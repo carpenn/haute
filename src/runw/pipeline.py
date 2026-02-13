@@ -24,7 +24,7 @@ class Node:
         """Number of DataFrame inputs the function accepts."""
         if self.is_source:
             return 0
-        sig = __import__("inspect").signature(self.fn)
+        sig = inspect.signature(self.fn)
         return len([
             p for p in sig.parameters.values()
             if p.name != "self"

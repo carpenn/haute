@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from runw.graph_utils import _sanitize_func_name, topo_sort_ids  # noqa: F401
 
 # Template fragments for each node type
 _SOURCE_FLAT_FILE = '''\
@@ -28,13 +28,6 @@ def {func_name}() -> pl.DataFrame:
     raise NotImplementedError("Databricks source not yet implemented")
 '''
 
-_TRANSFORM_EMPTY = '''\
-@pipeline.node
-def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
-    """{description}"""
-    return df
-'''
-
 _MODEL_SCORE = '''\
 @pipeline.node(model_uri="{model_uri}")
 def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
@@ -51,22 +44,7 @@ def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
     return df
 '''
 
-_OUTPUT = '''\
-@pipeline.node
-def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
-    """{description}"""
-    return df
-'''
 
-
-def _sanitize_func_name(label: str) -> str:
-    """Convert a human label to a valid Python function name (preserves casing)."""
-    name = label.strip()
-    name = name.replace(" ", "_").replace("-", "_")
-    name = "".join(c for c in name if c.isalnum() or c == "_")
-    if name and name[0].isdigit():
-        name = f"node_{name}"
-    return name or "unnamed_node"
 
 
 def _wrap_user_code(code: str, source_names: list[str]) -> str:
@@ -164,26 +142,8 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
 def _topo_sort(nodes: list[dict], edges: list[dict]) -> list[dict]:
     """Sort nodes in topological order based on edges."""
     node_map = {n["id"]: n for n in nodes}
-    in_edges: dict[str, list[str]] = {n["id"]: [] for n in nodes}
-    for e in edges:
-        if e["target"] in in_edges:
-            in_edges[e["target"]].append(e["source"])
-
-    visited: set[str] = set()
-    result: list[str] = []
-
-    def visit(nid: str) -> None:
-        if nid in visited:
-            return
-        visited.add(nid)
-        for dep in in_edges.get(nid, []):
-            visit(dep)
-        result.append(nid)
-
-    for nid in in_edges:
-        visit(nid)
-
-    return [node_map[nid] for nid in result if nid in node_map]
+    order = topo_sort_ids(list(node_map.keys()), edges)
+    return [node_map[nid] for nid in order if nid in node_map]
 
 
 def graph_to_code(

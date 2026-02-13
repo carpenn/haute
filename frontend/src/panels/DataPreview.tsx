@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react"
 import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2 } from "lucide-react"
+import { getDtypeColor } from "../utils/dtypeColors"
 
 interface Column {
   name: string
@@ -22,24 +23,6 @@ interface DataPreviewProps {
   onClose: () => void
 }
 
-const dtypeColors: Record<string, string> = {
-  Int32: "text-blue-400",
-  Int64: "text-blue-400",
-  Float32: "text-emerald-400",
-  Float64: "text-emerald-400",
-  Utf8: "text-amber-400",
-  String: "text-amber-400",
-  Boolean: "text-purple-400",
-  Date: "text-rose-400",
-  Datetime: "text-rose-400",
-}
-
-function getDtypeColor(dtype: string): string {
-  for (const [key, color] of Object.entries(dtypeColors)) {
-    if (dtype.includes(key)) return color
-  }
-  return "text-slate-500"
-}
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "null"

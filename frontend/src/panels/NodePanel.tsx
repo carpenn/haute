@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Database, Table2 } from "lucide-react"
+import { getDtypeColor } from "../utils/dtypeColors"
 
 type FileItem = {
   name: string
@@ -51,24 +52,6 @@ type NodePanelProps = {
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
 }
 
-const dtypeColorMap: Record<string, string> = {
-  Int64: "text-blue-400",
-  Int32: "text-blue-400",
-  Float64: "text-teal-400",
-  Float32: "text-teal-400",
-  String: "text-amber-400",
-  Utf8: "text-amber-400",
-  Boolean: "text-purple-400",
-  Date: "text-rose-400",
-  Datetime: "text-rose-400",
-}
-
-function getDtypeColor(dtype: string) {
-  for (const [key, color] of Object.entries(dtypeColorMap)) {
-    if (dtype.includes(key)) return color
-  }
-  return "text-slate-400"
-}
 
 function FileBrowser({ currentPath, onSelect }: { currentPath?: string; onSelect: (path: string) => void }) {
   const [dir, setDir] = useState(".")
@@ -484,11 +467,11 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
       ) : (
         Object.keys(config).length > 0 && (
           <div className="px-4 py-3">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Config</label>
+            <label className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Config</label>
             {Object.entries(config).map(([key, value]) => (
               <div key={key} className="mt-1.5 flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-mono">{key}:</span>
-                <span className="text-xs text-slate-700 font-mono truncate">{String(value)}</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{key}:</span>
+                <span className="text-xs font-mono truncate" style={{ color: 'var(--text-primary)' }}>{String(value)}</span>
               </div>
             ))}
           </div>

@@ -14,7 +14,7 @@ from typing import Any
 
 import polars as pl
 
-from runw.codegen import _sanitize_func_name
+from runw.graph_utils import _sanitize_func_name, topo_sort_ids, ancestors
 
 # Type alias — nodes pass lazy frames between each other
 _Frame = pl.LazyFrame
@@ -93,51 +93,6 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         return func_name, default_passthrough, False
 
 
-def _topo_sort_ids(node_ids: list[str], edges: list[dict]) -> list[str]:
-    """Topological sort of node IDs based on edges."""
-    in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
-    children: dict[str, list[str]] = {nid: [] for nid in node_ids}
-
-    for e in edges:
-        src, tgt = e["source"], e["target"]
-        if tgt in in_degree:
-            in_degree[tgt] += 1
-        if src in children:
-            children[src].append(tgt)
-
-    queue = sorted([nid for nid, deg in in_degree.items() if deg == 0])
-    result: list[str] = []
-
-    while queue:
-        nid = queue.pop(0)
-        result.append(nid)
-        for child in children.get(nid, []):
-            in_degree[child] -= 1
-            if in_degree[child] == 0:
-                queue.append(child)
-        queue.sort()
-
-    return result
-
-
-def _ancestors(target_id: str, edges: list[dict], all_ids: set[str]) -> set[str]:
-    """Get all ancestor node IDs of target (inclusive)."""
-    parents: dict[str, list[str]] = {nid: [] for nid in all_ids}
-    for e in edges:
-        if e["target"] in parents:
-            parents[e["target"]].append(e["source"])
-
-    visited: set[str] = set()
-
-    def walk(nid: str) -> None:
-        if nid in visited:
-            return
-        visited.add(nid)
-        for p in parents.get(nid, []):
-            walk(p)
-
-    walk(target_id)
-    return visited
 
 
 def execute_graph(
@@ -175,7 +130,7 @@ def execute_graph(
 
     # Determine which nodes to execute
     if target_node_id:
-        needed = _ancestors(target_node_id, edges, all_ids)
+        needed = ancestors(target_node_id, edges, all_ids)
     else:
         needed = all_ids
 
@@ -183,7 +138,7 @@ def execute_graph(
     relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
 
     # Topo sort the needed nodes
-    order = _topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
+    order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
 
     # Build parent lookup (node_id → list of parent node_ids)
     parents_of: dict[str, list[str]] = {nid: [] for nid in order}
@@ -201,7 +156,7 @@ def execute_graph(
     funcs: dict[str, tuple[callable, bool]] = {}
     for nid in order:
         source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        func_name, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
+        _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
         funcs[nid] = (fn, is_source)
 
     # Execute — all intermediate results stay lazy

@@ -40,6 +40,24 @@ const labelMap: Record<string, string> = {
   output: "Output",
 }
 
+function makePreviewData(
+  nodeId: string,
+  nodeLabel: string,
+  overrides: Partial<PreviewData> = {},
+): PreviewData {
+  return {
+    nodeId,
+    nodeLabel,
+    status: "ok",
+    row_count: 0,
+    column_count: 0,
+    columns: [],
+    preview: [],
+    error: null,
+    ...overrides,
+  }
+}
+
 let nodeIdCounter = 0
 let toastCounter = 0
 
@@ -67,7 +85,6 @@ function FlowEditor() {
   const [rowLimit, setRowLimit] = useState(1000)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string } | null>(null)
-  const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const { screenToFlowPosition, fitView } = useReactFlow()
@@ -129,16 +146,7 @@ function FlowEditor() {
   )
 
   const fetchPreview = useCallback((node: Node) => {
-    setPreviewData({
-      nodeId: node.id,
-      nodeLabel: String(node.data.label || node.id),
-      status: "loading",
-      row_count: 0,
-      column_count: 0,
-      columns: [],
-      preview: [],
-      error: null,
-    })
+    setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "loading" }))
     const { nodes: n, edges: e } = graphRef.current
     fetch("/api/pipeline/preview", {
       method: "POST",
@@ -147,30 +155,19 @@ function FlowEditor() {
     })
       .then((r) => r.json())
       .then((result) => {
-        setPreviewData({
-          nodeId: node.id,
-          nodeLabel: String(node.data.label || node.id),
+        setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), {
           status: result.status || "ok",
           row_count: result.row_count || 0,
           column_count: result.column_count || 0,
           columns: result.columns || [],
           preview: result.preview || [],
           error: result.error || null,
-        })
+        }))
       })
       .catch((err) => {
-        setPreviewData({
-          nodeId: node.id,
-          nodeLabel: String(node.data.label || node.id),
-          status: "error",
-          row_count: 0,
-          column_count: 0,
-          columns: [],
-          preview: [],
-          error: err.message,
-        })
+        setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "error", error: err.message }))
       })
-  }, [])
+  }, [rowLimit])
 
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
     if (selectedNodes.length === 1) {
@@ -213,16 +210,14 @@ function FlowEditor() {
         // If a node is selected, update its preview with run results
         if (selectedNode && results[selectedNode.id]) {
           const r = results[selectedNode.id]
-          setPreviewData({
-            nodeId: selectedNode.id,
-            nodeLabel: String(selectedNode.data.label || selectedNode.id),
+          setPreviewData(makePreviewData(selectedNode.id, String(selectedNode.data.label || selectedNode.id), {
             status: r.status || "ok",
             row_count: r.row_count || 0,
             column_count: r.column_count || 0,
             columns: r.columns || [],
             preview: r.preview || [],
             error: r.error || null,
-          })
+          }))
         }
       })
       .catch((err) => {
@@ -458,7 +453,7 @@ function FlowEditor() {
         <NodePalette />
 
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex-1 min-h-0" ref={reactFlowWrapper}>
+          <div className="flex-1 min-h-0">
             <ReactFlow
               nodes={nodes.map((n) => ({
                 ...n,
