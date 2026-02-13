@@ -15,7 +15,7 @@ import {
   MarkerType,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import Dagre from "@dagrejs/dagre"
+import ELK from "elkjs/lib/elk.bundled.js"
 
 import PipelineNode from "./nodes/PipelineNode"
 import NodePalette from "./panels/NodePalette"
@@ -61,16 +61,40 @@ function makePreviewData(
 let nodeIdCounter = 0
 let toastCounter = 0
 
-function getLayoutedElements(nodes: Node[], edges: Edge[]) {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
-  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 120 })
-  nodes.forEach((n) => g.setNode(n.id, { width: 240, height: 70 }))
-  edges.forEach((e) => g.setEdge(e.source, e.target))
-  Dagre.layout(g)
-  return nodes.map((n) => {
-    const pos = g.node(n.id)
-    return { ...n, position: { x: pos.x - 120, y: pos.y - 35 } }
-  })
+const elk = new ELK()
+
+async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise<Node[]> {
+  const elkGraph = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "RIGHT",
+      "elk.spacing.nodeNode": "60",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+    },
+    children: nodes.map((n) => ({
+      id: n.id,
+      width: 240,
+      height: 70,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      sources: [e.source],
+      targets: [e.target],
+    })),
+  }
+
+  const layout = await elk.layout(elkGraph)
+  const posMap = new Map<string, { x: number; y: number }>()
+  for (const child of layout.children || []) {
+    posMap.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 })
+  }
+
+  return nodes.map((n) => ({
+    ...n,
+    position: posMap.get(n.id) || n.position,
+  }))
 }
 
 function FlowEditor() {
@@ -85,6 +109,7 @@ function FlowEditor() {
   const [rowLimit, setRowLimit] = useState(1000)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string } | null>(null)
+  const [syncBanner, setSyncBanner] = useState<string | null>(null)
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const { screenToFlowPosition, fitView } = useReactFlow()
@@ -109,6 +134,68 @@ function FlowEditor() {
     }
   }, [nodes, edges])
 
+  // WebSocket connection for live code ↔ GUI sync
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+    const wsUrl = `${protocol}//${window.location.host}/ws/sync`
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+    function connect() {
+      ws = new WebSocket(wsUrl)
+
+      ws.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+
+          if (msg.type === "graph_update" && msg.graph) {
+            const g = msg.graph
+            const newNodes = g.nodes || []
+            const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "smoothstep", animated: false }))
+
+            // If no saved positions, auto-layout with ELK
+            const hasPositions = newNodes.some(
+              (n: Node) => n.position && (n.position.x !== 0 || n.position.y !== 0)
+            )
+
+            if (hasPositions) {
+              setNodes(newNodes)
+            } else {
+              const layouted = await getLayoutedElements(newNodes, newEdges)
+              setNodes(layouted)
+            }
+            setEdges(newEdges)
+            nodeIdCounter = newNodes.length
+            setSyncBanner(null)
+            addToast("info", "Pipeline updated from file")
+            setTimeout(() => fitView({ padding: 0.8 }), 100)
+          }
+
+          if (msg.type === "parse_error") {
+            setSyncBanner(msg.error || "Parse error in pipeline file")
+          }
+        } catch (err) {
+          console.error("WebSocket message error:", err)
+        }
+      }
+
+      ws.onclose = () => {
+        reconnectTimer = setTimeout(connect, 3000)
+      }
+
+      ws.onerror = () => {
+        ws?.close()
+      }
+    }
+
+    connect()
+
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
+  }, [setNodes, setEdges, fitView, addToast])
+
   useEffect(() => {
     fetch("/api/pipeline")
       .then((res) => {
@@ -118,7 +205,7 @@ function FlowEditor() {
       })
       .then((data) => {
         setNodes(data.nodes || [])
-        setEdges((data.edges || []).map((e: Edge) => ({ ...e, animated: false })))
+        setEdges((data.edges || []).map((e: Edge) => ({ ...e, type: "smoothstep", animated: false })))
         nodeIdCounter = (data.nodes || []).length
         lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [] })
         setLoading(false)
@@ -323,10 +410,10 @@ function FlowEditor() {
     }
   }, [onUpdateNode])
 
-  const handleAutoLayout = useCallback(() => {
+  const handleAutoLayout = useCallback(async () => {
     const { nodes: n, edges: e } = graphRef.current
     if (n.length === 0) return
-    const layouted = getLayoutedElements(n, e)
+    const layouted = await getLayoutedElements(n, e)
     setNodes(layouted)
     setTimeout(() => fitView({ padding: 0.8 }), 50)
     addToast("info", "Auto-layout applied")
@@ -453,6 +540,13 @@ function FlowEditor() {
         <NodePalette />
 
         <div className="flex-1 flex flex-col min-w-0">
+          {syncBanner && (
+            <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-medium"
+              style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', borderBottom: '1px solid rgba(239, 68, 68, 0.3)' }}>
+              <span className="flex-1 truncate">{syncBanner}</span>
+              <button onClick={() => setSyncBanner(null)} className="opacity-60 hover:opacity-100">✕</button>
+            </div>
+          )}
           <div className="flex-1 min-h-0">
             <ReactFlow
               nodes={nodes.map((n) => ({

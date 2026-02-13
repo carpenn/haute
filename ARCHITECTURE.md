@@ -389,39 +389,130 @@ Short, available, memorable. CLI command: `runw`. Import: `import runw`.
 
 ---
 
-## 9. Phased Roadmap
+## 9. Killer Features — What Gets Attention
 
-### Phase 1 — Hello World UI
-- [ ] Scaffold project (pyproject.toml, frontend/, src/runw/)
-- [ ] FastAPI backend with a `/api/pipeline` endpoint returning a dummy graph
-- [ ] React Flow frontend rendering a pipeline graph
-- [ ] `runw serve` CLI command opens browser
+The features below are ordered by impact. Features 1–2 are what get **attention** (demos, HN, LinkedIn). Features 3–4 are what get **adoption** (teams choosing runw over alternatives). Features 5–6 are what make engineering teams **insist** on using it.
+
+### 9.1 Live Code ↔ GUI Sync (the headline feature)
+
+Edit a `.py` file in VS Code → the React Flow graph updates in real-time. Edit the graph → the `.py` file updates on disk. No other tool does this well. This is the feature that sells itself in a 30-second demo.
+
+Implementation: libcst for round-trip-safe Python parsing. File watcher (watchfiles) detects `.py` changes, pushes updated graph state to the React Flow UI via WebSocket. GUI edits generate clean, idiomatic, diffable Python code back to disk.
+
+The hard part isn't parsing — it's **conflict resolution** when both sides edit simultaneously. Treat the `.py` file as the single source of truth; GUI edits write to disk immediately, and the file watcher debounces to avoid loops.
+
+### 9.2 What-If Sensitivity Mode (the "wow" demo feature)
+
+Pin a single input row and show sliders for each input variable. Drag "driver age" from 25 to 45 and watch the price update **live** through every node in the graph. Each node shows its intermediate output updating in real-time.
+
+This is what pricing analysts do all day in spreadsheets. Making it visual and instant in the pipeline graph is a **demo moment** — the kind of thing people share.
+
+Implementation: Since the pipeline uses Polars lazy evaluation, scoring a single row is near-instant. The frontend sends a modified 1-row DataFrame on each slider change, the backend runs the pipeline and returns per-node results. Debounce slider input to ~100ms.
+
+### 9.3 Execution Trace / Data Lineage (the regulatory feature)
+
+Click any cell in the output preview table → highlight the path through every node that produced it, showing intermediate values at each step.
+
+Example: click a price of £412.50 and see:
+```
+base rate £300 → area factor ×1.2 → NCD ×0.85 → frequency load ×1.35 → £412.50
+```
+traced visually through the graph with each node lit up.
+
+This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explainability). No open-source pricing tool does this. Achievable because we already have per-node lazy execution and preview results.
+
+### 9.4 One-Command Deploy to Databricks (the adoption feature)
+
+```bash
+runw deploy motor --endpoint motor-pricing
+```
+
+Three commands from init to live API:
+```bash
+runw init motor
+# ... edit pipeline ...
+runw deploy motor --endpoint motor-pricing
+```
+
+This packages the pipeline as an MLflow pyfunc model, registers it in MLflow Model Registry, creates/updates a Databricks Model Serving endpoint, and returns the URL. Pricing teams spend **weeks** on deployment plumbing — this makes it a one-liner.
+
+### 9.5 Pipeline Visual Diff (the engineering team feature)
+
+```bash
+runw diff HEAD~1
+```
+
+Renders a side-by-side graph diff: green nodes = added, red = removed, amber = changed (with inline code diff on hover). Turns every PR review into a visual experience.
+
+Git diffs of pipeline `.py` files are hard to review; a graph diff is immediately legible. This is genuinely novel — no pipeline tool does this.
+
+### 9.6 Natural Language → Polars Code (the adoption accelerator)
+
+Add a "describe what you want" input to the Polars node. Type:
+> "join on postcode and calculate average claim cost by area"
+
+→ generates the Polars code automatically.
+
+This massively lowers the barrier for pricing analysts who know SQL/Excel but can't write Polars. Implementation: call an LLM API (OpenAI/Anthropic) with a well-crafted prompt that includes the input schema (already available from lazy scan) and available column names. No need to build an LLM — just a smart prompt.
+
+### 9.7 Rating Table Hot-Reload with Impact Preview
+
+Edit a rating factor table in Databricks → instantly see how it changes output prices across the preview dataset. Show a histogram: "this change increases 12% of quotes by >5%".
+
+This is the #1 workflow in pricing. Making it instant and visual (instead of re-running a notebook) is a genuine competitive advantage over legacy tools.
+
+### 9.8 Schema Validation Between Nodes
+
+Automatically check that the output columns of node A match the expected input of node B. Show a **red edge** if there's a mismatch. Catch "column not found" errors before execution, not during.
+
+Low-hanging fruit with high impact — the schema is already available from Polars lazy scans. This is the kind of polish that makes the tool feel professional.
+
+---
+
+## 10. Phased Roadmap
+
+### Phase 1 — Hello World UI ✅
+- [x] Scaffold project (pyproject.toml, frontend/, src/runw/)
+- [x] FastAPI backend with pipeline API endpoints
+- [x] React Flow frontend rendering a pipeline graph
+- [x] `runw serve` CLI command opens browser
+- [x] Node palette, drag-and-drop, context menu, keyboard shortcuts
+- [x] Data preview panel with resizable split
+- [x] Polars lazy execution with configurable row limit
+- [x] Dark theme, polished UI
 - [ ] Static asset bundling (frontend builds into Python wheel)
 
-### Phase 2 — MLflow Integration & Deployment
-- [ ] `@runw.node` decorator and Pipeline class (core DSL)
+### Phase 2 — Live Code ↔ GUI Sync
+- [ ] Parse decorated `.py` files → React Flow graph (libcst)
+- [ ] GUI edits write back to `.py` files (clean, diffable code)
+- [ ] File watcher pushes changes to UI via WebSocket
+- [ ] Conflict resolution (file = source of truth, debounced sync)
+- [ ] Schema validation between connected nodes (red edge on mismatch)
+
+### Phase 3 — Deploy & Score
 - [ ] Package a pipeline as an MLflow pyfunc model
 - [ ] `runw deploy` registers model and deploys to Databricks Model Serving
-- [ ] Local scoring engine (Polars-based, for dev/testing)
+- [ ] Local scoring engine (`pipeline.score(df)` for dev/testing)
 - [ ] DataSource node with Databricks Unity Catalog support
-
-### Phase 3 — Bidirectional Code ↔ GUI
-- [ ] Parse decorated `.py` files → React Flow graph (libcst)
-- [ ] GUI edits write back to `.py` files
-- [ ] File watcher pushes changes to UI via WebSocket
-- [ ] Node properties panel
 - [ ] Rating table viewer (reads from Databricks)
 
-### Phase 4 — Engineering Practices
-- [ ] `runw init` scaffolds a new pricing project
-- [ ] GitHub Actions CI/CD template
+### Phase 4 — Killer Demo Features
+- [ ] What-if sensitivity mode (slider-driven single-row scoring)
+- [ ] Execution trace / data lineage (click cell → trace through graph)
+- [ ] Rating table hot-reload with impact preview
+- [ ] Natural language → Polars code (LLM-powered node assistant)
+
+### Phase 5 — Engineering Practices
+- [ ] `runw init` scaffolds a new pricing project with CI/CD
+- [ ] GitHub Actions template (lint → test → deploy on merge)
 - [ ] Pre-commit hooks (ruff, mypy, runw lint)
 - [ ] Auto-generated test stubs + `runw test`
-- [ ] `runw lint` pipeline validation
+- [ ] `runw lint` pipeline-specific validation
+- [ ] Pipeline visual diff (`runw diff HEAD~1`)
 
-### Phase 5 — Advanced
+### Phase 6 — Advanced
 - [ ] Composable pipelines (sub-pipelines as nodes)
-- [ ] Monitoring dashboard (actual vs expected)
+- [ ] Monitoring dashboard (actual vs expected pricing)
 - [ ] A/B testing for deployed endpoints
 - [ ] Optimisation engine
-- [ ] Pipeline diff view (git integration)
+- [ ] Collaborative editing (multi-user)

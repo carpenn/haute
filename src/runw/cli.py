@@ -191,6 +191,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
                 host=host,
                 port=port,
                 reload=True,
+                reload_excludes=["pipelines/*", "examples/*", "*.runw.json"],
             )
         finally:
             vite_proc.terminate()

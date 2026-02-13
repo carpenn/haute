@@ -1,34 +1,70 @@
 """FastAPI backend for runw."""
 
-import importlib.util
-import sys
+import asyncio
+import json as _json
+import logging
+import time
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-
-from runw.pipeline import Pipeline
 
 app = FastAPI(title="runw", version="0.1.0")
 
 STATIC_DIR = Path(__file__).parent / "static"
+logger = logging.getLogger("uvicorn.error")
+
+# ---------------------------------------------------------------------------
+# Self-write tracking (avoid file-watcher feedback loops)
+# ---------------------------------------------------------------------------
+_last_self_write: float = 0.0
+_SELF_WRITE_COOLDOWN = 1.0  # seconds
 
 
-def _load_pipeline(filepath: Path) -> Pipeline:
-    """Import a .py file and find the Pipeline instance in it."""
-    spec = importlib.util.spec_from_file_location(filepath.stem, filepath)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"Cannot load {filepath}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+def _mark_self_write() -> None:
+    global _last_self_write
+    _last_self_write = time.monotonic()
 
-    for attr in dir(module):
-        obj = getattr(module, attr)
-        if isinstance(obj, Pipeline):
-            return obj
-    raise ValueError(f"No Pipeline instance found in {filepath}")
+
+def _is_self_write() -> bool:
+    return (time.monotonic() - _last_self_write) < _SELF_WRITE_COOLDOWN
+
+
+# ---------------------------------------------------------------------------
+# WebSocket connections for live sync
+# ---------------------------------------------------------------------------
+_ws_clients: set[WebSocket] = set()
+
+
+async def _broadcast(data: dict) -> None:
+    """Push a message to all connected WebSocket clients."""
+    payload = _json.dumps(data)
+    dead: list[WebSocket] = []
+    for ws in _ws_clients:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.discard(ws)
+
+
+@app.websocket("/ws/sync")
+async def ws_sync(websocket: WebSocket) -> None:
+    """WebSocket endpoint for live code ↔ GUI sync."""
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    logger.info("WebSocket client connected (%d total)", len(_ws_clients))
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive / client messages
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_clients.discard(websocket)
+        logger.info("WebSocket client disconnected (%d remaining)", len(_ws_clients))
 
 
 def _discover_pipelines() -> list[Path]:
@@ -42,6 +78,43 @@ def _discover_pipelines() -> list[Path]:
     return [f for f in found if f.name != "__init__.py" and f.name != "create_sample_data.py"]
 
 
+def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
+    """Load node positions from the sidecar .runw.json file."""
+    sidecar = py_path.with_suffix(".runw.json")
+    if sidecar.exists():
+        try:
+            data = _json.loads(sidecar.read_text())
+            return data.get("positions", {})
+        except Exception:
+            pass
+    return {}
+
+
+def _save_sidecar(py_path: Path, graph: dict) -> None:
+    """Write node positions to the sidecar .runw.json file."""
+    positions = {}
+    for node in graph.get("nodes", []):
+        positions[node["id"]] = node.get("position", {"x": 0, "y": 0})
+
+    sidecar = py_path.with_suffix(".runw.json")
+    sidecar.write_text(_json.dumps({"positions": positions}, indent=2) + "\n")
+
+
+def _parse_pipeline_to_graph(py_path: Path) -> dict:
+    """Parse a .py file and merge with sidecar positions."""
+    from runw.parser import parse_pipeline_file
+
+    graph = parse_pipeline_file(py_path)
+    positions = _load_sidecar_positions(py_path)
+
+    # Apply saved positions if available
+    for node in graph.get("nodes", []):
+        if node["id"] in positions:
+            node["position"] = positions[node["id"]]
+
+    return graph
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -49,16 +122,18 @@ def _discover_pipelines() -> list[Path]:
 @app.get("/api/pipelines")
 async def list_pipelines():
     """List all discovered pipelines."""
+    from runw.parser import parse_pipeline_file
+
     files = _discover_pipelines()
     result = []
     for f in files:
         try:
-            p = _load_pipeline(f)
+            graph = parse_pipeline_file(f)
             result.append({
-                "name": p.name,
-                "description": p.description,
+                "name": graph.get("pipeline_name", f.stem),
+                "description": graph.get("pipeline_description", ""),
                 "file": str(f.relative_to(Path.cwd())),
-                "node_count": len(p.nodes),
+                "node_count": len(graph.get("nodes", [])),
             })
         except Exception as e:
             result.append({"name": f.stem, "file": str(f), "error": str(e)})
@@ -70,9 +145,9 @@ async def get_pipeline(name: str):
     """Return the graph for a specific pipeline."""
     for f in _discover_pipelines():
         try:
-            p = _load_pipeline(f)
-            if p.name == name:
-                return p.to_graph()
+            graph = _parse_pipeline_to_graph(f)
+            if graph.get("pipeline_name") == name:
+                return graph
         except Exception:
             continue
     raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
@@ -80,42 +155,44 @@ async def get_pipeline(name: str):
 
 @app.get("/api/pipeline")
 async def get_first_pipeline():
-    """Return the graph for the active pipeline, or an empty canvas."""
-    import json as _json
+    """Return the graph for the active pipeline, or an empty canvas.
 
+    Python file is the source of truth. Sidecar .runw.json provides positions.
+    """
     cwd = Path.cwd()
     pipelines_dir = cwd / "pipelines"
 
-    # First, check for a saved graph .json (preserves exact positions/config)
-    if pipelines_dir.is_dir():
-        for jf in sorted(pipelines_dir.glob("*.json")):
-            try:
-                data = _json.loads(jf.read_text())
-                if "nodes" in data and "edges" in data:
-                    return data
-            except Exception:
-                continue
-
-    # Fall back to loading .py pipeline files from pipelines/
+    # Parse .py files from pipelines/ directory
     if pipelines_dir.is_dir():
         for f in sorted(pipelines_dir.glob("*.py")):
             if f.name == "__init__.py":
                 continue
             try:
-                p = _load_pipeline(f)
-                return p.to_graph()
+                graph = _parse_pipeline_to_graph(f)
+                if graph.get("nodes"):
+                    return graph
             except Exception:
                 continue
 
-    # No pipelines found — return blank canvas
+    # Fall back to examples/
+    examples_dir = cwd / "examples"
+    if examples_dir.is_dir():
+        for f in sorted(examples_dir.glob("*.py")):
+            if f.name == "__init__.py":
+                continue
+            try:
+                graph = _parse_pipeline_to_graph(f)
+                if graph.get("nodes"):
+                    return graph
+            except Exception:
+                continue
+
     return {"nodes": [], "edges": []}
 
 
 @app.post("/api/pipeline/save")
 async def save_pipeline(body: dict):
-    """Save a graph as both a .py pipeline file and a .json graph state file."""
-    import json as _json
-
+    """Save a graph: .py (source of truth) + .runw.json (positions)."""
     from runw.codegen import graph_to_code
 
     name = body.get("name", "my_pipeline")
@@ -128,19 +205,18 @@ async def save_pipeline(body: dict):
 
     safe_name = name.lower().replace(" ", "_").replace("-", "_")
 
-    # Write .py (runnable code)
+    # Write .py (source of truth — runnable code)
     py_path = pipelines_dir / f"{safe_name}.py"
     code = graph_to_code(graph, pipeline_name=name, description=description)
+    _mark_self_write()
     py_path.write_text(code)
 
-    # Write .json (full graph state with positions for the GUI)
-    json_path = pipelines_dir / f"{safe_name}.json"
-    json_path.write_text(_json.dumps(graph, indent=2))
+    # Write sidecar .runw.json (node positions for the GUI)
+    _save_sidecar(py_path, graph)
 
     return {
         "status": "saved",
         "file": str(py_path.relative_to(cwd)),
-        "graph_file": str(json_path.relative_to(cwd)),
         "pipeline_name": name,
     }
 
@@ -264,6 +340,70 @@ async def get_schema(path: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# File watcher — live sync from .py edits to GUI
+# ---------------------------------------------------------------------------
+
+_watcher_task: asyncio.Task | None = None
+
+
+async def _file_watcher() -> None:
+    """Watch pipeline directories for .py changes and broadcast to GUI."""
+    try:
+        from watchfiles import awatch, Change
+    except ImportError:
+        logger.warning("watchfiles not installed — live sync disabled")
+        return
+
+    cwd = Path.cwd()
+    watch_dirs = [d for d in [cwd / "pipelines", cwd / "examples"] if d.is_dir()]
+    if not watch_dirs:
+        logger.info("No pipelines/ or examples/ directory — file watcher idle")
+        return
+
+    logger.info("File watcher started, watching: %s", [str(d) for d in watch_dirs])
+
+    async for changes in awatch(*watch_dirs):
+        if _is_self_write():
+            continue
+
+        for change_type, changed_path in changes:
+            p = Path(changed_path)
+            if p.suffix != ".py" or p.name.startswith("__"):
+                continue
+            if change_type not in (Change.modified, Change.added):
+                continue
+
+            logger.info("File changed: %s — re-parsing", p.name)
+            try:
+                graph = _parse_pipeline_to_graph(p)
+                await _broadcast({
+                    "type": "graph_update",
+                    "graph": graph,
+                    "source_file": str(p),
+                })
+                logger.info("Broadcast graph_update to %d clients (%d nodes)", len(_ws_clients), len(graph.get("nodes", [])))
+            except Exception as e:
+                logger.error("Parse error for %s: %s", p.name, e)
+                await _broadcast({
+                    "type": "parse_error",
+                    "error": str(e),
+                    "source_file": str(p),
+                })
+
+
+@app.on_event("startup")
+async def _start_file_watcher() -> None:
+    global _watcher_task
+    _watcher_task = asyncio.create_task(_file_watcher())
+
+
+@app.on_event("shutdown")
+async def _stop_file_watcher() -> None:
+    if _watcher_task:
+        _watcher_task.cancel()
 
 
 # ---------------------------------------------------------------------------

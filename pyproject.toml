@@ -17,6 +17,8 @@ dependencies = [
     "polars>=1.0.0",
     "click>=8.1.0",
     "python-multipart>=0.0.18",
+    "libcst>=1.8.6",
+    "watchfiles>=1.1.1",
 ]
 
 [project.optional-dependencies]
