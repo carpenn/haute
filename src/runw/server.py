@@ -198,6 +198,7 @@ async def save_pipeline(body: dict):
     name = body.get("name", "my_pipeline")
     description = body.get("description", "")
     graph = body.get("graph", {})
+    preamble = body.get("preamble", "")
 
     cwd = Path.cwd()
     pipelines_dir = cwd / "pipelines"
@@ -207,7 +208,7 @@ async def save_pipeline(body: dict):
 
     # Write .py (source of truth — runnable code)
     py_path = pipelines_dir / f"{safe_name}.py"
-    code = graph_to_code(graph, pipeline_name=name, description=description)
+    code = graph_to_code(graph, pipeline_name=name, description=description, preamble=preamble)
     _mark_self_write()
     py_path.write_text(code)
 

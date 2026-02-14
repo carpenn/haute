@@ -60,7 +60,57 @@ def {func_name}({params}) -> pl.DataFrame:
     return {first}
 '''
 
+_EXTERNAL_PICKLE = '''\
+@pipeline.node(external="{path}", file_type="pickle")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    import pickle
+    with open("{path}", "rb") as _f:
+        obj = pickle.load(_f)
+{body}
+'''
 
+_EXTERNAL_JSON = '''\
+@pipeline.node(external="{path}", file_type="json")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    import json
+    with open("{path}", "r") as _f:
+        obj = json.load(_f)
+{body}
+'''
+
+_EXTERNAL_JOBLIB = '''\
+@pipeline.node(external="{path}", file_type="joblib")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    import joblib
+    obj = joblib.load("{path}")
+{body}
+'''
+
+_EXTERNAL_CATBOOST = '''\
+@pipeline.node(external="{path}", file_type="catboost", model_class="{model_class}")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    from catboost import {cb_class}
+    obj = {cb_class}()
+    obj.load_model("{path}")
+{body}
+'''
+
+
+def _wrap_external_code(code: str) -> str:
+    """Wrap external file user code: indent each line and append ``return df``.
+
+    Unlike transforms, external file code is multi-statement — the user
+    is responsible for assigning a Polars DataFrame to ``df``.
+    """
+    code = code.strip()
+    if not code:
+        return "    return df"
+    indented = "\n".join(f"    {line}" for line in code.splitlines())
+    return f"{indented}\n    return df"
 
 
 def _wrap_user_code(code: str, source_names: list[str]) -> str:
@@ -142,6 +192,30 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
             func_name=func_name, description=description, table=table, key=key
         )
 
+    elif node_type == "externalFile":
+        path = config.get("path", "model.pkl")
+        file_type = config.get("fileType", "pickle")
+        code = config.get("code", "").strip()
+        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        body = _wrap_external_code(code)
+        if file_type == "catboost":
+            model_class = config.get("modelClass", "classifier")
+            cb_class = "CatBoostRegressor" if model_class == "regressor" else "CatBoostClassifier"
+            return _EXTERNAL_CATBOOST.format(
+                func_name=func_name, description=description, path=path,
+                params=params, body=body, model_class=model_class, cb_class=cb_class,
+            )
+        templates = {
+            "pickle": _EXTERNAL_PICKLE,
+            "json": _EXTERNAL_JSON,
+            "joblib": _EXTERNAL_JOBLIB,
+        }
+        template = templates.get(file_type, _EXTERNAL_PICKLE)
+        return template.format(
+            func_name=func_name, description=description, path=path,
+            params=params, body=body,
+        )
+
     elif node_type == "dataSink":
         path = config.get("path", "output.parquet")
         fmt = config.get("format", "parquet")
@@ -177,6 +251,7 @@ def graph_to_code(
     graph: dict,
     pipeline_name: str = "my_pipeline",
     description: str = "",
+    preamble: str = "",
 ) -> str:
     """Convert a React Flow graph to a valid runw pipeline .py file."""
     nodes = graph.get("nodes", [])
@@ -196,6 +271,14 @@ def graph_to_code(
         "",
         "import polars as pl",
         "import runw",
+    ]
+
+    # User-defined preamble (extra imports, helpers, constants)
+    if preamble.strip():
+        lines.append("")
+        lines.append(preamble.rstrip())
+
+    lines += [
         "",
         f'pipeline = runw.Pipeline("{pipeline_name}", description="{description}")',
         "",

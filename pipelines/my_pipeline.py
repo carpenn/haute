@@ -3,6 +3,9 @@
 import polars as pl
 import runw
 
+import numpy as np
+from catboost import CatBoostClassifier, CatBoostRegressor
+
 pipeline = runw.Pipeline("my_pipeline", description="")
 
 
@@ -41,6 +44,27 @@ def exposure() -> pl.DataFrame:
 def policies() -> pl.DataFrame:
     """data_source node"""
     return pl.scan_parquet("pipelines/data/policies.parquet")
+
+
+@pipeline.node(external="pipelines/models/model.cbm", file_type="catboost", model_class="regressor")
+def catboost_load(policies: pl.DataFrame) -> pl.DataFrame:
+    """catboost_load node"""
+    from catboost import CatBoostRegressor
+    obj = CatBoostRegressor()
+    obj.load_model("pipelines/models/model.cbm")
+    X = (
+        policies
+        .select(obj.feature_names_)
+    ).collect().to_numpy()
+    
+    preds = obj.predict(X)
+    
+    df = (
+        policies
+        .select('IDpol')
+        .with_columns(freq_preds = pl.Series(preds))
+    )
+    return df
 
 
 @pipeline.node
@@ -102,3 +126,4 @@ pipeline.connect("claims", "claims_aggregate")
 pipeline.connect("claims_aggregate", "frequency_set")
 pipeline.connect("frequency_set", "frequency_write")
 pipeline.connect("severity_set", "severity_write")
+pipeline.connect("policies", "catboost_load")

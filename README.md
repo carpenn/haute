@@ -198,6 +198,156 @@ The system auto-wraps your code into a proper function. No boilerplate needed.
 
 ---
 
+## Node Types
+
+Runway provides several node types, each designed for a specific role in your pipeline.
+
+### Data Source
+
+Reads data from a file or table. No code needed — just configure the path.
+
+```python
+@pipeline.node(path="data/policies.parquet")
+def policies() -> pl.DataFrame:
+    """Read policy data."""
+    return pl.scan_parquet("data/policies.parquet")
+```
+
+Supported formats: **Parquet**, **CSV**, **JSON**. Databricks tables are planned.
+
+### Transform (Polars)
+
+The workhorse node. Write Polars code to filter, join, aggregate, or reshape data. Inputs are referenced by their upstream node name.
+
+```python
+@pipeline.node
+def frequency_set(policies: pl.DataFrame, claims: pl.DataFrame) -> pl.DataFrame:
+    """Join policies with claims."""
+    df = (
+    policies
+    .join(claims, on="IDpol", how="left")
+    .with_columns(
+        ClaimCount=pl.when(pl.col("ClaimAmount") > 0).then(1).otherwise(0)
+    )
+    )
+    return df
+```
+
+In the GUI code editor, you can use two shorthand syntaxes:
+
+- **Chain syntax** — start with `.` to chain off the first input:
+  ```
+  .filter(pl.col("Area") == "A")
+  .select("IDpol", "premium")
+  ```
+- **Expression syntax** — reference multiple inputs by name:
+  ```
+  policies.join(claims, on="IDpol", how="left")
+  ```
+
+The system wraps your code into a proper function automatically.
+
+### External File
+
+Load an external object (model, config, lookup) from a file in your project, then write code that uses it alongside your DataFrames. The loaded object is available as `obj` in the code editor.
+
+```python
+@pipeline.node(external="models/model.cbm", file_type="catboost", model_class="regressor")
+def score(policies: pl.DataFrame) -> pl.DataFrame:
+    """Score policies with CatBoost model."""
+    from catboost import CatBoostRegressor
+    obj = CatBoostRegressor()
+    obj.load_model("models/model.cbm")
+    df = (
+    policies.with_columns(
+        prediction=pl.Series(obj.predict(policies.select("Area", "VehAge").to_numpy()))
+    )
+    )
+    return df
+```
+
+Supported file types:
+
+| Type | Extension | Loading |
+|---|---|---|
+| **Pickle** | `.pkl`, `.pickle` | `pickle.load()` |
+| **JSON** | `.json` | `json.load()` |
+| **Joblib** | `.joblib` | `joblib.load()` |
+| **CatBoost** | `.cbm` | `CatBoostClassifier()` or `CatBoostRegressor()` with `.load_model()` |
+
+For CatBoost models, you also choose **Classifier** or **Regressor** in the GUI — the correct class is used automatically.
+
+### Data Sink
+
+Write a DataFrame to disk. Sinks are **pass-through** during normal runs and previews — the data flows through without writing. Writing only happens when you explicitly click the **Write** button in the node's config panel.
+
+```python
+@pipeline.node(sink="output/frequency.parquet", format="parquet")
+def frequency_write(frequency_set: pl.DataFrame) -> pl.DataFrame:
+    """Write frequency data to parquet."""
+    frequency_set.collect().write_parquet("output/frequency.parquet")
+    return frequency_set
+```
+
+Supported formats: **Parquet**, **CSV**.
+
+---
+
+## Pipeline Imports & Helpers
+
+By default, every pipeline includes `import polars as pl` and `import runw`. If your nodes need additional libraries, helper functions, or constants, add them via the **Imports** button in the toolbar (the ⚙ icon).
+
+Everything you put here is written between the standard imports and your node functions in the `.py` file, and is **preserved across GUI saves**.
+
+### Example
+
+In the GUI, click **Imports** and add:
+
+```python
+import numpy as np
+from catboost import CatBoostClassifier
+
+DISCOUNT_RATE = 0.95
+
+def apply_discount(df, col):
+    return df.with_columns(pl.col(col) * DISCOUNT_RATE)
+```
+
+This produces a `.py` file like:
+
+```python
+"""Pipeline: my_pipeline"""
+
+import polars as pl
+import runw
+
+import numpy as np
+from catboost import CatBoostClassifier
+
+DISCOUNT_RATE = 0.95
+
+def apply_discount(df, col):
+    return df.with_columns(pl.col(col) * DISCOUNT_RATE)
+
+pipeline = runw.Pipeline("my_pipeline", description="")
+
+
+@pipeline.node(path="data/policies.parquet")
+def policies() -> pl.DataFrame:
+    ...
+```
+
+### Round-tripping
+
+The preamble works in both directions:
+
+- **GUI → Code**: when you save from the GUI, your imports and helpers are written to the `.py` file
+- **Code → GUI**: when you edit the `.py` file directly and add imports, they appear in the Imports panel next time the GUI loads
+
+This means you can freely switch between the GUI and your text editor without losing custom code.
+
+---
+
 ## CLI Reference
 
 | Command | Description |

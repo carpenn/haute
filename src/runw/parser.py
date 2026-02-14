@@ -11,6 +11,7 @@ preserving formatting matters.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ from typing import Any
 
 def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
     """Infer the GUI node type from decorator config and param count."""
+    if "external" in decorator_kwargs:
+        return "externalFile"
     if "sink" in decorator_kwargs:
         return "dataSink"
     if "model_uri" in decorator_kwargs:
@@ -167,6 +170,74 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     return _dedent("\n".join(stripped_lines)).strip()
 
 
+def _extract_external_user_code(body_source: str, param_names: list[str]) -> str:
+    """Extract user code from an externalFile function body.
+
+    Strips the docstring, then scans forward to skip the file-loading
+    boilerplate (import statements, with-open blocks, obj assignments /
+    method calls).  Everything between the boilerplate and a trailing
+    ``return df`` is the user code.
+    """
+    lines = body_source.strip().splitlines()
+    cleaned = _strip_docstring(lines)
+
+    if not cleaned:
+        return ""
+
+    # Determine the base indentation from the first non-blank line
+    base_indent = 0
+    for line in cleaned:
+        if line.strip():
+            base_indent = len(line) - len(line.lstrip())
+            break
+
+    # Scan from the start to skip loading boilerplate
+    i = 0
+    in_with = False
+    while i < len(cleaned):
+        s = cleaned[i].strip()
+        line_indent = len(cleaned[i]) - len(cleaned[i].lstrip()) if s else 0
+
+        if not s:
+            i += 1
+            continue
+
+        # Inside a with-block: skip indented body lines
+        if in_with:
+            if line_indent > base_indent:
+                i += 1
+                continue
+            in_with = False
+            # fall through to check this line normally
+
+        if s.startswith("import ") or s.startswith("from "):
+            i += 1
+            continue
+        if s.startswith("with open("):
+            in_with = True
+            i += 1
+            continue
+        if s.startswith("obj = ") or s.startswith("obj."):
+            i += 1
+            continue
+
+        break  # first user-code line
+
+    user_lines = cleaned[i:]
+    if not user_lines:
+        return ""
+
+    code = _dedent("\n".join(user_lines)).strip()
+
+    # Strip trailing "return df"
+    if code.endswith("\nreturn df"):
+        code = code[: -len("\nreturn df")].rstrip()
+    elif code == "return df":
+        return ""
+
+    return code
+
+
 def _extract_function_bodies(source: str) -> dict[str, str]:
     """Extract raw source of each function body, keyed by function name."""
     try:
@@ -249,6 +320,300 @@ def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers for building graph output
+# ---------------------------------------------------------------------------
+
+def _build_node_config(
+    node_type: str,
+    decorator_kwargs: dict[str, Any],
+    body: str,
+    param_names: list[str],
+) -> dict[str, Any]:
+    """Build the config dict for a node given its type and decorator kwargs."""
+    config: dict[str, Any] = {}
+    if node_type == "dataSource":
+        config["path"] = decorator_kwargs.get("path", "")
+        if "table" in decorator_kwargs:
+            config["sourceType"] = "databricks"
+            config["table"] = decorator_kwargs["table"]
+        else:
+            config["sourceType"] = "flat_file"
+    elif node_type == "modelScore":
+        config["model_uri"] = decorator_kwargs.get("model_uri", "")
+    elif node_type == "ratingStep":
+        config["table"] = decorator_kwargs.get("table", "")
+        config["key"] = decorator_kwargs.get("key", "")
+    elif node_type == "dataSink":
+        config["path"] = decorator_kwargs.get("sink", "")
+        config["format"] = decorator_kwargs.get("format", "parquet")
+    elif node_type == "externalFile":
+        config["path"] = decorator_kwargs.get("external", "")
+        config["fileType"] = decorator_kwargs.get("file_type", "pickle")
+        if config["fileType"] == "catboost":
+            config["modelClass"] = decorator_kwargs.get("model_class", "classifier")
+        config["code"] = _extract_external_user_code(body, param_names) if body else ""
+    else:
+        # transform / output
+        config["code"] = _extract_user_code(body, param_names) if body else ""
+    return config
+
+
+def _build_edges(
+    raw_nodes: list[dict],
+    explicit_connect_pairs: list[tuple[str, str]],
+) -> list[dict]:
+    """Build edge dicts from explicit connect() calls and implicit param-name matching."""
+    node_names = {n["func_name"] for n in raw_nodes}
+    edges: list[dict] = []
+    explicit_edges: set[tuple[str, str]] = set()
+
+    for src, tgt in explicit_connect_pairs:
+        if src in node_names and tgt in node_names:
+            explicit_edges.add((src, tgt))
+            edges.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+
+    # Implicit edges from parameter names matching node names
+    targets_with_explicit = {tgt for _, tgt in explicit_edges}
+    for node_info in raw_nodes:
+        if node_info["func_name"] in targets_with_explicit:
+            continue
+        for param in node_info["param_names"]:
+            if param in node_names and param != node_info["func_name"]:
+                pair = (param, node_info["func_name"])
+                if pair not in explicit_edges:
+                    edges.append({"id": f"e_{pair[0]}_{pair[1]}", "source": pair[0], "target": pair[1]})
+
+    # Fallback: if still no edges, infer linear chain from definition order
+    if not edges and len(raw_nodes) > 1:
+        for i in range(1, len(raw_nodes)):
+            src = raw_nodes[i - 1]["func_name"]
+            tgt = raw_nodes[i]["func_name"]
+            edges.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+
+    return edges
+
+
+def _build_rf_nodes(raw_nodes: list[dict], x_spacing: int = 300) -> list[dict]:
+    """Convert raw parsed nodes into React Flow node dicts."""
+    return [
+        {
+            "id": n["func_name"],
+            "type": n["node_type"],
+            "position": {"x": i * x_spacing, "y": 0},
+            "data": {
+                "label": n["func_name"],
+                "description": n["description"],
+                "nodeType": n["node_type"],
+                "config": n["config"],
+            },
+        }
+        for i, n in enumerate(raw_nodes)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Regex-based fallback for files with syntax errors
+# ---------------------------------------------------------------------------
+
+_RE_DECORATOR = re.compile(
+    r"^(@pipeline\.node(?:\([^)]*\))?)\s*\n"
+    r"def\s+(\w+)\s*\(([^)]*)\)",
+    re.MULTILINE,
+)
+
+_RE_PIPELINE_META = re.compile(
+    r'pipeline\s*=\s*runw\.Pipeline\(\s*["\']([^"\']*)["\']'
+    r'(?:.*?description\s*=\s*["\']([^"\']*)["\'])?',
+)
+
+_RE_CONNECT = re.compile(
+    r'pipeline\.connect\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\)',
+)
+
+_RE_DECORATOR_KWARG = re.compile(
+    r'(\w+)\s*=\s*["\']([^"\']*)["\']',
+)
+
+
+def _find_function_blocks(source: str) -> list[dict]:
+    """Find @pipeline.node function blocks using regex.
+
+    Returns a list of dicts with keys: func_name, decorator_text, params,
+    body_text, start_line.
+    """
+    lines = source.splitlines()
+    blocks: list[dict] = []
+
+    for m in _RE_DECORATOR.finditer(source):
+        decorator_text = m.group(1)
+        func_name = m.group(2)
+        params_text = m.group(3)
+
+        # Find the line number of the def
+        def_pos = m.start()
+        start_line = source[:def_pos].count("\n")
+
+        # Extract parameter names (strip type annotations)
+        param_names = []
+        for p in params_text.split(","):
+            p = p.strip()
+            if not p:
+                continue
+            name = p.split(":")[0].strip()
+            if name:
+                param_names.append(name)
+
+        # Find the body: everything indented after the def line
+        # The def line is somewhere after the decorator
+        def_line_idx = source[:m.end()].count("\n")
+        body_lines = []
+        for i in range(def_line_idx + 1, len(lines)):
+            line = lines[i]
+            if line.strip() == "":
+                body_lines.append(line)
+                continue
+            if line[0] == " " or line[0] == "\t":
+                body_lines.append(line)
+            else:
+                break
+
+        # Strip trailing empty lines
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+
+        blocks.append({
+            "func_name": func_name,
+            "decorator_text": decorator_text,
+            "param_names": param_names,
+            "body_text": "\n".join(body_lines),
+            "start_line": start_line,
+        })
+
+    return blocks
+
+
+def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, str]:
+    """Extract keyword arguments from a decorator using regex."""
+    # Strip the @pipeline.node( ... ) wrapper
+    if "(" in decorator_text:
+        inner = decorator_text.split("(", 1)[1].rstrip(")")
+        return dict(_RE_DECORATOR_KWARG.findall(inner))
+    return {}
+
+
+def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> dict:
+    """Parse a pipeline file with syntax errors using regex fallback.
+
+    Extracts all @pipeline.node functions, marks broken ones with an error
+    in their config, and still returns the full graph.
+    """
+    # Pipeline metadata via regex
+    meta_match = _RE_PIPELINE_META.search(source)
+    pipeline_name = meta_match.group(1) if meta_match else "my_pipeline"
+    pipeline_desc = (meta_match.group(2) or "") if meta_match else ""
+
+    # Find function blocks
+    blocks = _find_function_blocks(source)
+    raw_nodes: list[dict] = []
+
+    for block in blocks:
+        func_name = block["func_name"]
+        decorator_kwargs = _parse_decorator_kwargs_regex(block["decorator_text"])
+        param_names = block["param_names"]
+        n_params = len(param_names)
+        node_type = _infer_node_type(decorator_kwargs, n_params)
+
+        # Try to parse the function individually to get the docstring
+        func_source = f"{block['decorator_text']}\ndef {func_name}({', '.join(param_names)}):\n{block['body_text']}"
+        description = ""
+        has_syntax_error = False
+
+        try:
+            func_tree = ast.parse(func_source)
+            for stmt in ast.iter_child_nodes(func_tree):
+                if isinstance(stmt, ast.FunctionDef):
+                    description = _get_docstring(stmt)
+                    break
+        except SyntaxError:
+            has_syntax_error = True
+
+        body = block["body_text"] if not has_syntax_error else ""
+        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+        raw_nodes.append({
+            "func_name": func_name,
+            "node_type": node_type,
+            "description": description or f"{func_name} node",
+            "config": config,
+            "param_names": param_names,
+        })
+
+    # Build edges + nodes using shared helpers
+    connect_pairs = _RE_CONNECT.findall(source)
+    edges = _build_edges(raw_nodes, connect_pairs)
+    rf_nodes = _build_rf_nodes(raw_nodes)
+    preamble = _extract_preamble(source)
+
+    return {
+        "nodes": rf_nodes,
+        "edges": edges,
+        "pipeline_name": pipeline_name,
+        "pipeline_description": pipeline_desc,
+        "preamble": preamble,
+        "source_file": source_file,
+        "warning": f"File has syntax errors — some nodes may show errors. {syntax_error}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Preamble extraction
+# ---------------------------------------------------------------------------
+
+_STANDARD_IMPORTS = {"import polars as pl", "import runw"}
+
+
+def _extract_preamble(source: str) -> str:
+    """Extract user-defined preamble between standard imports and pipeline code.
+
+    The preamble is any code that appears after the standard imports
+    (``import polars as pl``, ``import runw``) but before the first
+    ``@pipeline.node`` decorator or ``pipeline = runw.Pipeline(...)`` line.
+    """
+    lines = source.splitlines()
+    # Find the end of standard imports region
+    last_standard_idx = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped in _STANDARD_IMPORTS:
+            last_standard_idx = i
+
+    if last_standard_idx == -1:
+        return ""
+
+    # Find the start of pipeline code (pipeline = ... or @pipeline.node)
+    pipeline_start_idx = len(lines)
+    for i in range(last_standard_idx + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("pipeline") and ("runw.Pipeline" in stripped or "= runw.Pipeline" in stripped):
+            pipeline_start_idx = i
+            break
+        if stripped.startswith("@pipeline.node"):
+            pipeline_start_idx = i
+            break
+
+    # Extract lines between standard imports and pipeline code
+    preamble_lines = lines[last_standard_idx + 1 : pipeline_start_idx]
+
+    # Strip leading/trailing blank lines
+    while preamble_lines and not preamble_lines[0].strip():
+        preamble_lines.pop(0)
+    while preamble_lines and not preamble_lines[-1].strip():
+        preamble_lines.pop()
+
+    return "\n".join(preamble_lines)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -261,10 +626,12 @@ def parse_pipeline_file(filepath: str | Path) -> dict:
             "edges": [...],
             "pipeline_name": str,
             "pipeline_description": str,
+            "preamble": str,
             "source_file": str,
         }
 
-    On syntax errors returns a dict with an "error" key.
+    On syntax errors the file is still parsed via regex fallback so
+    that valid nodes are returned alongside broken ones.
     """
     filepath = Path(filepath)
     source = filepath.read_text()
@@ -274,15 +641,11 @@ def parse_pipeline_file(filepath: str | Path) -> dict:
 def parse_pipeline_source(source: str, source_file: str = "") -> dict:
     """Parse pipeline source code and return graph JSON."""
 
-    # Syntax check
+    # Syntax check — fall back to regex if the file has errors
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
-        return {
-            "error": f"Syntax error on line {e.lineno}: {e.msg}",
-            "nodes": [],
-            "edges": [],
-        }
+        return _fallback_parse(source, source_file, e)
 
     # Pipeline metadata
     pipeline_name, pipeline_desc = _extract_pipeline_meta(tree)
@@ -313,26 +676,8 @@ def parse_pipeline_source(source: str, source_file: str = "") -> dict:
         description = _get_docstring(stmt)
 
         # Build config
-        config: dict[str, Any] = {}
-        if node_type == "dataSource":
-            config["path"] = decorator_kwargs.get("path", "")
-            if "table" in decorator_kwargs:
-                config["sourceType"] = "databricks"
-                config["table"] = decorator_kwargs["table"]
-            else:
-                config["sourceType"] = "flat_file"
-        elif node_type == "modelScore":
-            config["model_uri"] = decorator_kwargs.get("model_uri", "")
-        elif node_type == "ratingStep":
-            config["table"] = decorator_kwargs.get("table", "")
-            config["key"] = decorator_kwargs.get("key", "")
-        elif node_type == "dataSink":
-            config["path"] = decorator_kwargs.get("sink", "")
-            config["format"] = decorator_kwargs.get("format", "parquet")
-        else:
-            # transform — extract user code from body
-            body = func_bodies.get(func_name, "")
-            config["code"] = _extract_user_code(body, param_names) if body else ""
+        body = func_bodies.get(func_name, "")
+        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
 
         raw_nodes.append({
             "func_name": func_name,
@@ -352,68 +697,16 @@ def parse_pipeline_source(source: str, source_file: str = "") -> dict:
             "source_file": source_file,
         }
 
-    # Build edges
-    node_names = {n["func_name"] for n in raw_nodes}
-    edges: list[dict] = []
-
-    # Explicit connect() calls
-    explicit_edges: set[tuple[str, str]] = set()
-    for src, tgt in _extract_connect_calls(tree):
-        if src in node_names and tgt in node_names:
-            explicit_edges.add((src, tgt))
-            edges.append({
-                "id": f"e_{src}_{tgt}",
-                "source": src,
-                "target": tgt,
-            })
-
-    # Implicit edges from parameter names matching node names
-    targets_with_explicit = {tgt for _, tgt in explicit_edges}
-    for node_info in raw_nodes:
-        if node_info["func_name"] in targets_with_explicit:
-            continue
-        for param in node_info["param_names"]:
-            if param in node_names and param != node_info["func_name"]:
-                pair = (param, node_info["func_name"])
-                if pair not in explicit_edges:
-                    edges.append({
-                        "id": f"e_{pair[0]}_{pair[1]}",
-                        "source": pair[0],
-                        "target": pair[1],
-                    })
-
-    # Fallback: if still no edges, infer linear chain from definition order
-    # (same behaviour as Pipeline._topo_order when no connect() calls)
-    if not edges and len(raw_nodes) > 1:
-        for i in range(1, len(raw_nodes)):
-            src = raw_nodes[i - 1]["func_name"]
-            tgt = raw_nodes[i]["func_name"]
-            edges.append({
-                "id": f"e_{src}_{tgt}",
-                "source": src,
-                "target": tgt,
-            })
-
-    # Build React Flow nodes (initial positions — will be replaced by ELK layout)
-    x_spacing = 300
-    rf_nodes = []
-    for i, n in enumerate(raw_nodes):
-        rf_nodes.append({
-            "id": n["func_name"],
-            "type": n["node_type"],
-            "position": {"x": i * x_spacing, "y": 0},
-            "data": {
-                "label": n["func_name"],
-                "description": n["description"],
-                "nodeType": n["node_type"],
-                "config": n["config"],
-            },
-        })
+    # Build edges + nodes using shared helpers
+    edges = _build_edges(raw_nodes, _extract_connect_calls(tree))
+    rf_nodes = _build_rf_nodes(raw_nodes)
+    preamble = _extract_preamble(source)
 
     return {
         "nodes": rf_nodes,
         "edges": edges,
         "pipeline_name": pipeline_name,
         "pipeline_description": pipeline_desc,
+        "preamble": preamble,
         "source_file": source_file,
     }

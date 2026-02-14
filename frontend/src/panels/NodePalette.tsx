@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 
@@ -50,6 +50,14 @@ const nodeTemplates = [
     icon: HardDriveDownload,
     accent: "#f59e0b",
     defaultConfig: { path: "", format: "parquet" },
+  },
+  {
+    type: "externalFile",
+    label: "External File",
+    description: "Load a pickle, JSON, or joblib file and use in code",
+    icon: FileArchive,
+    accent: "#ec4899",
+    defaultConfig: { path: "", fileType: "pickle", code: "" },
   },
 ]
 

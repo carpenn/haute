@@ -11,7 +11,7 @@ down into scans.  Preview mode slaps a .head(row_limit) before
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 import polars as pl
 
@@ -21,7 +21,63 @@ from runw.graph_utils import _sanitize_func_name, topo_sort_ids, ancestors
 _Frame = pl.LazyFrame
 
 
-def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[str, callable, bool]:
+def _exec_user_code(
+    code: str,
+    src_names: list[str],
+    dfs: tuple[_Frame, ...],
+    extra_ns: dict[str, Any] | None = None,
+) -> _Frame:
+    """Wrap, execute, and return the result of user-provided code.
+
+    Shared by transform and externalFile node types.
+    - Injects ``pl``, input DataFrames by name, and ``df`` (first input).
+    - Optionally merges *extra_ns* into the local namespace (e.g. ``obj``).
+    - Handles the ``.chain`` / bare-expression wrapping and adjusts line
+      numbers in error messages so they match the editor.
+    """
+    local_ns: dict[str, Any] = {"pl": pl}
+    for i, d in enumerate(dfs):
+        if i < len(src_names):
+            local_ns[src_names[i]] = d
+    if dfs:
+        local_ns["df"] = dfs[0]
+    if extra_ns:
+        local_ns.update(extra_ns)
+
+    exec_code = code
+    line_offset = 0
+    if code.startswith("."):
+        first = src_names[0] if src_names else "df"
+        exec_code = f"df = (\n    {first}\n    {code}\n)"
+        line_offset = 2
+    elif "df =" not in code and "df=" not in code:
+        exec_code = f"df = (\n    {code}\n)"
+        line_offset = 1
+
+    try:
+        exec(exec_code, {"pl": pl, **(extra_ns or {})}, local_ns)
+    except SyntaxError as exc:
+        if exc.lineno is not None:
+            exc.lineno = max(1, exc.lineno - line_offset)
+        raise
+    except Exception as exc:
+        msg = str(exc)
+        if line_offset and re.search(r'line \d+', msg):
+            msg = re.sub(
+                r'line (\d+)',
+                lambda m: f'line {max(1, int(m.group(1)) - line_offset)}',
+                msg,
+            )
+            raise type(exc)(msg) from None
+        raise
+
+    result = local_ns.get("df", dfs[0] if dfs else pl.LazyFrame())
+    if isinstance(result, pl.DataFrame):
+        result = result.lazy()
+    return result
+
+
+def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
     Returns (func_name, fn, is_source).
@@ -63,50 +119,53 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
             return dfs[0] if dfs else pl.LazyFrame()
         return func_name, sink_passthrough, False
 
+    elif node_type == "externalFile":
+        code = config.get("code", "").strip()
+        path = config.get("path", "")
+        file_type = config.get("fileType", "pickle")
+        model_class = config.get("modelClass", "classifier")
+        _src_names = list(source_names)
+
+        def _load_external(p: str, ft: str, mc: str = "classifier") -> Any:
+            """Load an external file and return the object."""
+            if ft == "json":
+                import json as _json
+                with open(p, "r") as f:
+                    return _json.load(f)
+            elif ft == "joblib":
+                import joblib
+                return joblib.load(p)
+            elif ft == "catboost":
+                if mc == "regressor":
+                    from catboost import CatBoostRegressor
+                    m = CatBoostRegressor()
+                else:
+                    from catboost import CatBoostClassifier
+                    m = CatBoostClassifier()
+                m.load_model(p)
+                return m
+            else:  # pickle
+                import pickle
+                with open(p, "rb") as f:
+                    return pickle.load(f)
+
+        if code:
+            def external_fn(*dfs: _Frame) -> _Frame:
+                obj = _load_external(path, file_type, model_class)
+                return _exec_user_code(code, _src_names, dfs, extra_ns={"obj": obj})
+            return func_name, external_fn, False
+        else:
+            def external_passthrough(*dfs: _Frame) -> _Frame:
+                return dfs[0] if dfs else pl.LazyFrame()
+            return func_name, external_passthrough, False
+
     elif node_type in ("transform", "modelScore", "ratingStep", "output"):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
 
         if code:
             def transform_fn(*dfs: _Frame) -> _Frame:
-                local_ns: dict[str, Any] = {"pl": pl}
-                for i, d in enumerate(dfs):
-                    if i < len(_src_names):
-                        local_ns[_src_names[i]] = d
-                if dfs:
-                    local_ns["df"] = dfs[0]
-
-                exec_code = code
-                line_offset = 0
-                if code.startswith("."):
-                    first = _src_names[0] if _src_names else "df"
-                    exec_code = f"df = (\n    {first}\n    {code}\n)"
-                    line_offset = 2
-                elif "df =" not in code and "df=" not in code:
-                    exec_code = f"df = (\n    {code}\n)"
-                    line_offset = 1
-
-                try:
-                    exec(exec_code, {"pl": pl}, local_ns)
-                except SyntaxError as exc:
-                    if exc.lineno is not None:
-                        exc.lineno = max(1, exc.lineno - line_offset)
-                    raise
-                except Exception as exc:
-                    msg = str(exc)
-                    if line_offset and re.search(r'line \d+', msg):
-                        msg = re.sub(
-                            r'line (\d+)',
-                            lambda m: f'line {max(1, int(m.group(1)) - line_offset)}',
-                            msg,
-                        )
-                        raise type(exc)(msg) from None
-                    raise
-                result = local_ns.get("df", dfs[0] if dfs else pl.LazyFrame())
-                # If user code collected to a DataFrame, make it lazy again
-                if isinstance(result, pl.DataFrame):
-                    result = result.lazy()
-                return result
+                return _exec_user_code(code, _src_names, dfs)
             return func_name, transform_fn, False
         else:
             def passthrough(*dfs: _Frame) -> _Frame:
@@ -179,7 +238,7 @@ def execute_graph(
         id_to_name[nid] = _sanitize_func_name(label)
 
     # Build functions with source names so variables match upstream node names
-    funcs: dict[str, tuple[callable, bool]] = {}
+    funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
         source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
         _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
@@ -294,7 +353,7 @@ def execute_sink(graph: dict, sink_node_id: str) -> dict:
         label = node_map[nid].get("data", {}).get("label", "Unnamed")
         id_to_name[nid] = _sanitize_func_name(label)
 
-    funcs: dict[str, tuple[callable, bool]] = {}
+    funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
         source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
         _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)

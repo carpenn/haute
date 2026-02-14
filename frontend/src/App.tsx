@@ -23,7 +23,7 @@ import NodePanel from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
-import { PanelLeftOpen } from "lucide-react"
+import { PanelLeftOpen, Settings } from "lucide-react"
 
 const nodeTypes = {
   dataSource: PipelineNode,
@@ -32,6 +32,7 @@ const nodeTypes = {
   ratingStep: PipelineNode,
   output: PipelineNode,
   dataSink: PipelineNode,
+  externalFile: PipelineNode,
 }
 
 const labelMap: Record<string, string> = {
@@ -41,6 +42,7 @@ const labelMap: Record<string, string> = {
   ratingStep: "Rating Step",
   output: "Output",
   dataSink: "Data Sink",
+  externalFile: "External File",
 }
 
 function makePreviewData(
@@ -114,8 +116,11 @@ function FlowEditor() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string } | null>(null)
   const [syncBanner, setSyncBanner] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(true)
+  const [preamble, setPreamble] = useState("")
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
+  const preambleRef = useRef("")
   const { screenToFlowPosition, fitView } = useReactFlow()
 
   const addToast = useCallback((type: ToastMessage["type"], text: string) => {
@@ -130,13 +135,13 @@ function FlowEditor() {
   // Keep graphRef in sync so callbacks never see stale state
   graphRef.current = { nodes, edges }
 
-  // Track dirty state
+  // Track dirty state (includes preamble so preamble-only changes are tracked)
   useEffect(() => {
-    const snapshot = JSON.stringify({ nodes, edges })
+    const snapshot = JSON.stringify({ nodes, edges, preamble })
     if (lastSavedRef.current && snapshot !== lastSavedRef.current) {
       setDirty(true)
     }
-  }, [nodes, edges])
+  }, [nodes, edges, preamble])
 
   // WebSocket connection for live code ↔ GUI sync
   useEffect(() => {
@@ -169,6 +174,10 @@ function FlowEditor() {
               setNodes(layouted)
             }
             setEdges(newEdges)
+            if (g.preamble !== undefined) {
+              setPreamble(g.preamble || "")
+              preambleRef.current = g.preamble || ""
+            }
             nodeIdCounter = newNodes.length
             setSyncBanner(null)
             addToast("info", "Pipeline updated from file")
@@ -210,8 +219,12 @@ function FlowEditor() {
       .then((data) => {
         setNodes(data.nodes || [])
         setEdges((data.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        if (data.preamble !== undefined) {
+          setPreamble(data.preamble || "")
+          preambleRef.current = data.preamble || ""
+        }
         nodeIdCounter = (data.nodes || []).length
-        lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [] })
+        lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [], preamble: data.preamble || "" })
         setLoading(false)
       })
       .catch((err) => {
@@ -328,11 +341,12 @@ function FlowEditor() {
         name: "my_pipeline",
         description: "",
         graph: { nodes: n, edges: e },
+        preamble: preambleRef.current,
       }),
     })
       .then((r) => r.json())
       .then((data) => {
-        lastSavedRef.current = JSON.stringify({ nodes: n, edges: e })
+        lastSavedRef.current = JSON.stringify({ nodes: n, edges: e, preamble: preambleRef.current })
         setDirty(false)
         addToast("success", `Saved → ${data.file}`)
       })
@@ -526,6 +540,17 @@ function FlowEditor() {
             />
           </div>
           <button
+            onClick={() => setSettingsOpen(true)}
+            className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+            title="Pipeline settings (imports, helpers)"
+          >
+            <Settings size={13} />
+            Imports
+          </button>
+          <button
             onClick={handleAutoLayout}
             disabled={nodes.length === 0}
             className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
@@ -635,6 +660,70 @@ function FlowEditor() {
           onDuplicate={handleDuplicateNode}
           onRename={handleRenameNode}
         />
+      )}
+
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,.5)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
+        >
+          <div className="w-[560px] max-h-[80vh] flex flex-col rounded-xl overflow-hidden shadow-2xl" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <div className="px-4 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Pipeline Imports &amp; Helpers</h2>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  Extra imports, constants, and helper functions. Preserved across GUI saves.
+                </p>
+              </div>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="p-1 rounded transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 p-4">
+              <div className="text-[11px] font-mono mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
+                <span style={{ color: 'rgba(96,165,250,.5)' }}>import polars as pl</span> and <span style={{ color: 'rgba(96,165,250,.5)' }}>import runw</span> are always included
+              </div>
+              <textarea
+                defaultValue={preamble}
+                onChange={(e) => {
+                  setPreamble(e.target.value)
+                  preambleRef.current = e.target.value
+                  setDirty(true)
+                }}
+                spellCheck={false}
+                placeholder={"import numpy as np\nimport catboost\nfrom sklearn.preprocessing import StandardScaler\n\n# Helper functions\ndef my_helper(x):\n    return x * 2"}
+                className="w-full h-[300px] px-3 py-2.5 text-[12px] font-mono rounded-lg focus:outline-none focus:ring-2 resize-none"
+                style={{
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border)',
+                  color: '#a5f3fc',
+                  caretColor: 'var(--accent)',
+                  lineHeight: '1.625',
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+              />
+            </div>
+            <div className="px-4 py-3 flex justify-end shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="px-4 py-1.5 text-[12px] font-semibold text-white rounded-md transition-colors"
+                style={{ background: 'var(--accent)' }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
