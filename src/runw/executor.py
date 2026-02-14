@@ -56,6 +56,13 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
 
         return func_name, source_fn, True
 
+    elif node_type == "dataSink":
+        # During normal run/preview, dataSink is a pass-through.
+        # Actual writing happens via execute_sink() on explicit user action.
+        def sink_passthrough(*dfs: _Frame) -> _Frame:
+            return dfs[0] if dfs else pl.LazyFrame()
+        return func_name, sink_passthrough, False
+
     elif node_type in ("transform", "modelScore", "ratingStep", "output"):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
@@ -237,3 +244,95 @@ def execute_graph(
             }
 
     return results
+
+
+def execute_sink(graph: dict, sink_node_id: str) -> dict:
+    """Execute the pipeline up to a sink node and write its input to disk.
+
+    This is called on-demand (not during normal run/preview).
+    Returns a status dict with row count and output path.
+    """
+    from pathlib import Path
+
+    nodes = graph.get("nodes", [])
+    node_map = {n["id"]: n for n in nodes}
+
+    sink_node = node_map.get(sink_node_id)
+    if not sink_node:
+        raise ValueError(f"Sink node '{sink_node_id}' not found")
+
+    config = sink_node.get("data", {}).get("config", {})
+    path = config.get("path", "")
+    fmt = config.get("format", "parquet")
+
+    if not path:
+        raise ValueError("Sink node has no output path configured")
+
+    # Run the pipeline up to the sink to get its input data
+    results = execute_graph(graph, target_node_id=sink_node_id)
+    sink_result = results.get(sink_node_id)
+
+    if not sink_result or sink_result.get("status") != "ok":
+        error = sink_result.get("error", "Unknown error") if sink_result else "No result"
+        raise RuntimeError(f"Pipeline failed before sink: {error}")
+
+    # Re-execute to get the actual LazyFrame (results only have preview)
+    # We need the full data, so run without row limit
+    edges = graph.get("edges", [])
+    all_ids = set(node_map.keys())
+    needed = ancestors(sink_node_id, edges, all_ids)
+    relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
+    order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
+
+    parents_of: dict[str, list[str]] = {nid: [] for nid in order}
+    for e in relevant_edges:
+        if e["target"] in parents_of:
+            parents_of[e["target"]].append(e["source"])
+
+    id_to_name: dict[str, str] = {}
+    for nid in order:
+        label = node_map[nid].get("data", {}).get("label", "Unnamed")
+        id_to_name[nid] = _sanitize_func_name(label)
+
+    funcs: dict[str, tuple[callable, bool]] = {}
+    for nid in order:
+        source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
+        _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
+        funcs[nid] = (fn, is_source)
+
+    lazy_outputs: dict[str, _Frame] = {}
+    for nid in order:
+        fn, is_source = funcs[nid]
+        if is_source:
+            lazy_outputs[nid] = fn()
+        else:
+            input_ids = parents_of.get(nid, [])
+            if input_ids:
+                input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
+                lazy_outputs[nid] = fn(*input_lfs) if input_lfs else fn()
+            else:
+                last_lfs = list(lazy_outputs.values())
+                lazy_outputs[nid] = fn(last_lfs[-1]) if last_lfs else fn()
+
+    lf = lazy_outputs.get(sink_node_id)
+    if lf is None:
+        raise RuntimeError("Failed to compute sink input")
+
+    df = lf.collect()
+
+    # Ensure parent directories exist
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "csv":
+        df.write_csv(out)
+    else:
+        df.write_parquet(out)
+
+    return {
+        "status": "ok",
+        "message": f"Wrote {len(df):,} rows to {path}",
+        "row_count": len(df),
+        "path": path,
+        "format": fmt,
+    }

@@ -31,6 +31,7 @@ const nodeTypes = {
   modelScore: PipelineNode,
   ratingStep: PipelineNode,
   output: PipelineNode,
+  dataSink: PipelineNode,
 }
 
 const labelMap: Record<string, string> = {
@@ -39,6 +40,7 @@ const labelMap: Record<string, string> = {
   modelScore: "Model Score",
   ratingStep: "Rating Step",
   output: "Output",
+  dataSink: "Data Sink",
 }
 
 function makePreviewData(

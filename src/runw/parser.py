@@ -21,6 +21,8 @@ from typing import Any
 
 def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
     """Infer the GUI node type from decorator config and param count."""
+    if "sink" in decorator_kwargs:
+        return "dataSink"
     if "model_uri" in decorator_kwargs:
         return "modelScore"
     if "table" in decorator_kwargs and "key" in decorator_kwargs:
@@ -324,6 +326,9 @@ def parse_pipeline_source(source: str, source_file: str = "") -> dict:
         elif node_type == "ratingStep":
             config["table"] = decorator_kwargs.get("table", "")
             config["key"] = decorator_kwargs.get("key", "")
+        elif node_type == "dataSink":
+            config["path"] = decorator_kwargs.get("sink", "")
+            config["format"] = decorator_kwargs.get("format", "parquet")
         else:
             # transform — extract user code from body
             body = func_bodies.get(func_name, "")

@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 
@@ -42,6 +42,14 @@ const nodeTemplates = [
     icon: CircleDot,
     accent: "#f43f5e",
     defaultConfig: { columns: [] },
+  },
+  {
+    type: "dataSink",
+    label: "Data Sink",
+    description: "Write to parquet, CSV, or directory",
+    icon: HardDriveDownload,
+    accent: "#f59e0b",
+    defaultConfig: { path: "", format: "parquet" },
   },
 ]
 

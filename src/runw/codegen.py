@@ -44,6 +44,22 @@ def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
     return df
 '''
 
+_SINK_PARQUET = '''\
+@pipeline.node(sink="{path}", format="parquet")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    {first}.collect().write_parquet("{path}")
+    return {first}
+'''
+
+_SINK_CSV = '''\
+@pipeline.node(sink="{path}", format="csv")
+def {func_name}({params}) -> pl.DataFrame:
+    """{description}"""
+    {first}.collect().write_csv("{path}")
+    return {first}
+'''
+
 
 
 
@@ -124,6 +140,17 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         key = config.get("key", "")
         return _RATING_STEP.format(
             func_name=func_name, description=description, table=table, key=key
+        )
+
+    elif node_type == "dataSink":
+        path = config.get("path", "output.parquet")
+        fmt = config.get("format", "parquet")
+        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        first = source_names[0] if source_names else "df"
+        template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
+        return template.format(
+            func_name=func_name, description=description, path=path,
+            params=params, first=first,
         )
 
     # transform / output — use source node names as params

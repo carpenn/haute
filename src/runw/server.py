@@ -300,6 +300,29 @@ async def preview_node(body: dict):
                 "row_count": 0, "column_count": 0, "columns": [], "preview": []}
 
 
+@app.post("/api/pipeline/sink")
+async def execute_sink_node(body: dict):
+    """Execute the pipeline up to a sink node and write output to disk.
+
+    Only called on explicit user action (Write button), not during normal run/preview.
+    """
+    from runw.executor import execute_sink
+
+    graph = body.get("graph", {})
+    node_id = body.get("nodeId")
+
+    if not node_id:
+        raise HTTPException(status_code=400, detail="nodeId is required")
+    if not graph.get("nodes"):
+        raise HTTPException(status_code=400, detail="Empty graph")
+
+    try:
+        result = execute_sink(graph, sink_node_id=node_id)
+        return result
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/files")
 async def browse_files(dir: str = ".", extensions: str = ".parquet,.csv,.json,.xml"):
     """Browse files on disk for the file picker UI."""

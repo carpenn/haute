@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Database, Brain, TableProperties, CircleDot } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 const iconMap: Record<string, React.ElementType> = {
@@ -9,6 +9,7 @@ const iconMap: Record<string, React.ElementType> = {
   modelScore: Brain,
   ratingStep: TableProperties,
   output: CircleDot,
+  dataSink: HardDriveDownload,
 }
 
 const accentMap: Record<string, string> = {
@@ -17,6 +18,7 @@ const accentMap: Record<string, string> = {
   modelScore: "#8b5cf6",
   ratingStep: "#10b981",
   output: "#f43f5e",
+  dataSink: "#f59e0b",
 }
 
 const labelMap: Record<string, string> = {
@@ -25,6 +27,7 @@ const labelMap: Record<string, string> = {
   modelScore: "MODEL",
   ratingStep: "RATING",
   output: "OUTPUT",
+  dataSink: "SINK",
 }
 
 const statusColors: Record<string, string> = {

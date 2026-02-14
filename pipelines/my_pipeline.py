@@ -44,21 +44,6 @@ def policies() -> pl.DataFrame:
 
 
 @pipeline.node
-def severity_set(exposure: pl.DataFrame, claims: pl.DataFrame, policies: pl.DataFrame) -> pl.DataFrame:
-    """claim_exposure_join copy node"""
-    df = (
-    policies
-    .join(
-        claims, 
-        on = 'IDpol', 
-        how = 'left'
-    )
-    .filter(pl.col('ClaimAmount') > 0 )
-    )
-    return df
-
-
-@pipeline.node
 def frequency_set(policies: pl.DataFrame, exposure: pl.DataFrame, claims_aggregate: pl.DataFrame) -> pl.DataFrame:
     """frequency_set node"""
     df = (
@@ -77,6 +62,35 @@ def frequency_set(policies: pl.DataFrame, exposure: pl.DataFrame, claims_aggrega
     return df
 
 
+@pipeline.node(sink="output/frequency.parquet", format="parquet")
+def frequency_write(frequency_set: pl.DataFrame) -> pl.DataFrame:
+    """frequency_write node"""
+    frequency_set.collect().write_parquet("output/frequency.parquet")
+    return frequency_set
+
+
+@pipeline.node
+def severity_set(exposure: pl.DataFrame, claims: pl.DataFrame, policies: pl.DataFrame) -> pl.DataFrame:
+    """claim_exposure_join copy node"""
+    df = (
+    policies
+    .join(
+        claims, 
+        on = 'IDpol', 
+        how = 'left'
+    )
+    .filter(pl.col('ClaimAmount') > 0 )
+    )
+    return df
+
+
+@pipeline.node(sink="output/severity.parquet", format="parquet")
+def severity_write(severity_set: pl.DataFrame) -> pl.DataFrame:
+    """severity_write node"""
+    severity_set.collect().write_parquet("output/severity.parquet")
+    return severity_set
+
+
 
 # Wire nodes together — edges define data flow
 pipeline.connect("policies", "frequency_set")
@@ -86,3 +100,5 @@ pipeline.connect("claims", "severity_set")
 pipeline.connect("policies", "severity_set")
 pipeline.connect("claims", "claims_aggregate")
 pipeline.connect("claims_aggregate", "frequency_set")
+pipeline.connect("frequency_set", "frequency_write")
+pipeline.connect("severity_set", "severity_write")

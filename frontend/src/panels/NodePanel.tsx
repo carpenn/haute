@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2 } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 
 type FileItem = {
@@ -523,6 +523,120 @@ function TransformConfig({
   )
 }
 
+function DataSinkConfig({
+  config,
+  onUpdate,
+  nodeId,
+  allNodes,
+  edges,
+}: {
+  config: Record<string, unknown>
+  onUpdate: (key: string, value: unknown) => void
+  nodeId: string
+  allNodes: SimpleNode[]
+  edges: SimpleEdge[]
+}) {
+  const [format, setFormat] = useState<string>((config.format as string) || "parquet")
+  const [writing, setWriting] = useState(false)
+  const [writeResult, setWriteResult] = useState<{ status: string; message: string } | null>(null)
+
+  const hasPath = Boolean(config.path)
+
+  const handleWrite = () => {
+    if (!hasPath || writing) return
+    setWriting(true)
+    setWriteResult(null)
+
+    const graph = {
+      nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
+      edges: edges,
+    }
+
+    fetch("/api/pipeline/sink", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ graph, nodeId }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        setWriteResult({ status: data.status || "ok", message: data.message || "Written successfully" })
+        setWriting(false)
+      })
+      .catch((err) => {
+        setWriteResult({ status: "error", message: err.message })
+        setWriting(false)
+      })
+  }
+
+  return (
+    <div className="px-4 py-3 space-y-3">
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Format</label>
+        <div className="mt-1 flex gap-1.5">
+          {["parquet", "csv"].map((fmt) => (
+            <button
+              key={fmt}
+              onClick={() => {
+                setFormat(fmt)
+                onUpdate("format", fmt)
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              style={{
+                background: format === fmt ? 'rgba(245,158,11,.1)' : 'var(--bg-input)',
+                border: format === fmt ? '1px solid #f59e0b' : '1px solid var(--border)',
+                color: format === fmt ? '#f59e0b' : 'var(--text-secondary)',
+              }}
+            >
+              {fmt.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+          Output Path
+        </label>
+        <input
+          type="text"
+          placeholder={format === "csv" ? "output/results.csv" : "output/results.parquet"}
+          defaultValue={(config.path as string) || ""}
+          onChange={(e) => onUpdate("path", e.target.value)}
+          className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
+          style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(245,158,11,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px rgba(245,158,11,.1)' }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+        />
+      </div>
+
+      <button
+        onClick={handleWrite}
+        disabled={!hasPath || writing}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12px] font-semibold rounded-lg transition-colors disabled:opacity-40"
+        style={{ background: '#f59e0b', color: '#000' }}
+        onMouseEnter={(e) => { if (hasPath && !writing) e.currentTarget.style.background = '#fbbf24' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = '#f59e0b' }}
+      >
+        <HardDriveDownload size={14} />
+        {writing ? "Writing..." : "Write"}
+      </button>
+
+      {writeResult && (
+        <div
+          className="px-2.5 py-2 rounded-lg text-xs"
+          style={{
+            background: writeResult.status === "ok" ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)',
+            border: writeResult.status === "ok" ? '1px solid rgba(34,197,94,.2)' : '1px solid rgba(239,68,68,.2)',
+            color: writeResult.status === "ok" ? '#4ade80' : '#f87171',
+          }}
+        >
+          {writeResult.message}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function sanitizeName(label: string): string {
   let name = label.trim().replace(/[\s-]/g, "_")
   name = name.replace(/[^a-zA-Z0-9_]/g, "")
@@ -535,6 +649,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
 
   const config = (node.data.config || {}) as Record<string, unknown>
   const isDataSource = node.data.nodeType === "dataSource"
+  const isDataSink = node.data.nodeType === "dataSink"
   const isTransform = node.data.nodeType === "transform" || node.data.nodeType === "output"
 
   // Compute input sources — variable name = sanitized source node label
@@ -581,6 +696,8 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
 
       {isDataSource ? (
         <DataSourceConfig config={config} onUpdate={handleConfigUpdate} />
+      ) : isDataSink ? (
+        <DataSinkConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
       ) : isTransform ? (
         <TransformConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
       ) : (
