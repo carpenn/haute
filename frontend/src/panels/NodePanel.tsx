@@ -350,6 +350,9 @@ function DataSourceConfig({
   )
 }
 
+const PAIRS: Record<string, string> = { "(": ")", "[": "]", "{": "}", "'": "'", '"': '"' }
+const CLOSE_CHARS = new Set([")", "]", "}"])
+
 function CodeEditor({
   defaultValue,
   onChange,
@@ -367,6 +370,38 @@ function CodeEditor({
 
   const lineCount = Math.max((code || "").split("\n").length, 1)
 
+  // Undo-safe text insertion — goes through the browser input pipeline
+  // so Ctrl+Z / Ctrl+Shift+Z work natively.
+  const insertText = useCallback((ta: HTMLTextAreaElement, text: string) => {
+    ta.focus()
+    document.execCommand("insertText", false, text)
+    // Sync React state with the DOM value
+    setCode(ta.value)
+    onChange(ta.value)
+  }, [onChange])
+
+  // Replace a range and place cursor at `cursorPos`
+  const replaceRange = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, cursorPos?: number) => {
+    ta.focus()
+    ta.setSelectionRange(start, end)
+    document.execCommand("insertText", false, text)
+    if (cursorPos !== undefined) {
+      ta.setSelectionRange(cursorPos, cursorPos)
+    }
+    setCode(ta.value)
+    onChange(ta.value)
+  }, [onChange])
+
+  // Replace a range and select the result
+  const replaceRangeSelect = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, selStart: number, selEnd: number) => {
+    ta.focus()
+    ta.setSelectionRange(start, end)
+    document.execCommand("insertText", false, text)
+    ta.setSelectionRange(selStart, selEnd)
+    setCode(ta.value)
+    onChange(ta.value)
+  }, [onChange])
+
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setCode(e.target.value)
@@ -377,20 +412,166 @@ function CodeEditor({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const ta = e.currentTarget
+      const { selectionStart: start, selectionEnd: end, value: val } = ta
+      const hasSelection = start !== end
+
+      // --- Tab / Shift+Tab: multi-line indent/dedent ---
       if (e.key === "Tab") {
         e.preventDefault()
-        const ta = e.currentTarget
-        const start = ta.selectionStart
-        const end = ta.selectionEnd
-        const val = ta.value
-        const newVal = val.substring(0, start) + "    " + val.substring(end)
-        ta.value = newVal
-        ta.selectionStart = ta.selectionEnd = start + 4
-        setCode(newVal)
-        onChange(newVal)
+        if (hasSelection) {
+          const lineStart = val.lastIndexOf("\n", start - 1) + 1
+          const lineEnd = val.indexOf("\n", end - 1)
+          const blockEnd = lineEnd === -1 ? val.length : lineEnd
+          const block = val.substring(lineStart, blockEnd)
+          const lines = block.split("\n")
+
+          let newBlock: string
+          if (e.shiftKey) {
+            newBlock = lines.map((l) => l.startsWith("    ") ? l.slice(4) : l.replace(/^\t/, "")).join("\n")
+          } else {
+            newBlock = lines.map((l) => "    " + l).join("\n")
+          }
+
+          const delta = newBlock.length - block.length
+          replaceRangeSelect(ta, lineStart, blockEnd, newBlock, lineStart, blockEnd + delta)
+        } else {
+          if (e.shiftKey) {
+            const lineStart = val.lastIndexOf("\n", start - 1) + 1
+            const lineText = val.substring(lineStart, start)
+            if (lineText.endsWith("    ")) {
+              replaceRange(ta, start - 4, start, "", start - 4)
+            } else if (lineText.endsWith("\t")) {
+              replaceRange(ta, start - 1, start, "", start - 1)
+            }
+          } else {
+            insertText(ta, "    ")
+          }
+        }
+        return
+      }
+
+      // --- Quote / bracket wrap selection or auto-close ---
+      if (PAIRS[e.key]) {
+        const open = e.key
+        const close = PAIRS[e.key]
+        if (hasSelection) {
+          e.preventDefault()
+          const selected = val.substring(start, end)
+          const wrapped = open + selected + close
+          replaceRangeSelect(ta, start, end, wrapped, start + 1, end + 1)
+          return
+        }
+        // Auto-close pair (no selection)
+        // For quotes, don't auto-close if the char before cursor is alphanumeric (mid-word)
+        if (open === "'" || open === '"') {
+          const charBefore = start > 0 ? val[start - 1] : ""
+          if (/\w/.test(charBefore)) return // let browser handle normally
+          // If cursor is right before the same closing quote, skip over it
+          if (val[start] === open) {
+            e.preventDefault()
+            ta.setSelectionRange(start + 1, start + 1)
+            return
+          }
+        }
+        e.preventDefault()
+        insertText(ta, open + close)
+        ta.setSelectionRange(start + 1, start + 1)
+        return
+      }
+
+      // --- Skip over closing bracket/quote if already there ---
+      if (CLOSE_CHARS.has(e.key) && val[start] === e.key && !hasSelection) {
+        e.preventDefault()
+        ta.setSelectionRange(start + 1, start + 1)
+        return
+      }
+
+      // --- Backspace: delete matching pair ---
+      if (e.key === "Backspace" && !hasSelection && start > 0) {
+        const before = val[start - 1]
+        const after = val[start]
+        if (PAIRS[before] && PAIRS[before] === after) {
+          e.preventDefault()
+          replaceRange(ta, start - 1, start + 1, "", start - 1)
+          return
+        }
+      }
+
+      // --- Enter: auto-indent + extra indent after colon ---
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        const lineStart = val.lastIndexOf("\n", start - 1) + 1
+        const currentLine = val.substring(lineStart, start)
+        const indentMatch = currentLine.match(/^(\s*)/)
+        let indent = indentMatch ? indentMatch[1] : ""
+        const trimmedLine = currentLine.trimEnd()
+        if (trimmedLine.endsWith(":")) {
+          indent += "    "
+        }
+        insertText(ta, "\n" + indent)
+        return
+      }
+
+      // --- Home: smart home (toggle between start-of-text and column 0) ---
+      if (e.key === "Home" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault()
+        const lineStart = val.lastIndexOf("\n", start - 1) + 1
+        const lineText = val.substring(lineStart)
+        const textStart = lineStart + (lineText.match(/^\s*/)?.[0].length ?? 0)
+        const target = start === textStart ? lineStart : textStart
+        if (e.shiftKey) {
+          ta.setSelectionRange(target, end)
+        } else {
+          ta.setSelectionRange(target, target)
+        }
+        return
+      }
+
+      // --- Ctrl+D: duplicate line or selection ---
+      if (e.key === "d" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        if (hasSelection) {
+          const selected = val.substring(start, end)
+          replaceRangeSelect(ta, end, end, selected, end, end + selected.length)
+        } else {
+          const lineStart = val.lastIndexOf("\n", start - 1) + 1
+          let lineEnd = val.indexOf("\n", start)
+          if (lineEnd === -1) lineEnd = val.length
+          const line = val.substring(lineStart, lineEnd)
+          const offset = start - lineStart
+          replaceRange(ta, lineEnd, lineEnd, "\n" + line, lineEnd + 1 + offset)
+        }
+        return
+      }
+
+      // --- Ctrl+/: toggle comment ---
+      if (e.key === "/" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        const lineStart = val.lastIndexOf("\n", start - 1) + 1
+        const lineEnd = hasSelection ? (val.indexOf("\n", end - 1) === -1 ? val.length : val.indexOf("\n", end - 1)) : (val.indexOf("\n", start) === -1 ? val.length : val.indexOf("\n", start))
+        const block = val.substring(lineStart, lineEnd)
+        const lines = block.split("\n")
+        const allCommented = lines.every((l) => l.trimStart().startsWith("# ") || l.trim() === "")
+        let newBlock: string
+        if (allCommented) {
+          newBlock = lines.map((l) => l.trim() === "" ? l : l.replace(/^(\s*)# /, "$1")).join("\n")
+        } else {
+          newBlock = lines.map((l) => l.trim() === "" ? l : l.replace(/^(\s*)/, "$1# ")).join("\n")
+        }
+        const delta = newBlock.length - block.length
+        replaceRangeSelect(ta, lineStart, lineEnd, newBlock, lineStart, lineEnd + delta)
+        return
+      }
+
+      // --- Ctrl+A: select all within editor ---
+      if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        ta.setSelectionRange(0, val.length)
+        return
       }
     },
-    [onChange],
+    [insertText, replaceRange, replaceRangeSelect],
   )
 
   const handleScroll = useCallback(() => {
