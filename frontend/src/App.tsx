@@ -349,6 +349,10 @@ function FlowEditor() {
     [setNodes],
   )
 
+  const handleDeleteEdge = useCallback((edgeId: string) => {
+    setEdges((eds) => eds.filter((e) => e.id !== edgeId))
+  }, [setEdges])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -362,15 +366,20 @@ function FlowEditor() {
         return
       }
 
-      // Delete / Backspace → remove selected nodes (unless typing)
+      // Delete / Backspace → remove selected nodes and/or edges (unless typing)
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
         const { nodes: currentNodes, edges: currentEdges } = graphRef.current
-        const selectedIds = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id))
-        if (selectedIds.size === 0) return
-        setNodes(currentNodes.filter((n) => !selectedIds.has(n.id)))
-        setEdges(currentEdges.filter((e) => !selectedIds.has(e.source) && !selectedIds.has(e.target)))
-        setSelectedNode(null)
-        setPreviewData(null)
+        const selectedNodeIds = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id))
+        const selectedEdgeIds = new Set(currentEdges.filter((ed) => ed.selected).map((ed) => ed.id))
+        if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) return
+        if (selectedNodeIds.size > 0) {
+          setNodes(currentNodes.filter((n) => !selectedNodeIds.has(n.id)))
+          setEdges(currentEdges.filter((ed) => !selectedNodeIds.has(ed.source) && !selectedNodeIds.has(ed.target)))
+          setSelectedNode(null)
+          setPreviewData(null)
+        } else {
+          setEdges(currentEdges.filter((ed) => !selectedEdgeIds.has(ed.id)))
+        }
       }
     }
     window.addEventListener("keydown", handler)
@@ -609,6 +618,7 @@ function FlowEditor() {
           allNodes={nodes as any}
           onClose={() => setSelectedNode(null)}
           onUpdateNode={onUpdateNode}
+          onDeleteEdge={handleDeleteEdge}
         />
       </div>
 

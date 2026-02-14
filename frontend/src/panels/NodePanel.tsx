@@ -17,6 +17,7 @@ type SchemaColumn = {
 type InputSource = {
   varName: string
   sourceLabel: string
+  edgeId: string
 }
 
 type SchemaInfo = {
@@ -50,6 +51,7 @@ type NodePanelProps = {
   allNodes: SimpleNode[]
   onClose: () => void
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
+  onDeleteEdge?: (edgeId: string) => void
 }
 
 
@@ -352,10 +354,12 @@ function TransformConfig({
   config,
   onUpdate,
   inputSources,
+  onDeleteInput,
 }: {
   config: Record<string, unknown>
   onUpdate: (key: string, value: unknown) => void
   inputSources: InputSource[]
+  onDeleteInput?: (edgeId: string) => void
 }) {
   const defaultCode = (config.code as string) || ""
   const isMultiInput = inputSources.length > 1
@@ -370,7 +374,21 @@ function TransformConfig({
               {isMultiInput ? "Inputs" : "Input"}
             </span>
             {inputSources.map((src) => (
-              <code key={src.varName} className="text-[11px] px-1.5 py-0.5 rounded font-semibold" style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }}>{src.varName}</code>
+              <span key={src.varName} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-soft)' }}>
+                <code className="text-[11px] font-semibold" style={{ color: 'var(--accent)' }}>{src.varName}</code>
+                {onDeleteInput && (
+                  <button
+                    onClick={() => onDeleteInput(src.edgeId)}
+                    className="p-0 rounded transition-colors"
+                    style={{ color: 'var(--text-muted)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+                    title={`Remove connection from ${src.sourceLabel}`}
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </span>
             ))}
           </div>
         </div>
@@ -412,7 +430,7 @@ function sanitizeName(label: string): string {
   return name || "unnamed_node"
 }
 
-export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge }: NodePanelProps) {
   if (!node) return null
 
   const config = (node.data.config || {}) as Record<string, unknown>
@@ -426,6 +444,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
     .map((e) => ({
       varName: sanitizeName(nodeMap[e.source]?.data.label || e.source),
       sourceLabel: nodeMap[e.source]?.data.label || e.source,
+      edgeId: e.id,
     }))
 
   const handleConfigUpdate = (key: string, value: unknown) => {
@@ -463,7 +482,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
       {isDataSource ? (
         <DataSourceConfig config={config} onUpdate={handleConfigUpdate} />
       ) : isTransform ? (
-        <TransformConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} />
+        <TransformConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
       ) : (
         Object.keys(config).length > 0 && (
           <div className="px-4 py-3">
