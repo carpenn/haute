@@ -153,7 +153,7 @@ function FlowEditor() {
           if (msg.type === "graph_update" && msg.graph) {
             const g = msg.graph
             const newNodes = g.nodes || []
-            const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "smoothstep", animated: false }))
+            const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))
 
             // If no saved positions, auto-layout with ELK
             const hasPositions = newNodes.some(
@@ -207,7 +207,7 @@ function FlowEditor() {
       })
       .then((data) => {
         setNodes(data.nodes || [])
-        setEdges((data.edges || []).map((e: Edge) => ({ ...e, type: "smoothstep", animated: false })))
+        setEdges((data.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
         nodeIdCounter = (data.nodes || []).length
         lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [] })
         setLoading(false)
@@ -599,7 +599,7 @@ function FlowEditor() {
               fitViewOptions={{ padding: 0.8 }}
               proOptions={{ hideAttribution: true }}
               defaultEdgeOptions={{
-                type: "smoothstep",
+                type: "default",
                 animated: false,
                 style: { stroke: 'rgba(255,255,255,.12)', strokeWidth: 1.5 },
                 markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.15)' },

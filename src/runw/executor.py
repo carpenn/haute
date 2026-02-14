@@ -10,6 +10,7 @@ down into scans.  Preview mode slaps a .head(row_limit) before
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import polars as pl
@@ -69,13 +70,31 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
                     local_ns["df"] = dfs[0]
 
                 exec_code = code
+                line_offset = 0
                 if code.startswith("."):
                     first = _src_names[0] if _src_names else "df"
                     exec_code = f"df = (\n    {first}\n    {code}\n)"
+                    line_offset = 2
                 elif "df =" not in code and "df=" not in code:
                     exec_code = f"df = (\n    {code}\n)"
+                    line_offset = 1
 
-                exec(exec_code, {"pl": pl}, local_ns)
+                try:
+                    exec(exec_code, {"pl": pl}, local_ns)
+                except SyntaxError as exc:
+                    if exc.lineno is not None:
+                        exc.lineno = max(1, exc.lineno - line_offset)
+                    raise
+                except Exception as exc:
+                    msg = str(exc)
+                    if line_offset and re.search(r'line \d+', msg):
+                        msg = re.sub(
+                            r'line (\d+)',
+                            lambda m: f'line {max(1, int(m.group(1)) - line_offset)}',
+                            msg,
+                        )
+                        raise type(exc)(msg) from None
+                    raise
                 result = local_ns.get("df", dfs[0] if dfs else pl.LazyFrame())
                 # If user code collected to a DataFrame, make it lazy again
                 if isinstance(result, pl.DataFrame):

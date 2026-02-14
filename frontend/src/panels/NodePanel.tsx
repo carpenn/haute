@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Database, Table2 } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 
@@ -350,6 +350,113 @@ function DataSourceConfig({
   )
 }
 
+function CodeEditor({
+  defaultValue,
+  onChange,
+  placeholder,
+}: {
+  defaultValue: string
+  onChange: (value: string) => void
+  placeholder?: string
+}) {
+  const [code, setCode] = useState(defaultValue)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const gutterRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+
+  const lineCount = Math.max((code || "").split("\n").length, 1)
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setCode(e.target.value)
+      onChange(e.target.value)
+    },
+    [onChange],
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Tab") {
+        e.preventDefault()
+        const ta = e.currentTarget
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        const val = ta.value
+        const newVal = val.substring(0, start) + "    " + val.substring(end)
+        ta.value = newVal
+        ta.selectionStart = ta.selectionEnd = start + 4
+        setCode(newVal)
+        onChange(newVal)
+      }
+    },
+    [onChange],
+  )
+
+  const handleScroll = useCallback(() => {
+    if (textareaRef.current && gutterRef.current) {
+      gutterRef.current.scrollTop = textareaRef.current.scrollTop
+    }
+  }, [])
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 min-h-[120px] rounded-lg overflow-hidden"
+      style={{
+        border: focused ? '1px solid rgba(59,130,246,.3)' : '1px solid var(--border)',
+        boxShadow: focused ? '0 0 0 2px var(--accent-soft)' : 'none',
+        background: 'var(--bg-input)',
+      }}
+    >
+      <div className="flex h-full">
+        <div
+          ref={gutterRef}
+          className="shrink-0 overflow-hidden select-none py-2.5"
+          style={{
+            background: 'var(--bg-elevated)',
+            borderRight: '1px solid var(--border)',
+            width: lineCount >= 100 ? 44 : 34,
+          }}
+        >
+          {Array.from({ length: lineCount }, (_, i) => (
+            <div
+              key={i}
+              className="text-right pr-2 font-mono"
+              style={{
+                color: 'var(--text-muted)',
+                fontSize: '12px',
+                lineHeight: '1.625',
+                height: '19.5px',
+              }}
+            >
+              {i + 1}
+            </div>
+          ))}
+        </div>
+        <textarea
+          ref={textareaRef}
+          defaultValue={defaultValue}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onScroll={handleScroll}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          spellCheck={false}
+          placeholder={placeholder}
+          className="flex-1 w-full h-full pl-2.5 pr-3 py-2.5 text-[12px] font-mono focus:outline-none resize-none"
+          style={{
+            background: 'transparent',
+            color: '#a5f3fc',
+            caretColor: 'var(--accent)',
+            lineHeight: '1.625',
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function TransformConfig({
   config,
   onUpdate,
@@ -401,24 +508,17 @@ function TransformConfig({
           {hasInput ? "use input names" : <>start with <code className="px-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>.</code> to chain</>}
         </span>
       </div>
-      <div className="flex-1 min-h-[120px]">
-        <textarea
-          defaultValue={defaultCode}
-          onChange={(e) => onUpdate("code", e.target.value)}
-          spellCheck={false}
-          placeholder={
-            isMultiInput
-              ? `${inputSources[0].varName}.join(${inputSources[1]?.varName || "other"}, on="key", how="left")`
-              : hasInput
-                ? `${inputSources[0].varName}\n.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
-                : `.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
-          }
-          className="w-full h-full px-3 py-2.5 text-[12px] font-mono rounded-lg focus:outline-none focus:ring-2 resize-none leading-relaxed"
-          style={{ background: 'var(--bg-input)', color: '#a5f3fc', border: '1px solid var(--border)', caretColor: 'var(--accent)' }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
-        />
-      </div>
+      <CodeEditor
+        defaultValue={defaultCode}
+        onChange={(val) => onUpdate("code", val)}
+        placeholder={
+          isMultiInput
+            ? `${inputSources[0].varName}.join(${inputSources[1]?.varName || "other"}, on="key", how="left")`
+            : hasInput
+              ? `${inputSources[0].varName}\n.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
+              : `.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
+        }
+      />
     </div>
   )
 }
