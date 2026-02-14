@@ -1,4 +1,4 @@
-# Tech Stack
+# Runway — Tech Stack
 
 Reference implementation: [PricingFrontier/atelier](https://github.com/PricingFrontier/atelier)
 

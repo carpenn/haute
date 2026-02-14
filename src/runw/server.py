@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="runw", version="0.1.0")
+app = FastAPI(title="Runway", version="0.1.0")
 
 STATIC_DIR = Path(__file__).parent / "static"
 logger = logging.getLogger("uvicorn.error")
@@ -233,6 +233,38 @@ async def run_pipeline(body: dict):
     try:
         results = execute_graph(graph)
         return {"status": "ok", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/pipeline/trace")
+async def trace_row(body: dict):
+    """Trace a single row through the pipeline, returning per-node snapshots.
+
+    Request body:
+        graph: React Flow graph JSON
+        rowIndex: 0-indexed row to trace (default 0)
+        targetNodeId: node to trace from (default: last node)
+        column: optional column name to filter the trace to
+    """
+    from runw.trace import execute_trace, trace_result_to_dict
+
+    graph = body.get("graph", {})
+    row_index = body.get("rowIndex", 0)
+    target_node_id = body.get("targetNodeId")
+    column = body.get("column")
+
+    if not graph.get("nodes"):
+        raise HTTPException(status_code=400, detail="Empty graph")
+
+    try:
+        result = execute_trace(
+            graph,
+            row_index=int(row_index),
+            target_node_id=target_node_id,
+            column=column,
+        )
+        return {"status": "ok", "trace": trace_result_to_dict(result)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

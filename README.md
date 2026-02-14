@@ -1,4 +1,4 @@
-# runw
+# Runway
 
 **Open-source pricing engine for insurance teams on Databricks.**
 
@@ -10,27 +10,27 @@ pip install runw
 
 ---
 
-## What is runw?
+## What is Runway?
 
-runw gives insurance pricing teams a **code-first, GUI-friendly** way to build data pipelines. It bridges the gap between:
+Runway gives insurance pricing teams a **code-first, GUI-friendly** way to build data pipelines. It bridges the gap between:
 
 - **Pricing analysts** who are comfortable with visual tools (Alteryx, WTW Radar)
 - **Engineering best practices**: version control, CI/CD, unit tests, code review
 
 The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code.
 
-### runw is:
+### Runway is:
 
 - A Python DSL for defining pricing pipelines as decorated functions
 - A browser-based React Flow UI for visual pipeline editing
 - A Polars-powered execution engine (fast, lazy, streaming)
 - A CLI for scaffolding, running, and serving pipelines
 
-### runw is not:
+### Runway is not:
 
 - A model training framework (use MLflow, scikit-learn, XGBoost, etc.)
 - A full ETL platform (use Spark, dbt, etc. for heavy lifting)
-- A replacement for Databricks — it's designed to run **on** Databricks
+- A replacement for Databricks — Runway is designed to run **on** Databricks
 
 ---
 

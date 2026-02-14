@@ -146,7 +146,7 @@ function FileBrowser({ currentPath, onSelect }: { currentPath?: string; onSelect
                     {item.name}
                   </span>
                   {item.size !== undefined && (
-                    <span className="text-[10px] ml-auto shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    <span className="text-[11px] ml-auto shrink-0" style={{ color: 'var(--text-muted)' }}>
                       {formatSize(item.size)}
                     </span>
                   )}
@@ -171,13 +171,13 @@ function SchemaPreview({ schema }: { schema: SchemaInfo }) {
         <div className="flex items-center gap-2">
           <Table2 size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Schema</span>
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
             {schema.column_count} cols / {schema.row_count.toLocaleString()} rows
           </span>
         </div>
         <button
           onClick={() => setShowPreview(!showPreview)}
-          className="text-[10px] font-medium" style={{ color: 'var(--accent)' }}
+          className="text-[11px] font-medium" style={{ color: 'var(--accent)' }}
         >
           {showPreview ? "Hide preview" : "Show preview"}
         </button>
@@ -197,7 +197,7 @@ function SchemaPreview({ schema }: { schema: SchemaInfo }) {
                 <tr key={col.name} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td className="px-2.5 py-1.5 font-mono" style={{ color: 'var(--text-primary)' }}>{col.name}</td>
                   <td className="px-2.5 py-1.5">
-                    <span className={`text-[10px] font-medium ${getDtypeColor(col.dtype)}`}>
+                    <span className={`text-[11px] font-medium ${getDtypeColor(col.dtype)}`}>
                       {col.dtype}
                     </span>
                   </td>
@@ -209,7 +209,7 @@ function SchemaPreview({ schema }: { schema: SchemaInfo }) {
 
         {showPreview && schema.preview.length > 0 && (
           <div className="mt-2 rounded-lg overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>
-            <table className="w-full text-[10px]">
+            <table className="w-full text-[11px]">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
                   {schema.columns.map((col) => (
@@ -270,7 +270,7 @@ function DataSourceConfig({
     <>
       <div className="px-4 py-3 space-y-3">
         <div>
-          <label className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Source Type</label>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Source Type</label>
           <div className="mt-1 flex gap-1.5">
             <button
               onClick={() => {
@@ -307,7 +307,7 @@ function DataSourceConfig({
 
         {sourceType === "flat_file" && (
           <div>
-            <label className="text-[9px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+            <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
               File
             </label>
             <FileBrowser
@@ -322,7 +322,7 @@ function DataSourceConfig({
 
         {sourceType === "databricks" && (
           <div>
-            <label className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Table</label>
+            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Table</label>
             <input
               type="text"
               placeholder="catalog.schema.table"
@@ -366,7 +366,7 @@ function TransformConfig({
       {hasInput && (
         <div className="rounded-lg px-3 py-1.5 shrink-0" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+            <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
               {isMultiInput ? "Inputs" : "Input"}
             </span>
             {inputSources.map((src) => (
@@ -376,10 +376,10 @@ function TransformConfig({
         </div>
       )}
       <div className="flex items-center justify-between shrink-0">
-        <label className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
           Polars Code
         </label>
-        <span className="text-[9px] font-medium" style={{ color: 'var(--text-muted)' }}>
+        <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
           {hasInput ? "use input names" : <>start with <code className="px-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>.</code> to chain</>}
         </span>
       </div>
@@ -436,7 +436,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
   }
 
   return (
-    <div key={node.id} className="w-[400px] h-full overflow-y-auto shrink-0 flex flex-col" style={{ background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
+    <div key={node.id} className="w-[min(400px,40vw)] h-full overflow-y-auto shrink-0 flex flex-col animate-slide-in" style={{ background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <input
           type="text"
@@ -451,7 +451,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
           onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
           onBlur={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.boxShadow = 'none' }}
         />
-        <span className="text-[9px] font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>{node.id}</span>
+        <span className="text-[11px] font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>{node.id}</span>
         <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
@@ -467,7 +467,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
       ) : (
         Object.keys(config).length > 0 && (
           <div className="px-4 py-3">
-            <label className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Config</label>
+            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Config</label>
             {Object.entries(config).map(([key, value]) => (
               <div key={key} className="mt-1.5 flex items-center gap-2">
                 <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{key}:</span>

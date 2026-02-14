@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "runw"
 version = "0.1.0"
-description = "Open-source pricing engine for insurance teams on Databricks"
+description = "Runway — Open-source pricing engine for insurance teams on Databricks"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

@@ -1,4 +1,4 @@
-"""CLI entrypoint for runw."""
+"""CLI entrypoint for Runway."""
 
 import os
 import signal
@@ -27,7 +27,7 @@ def _open_browser(url: str) -> None:
 @click.group()
 @click.version_option(package_name="runw")
 def cli() -> None:
-    """runw — Open-source pricing engine for insurance teams on Databricks."""
+    """Runway — Open-source pricing engine for insurance teams on Databricks."""
 
 
 def _find_frontend_dir() -> Path | None:
@@ -43,7 +43,7 @@ def _find_frontend_dir() -> Path | None:
 @cli.command()
 @click.argument("name")
 def init(name: str) -> None:
-    """Scaffold a new runw pricing project."""
+    """Scaffold a new Runway pricing project."""
     project_dir = Path.cwd() / name
 
     if project_dir.exists():
@@ -154,7 +154,7 @@ def run(pipeline_file: str | None) -> None:
 @click.option("--port", default=8000, type=int, help="Backend API port.")
 @click.option("--no-browser", is_flag=True, help="Don't open browser automatically.")
 def serve(host: str, port: int, no_browser: bool) -> None:
-    """Start the runw UI server."""
+    """Start the Runway UI server."""
     import uvicorn
 
     from runw.server import STATIC_DIR

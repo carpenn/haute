@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, type DragEvent } from "react"
+import { useEffect, useCallback, useState, useRef, useMemo, type DragEvent } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -23,6 +23,7 @@ import NodePanel from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
+import { PanelLeftOpen } from "lucide-react"
 
 const nodeTypes = {
   dataSource: PipelineNode,
@@ -110,6 +111,7 @@ function FlowEditor() {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string } | null>(null)
   const [syncBanner, setSyncBanner] = useState<string | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(true)
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const { screenToFlowPosition, fitView } = useReactFlow()
@@ -419,6 +421,16 @@ function FlowEditor() {
     addToast("info", "Auto-layout applied")
   }, [setNodes, fitView, addToast])
 
+  // Memoize nodes with status to avoid re-creating every node object on each render
+  const nodesWithStatus = useMemo(() => {
+    if (Object.keys(nodeStatuses).length === 0) return nodes
+    return nodes.map((n) => {
+      const status = nodeStatuses[n.id]
+      if (status === n.data._status) return n
+      return { ...n, data: { ...n.data, _status: status } }
+    })
+  }, [nodes, nodeStatuses])
+
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()
     setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label) })
@@ -482,30 +494,30 @@ function FlowEditor() {
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <header className="h-11 flex items-center px-4 shrink-0" style={{ background: 'var(--chrome)', borderBottom: '1px solid var(--chrome-border)' }}>
         <div className="flex items-center gap-2.5">
-          <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>runw</h1>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>v0.1.0</span>
+          <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Runway</h1>
+          <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>v0.1.0</span>
           {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-dot" title="Unsaved changes" />}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>
+          <span className="text-[12px] mr-2" style={{ color: 'var(--text-muted)' }}>
             {nodes.length} nodes · {edges.length} edges
           </span>
           <div className="flex items-center gap-1 mr-1" title="Row limit for preview (0 = no limit)">
-            <label className="text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
+            <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
             <input
               type="number"
               min={0}
               step={100}
               value={rowLimit}
               onChange={(e) => setRowLimit(Math.max(0, parseInt(e.target.value) || 0))}
-              className="w-16 px-1.5 py-0.5 text-[11px] font-mono rounded text-center focus:outline-none"
+              className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
               style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
             />
           </div>
           <button
             onClick={handleAutoLayout}
             disabled={nodes.length === 0}
-            className="px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors disabled:opacity-30"
+            className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
             style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
@@ -516,7 +528,7 @@ function FlowEditor() {
           <button
             onClick={handleRun}
             disabled={nodes.length === 0}
-            className="px-3 py-1 text-[11px] font-semibold text-white rounded-md transition-colors disabled:opacity-30"
+            className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors disabled:opacity-30"
             style={{ background: '#22c55e' }}
             onMouseEnter={(e) => e.currentTarget.style.background = '#4ade80'}
             onMouseLeave={(e) => e.currentTarget.style.background = '#22c55e'}
@@ -525,7 +537,7 @@ function FlowEditor() {
           </button>
           <button
             onClick={handleSave}
-            className="px-3 py-1 text-[11px] font-semibold text-white rounded-md transition-colors"
+            className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors"
             style={{ background: 'var(--accent)' }}
             onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
@@ -537,11 +549,24 @@ function FlowEditor() {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        <NodePalette />
+        {paletteOpen ? (
+          <NodePalette onCollapse={() => setPaletteOpen(false)} />
+        ) : (
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="shrink-0 flex items-center justify-center w-10 transition-colors"
+            style={{ background: 'var(--chrome)', borderRight: '1px solid var(--chrome-border)' }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--chrome-hover)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'var(--chrome)'}
+            title="Show node palette"
+          >
+            <PanelLeftOpen size={16} style={{ color: 'var(--text-muted)' }} />
+          </button>
+        )}
 
         <div className="flex-1 flex flex-col min-w-0">
           {syncBanner && (
-            <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-medium"
+            <div className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium"
               style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', borderBottom: '1px solid rgba(239, 68, 68, 0.3)' }}>
               <span className="flex-1 truncate">{syncBanner}</span>
               <button onClick={() => setSyncBanner(null)} className="opacity-60 hover:opacity-100">✕</button>
@@ -549,10 +574,7 @@ function FlowEditor() {
           )}
           <div className="flex-1 min-h-0">
             <ReactFlow
-              nodes={nodes.map((n) => ({
-                ...n,
-                data: { ...n.data, _status: nodeStatuses[n.id] },
-              }))}
+              nodes={nodesWithStatus}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}

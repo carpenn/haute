@@ -1,10 +1,11 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Database, Hexagon, Brain, TableProperties, CircleDot } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot } from "lucide-react"
+import PolarsIcon from "../components/PolarsIcon"
 
 const iconMap: Record<string, React.ElementType> = {
   dataSource: Database,
-  transform: Hexagon,
+  transform: PolarsIcon,
   modelScore: Brain,
   ratingStep: TableProperties,
   output: CircleDot,
@@ -12,7 +13,7 @@ const iconMap: Record<string, React.ElementType> = {
 
 const accentMap: Record<string, string> = {
   dataSource: "#3b82f6",
-  transform: "#f59e0b",
+  transform: "#06b6d4",
   modelScore: "#8b5cf6",
   ratingStep: "#10b981",
   output: "#f43f5e",
@@ -42,7 +43,7 @@ export type PipelineNodeData = {
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
   const nodeType = nodeData.nodeType || "transform"
-  const Icon = iconMap[nodeType] || Hexagon
+  const Icon = iconMap[nodeType] || PolarsIcon
   const accent = accentMap[nodeType] || accentMap.transform
   const typeLabel = labelMap[nodeType] || "NODE"
 
@@ -68,7 +69,7 @@ function PipelineNode({ data, selected }: NodeProps) {
         <div className="flex items-center gap-2 mb-1">
           <Icon size={12} style={{ color: accent }} className="shrink-0 opacity-80" />
           <span
-            className="text-[9px] font-bold uppercase tracking-[0.1em] shrink-0"
+            className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0"
             style={{ color: accent, opacity: 0.8 }}
           >
             {typeLabel}

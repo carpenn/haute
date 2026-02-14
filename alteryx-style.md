@@ -1,4 +1,4 @@
-# Alteryx-Style Feature Plan for runw
+# Alteryx-Style Feature Plan for Runway
 
 ## What Alteryx Gets Right (and how we adapt it)
 
@@ -6,7 +6,7 @@
 
 **Alteryx**: Click any node → see the output DataFrame in a table below the canvas. Every node caches its result so you can browse the data at each step. This is the #1 feature that makes Alteryx sticky.
 
-**runw adaptation**:
+**Runway adaptation**:
 - Bottom panel shows a paginated data table when you click a node
 - Backend runs the pipeline up to the selected node and returns the preview
 - `POST /api/pipeline/preview` — accepts the graph + target node ID, executes up to that node, returns first N rows
@@ -17,7 +17,7 @@
 
 **Alteryx**: Tools grouped into categories — Input/Output, Preparation, Join, Parse, Transform, Predictive, etc. Each category has a distinct color and icon.
 
-**runw adaptation**:
+**Runway adaptation**:
 - **Data** — Data Source (flat file, Databricks table, API)
 - **Transform** — Filter, Select, Rename, With Columns, Group By, Sort
 - **Join** — Join, Union/Concat, Anti-Join
@@ -30,7 +30,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Alteryx**: Click a node → right panel shows configuration fields specific to that tool type. Drop-downs, file pickers, expression editors, column selectors.
 
-**runw adaptation** (partially built):
+**Runway adaptation** (partially built):
 - DataSource: source type toggle, file browser, schema preview ✅
 - Transform: Polars code editor ✅
 - **Add**: Column picker (multi-select from upstream schema) for Select/Filter nodes
@@ -41,7 +41,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Alteryx**: Hit the play button → entire pipeline executes → every node shows a green check or red X → click any node to see its output.
 
-**runw adaptation**:
+**Runway adaptation**:
 - "Run" button in the header (alongside Save)
 - `POST /api/pipeline/run` — executes the full pipeline, returns status per node
 - Each node on the canvas shows a status indicator: ⏳ running, ✅ done, ❌ error
@@ -52,7 +52,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Alteryx**: Wires between tools define data flow. Output anchor → input anchor. Some tools have multiple input anchors (Join has Left + Right).
 
-**runw adaptation** (built):
+**Runway adaptation** (built):
 - Edges define data flow ✅
 - `pipeline.connect("source", "target")` ✅
 - Fan-out: one output feeds multiple downstream ✅
@@ -63,7 +63,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Alteryx**: Full undo/redo stack for canvas operations.
 
-**runw adaptation**:
+**Runway adaptation**:
 - React Flow supports this natively — wire up Ctrl+Z / Ctrl+Y
 - Store a history stack of (nodes, edges) snapshots
 - Undo button in the toolbar
@@ -72,7 +72,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Alteryx**: You can add text boxes and comments directly on the canvas. Each tool also shows a small annotation below it.
 
-**runw adaptation**:
+**Runway adaptation**:
 - Show the node name + description below each node on the canvas
 - Add a "Comment" node type that's just a text box (non-executable)
 - Tool tips on hover showing the node's config summary
@@ -85,7 +85,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx costs $5,000+/year per seat. Windows desktop app. No version control, no CI/CD, no collaboration.
 
-**runw fix**:
+**Runway fix**:
 - Open-source, free, runs anywhere Python runs
 - Code is the source of truth → works with Git
 - GUI is a web app → works on any OS
@@ -95,7 +95,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx workflows are opaque XML blobs. You can't read them, diff them, or run them without the GUI. If Alteryx changes its format, your workflows are trapped.
 
-**runw fix**:
+**Runway fix**:
 - Every pipeline is a valid `.py` file that runs standalone: `python my_pipeline.py`
 - GUI edits save to readable Python code + JSON layout sidecar
 - You can write pipelines in code and see them in the GUI, or build in the GUI and get code out
@@ -105,7 +105,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx uses its own data engine which chokes on large datasets (10M+ rows). Memory management is poor. No distributed computing.
 
-**runw fix**:
+**Runway fix**:
 - Built on Polars — lazy evaluation, streaming, multi-threaded, written in Rust
 - Same pipeline works on 1 row (live scoring) or 100M rows (batch)
 - Can push heavy work to Databricks/Spark when needed
@@ -115,7 +115,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx has its own formula language that nobody knows outside of Alteryx. It's not SQL, not Python, not R. Learning it is wasted effort.
 
-**runw fix**:
+**Runway fix**:
 - You write real Polars/Python — transferable skills
 - `pl.col("age") > 30` instead of `[Age] > 30`
 - Full power of the Python ecosystem available in every node
@@ -125,7 +125,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx workflows are binary-ish files. Git diffs are useless. Two people can't work on the same workflow. No branching/merging.
 
-**runw fix**:
+**Runway fix**:
 - Pipeline is a `.py` file → Git-native
 - PR reviews show exactly what changed in the pipeline logic
 - Multiple people can work on different nodes/pipelines
@@ -135,7 +135,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: No way to unit test individual Alteryx tools. No assertions. No regression testing. You just eyeball the output.
 
-**runw fix**:
+**Runway fix**:
 - Each node is a Python function → testable with pytest
 - `pipeline.score(test_df)` runs the pipeline on test data
 - Add assertions: row counts, column presence, value ranges
@@ -145,7 +145,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx requires running the entire workflow to see results. No partial execution. No hot-reload.
 
-**runw fix**:
+**Runway fix**:
 - Preview runs pipeline up to the selected node only (not the full DAG)
 - File watcher + WebSocket for live sync between IDE and GUI
 - Hot module reload in dev mode (already working via Vite)
@@ -154,7 +154,7 @@ For now, keep it simple with the 5 types we have. Expand into sub-types later. E
 
 **Problem**: Alteryx workflows can't be deployed as APIs. You have to buy Alteryx Server ($$$) for scheduling.
 
-**runw fix**:
+**Runway fix**:
 - `pipeline.score(df)` works on any DataFrame — embed in a FastAPI endpoint
 - Same pipeline code for batch and real-time
 - Deploy as a standard Python web service

@@ -40,7 +40,7 @@ Runway leans heavily into the **Databricks/MLflow ecosystem** rather than reinve
 A **Pipeline** is a directed acyclic graph (DAG) of **Nodes**. It represents the full journey from raw data to a deployable price.
 
 ```python
-from runway import Pipeline, DataSource, Transform, Model, RatingStep, Output
+from runw import Pipeline, DataSource, Transform, Model, RatingStep, Output
 
 pipeline = Pipeline(name="motor_pricing_v2")
 ```
@@ -64,7 +64,7 @@ Nodes are the building blocks. Each node is a Python class with defined inputs, 
 
 ```python
 # shared/transforms.py
-from runway import Transform
+from runw import Transform
 
 clean_vehicle = Transform(
     "clean_vehicle",
@@ -93,7 +93,7 @@ pipeline.add(data_source >> clean_vehicle >> model_score >> output)
 
 **GUI → Code:** When a user adds/edits/connects nodes in the GUI, Runway writes valid Python code back to the `.py` files on disk. The generated code is clean, idiomatic, and diffable in git.
 
-### 3.5 Project Structure (what `runway init` creates)
+### 3.5 Project Structure (what `runw init` creates)
 
 ```
 my-pricing-project/
@@ -110,8 +110,8 @@ my-pricing-project/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml          # Pre-configured GitHub Actions
-├── pyproject.toml          # Project config (runway as dependency)
-├── .pre-commit-config.yaml # ruff, mypy, runway lint
+├── pyproject.toml          # Project config (runw as dependency)
+├── .pre-commit-config.yaml # ruff, mypy, runw lint
 ├── .python-version         # 3.13
 ├── uv.lock
 └── README.md
@@ -126,9 +126,9 @@ my-pricing-project/
 Single Python wheel with bundled React static assets (same model as atelier).
 
 ```
-pip install runway-pricing
+pip install runw
 # or
-uv add runway-pricing
+uv add runw
 ```
 
 ### 4.2 System Architecture
@@ -190,7 +190,7 @@ uv add runway-pricing
 | **WebSockets** | websockets | File watcher → UI sync |
 | **Validation** | Pydantic v2 | |
 | **DataFrames** | Polars | Fast, no pandas dependency |
-| **CLI** | Click | `runway init`, `runway serve`, `runway deploy`, `runway lint` |
+| **CLI** | Click | `runw init`, `runw serve`, `runw deploy`, `runw lint` |
 | **MLflow client** | mlflow | Model registry, tracking, serving |
 | **Databricks client** | databricks-sdk | Unity Catalog, Model Serving, jobs |
 | **AST / code gen** | libcst | Concrete syntax tree — parse & modify Python preserving formatting |
@@ -264,7 +264,7 @@ POST /serving-endpoints/motor-pricing/invocations
 ### 5.3 Real-time API (via Databricks Model Serving)
 
 ```bash
-runway deploy motor_pricing_v2 --target databricks --endpoint motor-pricing
+runw deploy motor_pricing_v2 --target databricks --endpoint motor-pricing
 ```
 
 This:
@@ -299,19 +299,19 @@ databricks:
 
 ## 6. Engineering Practices (Baked In)
 
-### 6.1 What `runway init` gives you for free
+### 6.1 What `runw init` gives you for free
 
 | Practice | Implementation |
 |---|---|
 | **Version control** | Git-native — everything is `.py` files, diffable and reviewable |
 | **CI/CD** | Pre-configured GitHub Actions: lint → test → deploy on merge to main |
-| **Linting** | `ruff` for Python, `runway lint` for pipeline-specific validation |
+| **Linting** | `ruff` for Python, `runw lint` for pipeline-specific validation |
 | **Type checking** | `mypy` (strict mode) |
-| **Testing** | `pytest` stubs auto-generated for each pipeline; `runway test` runs them |
-| **Pre-commit hooks** | ruff, mypy, runway lint — runs on every commit |
+| **Testing** | `pytest` stubs auto-generated for each pipeline; `runw test` runs them |
+| **Pre-commit hooks** | ruff, mypy, runw lint — runs on every commit |
 | **Dependency management** | `uv` with lockfile |
 
-### 6.2 `runway lint` — Pipeline-specific checks
+### 6.2 `runw lint` — Pipeline-specific checks
 
 - All nodes have unique names
 - No disconnected nodes in the pipeline graph
@@ -320,11 +320,11 @@ databricks:
 - Rating table files exist and have expected columns
 - No circular dependencies
 
-### 6.3 `runway test` — Auto-generated tests
+### 6.3 `runw test` — Auto-generated tests
 
 ```python
 # tests/test_motor.py (auto-generated, user can extend)
-from runway.testing import PipelineTestCase
+from runw.testing import PipelineTestCase
 
 class TestMotorPipeline(PipelineTestCase):
     pipeline = "pipelines/motor.py"
@@ -345,13 +345,13 @@ class TestMotorPipeline(PipelineTestCase):
 
 | Command | Description |
 |---|---|
-| `runway init [name]` | Scaffold a new pricing project |
-| `runway serve` | Start the browser UI (FastAPI + React Flow) |
-| `runway score <pipeline> <data>` | Score data locally |
-| `runway deploy <pipeline>` | Deploy to Databricks Model Serving |
-| `runway lint` | Validate pipelines |
-| `runway test` | Run pipeline tests |
-| `runway status` | Show deployed endpoints and their status |
+| `runw init [name]` | Scaffold a new pricing project |
+| `runw serve` | Start the browser UI (FastAPI + React Flow) |
+| `runw score <pipeline> <data>` | Score data locally |
+| `runw deploy <pipeline>` | Deploy to Databricks Model Serving |
+| `runw lint` | Validate pipelines |
+| `runw test` | Run pipeline tests |
+| `runw status` | Show deployed endpoints and their status |
 
 ---
 
@@ -420,6 +420,26 @@ base rate £300 → area factor ×1.2 → NCD ×0.85 → frequency load ×1.35 �
 traced visually through the graph with each node lit up.
 
 This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explainability). No open-source pricing tool does this. Achievable because we already have per-node lazy execution and preview results.
+
+#### Implementation status
+
+**Phase A (done)** — Foundation in `src/runw/trace.py`:
+- `execute_trace()` runs the pipeline on a single row and captures per-node input/output snapshots
+- `SchemaDiff` classifies columns at each node as `added`, `removed`, `modified`, or `passed_through`
+- `TraceStep` / `TraceResult` dataclasses carry the full trace payload
+- Column filtering: pass a `column` name to prune the trace to only nodes that touch it
+- `POST /api/pipeline/trace` endpoint wired up in `server.py`
+- Reuses the existing `executor._build_node_fn` infrastructure — no duplication
+
+**TODO — future phases** (see `docs/EXECUTION_TRACE_DESIGN.md` for full design):
+- [ ] Row-identity tracking (`__trace_row_id`) for filters, joins, sorts
+- [ ] `JoinInfo` / `AggregationInfo` for cardinality-changing nodes
+- [ ] Column provenance via Polars expression plan inspection
+- [ ] Human-readable expression generation ("base × area × ncd = £412")
+- [ ] Compare-trace: two rows side-by-side with per-node diff
+- [ ] Frontend trace panel (highlight path on graph, value badges on nodes)
+- [ ] `runw trace export` CLI for regulatory PDF/HTML reports
+- [ ] Trace caching (LRU for recent row traces, cached schema diffs)
 
 ### 9.4 One-Command Deploy to Databricks (the adoption feature)
 
@@ -498,7 +518,8 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 
 ### Phase 4 — Killer Demo Features
 - [ ] What-if sensitivity mode (slider-driven single-row scoring)
-- [ ] Execution trace / data lineage (click cell → trace through graph)
+- [x] Execution trace / data lineage — Phase A: single-row trace engine + schema diffs (`src/runw/trace.py`, `POST /api/pipeline/trace`)
+- [ ] Execution trace / data lineage — Phase B+: row identity tracking, join/agg info, column provenance, expression gen, frontend panel, compare mode
 - [ ] Rating table hot-reload with impact preview
 - [ ] Natural language → Polars code (LLM-powered node assistant)
 

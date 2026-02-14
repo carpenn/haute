@@ -9,14 +9,14 @@ _SOURCE_FLAT_FILE = '''\
 @pipeline.node(path="{path}")
 def {func_name}() -> pl.DataFrame:
     """{description}"""
-    return pl.read_parquet("{path}")
+    return pl.scan_parquet("{path}")
 '''
 
 _SOURCE_CSV = '''\
 @pipeline.node(path="{path}")
 def {func_name}() -> pl.DataFrame:
     """{description}"""
-    return pl.read_csv("{path}")
+    return pl.scan_csv("{path}")
 '''
 
 _SOURCE_DATABRICKS = '''\

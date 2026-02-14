@@ -152,7 +152,7 @@ export default function DataPreview({ data, onClose }: DataPreviewProps) {
           <table className="w-full text-xs">
             <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-elevated)' }}>
               <tr>
-                <th className="px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider w-10"
+                <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider w-10"
                   style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
                   #
                 </th>
@@ -163,7 +163,7 @@ export default function DataPreview({ data, onClose }: DataPreviewProps) {
                     style={{ borderBottom: '1px solid var(--border)' }}
                   >
                     <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{col.name}</div>
-                    <div className={`text-[10px] font-normal ${getDtypeColor(col.dtype)}`}>
+                    <div className={`text-[11px] font-normal ${getDtypeColor(col.dtype)}`}>
                       {col.dtype}
                     </div>
                   </th>
@@ -196,7 +196,7 @@ export default function DataPreview({ data, onClose }: DataPreviewProps) {
           </table>
 
           {data.row_count > data.preview.length && (
-            <div className="px-3 py-1.5 text-[10px] text-center" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+            <div className="px-3 py-1.5 text-[11px] text-center" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
               Showing {data.preview.length} of {data.row_count.toLocaleString()} rows
             </div>
           )}

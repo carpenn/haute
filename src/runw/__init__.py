@@ -1,4 +1,4 @@
-"""runw — Open-source pricing engine for insurance teams on Databricks."""
+"""Runway — Open-source pricing engine for insurance teams on Databricks."""
 
 __version__ = "0.1.0"
 
