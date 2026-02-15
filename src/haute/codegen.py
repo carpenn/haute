@@ -280,7 +280,7 @@ def _topo_sort(nodes: list[dict], edges: list[dict]) -> list[dict]:
 
 def graph_to_code(
     graph: dict,
-    pipeline_name: str = "my_pipeline",
+    pipeline_name: str = "main",
     description: str = "",
     preamble: str = "",
 ) -> str:

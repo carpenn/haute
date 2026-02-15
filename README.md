@@ -36,19 +36,18 @@ pip install haute[databricks]
 ### 2. Create a project
 
 ```bash
-haute init my_project
-cd my_project
+mkdir my_project && cd my_project
+haute init
 ```
 
-This scaffolds everything you need:
+This scaffolds everything you need in the current directory:
 
 ```
-my_project/
-  haute.toml              ← project & deploy config
-  .env.example           ← Databricks credentials template
-  pipelines/main.py      ← starter pipeline
-  data/                  ← your data files
-  test_quotes/           ← JSON payloads for pre-deploy testing
+haute.toml              ← project & deploy config
+.env.example           ← Databricks credentials template
+pipelines/main.py      ← starter pipeline
+data/                  ← your data files
+test_quotes/           ← JSON payloads for pre-deploy testing
 ```
 
 ### 3. Write a pipeline
@@ -375,7 +374,7 @@ def apply_discount(df, col):
 
 | Command | Description |
 |---|---|
-| `haute init <name>` | Scaffold a new project with config, starter pipeline, and test quotes |
+| `haute init` | Scaffold a new project in the current directory |
 | `haute run [file]` | Execute a pipeline and print results |
 | `haute serve` | Start the visual editor |
 | `haute deploy [file]` | Deploy the pipeline as a live API |
@@ -404,17 +403,16 @@ def apply_discount(df, col):
 After `haute init`, your project looks like:
 
 ```
-my_project/
-  haute.toml                ← project & deploy config (committed)
-  .env.example             ← Databricks credentials template (committed)
-  .env                     ← actual credentials (gitignored)
-  .gitignore
-  pipelines/
-    main.py                ← pipeline code (source of truth)
-    main.haute.json         ← GUI layout state (node positions)
-  data/                    ← data files (.parquet, .csv)
-  test_quotes/             ← JSON payloads for pre-deploy validation
-    example.json
+haute.toml                ← project & deploy config (committed)
+.env.example             ← Databricks credentials template (committed)
+.env                     ← actual credentials (gitignored)
+.gitignore
+pipelines/
+  main.py                ← pipeline code (source of truth)
+  main.haute.json         ← GUI layout state (node positions)
+data/                    ← data files (.parquet, .csv)
+test_quotes/             ← JSON payloads for pre-deploy validation
+  example.json
 ```
 
 - **`.py`** files are the source of truth — diffable, reviewable, testable

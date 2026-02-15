@@ -13,9 +13,11 @@ def _open_browser(url: str) -> None:
     """Open *url* in the default browser, suppressing noisy stderr from gio."""
     try:
         if sys.platform == "linux":
-            subprocess.Popen(
+            rc = subprocess.call(
                 ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
+            if rc != 0:
+                webbrowser.open(url)
         elif sys.platform == "darwin":
             subprocess.Popen(
                 ["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -43,54 +45,28 @@ def _find_frontend_dir() -> Path | None:
 
 
 @cli.command()
-@click.argument("name")
-def init(name: str) -> None:
-    """Scaffold a new Haute pricing project."""
-    project_dir = Path.cwd() / name
+def init() -> None:
+    """Scaffold a Haute pricing project in the current directory."""
+    project_dir = Path.cwd()
+    name = "rating"
 
-    if project_dir.exists():
-        click.echo(f"Error: Directory '{name}' already exists.", err=True)
+    if (project_dir / "haute.toml").exists():
+        click.echo("Error: haute.toml already exists — project already initialised.", err=True)
         raise SystemExit(1)
 
-    project_dir.mkdir()
-    (project_dir / "pipelines").mkdir()
-    (project_dir / "data").mkdir()
-    (project_dir / "test_quotes").mkdir()
+    (project_dir / "data").mkdir(exist_ok=True)
+    (project_dir / "test_quotes").mkdir(exist_ok=True)
 
-    # Starter pipeline
-    starter = '''\
-"""My first pricing pipeline."""
+    # main.py — starter pipeline (overwrites uv init default)
+    starter_pipeline = '''\
+"""Pipeline: {name}"""
 
 import polars as pl
 import haute
 
-pipeline = haute.Pipeline("{name}", description="A new pricing pipeline")
-
-
-@pipeline.node(path="data/input.parquet", deploy_input=True)
-def read_data() -> pl.DataFrame:
-    """Read input data."""
-    return pl.scan_parquet("data/input.parquet")
-
-
-@pipeline.node
-def transform(read_data: pl.DataFrame) -> pl.DataFrame:
-    """Transform the data."""
-    return read_data
-
-
-@pipeline.node(output=True)
-def output(transform: pl.DataFrame) -> pl.DataFrame:
-    """Final output."""
-    return transform
-
-
-pipeline.connect("read_data", "transform")
-pipeline.connect("transform", "output")
+pipeline = haute.Pipeline("{name}", description="")
 '''
-    (project_dir / "pipelines" / "main.py").write_text(
-        starter.format(name=name)
-    )
+    (project_dir / "main.py").write_text(starter_pipeline.format(name=name))
 
     # haute.toml — project config
     haute_toml = '''\
@@ -99,7 +75,7 @@ pipeline.connect("transform", "output")
 
 [project]
 name = "{name}"
-pipeline = "pipelines/main.py"
+pipeline = "main.py"
 
 # ─────────────────────────────────────────────────────────────────
 # Deployment — Databricks MLflow Model Serving
@@ -125,9 +101,7 @@ serving_scale_to_zero = true
 [test_quotes]
 dir = "test_quotes"
 '''
-    (project_dir / "haute.toml").write_text(
-        haute_toml.format(name=name)
-    )
+    (project_dir / "haute.toml").write_text(haute_toml.format(name=name))
 
     # .env.example — template for secrets
     env_example = '''\
@@ -163,14 +137,13 @@ DATABRICKS_TOKEN=your_databricks_token_here
         "__pycache__/\n*.pyc\n.venv/\n.env\n"
     )
 
-    click.echo(f"Created project '{name}/'")
+    click.echo("Initialised Haute project in current directory.")
     click.echo("  haute.toml            — project & deploy config")
     click.echo("  .env.example         — Databricks credentials template")
-    click.echo("  pipelines/main.py    — starter pipeline")
+    click.echo("  main.py              — put your pipeline code here")
     click.echo("  data/                — put your data files here")
     click.echo("  test_quotes/         — example JSON payloads for testing")
     click.echo("\nNext steps:")
-    click.echo(f"  cd {name}")
     click.echo("  cp .env.example .env   # fill in Databricks credentials")
     click.echo("  haute serve")
 
@@ -300,6 +273,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
                 port=port,
                 reload=True,
                 reload_excludes=["pipelines/*", "examples/*", "*.haute.json"],
+                log_level="warning",
             )
         finally:
             vite_proc.terminate()

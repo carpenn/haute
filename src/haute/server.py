@@ -203,6 +203,7 @@ async def get_first_pipeline() -> dict:
             try:
                 graph = _parse_pipeline_to_graph(f)
                 if graph.get("nodes"):
+                    graph["source_file"] = str(f.relative_to(cwd))
                     return graph
             except Exception as e:
                 logger.warning("Failed to parse %s: %s", f.name, e)
@@ -217,6 +218,7 @@ async def get_first_pipeline() -> dict:
             try:
                 graph = _parse_pipeline_to_graph(f)
                 if graph.get("nodes"):
+                    graph["source_file"] = str(f.relative_to(cwd))
                     return graph
             except Exception as e:
                 logger.warning("Failed to parse %s: %s", f.name, e)
@@ -233,13 +235,17 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     graph = body.graph.model_dump()
 
     cwd = Path.cwd()
-    pipelines_dir = cwd / "pipelines"
-    pipelines_dir.mkdir(exist_ok=True)
-
-    safe_name = body.name.lower().replace(" ", "_").replace("-", "_")
 
     # Write .py (source of truth — runnable code)
-    py_path = pipelines_dir / f"{safe_name}.py"
+    if body.source_file:
+        py_path = (cwd / body.source_file).resolve()
+        if not py_path.is_relative_to(cwd):
+            raise HTTPException(status_code=400, detail="source_file must be within the project directory")
+    else:
+        pipelines_dir = cwd / "pipelines"
+        pipelines_dir.mkdir(exist_ok=True)
+        safe_name = body.name.lower().replace(" ", "_").replace("-", "_")
+        py_path = pipelines_dir / f"{safe_name}.py"
     code = graph_to_code(
         graph, pipeline_name=body.name,
         description=body.description, preamble=body.preamble,

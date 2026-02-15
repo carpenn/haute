@@ -56,7 +56,7 @@ class Pipeline:
     of the source node is passed as the input to the target node.
 
     Usage:
-        pipeline = Pipeline("my_pipeline")
+        pipeline = Pipeline("main")
 
         @pipeline.node(path="data.parquet")
         def read_data() -> pl.DataFrame: ...

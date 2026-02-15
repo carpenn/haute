@@ -3,8 +3,8 @@
 # Docs: https://github.com/PricingFrontier/haute
 
 [project]
-name = "my_pipeline"
-pipeline = "pipelines/my_pipeline.py"
+name = "main"
+pipeline = "pipelines/main.py"
 
 # ─────────────────────────────────────────────────────────────────
 # Deployment — Databricks MLflow Model Serving

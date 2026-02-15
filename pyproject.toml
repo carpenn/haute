@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "haute"
-version = "0.1.0"
+version = "0.1.7"
 description = "Haute — Open-source pricing engine for insurance teams on Databricks"
 readme = "README.md"
 license = "MIT"
@@ -40,6 +40,26 @@ dev = [
 
 [project.scripts]
 haute = "haute.cli:cli"
+
+[tool.hatch.build]
+artifacts = ["src/haute/static/**"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "frontend/",
+    "docs/",
+    "examples/",
+    "tests/",
+    "pipelines/",
+    "my_project/",
+    "output/",
+    "test_quotes/",
+    ".env.example",
+    ".python-version",
+    "haute.toml",
+    "uv.lock",
+    "ARCHITECTURE.md",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/haute"]

@@ -166,7 +166,7 @@ function FileBrowser({ currentPath, onSelect, extensions }: { currentPath?: stri
 function SchemaPreview({ schema }: { schema: SchemaInfo }) {
   const [showPreview, setShowPreview] = useState(false)
 
-  if (!schema) return null
+  if (!schema || !schema.columns) return null
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
@@ -175,7 +175,7 @@ function SchemaPreview({ schema }: { schema: SchemaInfo }) {
           <Table2 size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Schema</span>
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {schema.column_count} cols / {schema.row_count.toLocaleString()} rows
+            {schema.column_count ?? 0} cols / {(schema.row_count ?? 0).toLocaleString()} rows
           </span>
         </div>
         <button
@@ -255,12 +255,18 @@ function DataSourceConfig({
   const fetchSchema = (path: string) => {
     setLoadingSchema(true)
     fetch(`/api/schema?path=${encodeURIComponent(path)}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data) => {
         setSchema(data)
         setLoadingSchema(false)
       })
-      .catch(() => setLoadingSchema(false))
+      .catch(() => {
+        setSchema(null)
+        setLoadingSchema(false)
+      })
   }
 
   useEffect(() => {
@@ -1044,7 +1050,46 @@ function OutputConfig({
   )
 }
 
+const MIN_PANEL_W = 320
+const MAX_PANEL_W = 900
+const DEFAULT_PANEL_W = 400
+
 export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge }: NodePanelProps) {
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_W)
+  const isDragging = useRef(false)
+  const startX = useRef(0)
+  const startW = useRef(DEFAULT_PANEL_W)
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return
+      const delta = startX.current - e.clientX
+      const newW = Math.min(MAX_PANEL_W, Math.max(MIN_PANEL_W, startW.current + delta))
+      setPanelWidth(newW)
+    }
+    const onMouseUp = () => {
+      if (isDragging.current) {
+        isDragging.current = false
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    isDragging.current = true
+    startX.current = e.clientX
+    startW.current = panelWidth
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [panelWidth])
+
   if (!node) return null
 
   const config = (node.data.config || {}) as Record<string, unknown>
@@ -1072,7 +1117,16 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
   }
 
   return (
-    <div key={node.id} className="w-[min(400px,40vw)] h-full overflow-y-auto shrink-0 flex flex-col animate-slide-in" style={{ background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)' }}>
+    <div key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)' }}>
+      {/* Drag handle */}
+      <div
+        onMouseDown={onDragStart}
+        className="shrink-0 h-full w-1 cursor-col-resize transition-colors"
+        style={{ background: 'transparent' }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+        onMouseLeave={(e) => { if (!isDragging.current) e.currentTarget.style.background = 'transparent' }}
+      />
+      <div className="flex-1 min-w-0 h-full overflow-y-auto flex flex-col">
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <input
           type="text"
@@ -1119,6 +1173,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
           </div>
         )
       )}
+      </div>
     </div>
   )
 }

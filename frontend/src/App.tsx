@@ -118,6 +118,8 @@ function FlowEditor() {
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const preambleRef = useRef("")
+  const pipelineNameRef = useRef("main")
+  const sourceFileRef = useRef("")
   const nodeIdCounter = useRef(0)
   const toastCounter = useRef(0)
   const { screenToFlowPosition, fitView } = useReactFlow()
@@ -221,6 +223,12 @@ function FlowEditor() {
         if (data.preamble !== undefined) {
           setPreamble(data.preamble || "")
           preambleRef.current = data.preamble || ""
+        }
+        if (data.pipeline_name) {
+          pipelineNameRef.current = data.pipeline_name
+        }
+        if (data.source_file) {
+          sourceFileRef.current = data.source_file
         }
         nodeIdCounter.current = (data.nodes || []).length
         lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [], preamble: data.preamble || "" })
@@ -347,10 +355,11 @@ function FlowEditor() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: "my_pipeline",
+        name: pipelineNameRef.current,
         description: "",
         graph: { nodes: n, edges: e },
         preamble: preambleRef.current,
+        source_file: sourceFileRef.current,
       }),
     })
       .then((r) => r.json())

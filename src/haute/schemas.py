@@ -47,10 +47,11 @@ class ColumnInfo(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SavePipelineRequest(BaseModel):
-    name: str = "my_pipeline"
+    name: str = "main"
     description: str = ""
     graph: Graph = Field(default_factory=Graph)
     preamble: str = ""
+    source_file: str = ""
 
 
 class SavePipelineResponse(BaseModel):

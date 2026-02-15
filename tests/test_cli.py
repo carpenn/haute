@@ -72,26 +72,31 @@ class TestVersion:
 class TestInit:
     def test_creates_project_structure(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(cli, ["init", "my_project"], catch_exceptions=False)
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
         assert result.exit_code == 0, result.output
-        proj = tmp_path / "my_project"
-        assert proj.is_dir()
-        assert (proj / "pipelines").is_dir()
-        assert (proj / "data").is_dir()
-        assert (proj / "pipelines" / "main.py").exists()
-        assert (proj / ".gitignore").exists()
+        assert (tmp_path / "data").is_dir()
+        assert (tmp_path / "test_quotes").is_dir()
+        assert (tmp_path / "haute.toml").exists()
+        assert (tmp_path / ".env.example").exists()
+        assert (tmp_path / ".gitignore").exists()
+        assert (tmp_path / "main.py").exists()
+
+        # haute.toml should reference main.py and the project name
+        toml_content = (tmp_path / "haute.toml").read_text()
+        assert "rating" in toml_content
+        assert 'pipeline = "main.py"' in toml_content
 
         # Starter pipeline should be valid Python
-        content = (proj / "pipelines" / "main.py").read_text()
-        compile(content, "<test>", "exec")
-        assert "my_project" in content
+        py_content = (tmp_path / "main.py").read_text()
+        compile(py_content, "<test>", "exec")
+        assert "rating" in py_content
 
-    def test_existing_dir_fails(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_already_initialised_fails(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "existing").mkdir()
-        result = runner.invoke(cli, ["init", "existing"])
+        (tmp_path / "haute.toml").write_text("[project]\nname = \"x\"\n")
+        result = runner.invoke(cli, ["init"])
         assert result.exit_code == 1
-        assert "already exists" in result.output
+        assert "already" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +182,9 @@ class TestServe:
     def test_serve_no_frontend_no_static_fails(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Without frontend/ or built static, serve should fail with a clear message."""
         monkeypatch.chdir(tmp_path)
+        # Mock STATIC_DIR to a non-existent path so we hit the error branch
+        # (the real STATIC_DIR may exist from a previous npm run build)
+        monkeypatch.setattr("haute.server.STATIC_DIR", tmp_path / "nonexistent_static")
         result = runner.invoke(cli, ["serve", "--no-browser"])
         assert result.exit_code == 1
         assert "frontend" in result.output.lower() or "npm" in result.output.lower()

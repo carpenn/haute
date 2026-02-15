@@ -292,7 +292,7 @@ def _extract_connect_calls(tree: ast.Module) -> list[tuple[str, str]]:
 
 def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
     """Find pipeline = haute.Pipeline("name", description="...") at module level."""
-    name = "my_pipeline"
+    name = "main"
     description = ""
 
     for node in ast.iter_child_nodes(tree):
@@ -533,7 +533,7 @@ def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) ->
     """
     # Pipeline metadata via regex
     meta_match = _RE_PIPELINE_META.search(source)
-    pipeline_name = meta_match.group(1) if meta_match else "my_pipeline"
+    pipeline_name = meta_match.group(1) if meta_match else "main"
     pipeline_desc = (meta_match.group(2) or "") if meta_match else ""
 
     # Find function blocks
