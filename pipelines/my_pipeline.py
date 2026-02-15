@@ -46,12 +46,12 @@ def policies() -> pl.DataFrame:
     return pl.scan_parquet("pipelines/data/policies.parquet")
 
 
-@pipeline.node(external="pipelines/models/model.cbm", file_type="catboost", model_class="regressor")
-def catboost_load(policies: pl.DataFrame) -> pl.DataFrame:
+@pipeline.node(external="pipelines/models/freq.cbm", file_type="catboost", model_class="regressor")
+def frequency_model(policies: pl.DataFrame) -> pl.DataFrame:
     """catboost_load node"""
     from catboost import CatBoostRegressor
     obj = CatBoostRegressor()
-    obj.load_model("pipelines/models/model.cbm")
+    obj.load_model("pipelines/models/freq.cbm")
     X = (
         policies
         .select(obj.feature_names_)
@@ -63,6 +63,27 @@ def catboost_load(policies: pl.DataFrame) -> pl.DataFrame:
         policies
         .select('IDpol')
         .with_columns(freq_preds = pl.Series(preds))
+    )
+    return df
+
+
+@pipeline.node(external="pipelines/models/sev.cbm", file_type="catboost", model_class="regressor")
+def severity_model(policies: pl.DataFrame) -> pl.DataFrame:
+    """catboost_load node"""
+    from catboost import CatBoostRegressor
+    obj = CatBoostRegressor()
+    obj.load_model("pipelines/models/sev.cbm")
+    X = (
+        policies
+        .select(obj.feature_names_)
+    ).collect().to_numpy()
+    
+    preds = obj.predict(X)
+    
+    df = (
+        policies
+        .select('IDpol')
+        .with_columns(sev_preds = pl.Series(preds))
     )
     return df
 
@@ -115,6 +136,23 @@ def severity_write(severity_set: pl.DataFrame) -> pl.DataFrame:
     return severity_set
 
 
+@pipeline.node
+def calculate_premium(severity_model: pl.DataFrame, frequency_model: pl.DataFrame) -> pl.DataFrame:
+    """calculate_premium node"""
+    df = (
+    frequency_model
+    .join(
+        severity_model, 
+        on = 'IDpol', 
+        how = 'left'
+    )
+    .with_columns(technical_price = pl.col('freq_preds') * pl.col('sev_preds'))
+    .with_columns(premium = pl.col('technical_price') / 0.7)
+    .select('IDpol', 'premium')
+    )
+    return df
+
+
 
 # Wire nodes together — edges define data flow
 pipeline.connect("policies", "frequency_set")
@@ -126,4 +164,7 @@ pipeline.connect("claims", "claims_aggregate")
 pipeline.connect("claims_aggregate", "frequency_set")
 pipeline.connect("frequency_set", "frequency_write")
 pipeline.connect("severity_set", "severity_write")
-pipeline.connect("policies", "catboost_load")
+pipeline.connect("policies", "frequency_model")
+pipeline.connect("policies", "severity_model")
+pipeline.connect("severity_model", "calculate_premium")
+pipeline.connect("frequency_model", "calculate_premium")
