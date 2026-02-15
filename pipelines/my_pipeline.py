@@ -40,7 +40,7 @@ def exposure() -> pl.DataFrame:
     return pl.scan_parquet("pipelines/data/exposure.parquet")
 
 
-@pipeline.node(path="pipelines/data/policies.parquet")
+@pipeline.node(path="pipelines/data/policies.parquet", deploy_input=True)
 def policies() -> pl.DataFrame:
     """data_source node"""
     return pl.scan_parquet("pipelines/data/policies.parquet")

@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Radio } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 const iconMap: Record<string, React.ElementType> = {
@@ -43,6 +43,7 @@ export type PipelineNodeData = {
   label: string
   description: string
   nodeType: string
+  config?: Record<string, unknown>
   _status?: "ok" | "error" | "running"
 }
 
@@ -52,6 +53,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const Icon = iconMap[nodeType] || PolarsIcon
   const accent = accentMap[nodeType] || accentMap.transform
   const typeLabel = labelMap[nodeType] || "NODE"
+  const isDeployInput = !!(nodeData.config?.deploy_input)
 
   return (
     <div
@@ -80,9 +82,18 @@ function PipelineNode({ data, selected }: NodeProps) {
           >
             {typeLabel}
           </span>
+          {isDeployInput && (
+            <span
+              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+              style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
+            >
+              <Radio size={8} />
+              API
+            </span>
+          )}
           {nodeData._status && (
             <span
-              className={`ml-auto w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}
+              className={`${isDeployInput ? "" : "ml-auto "} w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}
               style={{ backgroundColor: statusColors[nodeData._status] }}
             />
           )}

@@ -1,0 +1,31 @@
+# Runway project configuration
+# Created by: runw init
+# Docs: https://github.com/PricingFrontier/runway
+
+[project]
+name = "my_pipeline"
+pipeline = "pipelines/my_pipeline.py"
+
+# ─────────────────────────────────────────────────────────────────
+# Deployment — Databricks MLflow Model Serving
+# ─────────────────────────────────────────────────────────────────
+[deploy]
+target = "databricks"                     # deployment target
+model_name = "motor-pricing"              # MLflow registered model name
+endpoint_name = "motor-pricing"           # Databricks serving endpoint name
+
+[deploy.databricks]
+# Workspace credentials are read from .env (see .env.example)
+#   DATABRICKS_HOST  = https://adb-xxxxx.xx.azuredatabricks.net
+#   DATABRICKS_TOKEN = dapi...
+experiment_name = "/Shared/runway/motor-pricing"  # MLflow experiment
+catalog = "main"                                   # Unity Catalog
+schema = "pricing"                                 # Unity Catalog schema
+serving_workload_size = "Small"                    # Small | Medium | Large
+serving_scale_to_zero = true                       # scale to zero when idle
+
+# ─────────────────────────────────────────────────────────────────
+# Test quotes — example JSON payloads for pre-deploy validation
+# ─────────────────────────────────────────────────────────────────
+[test_quotes]
+dir = "test_quotes"                       # directory containing .json files

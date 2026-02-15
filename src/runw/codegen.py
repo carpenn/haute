@@ -14,21 +14,21 @@ def _build_params(source_names: list[str]) -> str:
 
 # Template fragments for each node type
 _SOURCE_FLAT_FILE = '''\
-@pipeline.node(path="{path}")
+@pipeline.node(path="{path}"{deploy_kw})
 def {func_name}() -> pl.DataFrame:
     """{description}"""
     return pl.scan_parquet("{path}")
 '''
 
 _SOURCE_CSV = '''\
-@pipeline.node(path="{path}")
+@pipeline.node(path="{path}"{deploy_kw})
 def {func_name}() -> pl.DataFrame:
     """{description}"""
     return pl.scan_csv("{path}")
 '''
 
 _SOURCE_DATABRICKS = '''\
-@pipeline.node(table="{table}")
+@pipeline.node(table="{table}"{deploy_kw})
 def {func_name}() -> pl.DataFrame:
     """{description}"""
     import databricks.sdk
@@ -173,18 +173,22 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
     if node_type == "dataSource":
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
+        deploy_kw = ", deploy_input=True" if config.get("deploy_input") else ""
         if source_type == "databricks":
             table = config.get("table", "catalog.schema.table")
             return _SOURCE_DATABRICKS.format(
-                func_name=func_name, description=description, table=table
+                func_name=func_name, description=description, table=table,
+                deploy_kw=deploy_kw,
             )
         elif path.endswith(".csv"):
             return _SOURCE_CSV.format(
-                func_name=func_name, description=description, path=path
+                func_name=func_name, description=description, path=path,
+                deploy_kw=deploy_kw,
             )
         else:
             return _SOURCE_FLAT_FILE.format(
-                func_name=func_name, description=description, path=path
+                func_name=func_name, description=description, path=path,
+                deploy_kw=deploy_kw,
             )
 
     elif node_type == "modelScore":

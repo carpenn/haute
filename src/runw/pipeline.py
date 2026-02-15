@@ -22,6 +22,11 @@ class Node:
     config: dict = field(default_factory=dict)
 
     @property
+    def is_deploy_input(self) -> bool:
+        """Whether this node is marked as the live API input for deployment."""
+        return bool(self.config.get("deploy_input"))
+
+    @property
     def n_inputs(self) -> int:
         """Number of DataFrame inputs the function accepts."""
         if self.is_source:
@@ -166,14 +171,26 @@ class Pipeline:
         return outputs[order[-1].name]
 
     def score(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Run the pipeline on an input DataFrame, skipping source nodes."""
+        """Run the pipeline on an input DataFrame, skipping source nodes.
+
+        If any source node is marked ``deploy_input=True``, only those
+        sources are seeded with *df*.  Other sources still execute their
+        own loading logic (e.g. static rating tables).  When no node is
+        marked, **all** sources are seeded (backward-compatible default).
+        """
         order = self._topo_order()
         outputs: dict[str, pl.DataFrame] = {}
 
-        # Seed all source node outputs with the provided df
+        deploy_inputs = [n for n in order if n.is_source and n.is_deploy_input]
+        seed_all = len(deploy_inputs) == 0  # fallback: seed every source
+
         for n in order:
             if n.is_source:
-                outputs[n.name] = df
+                if seed_all or n.is_deploy_input:
+                    outputs[n.name] = df
+                else:
+                    # Not a deploy input — run its own load logic
+                    outputs[n.name] = n()
 
         for n in order:
             if n.is_source:

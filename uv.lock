@@ -2023,7 +2023,6 @@ name = "runw"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "catboost" },
     { name = "click" },
     { name = "fastapi" },
     { name = "libcst" },
@@ -2036,6 +2035,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+catboost = [
+    { name = "catboost" },
+]
 databricks = [
     { name = "databricks-sdk" },
     { name = "mlflow" },
@@ -2051,7 +2053,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "catboost", specifier = ">=1.2.8" },
+    { name = "catboost", marker = "extra == 'catboost'", specifier = ">=1.2.8" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -2064,7 +2066,7 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=1.1.1" },
     { name = "websockets", specifier = ">=14.0" },
 ]
-provides-extras = ["databricks"]
+provides-extras = ["catboost", "databricks"]
 
 [package.metadata.requires-dev]
 dev = [

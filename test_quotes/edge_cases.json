@@ -1,0 +1,41 @@
+[
+  {
+    "IDpol": 99010,
+    "VehPower": 4,
+    "VehAge": 0,
+    "DrivAge": 18,
+    "BonusMalus": 100,
+    "VehBrand": "B1",
+    "VehGas": "Regular",
+    "Area": "A",
+    "Density": 27000,
+    "Region": "Ile-de-France",
+    "_description": "Young driver, new car, highest density urban area, max BonusMalus"
+  },
+  {
+    "IDpol": 99011,
+    "VehPower": 15,
+    "VehAge": 25,
+    "DrivAge": 80,
+    "BonusMalus": 50,
+    "VehBrand": "B12",
+    "VehGas": "Diesel",
+    "Area": "F",
+    "Density": 5,
+    "Region": "Bretagne",
+    "_description": "Elderly driver, very old high-power vehicle, rural area, min BonusMalus"
+  },
+  {
+    "IDpol": 99012,
+    "VehPower": 6,
+    "VehAge": 5,
+    "DrivAge": 40,
+    "BonusMalus": 50,
+    "VehBrand": "B12",
+    "VehGas": "Regular",
+    "Area": "D",
+    "Density": 1000,
+    "Region": "Rhone-Alpes",
+    "_description": "Typical mid-risk profile — baseline comparison"
+  }
+]

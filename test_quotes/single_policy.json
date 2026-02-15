@@ -1,0 +1,14 @@
+[
+  {
+    "IDpol": 99001,
+    "VehPower": 7,
+    "VehAge": 3,
+    "DrivAge": 42,
+    "BonusMalus": 50,
+    "VehBrand": "B12",
+    "VehGas": "Diesel",
+    "Area": "C",
+    "Density": 850,
+    "Region": "Ile-de-France"
+  }
+]

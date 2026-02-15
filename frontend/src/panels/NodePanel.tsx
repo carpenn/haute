@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { sanitizeName } from "../utils/sanitizeName"
 
@@ -306,6 +306,28 @@ function DataSourceConfig({
               Databricks
             </button>
           </div>
+        </div>
+
+        {/* API Input toggle */}
+        <div>
+          <button
+            onClick={() => {
+              const next = !config.deploy_input
+              onUpdate("deploy_input", next || undefined)
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors"
+            style={{
+              background: config.deploy_input ? 'rgba(34,197,94,.1)' : 'var(--bg-input)',
+              border: config.deploy_input ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--border)',
+              color: config.deploy_input ? '#22c55e' : 'var(--text-secondary)',
+            }}
+          >
+            <Radio size={14} />
+            <span>API Input</span>
+            <span className="ml-auto text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              {config.deploy_input ? 'This source receives live requests' : 'Mark as live API input'}
+            </span>
+          </button>
         </div>
 
         {sourceType === "flat_file" && (

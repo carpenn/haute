@@ -1,0 +1,62 @@
+[
+  {
+    "IDpol": 99001,
+    "VehPower": 7,
+    "VehAge": 3,
+    "DrivAge": 42,
+    "BonusMalus": 50,
+    "VehBrand": "B12",
+    "VehGas": "Diesel",
+    "Area": "C",
+    "Density": 850,
+    "Region": "Ile-de-France"
+  },
+  {
+    "IDpol": 99002,
+    "VehPower": 4,
+    "VehAge": 0,
+    "DrivAge": 22,
+    "BonusMalus": 100,
+    "VehBrand": "B1",
+    "VehGas": "Regular",
+    "Area": "A",
+    "Density": 27000,
+    "Region": "Ile-de-France"
+  },
+  {
+    "IDpol": 99003,
+    "VehPower": 11,
+    "VehAge": 15,
+    "DrivAge": 68,
+    "BonusMalus": 50,
+    "VehBrand": "B3",
+    "VehGas": "Diesel",
+    "Area": "F",
+    "Density": 12,
+    "Region": "Bretagne"
+  },
+  {
+    "IDpol": 99004,
+    "VehPower": 5,
+    "VehAge": 1,
+    "DrivAge": 35,
+    "BonusMalus": 68,
+    "VehBrand": "B2",
+    "VehGas": "Regular",
+    "Area": "D",
+    "Density": 1500,
+    "Region": "Rhone-Alpes"
+  },
+  {
+    "IDpol": 99005,
+    "VehPower": 9,
+    "VehAge": 8,
+    "DrivAge": 50,
+    "BonusMalus": 50,
+    "VehBrand": "B6",
+    "VehGas": "Diesel",
+    "Area": "B",
+    "Density": 95,
+    "Region": "Picardie"
+  }
+]

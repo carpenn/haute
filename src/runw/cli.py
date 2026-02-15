@@ -55,6 +55,7 @@ def init(name: str) -> None:
     project_dir.mkdir()
     (project_dir / "pipelines").mkdir()
     (project_dir / "data").mkdir()
+    (project_dir / "test_quotes").mkdir()
 
     # Starter pipeline
     starter = '''\
@@ -66,38 +67,112 @@ import runw
 pipeline = runw.Pipeline("{name}", description="A new pricing pipeline")
 
 
-@pipeline.node(path="data/input.parquet")
+@pipeline.node(path="data/input.parquet", deploy_input=True)
 def read_data() -> pl.DataFrame:
     """Read input data."""
-    return pl.read_parquet("data/input.parquet")
+    return pl.scan_parquet("data/input.parquet")
 
 
 @pipeline.node
-def transform(df: pl.DataFrame) -> pl.DataFrame:
+def transform(read_data: pl.DataFrame) -> pl.DataFrame:
     """Transform the data."""
-    return df
+    return read_data
 
 
-@pipeline.node
-def output(df: pl.DataFrame) -> pl.DataFrame:
+@pipeline.node(output=True)
+def output(transform: pl.DataFrame) -> pl.DataFrame:
     """Final output."""
-    return df
+    return transform
+
+
+pipeline.connect("read_data", "transform")
+pipeline.connect("transform", "output")
 '''
     (project_dir / "pipelines" / "main.py").write_text(
         starter.format(name=name)
     )
 
+    # runw.toml — project config
+    runw_toml = '''\
+# Runway project configuration
+# Docs: https://github.com/PricingFrontier/runway
+
+[project]
+name = "{name}"
+pipeline = "pipelines/main.py"
+
+# ─────────────────────────────────────────────────────────────────
+# Deployment — Databricks MLflow Model Serving
+# ─────────────────────────────────────────────────────────────────
+[deploy]
+target = "databricks"
+model_name = "{name}"
+endpoint_name = "{name}"
+
+[deploy.databricks]
+# Workspace credentials are read from .env (see .env.example)
+#   DATABRICKS_HOST  = https://adb-xxxxx.xx.azuredatabricks.net
+#   DATABRICKS_TOKEN = dapi...
+experiment_name = "/Shared/runway/{name}"
+catalog = "main"
+schema = "pricing"
+serving_workload_size = "Small"
+serving_scale_to_zero = true
+
+# ─────────────────────────────────────────────────────────────────
+# Test quotes — example JSON payloads for pre-deploy validation
+# ─────────────────────────────────────────────────────────────────
+[test_quotes]
+dir = "test_quotes"
+'''
+    (project_dir / "runw.toml").write_text(
+        runw_toml.format(name=name)
+    )
+
+    # .env.example — template for secrets
+    env_example = '''\
+# Runway — Databricks credentials
+# Copy this file to .env and fill in your values.
+# .env is gitignored and will never be committed.
+#
+#   cp .env.example .env
+
+# Databricks workspace URL (no trailing slash)
+DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
+
+# Personal access token (Databricks > User Settings > Developer > Access Tokens)
+DATABRICKS_TOKEN=dapi0123456789abcdef0123456789abcdef
+'''
+    (project_dir / ".env.example").write_text(env_example)
+
+    # Starter test quote
+    test_quote = '''\
+[
+  {
+    "_description": "Example quote — replace with your own fields",
+    "id": 1,
+    "field_a": "value",
+    "field_b": 42
+  }
+]
+'''
+    (project_dir / "test_quotes" / "example.json").write_text(test_quote)
+
     # .gitignore
     (project_dir / ".gitignore").write_text(
-        "__pycache__/\n*.pyc\n.venv/\n"
+        "__pycache__/\n*.pyc\n.venv/\n.env\n"
     )
 
     click.echo(f"Created project '{name}/'")
-    click.echo("  pipelines/main.py  — starter pipeline")
-    click.echo("  data/              — put your data files here")
-    click.echo("\nNext steps:")
+    click.echo(f"  runw.toml            — project & deploy config")
+    click.echo(f"  .env.example         — Databricks credentials template")
+    click.echo(f"  pipelines/main.py    — starter pipeline")
+    click.echo(f"  data/                — put your data files here")
+    click.echo(f"  test_quotes/         — example JSON payloads for testing")
+    click.echo(f"\nNext steps:")
     click.echo(f"  cd {name}")
-    click.echo("  runw serve")
+    click.echo(f"  cp .env.example .env   # fill in Databricks credentials")
+    click.echo(f"  runw serve")
 
 
 @cli.command()
