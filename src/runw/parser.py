@@ -92,6 +92,11 @@ def _strip_docstring(lines: list[str]) -> list[str]:
         stripped = line.strip()
 
         if not docstring_done:
+            if in_docstring:
+                if '"""' in stripped or "'''" in stripped:
+                    in_docstring = False
+                    docstring_done = True
+                continue
             if not cleaned and (stripped.startswith('"""') or stripped.startswith("'''")):
                 quote = stripped[:3]
                 if stripped.count(quote) >= 2 and stripped.endswith(quote):
@@ -100,11 +105,6 @@ def _strip_docstring(lines: list[str]) -> list[str]:
                 else:
                     in_docstring = True
                     continue
-            if in_docstring:
-                if '"""' in stripped or "'''" in stripped:
-                    in_docstring = False
-                    docstring_done = True
-                continue
             docstring_done = True
 
         cleaned.append(line)

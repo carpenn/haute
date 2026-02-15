@@ -83,6 +83,30 @@ class TestExecUserCode:
         result = _exec_user_code("df = df.collect()", ["df"], (lf,))
         assert isinstance(result, pl.LazyFrame)
 
+    def test_multiple_named_sources(self):
+        """Multiple source names are injected as named variables."""
+        lf_a = pl.DataFrame({"x": [1]}).lazy()
+        lf_b = pl.DataFrame({"y": [2]}).lazy()
+        code = "df = a.join(b, how='cross')"
+        result = _exec_user_code(code, ["a", "b"], (lf_a, lf_b))
+        df = result.collect()
+        assert set(df.columns) == {"x", "y"}
+
+    def test_extra_ns_injects_object(self):
+        """extra_ns should inject additional variables (e.g. external model obj)."""
+        lf = pl.DataFrame({"x": [10]}).lazy()
+        code = "df = df.with_columns(y=pl.lit(val))"
+        result = _exec_user_code(code, ["df"], (lf,), extra_ns={"val": 42})
+        df = result.collect()
+        assert df["y"].to_list() == [42]
+
+    def test_runtime_error_preserves_message(self):
+        """Runtime errors in user code should propagate with useful messages."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(Exception) as exc_info:
+            _exec_user_code("df = 1 / 0", ["df"], (lf,))
+        assert "division" in str(exc_info.value).lower()
+
 
 # ---------------------------------------------------------------------------
 # _build_node_fn
@@ -96,6 +120,7 @@ class TestBuildNodeFn:
         node = _source_node("src", str(p))
         name, fn, is_source = _build_node_fn(node)
         assert is_source is True
+        assert name == "src"
         df = fn().collect()
         assert df["a"].to_list() == [1, 2]
 
@@ -107,6 +132,32 @@ class TestBuildNodeFn:
         name, fn, is_source = _build_node_fn(node)
         df = fn().collect()
         assert df["b"].to_list() == [3, 4]
+
+    def test_data_source_json(self, tmp_path):
+        p = tmp_path / "data.json"
+        pl.DataFrame({"c": [5, 6]}).write_json(p)
+
+        node = _source_node("src", str(p))
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True
+        result = fn()
+        assert isinstance(result, pl.LazyFrame)
+        df = result.collect()
+        assert df["c"].to_list() == [5, 6]
+
+    def test_data_source_databricks_raises(self):
+        node = {
+            "id": "db",
+            "data": {
+                "label": "db",
+                "nodeType": "dataSource",
+                "config": {"sourceType": "databricks"},
+            },
+        }
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True
+        with pytest.raises(NotImplementedError, match="Databricks"):
+            fn()
 
     def test_transform_with_code(self):
         node = _transform_node("t", code=".with_columns(y=pl.col('x') + 1)")
@@ -130,6 +181,13 @@ class TestBuildNodeFn:
         df = fn(lf).collect()
         assert df.columns == ["a"]
 
+    def test_output_passthrough_without_fields(self):
+        node = _output_node("out", fields=[])
+        _, fn, _ = _build_node_fn(node)
+        lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
+        df = fn(lf).collect()
+        assert set(df.columns) == {"a", "b"}
+
     def test_sink_passthrough(self):
         node = {
             "id": "sink",
@@ -138,7 +196,84 @@ class TestBuildNodeFn:
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [1]}).lazy()
-        assert fn(lf).collect().shape == (1, 1)
+        df = fn(lf).collect()
+        assert df["x"].to_list() == [1]
+
+    def test_external_file_with_json(self, tmp_path):
+        """externalFile with JSON file type loads and injects obj."""
+        import json as _json
+        p = tmp_path / "data.json"
+        p.write_text(_json.dumps({"multiplier": 10}))
+
+        node = {
+            "id": "ext",
+            "data": {
+                "label": "ext",
+                "nodeType": "externalFile",
+                "config": {
+                    "path": str(p),
+                    "fileType": "json",
+                    "code": "df = df.with_columns(y=pl.lit(obj['multiplier']))",
+                },
+            },
+        }
+        _, fn, is_source = _build_node_fn(node, source_names=["df"])
+        assert is_source is False
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        df = fn(lf).collect()
+        assert df["y"].to_list() == [10]
+
+    def test_external_file_with_pickle(self, tmp_path):
+        """externalFile with pickle file type loads and injects obj."""
+        import pickle
+        p = tmp_path / "data.pkl"
+        with open(p, "wb") as f:
+            pickle.dump({"factor": 5}, f)
+
+        node = {
+            "id": "ext",
+            "data": {
+                "label": "ext",
+                "nodeType": "externalFile",
+                "config": {
+                    "path": str(p),
+                    "fileType": "pickle",
+                    "code": "df = df.with_columns(y=pl.lit(obj['factor']))",
+                },
+            },
+        }
+        _, fn, _ = _build_node_fn(node, source_names=["df"])
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        df = fn(lf).collect()
+        assert df["y"].to_list() == [5]
+
+    def test_external_file_passthrough_without_code(self):
+        """externalFile without code acts as passthrough."""
+        node = {
+            "id": "ext",
+            "data": {
+                "label": "ext",
+                "nodeType": "externalFile",
+                "config": {"path": "model.pkl", "fileType": "pickle", "code": ""},
+            },
+        }
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is False
+        lf = pl.DataFrame({"x": [7]}).lazy()
+        df = fn(lf).collect()
+        assert df["x"].to_list() == [7]
+
+    def test_unknown_node_type_passthrough(self):
+        """Unknown nodeType should act as passthrough."""
+        node = {
+            "id": "unk",
+            "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
+        }
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is False
+        lf = pl.DataFrame({"x": [3]}).lazy()
+        df = fn(lf).collect()
+        assert df["x"].to_list() == [3]
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +339,11 @@ class TestExecuteGraph:
         }
         results = execute_graph(graph)
         assert results["bad"]["status"] == "error"
-        assert results["bad"]["error"]  # non-empty error message
+        assert "nonexistent_col" in results["bad"]["error"].lower() or "not found" in results["bad"]["error"].lower(), (
+            f"Expected column-not-found error, got: {results['bad']['error']}"
+        )
+        assert results["bad"]["row_count"] == 0
+        assert results["bad"]["columns"] == []
 
 
 # ---------------------------------------------------------------------------

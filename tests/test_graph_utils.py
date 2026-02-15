@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 
 from runw.graph_utils import (
     _execute_lazy,
@@ -65,6 +66,10 @@ class TestTopoSort:
         assert result[0] == "a"
         assert result[-1] == "d"
         assert set(result) == {"a", "b", "c", "d"}
+        # Verify topological invariant
+        idx = {nid: i for i, nid in enumerate(result)}
+        for e in edges:
+            assert idx[e["source"]] < idx[e["target"]]
 
     def test_single_node(self):
         assert topo_sort_ids(["x"], []) == ["x"]
@@ -73,12 +78,39 @@ class TestTopoSort:
         result = topo_sort_ids(["c", "a", "b"], [])
         assert result == ["a", "b", "c"]
 
-    def test_deterministic(self):
+    def test_deterministic_ordering(self):
+        """With equal in-degree, nodes should be sorted alphabetically."""
         ids = ["c", "b", "a"]
         edges = [{"source": "a", "target": "c"}, {"source": "b", "target": "c"}]
-        r1 = topo_sort_ids(ids, edges)
-        r2 = topo_sort_ids(ids, edges)
-        assert r1 == r2
+        result = topo_sort_ids(ids, edges)
+        assert result == ["a", "b", "c"]
+        # Verify topological invariant: every parent before its child
+        idx = {nid: i for i, nid in enumerate(result)}
+        for e in edges:
+            assert idx[e["source"]] < idx[e["target"]], (
+                f"{e['source']} should come before {e['target']}"
+            )
+
+    def test_cycle_drops_nodes(self):
+        """Cycle nodes never reach in-degree 0, so they're silently dropped."""
+        ids = ["a", "b", "c"]
+        edges = [
+            {"source": "a", "target": "b"},
+            {"source": "b", "target": "c"},
+            {"source": "c", "target": "a"},
+        ]
+        result = topo_sort_ids(ids, edges)
+        assert len(result) < len(ids)  # cycle members dropped
+
+    def test_edges_referencing_unknown_nodes(self):
+        """Edges referencing non-existent IDs should be ignored."""
+        ids = ["a", "b"]
+        edges = [{"source": "a", "target": "b"}, {"source": "x", "target": "y"}]
+        result = topo_sort_ids(ids, edges)
+        assert set(result) == {"a", "b"}
+
+    def test_empty_input(self):
+        assert topo_sort_ids([], []) == []
 
 
 # ---------------------------------------------------------------------------
@@ -207,3 +239,61 @@ class TestExecuteLazy:
 
         outputs, _, _, _ = _execute_lazy(g, build_fn)
         assert isinstance(outputs["t"], pl.LazyFrame)
+
+    def test_non_source_no_input_raises(self):
+        """A non-source node with no parents and no prior outputs raises ValueError."""
+        def build_fn(node, source_names=None):
+            return node["id"], lambda *dfs: dfs[0], False
+
+        g = _make_graph([("lonely", "Lonely")], [])
+        with pytest.raises(ValueError, match="no input and is not a source"):
+            _execute_lazy(g, build_fn)
+
+    def test_fallback_to_last_output(self):
+        """A non-source with no edges but prior outputs uses the last available frame."""
+        call_order = []
+
+        def build_fn(node, source_names=None):
+            nid = node["id"]
+            if nid == "src":
+                def fn():
+                    call_order.append("src")
+                    return pl.DataFrame({"x": [1]}).lazy()
+                return nid, fn, True
+            else:
+                def fn(*dfs):
+                    call_order.append(nid)
+                    return dfs[0].with_columns(y=pl.lit(99))
+                return nid, fn, False
+
+        # Two nodes, no edge — "t" should fallback to src's output
+        g = _make_graph([("src", "Src"), ("t", "T")], [])
+        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+
+        outputs, _, _, _ = _execute_lazy(g, build_fn)
+        df = outputs["t"].collect()
+        assert df["y"].to_list() == [99]
+        assert call_order == ["src", "t"]
+
+    def test_multi_input_node(self):
+        """A node with two parents receives both LazyFrames."""
+        def build_fn(node, source_names=None):
+            nid = node["id"]
+            if nid in ("a", "b"):
+                data = {"x": [1]} if nid == "a" else {"y": [2]}
+                return nid, lambda d=data: pl.DataFrame(d).lazy(), True
+            else:
+                def fn(*dfs):
+                    return dfs[0].join(dfs[1], how="cross")
+                return nid, fn, False
+
+        g = _make_graph(
+            [("a", "A"), ("b", "B"), ("c", "C")],
+            [("a", "c"), ("b", "c")],
+        )
+        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+        g["nodes"][1]["data"]["nodeType"] = "dataSource"
+
+        outputs, _, _, _ = _execute_lazy(g, build_fn)
+        df = outputs["c"].collect()
+        assert set(df.columns) == {"x", "y"}

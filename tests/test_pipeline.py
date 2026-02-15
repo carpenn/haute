@@ -148,10 +148,101 @@ class TestPipeline:
         order = p._topo_order()
         assert [n.name for n in order] == ["first", "second"]
 
-    def test_to_graph(self):
+    def test_topo_order_cycle_raises(self):
+        """Cycle detection should raise ValueError."""
+        p = Pipeline("cycle")
+
+        @p.node
+        def a() -> pl.DataFrame:
+            return pl.DataFrame({"x": [1]})
+
+        @p.node
+        def b(a: pl.DataFrame) -> pl.DataFrame:
+            return a
+
+        p.connect("a", "b").connect("b", "a")
+        with pytest.raises(ValueError, match="Cycle|disconnected"):
+            p._topo_order()
+
+    def test_run_no_edges_uses_last_output(self):
+        """Without explicit edges, run() feeds last output as input."""
+        p = Pipeline("implicit")
+
+        @p.node
+        def source() -> pl.DataFrame:
+            return pl.DataFrame({"x": [1, 2]})
+
+        @p.node
+        def transform(df: pl.DataFrame) -> pl.DataFrame:
+            return df.with_columns(y=pl.col("x") * 3)
+
+        # No connect() calls — relies on fallback
+        result = p.run()
+        assert "y" in result.columns
+        assert result["y"].to_list() == [3, 6]
+
+    def test_score_no_edges(self):
+        """score() without edges should chain nodes sequentially."""
+        p = Pipeline("score_implicit")
+
+        @p.node
+        def source() -> pl.DataFrame:
+            return pl.DataFrame({"x": [0]})
+
+        @p.node
+        def transform(df: pl.DataFrame) -> pl.DataFrame:
+            return df.with_columns(y=pl.col("x") + 100)
+
+        custom = pl.DataFrame({"x": [5]})
+        result = p.score(custom)
+        assert result["y"].to_list() == [105]
+
+    def test_to_graph_with_explicit_edges(self):
         p = self._simple_pipeline()
         g = p.to_graph()
         assert len(g["nodes"]) == 2
         assert len(g["edges"]) == 1
         assert g["edges"][0]["source"] == "source"
         assert g["edges"][0]["target"] == "transform"
+        # Verify node types
+        node_map = {n["id"]: n for n in g["nodes"]}
+        assert node_map["source"]["data"]["nodeType"] == "dataSource"
+        assert node_map["transform"]["data"]["nodeType"] == "output"  # last node
+
+    def test_to_graph_inferred_linear_chain(self):
+        """Without explicit edges, to_graph() infers a linear chain."""
+        p = Pipeline("chain")
+
+        @p.node
+        def a() -> pl.DataFrame:
+            return pl.DataFrame()
+
+        @p.node
+        def b(df: pl.DataFrame) -> pl.DataFrame:
+            return df
+
+        @p.node
+        def c(df: pl.DataFrame) -> pl.DataFrame:
+            return df
+
+        g = p.to_graph()
+        assert len(g["edges"]) == 2
+        edge_pairs = [(e["source"], e["target"]) for e in g["edges"]]
+        assert ("a", "b") in edge_pairs
+        assert ("b", "c") in edge_pairs
+
+    def test_to_graph_positions_spaced(self):
+        """Nodes should be positioned with x_spacing."""
+        p = Pipeline("pos")
+
+        @p.node
+        def a() -> pl.DataFrame:
+            return pl.DataFrame()
+
+        @p.node
+        def b(df: pl.DataFrame) -> pl.DataFrame:
+            return df
+
+        g = p.to_graph()
+        assert g["nodes"][0]["position"]["x"] == 0
+        assert g["nodes"][1]["position"]["x"] == 280

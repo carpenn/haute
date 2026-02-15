@@ -150,20 +150,31 @@ class TestExecuteTrace:
         assert result.target_node_id == "t"
 
     def test_trace_with_column_filter(self, tmp_path):
+        """Column filter should include only nodes where the column appears."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
         graph = {
             "nodes": [
                 _source_node("src", str(p)),
+                # passthrough — doesn't touch 'y'
+                _transform_node("mid"),
+                # adds 'y' — should be included
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
-            "edges": [_edge("src", "t")],
+            "edges": [_edge("src", "mid"), _edge("mid", "t")],
         }
-        result = execute_trace(graph, column="y")
-        # Only nodes that touch "y" should be in the trace
-        node_ids = [s.node_id for s in result.steps]
-        assert "t" in node_ids
+        result_unfiltered = execute_trace(graph)
+        result_filtered = execute_trace(graph, column="y")
+
+        # Filtered should have fewer steps than unfiltered
+        assert result_filtered.nodes_in_trace <= result_unfiltered.nodes_in_trace
+        # The node that adds 'y' must be present
+        filtered_ids = [s.node_id for s in result_filtered.steps]
+        assert "t" in filtered_ids
+        # 'y' should appear in the transform's schema_diff
+        t_step = next(s for s in result_filtered.steps if s.node_id == "t")
+        assert "y" in t_step.schema_diff.columns_added
 
     def test_empty_graph_raises(self):
         with pytest.raises(ValueError, match="Empty graph"):
