@@ -11,14 +11,12 @@ down into scans.  Preview mode slaps a .head(row_limit) before
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import polars as pl
 
-from runw.graph_utils import _sanitize_func_name, topo_sort_ids, ancestors
-
-# Type alias — nodes pass lazy frames between each other
-_Frame = pl.LazyFrame
+from runw.graph_utils import _execute_lazy, _Frame, _sanitize_func_name
 
 
 def _exec_user_code(
@@ -130,7 +128,7 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
             """Load an external file and return the object."""
             if ft == "json":
                 import json as _json
-                with open(p, "r") as f:
+                with open(p) as f:
                     return _json.load(f)
             elif ft == "joblib":
                 import joblib
@@ -214,86 +212,25 @@ def execute_graph(
             "error": str | None,
         }
     """
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
-
-    if not nodes:
+    if not graph.get("nodes"):
         return {}
 
-    node_map = {n["id"]: n for n in nodes}
-    all_ids = set(node_map.keys())
+    lazy_outputs, order, _parents, _names = _execute_lazy(
+        graph, _build_node_fn, target_node_id,
+    )
 
-    # Determine which nodes to execute
-    if target_node_id:
-        needed = ancestors(target_node_id, edges, all_ids)
-    else:
-        needed = all_ids
-
-    # Filter edges to only relevant ones
-    relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
-
-    # Topo sort the needed nodes
-    order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
-
-    # Build parent lookup (node_id → list of parent node_ids)
-    parents_of: dict[str, list[str]] = {nid: [] for nid in order}
-    for e in relevant_edges:
-        if e["target"] in parents_of:
-            parents_of[e["target"]].append(e["source"])
-
-    # Map node_id → sanitized func name (for source_names)
-    id_to_name: dict[str, str] = {}
-    for nid in order:
-        label = node_map[nid].get("data", {}).get("label", "Unnamed")
-        id_to_name[nid] = _sanitize_func_name(label)
-
-    # Build functions with source names so variables match upstream node names
-    funcs: dict[str, tuple[Callable, bool]] = {}
-    for nid in order:
-        source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
-        funcs[nid] = (fn, is_source)
-
-    # Execute — all intermediate results stay lazy
-    lazy_outputs: dict[str, _Frame] = {}
     results: dict[str, dict] = {}
-
     for nid in order:
-        fn, is_source = funcs[nid]
+        lf = lazy_outputs.get(nid)
+        if lf is None:
+            results[nid] = {
+                "status": "error", "row_count": 0, "column_count": 0,
+                "columns": [], "preview": [], "error": "No output",
+            }
+            continue
         try:
-            if is_source:
-                lf = fn()
-            else:
-                input_ids = parents_of.get(nid, [])
-                if input_ids:
-                    input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
-                    if len(input_lfs) == 0:
-                        raise ValueError(f"No input data available for node '{nid}'")
-                    lf = fn(*input_lfs)
-                else:
-                    last_lfs = list(lazy_outputs.values())
-                    if last_lfs:
-                        lf = fn(last_lfs[-1])
-                    else:
-                        raise ValueError(f"Node '{nid}' has no input and is not a source")
-
-            # Ensure it's lazy
-            if isinstance(lf, pl.DataFrame):
-                lf = lf.lazy()
-
-            lazy_outputs[nid] = lf
-
-            # Collect — with optional row limit pushed into the query plan
-            if row_limit is not None:
-                df = lf.head(row_limit).collect()
-            else:
-                df = lf.collect()
-
-            columns = [
-                {"name": col, "dtype": str(df[col].dtype)}
-                for col in df.columns
-            ]
-
+            df = lf.head(row_limit).collect() if row_limit is not None else lf.collect()
+            columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
             results[nid] = {
                 "status": "ok",
                 "row_count": len(df),
@@ -304,12 +241,8 @@ def execute_graph(
             }
         except Exception as exc:
             results[nid] = {
-                "status": "error",
-                "row_count": 0,
-                "column_count": 0,
-                "columns": [],
-                "preview": [],
-                "error": str(exc),
+                "status": "error", "row_count": 0, "column_count": 0,
+                "columns": [], "preview": [], "error": str(exc),
             }
 
     return results
@@ -337,51 +270,9 @@ def execute_sink(graph: dict, sink_node_id: str) -> dict:
     if not path:
         raise ValueError("Sink node has no output path configured")
 
-    # Run the pipeline up to the sink to get its input data
-    results = execute_graph(graph, target_node_id=sink_node_id)
-    sink_result = results.get(sink_node_id)
-
-    if not sink_result or sink_result.get("status") != "ok":
-        error = sink_result.get("error", "Unknown error") if sink_result else "No result"
-        raise RuntimeError(f"Pipeline failed before sink: {error}")
-
-    # Re-execute to get the actual LazyFrame (results only have preview)
-    # We need the full data, so run without row limit
-    edges = graph.get("edges", [])
-    all_ids = set(node_map.keys())
-    needed = ancestors(sink_node_id, edges, all_ids)
-    relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
-    order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
-
-    parents_of: dict[str, list[str]] = {nid: [] for nid in order}
-    for e in relevant_edges:
-        if e["target"] in parents_of:
-            parents_of[e["target"]].append(e["source"])
-
-    id_to_name: dict[str, str] = {}
-    for nid in order:
-        label = node_map[nid].get("data", {}).get("label", "Unnamed")
-        id_to_name[nid] = _sanitize_func_name(label)
-
-    funcs: dict[str, tuple[Callable, bool]] = {}
-    for nid in order:
-        source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
-        funcs[nid] = (fn, is_source)
-
-    lazy_outputs: dict[str, _Frame] = {}
-    for nid in order:
-        fn, is_source = funcs[nid]
-        if is_source:
-            lazy_outputs[nid] = fn()
-        else:
-            input_ids = parents_of.get(nid, [])
-            if input_ids:
-                input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
-                lazy_outputs[nid] = fn(*input_lfs) if input_lfs else fn()
-            else:
-                last_lfs = list(lazy_outputs.values())
-                lazy_outputs[nid] = fn(last_lfs[-1]) if last_lfs else fn()
+    lazy_outputs, _order, _parents, _names = _execute_lazy(
+        graph, _build_node_fn, target_node_id=sink_node_id,
+    )
 
     lf = lazy_outputs.get(sink_node_id)
     if lf is None:
@@ -389,7 +280,6 @@ def execute_sink(graph: dict, sink_node_id: str) -> dict:
 
     df = lf.collect()
 
-    # Ensure parent directories exist
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 

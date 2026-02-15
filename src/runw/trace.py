@@ -21,16 +21,11 @@ TODO (future phases):
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-import polars as pl
-
 from runw.executor import _build_node_fn
-from runw.graph_utils import _sanitize_func_name, ancestors, topo_sort_ids
-
-_Frame = pl.LazyFrame
-
+from runw.graph_utils import _execute_lazy, _Frame, topo_sort_ids
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -202,54 +197,13 @@ def execute_trace(
     if target_node_id not in node_map:
         raise ValueError(f"Target node '{target_node_id}' not found in graph")
 
-    # Only execute ancestors of the target
-    needed = ancestors(target_node_id, edges, all_ids)
-    relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
-    order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
+    # Execute lazily via shared core
+    lazy_outputs, order, parents_of, _id_to_name = _execute_lazy(
+        graph, _build_node_fn, target_node_id,
+    )
 
-    # Parent lookup
-    parents_of: dict[str, list[str]] = {nid: [] for nid in order}
-    for e in relevant_edges:
-        if e["target"] in parents_of:
-            parents_of[e["target"]].append(e["source"])
-
-    # Node id → sanitised name
-    id_to_name: dict[str, str] = {}
-    for nid in order:
-        label = node_map[nid].get("data", {}).get("label", "Unnamed")
-        id_to_name[nid] = _sanitize_func_name(label)
-
-    # Build functions
-    funcs: dict[str, tuple[callable, bool]] = {}
-    for nid in order:
-        source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        _, fn, is_source = _build_node_fn(node_map[nid], source_names=source_names)
-        funcs[nid] = (fn, is_source)
-
-    # ---------- Execute (lazy) ----------
-    lazy_outputs: dict[str, _Frame] = {}
-
-    for nid in order:
-        fn, is_source = funcs[nid]
-        if is_source:
-            lf = fn()
-        else:
-            input_ids = parents_of.get(nid, [])
-            if input_ids:
-                input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
-                if not input_lfs:
-                    raise ValueError(f"No input data for node '{nid}'")
-                lf = fn(*input_lfs)
-            else:
-                last_lfs = list(lazy_outputs.values())
-                if last_lfs:
-                    lf = fn(last_lfs[-1])
-                else:
-                    raise ValueError(f"Node '{nid}' has no input and is not a source")
-
-        if isinstance(lf, pl.DataFrame):
-            lf = lf.lazy()
-        lazy_outputs[nid] = lf
+    # Determine which nodes are sources
+    source_ids = {nid for nid in order if not parents_of.get(nid)}
 
     # ---------- Build trace steps ----------
     steps: list[TraceStep] = []
@@ -257,7 +211,7 @@ def execute_trace(
     for nid in order:
         t_node = time.perf_counter()
 
-        fn, is_source = funcs[nid]
+        is_source = nid in source_ids
         node_data = node_map[nid].get("data", {})
         node_name = node_data.get("label", nid)
         node_type = node_data.get("nodeType", "transform")

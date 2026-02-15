@@ -1,6 +1,5 @@
 """CLI entrypoint for Runway."""
 
-import os
 import signal
 import subprocess
 import sys
@@ -13,11 +12,14 @@ import click
 def _open_browser(url: str) -> None:
     """Open *url* in the default browser, suppressing noisy stderr from gio."""
     try:
-        devnull = open(os.devnull, "w")
         if sys.platform == "linux":
-            subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
+            subprocess.Popen(
+                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
+            subprocess.Popen(
+                ["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
         else:
             webbrowser.open(url)
     except Exception:
@@ -91,11 +93,11 @@ def output(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     click.echo(f"Created project '{name}/'")
-    click.echo(f"  pipelines/main.py  — starter pipeline")
-    click.echo(f"  data/              — put your data files here")
-    click.echo(f"\nNext steps:")
+    click.echo("  pipelines/main.py  — starter pipeline")
+    click.echo("  data/              — put your data files here")
+    click.echo("\nNext steps:")
     click.echo(f"  cd {name}")
-    click.echo(f"  runw serve")
+    click.echo("  runw serve")
 
 
 @cli.command()
@@ -115,7 +117,10 @@ def run(pipeline_file: str | None) -> None:
                     break
 
     if not pipeline_file:
-        click.echo("Error: No pipeline file found. Pass a path or create pipelines/main.py", err=True)
+        click.echo(
+            "Error: No pipeline file found. Pass a path or create pipelines/main.py",
+            err=True,
+        )
         raise SystemExit(1)
 
     filepath = Path(pipeline_file)
@@ -164,7 +169,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
     if dev_mode:
         click.echo("🔧 Dev mode: starting Vite dev server + FastAPI backend")
-        click.echo(f"   Frontend → http://localhost:5173  (open this)")
+        click.echo("   Frontend → http://localhost:5173  (open this)")
         click.echo(f"   Backend  → http://{host}:{port}   (API only)")
         click.echo("")
         vite_proc = subprocess.Popen(

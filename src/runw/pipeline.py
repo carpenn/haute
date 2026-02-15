@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import polars as pl
+
+from runw.graph_utils import topo_sort_ids
 
 
 @dataclass
@@ -101,7 +103,7 @@ class Pipeline:
             return _register(fn)
         return _register
 
-    def connect(self, source: str, target: str) -> "Pipeline":
+    def connect(self, source: str, target: str) -> Pipeline:
         """Declare an edge: source node's output feeds into target node.
 
         Can be chained: pipeline.connect("a", "b").connect("b", "c")
@@ -123,34 +125,15 @@ class Pipeline:
             # No explicit edges — fall back to registration order
             return list(self._nodes)
 
-        in_degree: dict[str, int] = {n.name: 0 for n in self._nodes}
-        children: dict[str, list[str]] = {n.name: [] for n in self._nodes}
+        node_ids = [n.name for n in self._nodes]
+        edges = [{"source": src, "target": tgt} for src, tgt in self._edges]
+        sorted_ids = topo_sort_ids(node_ids, edges)
 
-        for src, tgt in self._edges:
-            if tgt in in_degree:
-                in_degree[tgt] += 1
-            if src in children:
-                children[src].append(tgt)
-
-        # Kahn's algorithm
-        queue = [name for name, deg in in_degree.items() if deg == 0]
-        result: list[Node] = []
-
-        while queue:
-            queue.sort()  # deterministic ordering
-            name = queue.pop(0)
-            if name in self._node_map:
-                result.append(self._node_map[name])
-            for child in children.get(name, []):
-                in_degree[child] -= 1
-                if in_degree[child] == 0:
-                    queue.append(child)
-
-        if len(result) != len(self._nodes):
-            missing = set(n.name for n in self._nodes) - set(n.name for n in result)
+        if len(sorted_ids) != len(self._nodes):
+            missing = {n.name for n in self._nodes} - set(sorted_ids)
             raise ValueError(f"Cycle detected or disconnected nodes: {missing}")
 
-        return result
+        return [self._node_map[name] for name in sorted_ids if name in self._node_map]
 
     def _get_inputs(self, node_name: str) -> list[str]:
         """Get the names of all nodes that feed into this node."""

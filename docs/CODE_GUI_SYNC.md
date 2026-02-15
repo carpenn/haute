@@ -22,9 +22,9 @@ The JSON graph is currently the source of truth. The `.py` file is a secondary e
 | `codegen.py` | ✅ Works | Generates `.py` from graph JSON (GUI → Code) |
 | `executor.py` | ✅ Works | Runs pipeline from graph JSON |
 | `pipeline.py` | ✅ Works | Separate execution path via `@pipeline.node` decorators |
-| Parser (`.py` → graph JSON) | ❌ Missing | Critical path — nothing reads `.py` back into the GUI |
-| File watcher | ❌ Missing | No live sync from file changes to GUI |
-| WebSocket | ❌ Missing | No push channel from backend to frontend |
+| `parser.py` (`.py` → graph JSON) | ✅ Works | Parses `.py` back into graph JSON (ast + regex fallback) |
+| File watcher | ✅ Works | watchfiles-based live sync from file changes to GUI |
+| WebSocket | ✅ Works | `/ws/sync` push channel from backend to frontend |
 
 ### Two execution engines (need to converge)
 

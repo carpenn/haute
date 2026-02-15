@@ -4,17 +4,30 @@ import asyncio
 import json as _json
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="Runway", version="0.1.0")
-
 STATIC_DIR = Path(__file__).parent / "static"
 logger = logging.getLogger("uvicorn.error")
+
+_watcher_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global _watcher_task
+    _watcher_task = asyncio.create_task(_file_watcher())
+    yield
+    if _watcher_task:
+        _watcher_task.cancel()
+
+
+app = FastAPI(title="Runway", version="0.1.0", lifespan=_lifespan)
 
 # ---------------------------------------------------------------------------
 # Self-write tracking (avoid file-watcher feedback loops)
@@ -402,13 +415,10 @@ async def get_schema(path: str):
 # File watcher — live sync from .py edits to GUI
 # ---------------------------------------------------------------------------
 
-_watcher_task: asyncio.Task | None = None
-
-
 async def _file_watcher() -> None:
     """Watch pipeline directories for .py changes and broadcast to GUI."""
     try:
-        from watchfiles import awatch, Change
+        from watchfiles import Change, awatch
     except ImportError:
         logger.warning("watchfiles not installed — live sync disabled")
         return
@@ -440,7 +450,11 @@ async def _file_watcher() -> None:
                     "graph": graph,
                     "source_file": str(p),
                 })
-                logger.info("Broadcast graph_update to %d clients (%d nodes)", len(_ws_clients), len(graph.get("nodes", [])))
+                n_nodes = len(graph.get("nodes", []))
+                logger.info(
+                    "Broadcast graph_update to %d clients (%d nodes)",
+                    len(_ws_clients), n_nodes,
+                )
             except Exception as e:
                 logger.error("Parse error for %s: %s", p.name, e)
                 await _broadcast({
@@ -448,18 +462,6 @@ async def _file_watcher() -> None:
                     "error": str(e),
                     "source_file": str(p),
                 })
-
-
-@app.on_event("startup")
-async def _start_file_watcher() -> None:
-    global _watcher_task
-    _watcher_task = asyncio.create_task(_file_watcher())
-
-
-@app.on_event("shutdown")
-async def _stop_file_watcher() -> None:
-    if _watcher_task:
-        _watcher_task.cancel()
 
 
 # ---------------------------------------------------------------------------
