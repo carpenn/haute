@@ -1,4 +1,4 @@
-"""Tests for runw.cli — CLI command tests using click.testing.CliRunner."""
+"""Tests for haute.cli — CLI command tests using click.testing.CliRunner."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 from click.testing import CliRunner
 
-from runw.cli import cli
+from haute.cli import cli
 
 
 # ---------------------------------------------------------------------------
@@ -31,9 +31,9 @@ def project_dir(tmp_path: Path) -> Path:
 
     code = f'''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("test_cli", description="CLI test pipeline")
+pipeline = haute.Pipeline("test_cli", description="CLI test pipeline")
 
 
 @pipeline.node(path="{data / 'input.parquet'}")
@@ -55,7 +55,7 @@ pipeline.connect("source", "transform")
 
 
 # ---------------------------------------------------------------------------
-# runw --version
+# haute --version
 # ---------------------------------------------------------------------------
 
 class TestVersion:
@@ -66,7 +66,7 @@ class TestVersion:
 
 
 # ---------------------------------------------------------------------------
-# runw init
+# haute init
 # ---------------------------------------------------------------------------
 
 class TestInit:
@@ -95,7 +95,7 @@ class TestInit:
 
 
 # ---------------------------------------------------------------------------
-# runw run
+# haute run
 # ---------------------------------------------------------------------------
 
 class TestRun:
@@ -132,7 +132,7 @@ class TestRun:
     def test_run_empty_pipeline(self, runner: CliRunner, tmp_path: Path):
         """A .py file with no @pipeline.node functions should fail."""
         empty = tmp_path / "empty.py"
-        empty.write_text("import polars as pl\nimport runw\npipeline = runw.Pipeline('e')\n")
+        empty.write_text("import polars as pl\nimport haute\npipeline = haute.Pipeline('e')\n")
         result = runner.invoke(cli, ["run", str(empty)])
         assert result.exit_code == 1
         assert "no" in result.output.lower() and "node" in result.output.lower()
@@ -145,9 +145,9 @@ class TestRun:
 
         code = f'''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("broken")
+pipeline = haute.Pipeline("broken")
 
 
 @pipeline.node(path="{data / 'd.parquet'}")
@@ -170,7 +170,7 @@ pipeline.connect("source", "bad")
 
 
 # ---------------------------------------------------------------------------
-# runw serve (smoke test only — can't test the long-running server)
+# haute serve (smoke test only — can't test the long-running server)
 # ---------------------------------------------------------------------------
 
 class TestServe:

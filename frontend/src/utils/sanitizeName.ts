@@ -2,7 +2,7 @@
  * Convert a human label to a valid Python function name (preserves casing).
  *
  * This MUST stay in sync with the backend implementation:
- *   src/runw/graph_utils.py → _sanitize_func_name()
+ *   src/haute/graph_utils.py → _sanitize_func_name()
  *
  * Both implementations follow the same rules:
  *   1. Trim whitespace

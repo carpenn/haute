@@ -29,7 +29,7 @@ The JSON graph is currently the source of truth. The `.py` file is a secondary e
 ### Two execution engines (need to converge)
 
 1. **`executor.py`** — runs from JSON graph (used by GUI preview/run)
-2. **`pipeline.py` `Pipeline.run()`** — runs from decorated Python (used by CLI `runw run`)
+2. **`pipeline.py` `Pipeline.run()`** — runs from decorated Python (used by CLI `haute run`)
 
 These must converge so the same pipeline code drives both the GUI and the CLI.
 
@@ -225,10 +225,10 @@ Node positions are stored in a sidecar file alongside the pipeline:
 ```
 pipelines/
 ├── motor.py              ← source of truth (Python code)
-└── motor.runw.json       ← UI metadata (positions, layout preferences)
+└── motor.haute.json       ← UI metadata (positions, layout preferences)
 ```
 
-**`motor.runw.json`:**
+**`motor.haute.json`:**
 ```json
 {
   "positions": {
@@ -263,7 +263,7 @@ Currently there are two ways to run a pipeline:
 
 Both GUI and CLI use the same path:
 - **GUI**: already has graph JSON, sends to executor
-- **CLI** (`runw run motor.py`): parser reads `.py` → graph JSON → executor
+- **CLI** (`haute run motor.py`): parser reads `.py` → graph JSON → executor
 
 `Pipeline.run()` and `Pipeline.score()` still work for the programmatic API, but under the hood they use the same executor logic.
 
@@ -290,13 +290,13 @@ Each layer produces specific error messages shown in the GUI:
 
 | Component | File | Priority | Effort |
 |---|---|---|---|
-| **Parser** | `src/runw/parser.py` | P0 — critical path | Medium |
-| **Surgical codegen** | modify `src/runw/codegen.py` | P0 — critical path | Medium |
-| **WebSocket endpoint** | modify `src/runw/server.py` | P1 | Small |
-| **File watcher** | modify `src/runw/server.py` | P1 | Small |
+| **Parser** | `src/haute/parser.py` | P0 — critical path | Medium |
+| **Surgical codegen** | modify `src/haute/codegen.py` | P0 — critical path | Medium |
+| **WebSocket endpoint** | modify `src/haute/server.py` | P1 | Small |
+| **File watcher** | modify `src/haute/server.py` | P1 | Small |
 | **Frontend WebSocket handler** | modify `frontend/src/App.tsx` | P1 | Small |
 | **ELK layout** | modify `frontend/src/App.tsx` | P1 | Small (drop-in replacement) |
-| **Sidecar metadata** | modify `src/runw/server.py` | P2 | Small |
+| **Sidecar metadata** | modify `src/haute/server.py` | P2 | Small |
 | **Error banners in GUI** | new frontend component | P2 | Small |
 | **Execution engine convergence** | modify `executor.py`, `pipeline.py` | P2 | Medium |
 
@@ -320,5 +320,5 @@ Each layer produces specific error messages shown in the GUI:
 | Feedback loop (watcher → parse → codegen → watcher → ...) | Self-write detection: ignore watcher events within 500ms of a codegen write |
 | User writes code that doesn't map to any node type | Permissive parser — unknown code is preserved but invisible to GUI |
 | Large pipelines (50+ nodes) look messy | ELK layout handles complex DAGs well; sidecar file preserves manual arrangement |
-| Merge conflicts in sidecar `.runw.json` | Positions are non-critical; auto-layout resolves any conflict. File is optional. |
+| Merge conflicts in sidecar `.haute.json` | Positions are non-critical; auto-layout resolves any conflict. File is optional. |
 | Two users editing same file via GUI | Out of scope for now. Same as two people editing any file — git handles it. |

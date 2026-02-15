@@ -1,9 +1,9 @@
 """My first pricing pipeline."""
 
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("my_project", description="A new pricing pipeline")
+pipeline = haute.Pipeline("my_project", description="A new pricing pipeline")
 
 
 @pipeline.node(path="data/input.parquet")

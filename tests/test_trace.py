@@ -1,11 +1,11 @@
-"""Tests for runw.trace — execution trace / data lineage."""
+"""Tests for haute.trace — execution trace / data lineage."""
 
 from __future__ import annotations
 
 import pytest
 import polars as pl
 
-from runw.trace import (
+from haute.trace import (
     SchemaDiff,
     TraceResult,
     TraceStep,

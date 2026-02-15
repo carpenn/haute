@@ -1,4 +1,4 @@
-"""Pipeline and node decorator for runw."""
+"""Pipeline and node decorator for haute."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
-from runw.graph_utils import topo_sort_ids
+from haute.graph_utils import topo_sort_ids
 
 
 @dataclass
@@ -50,7 +50,7 @@ class Node:
 
 
 class Pipeline:
-    """A runw pricing pipeline — a DAG of decorated nodes.
+    """A haute pricing pipeline — a DAG of decorated nodes.
 
     Nodes are functions. Edges define data flow: the output DataFrame
     of the source node is passed as the input to the target node.

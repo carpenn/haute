@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from runw.parser import (
+from haute.parser import (
     _build_node_config,
     _dedent,
     _extract_external_user_code,
@@ -266,12 +266,12 @@ class TestExtractPreamble:
     def test_extracts_between_imports_and_pipeline(self):
         source = (
             "import polars as pl\n"
-            "import runw\n"
+            "import haute\n"
             "\n"
             "from pathlib import Path\n"
             "DATA = 42\n"
             "\n"
-            'pipeline = runw.Pipeline("test")\n'
+            'pipeline = haute.Pipeline("test")\n'
         )
         preamble = _extract_preamble(source)
         assert "from pathlib import Path" in preamble
@@ -282,15 +282,15 @@ class TestExtractPreamble:
     def test_no_preamble(self):
         source = (
             "import polars as pl\n"
-            "import runw\n"
+            "import haute\n"
             "\n"
-            'pipeline = runw.Pipeline("test")\n'
+            'pipeline = haute.Pipeline("test")\n'
         )
         preamble = _extract_preamble(source)
         assert preamble == ""
 
     def test_no_standard_imports(self):
-        source = 'pipeline = runw.Pipeline("test")\n'
+        source = 'pipeline = haute.Pipeline("test")\n'
         assert _extract_preamble(source) == ""
 
 
@@ -303,9 +303,9 @@ class TestFallbackParse:
         """File with syntax error in one function should still parse other nodes."""
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("broken")
+pipeline = haute.Pipeline("broken")
 
 
 @pipeline.node(path="data.parquet")
@@ -339,9 +339,9 @@ def good_node(df: pl.DataFrame) -> pl.DataFrame:
         """Regex fallback should find pipeline.connect() calls."""
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("edges")
+pipeline = haute.Pipeline("edges")
 
 
 @pipeline.node
@@ -367,13 +367,13 @@ pipeline.connect("a", "b")
 
 class TestDeepRoundtrip:
     def test_roundtrip_preserves_node_types_and_configs(self, tmp_path):
-        from runw.codegen import graph_to_code
+        from haute.codegen import graph_to_code
 
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("roundtrip", description="Test pipeline")
+pipeline = haute.Pipeline("roundtrip", description="Test pipeline")
 
 
 @pipeline.node(path="data.parquet")

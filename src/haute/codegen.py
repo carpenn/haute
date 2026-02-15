@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from runw.graph_utils import _sanitize_func_name, topo_sort_ids
+from haute.graph_utils import _sanitize_func_name, topo_sort_ids
 
 
 def _build_params(source_names: list[str]) -> str:
@@ -284,7 +284,7 @@ def graph_to_code(
     description: str = "",
     preamble: str = "",
 ) -> str:
-    """Convert a React Flow graph to a valid runw pipeline .py file."""
+    """Convert a React Flow graph to a valid haute pipeline .py file."""
     nodes = graph.get("nodes", [])
     edges = graph.get("edges", [])
 
@@ -301,7 +301,7 @@ def graph_to_code(
         f'"""Pipeline: {pipeline_name}"""',
         "",
         "import polars as pl",
-        "import runw",
+        "import haute",
     ]
 
     # User-defined preamble (extra imports, helpers, constants)
@@ -311,7 +311,7 @@ def graph_to_code(
 
     lines += [
         "",
-        f'pipeline = runw.Pipeline("{pipeline_name}", description="{description}")',
+        f'pipeline = haute.Pipeline("{pipeline_name}", description="{description}")',
         "",
         "",
     ]

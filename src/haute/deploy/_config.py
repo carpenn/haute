@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from runw.deploy._pruner import (
+from haute.deploy._pruner import (
     find_deploy_input_nodes,
     find_output_node,
     find_source_nodes,
@@ -18,9 +18,9 @@ from runw.deploy._pruner import (
 
 @dataclass
 class DatabricksConfig:
-    """Typed Databricks-specific settings from [deploy.databricks] in runw.toml."""
+    """Typed Databricks-specific settings from [deploy.databricks] in haute.toml."""
 
-    experiment_name: str = "/Shared/runway/default"
+    experiment_name: str = "/Shared/haute/default"
     catalog: str = "main"
     schema: str = "pricing"
     serving_workload_size: str = "Small"
@@ -29,7 +29,7 @@ class DatabricksConfig:
 
 @dataclass
 class DeployConfig:
-    """User-provided deployment configuration (from runw.toml + CLI)."""
+    """User-provided deployment configuration (from haute.toml + CLI)."""
 
     pipeline_file: Path
     model_name: str
@@ -40,7 +40,7 @@ class DeployConfig:
 
     @classmethod
     def from_toml(cls, path: Path) -> DeployConfig:
-        """Load from runw.toml, merging [project] and [deploy] sections."""
+        """Load from haute.toml, merging [project] and [deploy] sections."""
         import tomllib
 
         text = path.read_text()
@@ -61,7 +61,7 @@ class DeployConfig:
         tq_dir = Path(tq["dir"]) if tq.get("dir") else None
 
         db_config = DatabricksConfig(
-            experiment_name=db_raw.get("experiment_name", "/Shared/runway/default"),
+            experiment_name=db_raw.get("experiment_name", "/Shared/haute/default"),
             catalog=db_raw.get("catalog", "main"),
             schema=db_raw.get("schema", "pricing"),
             serving_workload_size=db_raw.get("serving_workload_size", "Small"),
@@ -130,9 +130,9 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
     ``DeployConfig`` into a fully resolved ``ResolvedDeploy`` ready for
     deployment.
     """
-    from runw.deploy._bundler import collect_artifacts
-    from runw.deploy._schema import infer_input_schema, infer_output_schema
-    from runw.parser import parse_pipeline_file
+    from haute.deploy._bundler import collect_artifacts
+    from haute.deploy._schema import infer_input_schema, infer_output_schema
+    from haute.parser import parse_pipeline_file
 
     # Load .env for Databricks credentials
     project_root = config.pipeline_file.parent.parent

@@ -1,12 +1,12 @@
 """Pipeline: my_pipeline"""
 
 import polars as pl
-import runw
+import haute
 
 import numpy as np
 from catboost import CatBoostClassifier, CatBoostRegressor
 
-pipeline = runw.Pipeline("my_pipeline", description="")
+pipeline = haute.Pipeline("my_pipeline", description="")
 
 
 @pipeline.node(path="pipelines/data/claims_amounts.parquet")

@@ -712,6 +712,64 @@ wheels = [
 ]
 
 [[package]]
+name = "haute"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "fastapi" },
+    { name = "libcst" },
+    { name = "polars" },
+    { name = "pydantic" },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "watchfiles" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+catboost = [
+    { name = "catboost" },
+]
+databricks = [
+    { name = "databricks-sdk" },
+    { name = "mlflow" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "catboost", marker = "extra == 'catboost'", specifier = ">=1.2.8" },
+    { name = "click", specifier = ">=8.1.0" },
+    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "libcst", specifier = ">=1.8.6" },
+    { name = "mlflow", marker = "extra == 'databricks'", specifier = ">=2.15.0" },
+    { name = "polars", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "python-multipart", specifier = ">=0.0.18" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+    { name = "watchfiles", specifier = ">=1.1.1" },
+    { name = "websockets", specifier = ">=14.0" },
+]
+provides-extras = ["catboost", "databricks"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pytest", specifier = ">=9.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "ruff", specifier = ">=0.8.0" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -2016,64 +2074,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6f/b0/69adf22f4e24f3677208adb715c578266842e6e6a3cc77483f48dd999ede/ruff-0.15.0-py3-none-win32.whl", hash = "sha256:238a717ef803e501b6d51e0bdd0d2c6e8513fe9eec14002445134d3907cd46c3", size = 10465945, upload-time = "2026-02-03T17:53:12.591Z" },
     { url = "https://files.pythonhosted.org/packages/51/ad/f813b6e2c97e9b4598be25e94a9147b9af7e60523b0cb5d94d307c15229d/ruff-0.15.0-py3-none-win_amd64.whl", hash = "sha256:dd5e4d3301dc01de614da3cdffc33d4b1b96fb89e45721f1598e5532ccf78b18", size = 11564657, upload-time = "2026-02-03T17:52:51.893Z" },
     { url = "https://files.pythonhosted.org/packages/f6/b0/2d823f6e77ebe560f4e397d078487e8d52c1516b331e3521bc75db4272ca/ruff-0.15.0-py3-none-win_arm64.whl", hash = "sha256:c480d632cc0ca3f0727acac8b7d053542d9e114a462a145d0b00e7cd658c515a", size = 10865753, upload-time = "2026-02-03T17:53:03.014Z" },
-]
-
-[[package]]
-name = "runw"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "fastapi" },
-    { name = "libcst" },
-    { name = "polars" },
-    { name = "pydantic" },
-    { name = "python-multipart" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "watchfiles" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-catboost = [
-    { name = "catboost" },
-]
-databricks = [
-    { name = "databricks-sdk" },
-    { name = "mlflow" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "catboost", marker = "extra == 'catboost'", specifier = ">=1.2.8" },
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "libcst", specifier = ">=1.8.6" },
-    { name = "mlflow", marker = "extra == 'databricks'", specifier = ">=2.15.0" },
-    { name = "polars", specifier = ">=1.0.0" },
-    { name = "pydantic", specifier = ">=2.10.0" },
-    { name = "python-multipart", specifier = ">=0.0.18" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
-    { name = "watchfiles", specifier = ">=1.1.1" },
-    { name = "websockets", specifier = ">=14.0" },
-]
-provides-extras = ["catboost", "databricks"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pytest", specifier = ">=9.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24.0" },
-    { name = "ruff", specifier = ">=0.8.0" },
 ]
 
 [[package]]

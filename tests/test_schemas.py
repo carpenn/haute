@@ -1,11 +1,11 @@
-"""Tests for runw.schemas — Pydantic model validation."""
+"""Tests for haute.schemas — Pydantic model validation."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from runw.schemas import (
+from haute.schemas import (
     BrowseFilesResponse,
     ColumnInfo,
     FileItem,

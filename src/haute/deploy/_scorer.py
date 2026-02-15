@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 
 import polars as pl
 
-from runw.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
+from haute.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
 
 
 def score_graph(
@@ -52,7 +52,7 @@ def score_graph(
         node: dict, source_names: list[str] | None = None,
     ) -> tuple[str, Callable, bool]:
         """Modified _build_node_fn that intercepts deploy_input sources."""
-        from runw.executor import _build_node_fn, _exec_user_code
+        from haute.executor import _build_node_fn, _exec_user_code
 
         nid = node.get("id", "")
         data = node.get("data", {})

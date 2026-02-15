@@ -1,8 +1,8 @@
-"""Tests for runw.codegen — graph JSON → Python code generation."""
+"""Tests for haute.codegen — graph JSON → Python code generation."""
 
 from __future__ import annotations
 
-from runw.codegen import _build_params, _node_to_code, graph_to_code
+from haute.codegen import _build_params, _node_to_code, graph_to_code
 
 
 # ---------------------------------------------------------------------------
@@ -28,8 +28,8 @@ class TestBuildParams:
 def _compile_node_code(code: str) -> None:
     """Verify generated node code compiles inside a pipeline context."""
     wrapper = (
-        "import polars as pl\nimport runw\n"
-        "pipeline = runw.Pipeline('test')\n\n"
+        "import polars as pl\nimport haute\n"
+        "pipeline = haute.Pipeline('test')\n\n"
         f"{code}\n"
     )
     compile(wrapper, "<test>", "exec")
@@ -261,7 +261,7 @@ class TestGraphToCode:
         }
         code = graph_to_code(graph, pipeline_name="test_pipe")
         assert "import polars as pl" in code
-        assert "import runw" in code
+        assert "import haute" in code
         assert 'Pipeline("test_pipe"' in code
         assert "def Source()" in code
         assert "def Transform(Source: pl.DataFrame)" in code
@@ -276,14 +276,14 @@ class TestGraphToCode:
         code = graph_to_code(graph, preamble="import numpy as np")
         lines = code.splitlines()
         preamble_idx = next(i for i, line in enumerate(lines) if "numpy" in line)
-        pipeline_idx = next(i for i, line in enumerate(lines) if "runw.Pipeline(" in line)
+        pipeline_idx = next(i for i, line in enumerate(lines) if "haute.Pipeline(" in line)
         assert preamble_idx < pipeline_idx, "Preamble must appear before pipeline definition"
         compile(code, "<test>", "exec")
 
     def test_empty_graph(self):
         code = graph_to_code({"nodes": [], "edges": []})
         assert "import polars as pl" in code
-        assert "import runw" in code
+        assert "import haute" in code
         assert "Pipeline" in code
         # No nodes, so no @pipeline.node or pipeline.connect
         assert "@pipeline.node" not in code

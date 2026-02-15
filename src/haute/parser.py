@@ -291,7 +291,7 @@ def _extract_connect_calls(tree: ast.Module) -> list[tuple[str, str]]:
 
 
 def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
-    """Find pipeline = runw.Pipeline("name", description="...") at module level."""
+    """Find pipeline = haute.Pipeline("name", description="...") at module level."""
     name = "my_pipeline"
     description = ""
 
@@ -436,7 +436,7 @@ _RE_DECORATOR = re.compile(
 )
 
 _RE_PIPELINE_META = re.compile(
-    r'pipeline\s*=\s*runw\.Pipeline\(\s*["\']([^"\']*)["\']'
+    r'pipeline\s*=\s*haute\.Pipeline\(\s*["\']([^"\']*)["\']'
     r'(?:.*?description\s*=\s*["\']([^"\']*)["\'])?',
 )
 
@@ -598,15 +598,15 @@ def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) ->
 # Preamble extraction
 # ---------------------------------------------------------------------------
 
-_STANDARD_IMPORTS = {"import polars as pl", "import runw"}
+_STANDARD_IMPORTS = {"import polars as pl", "import haute"}
 
 
 def _extract_preamble(source: str) -> str:
     """Extract user-defined preamble between standard imports and pipeline code.
 
     The preamble is any code that appears after the standard imports
-    (``import polars as pl``, ``import runw``) but before the first
-    ``@pipeline.node`` decorator or ``pipeline = runw.Pipeline(...)`` line.
+    (``import polars as pl``, ``import haute``) but before the first
+    ``@pipeline.node`` decorator or ``pipeline = haute.Pipeline(...)`` line.
     """
     lines = source.splitlines()
     # Find the end of standard imports region
@@ -625,7 +625,7 @@ def _extract_preamble(source: str) -> str:
         stripped = lines[i].strip()
         is_pipeline_def = (
             stripped.startswith("pipeline")
-            and ("runw.Pipeline" in stripped or "= runw.Pipeline" in stripped)
+            and ("haute.Pipeline" in stripped or "= haute.Pipeline" in stripped)
         )
         if is_pipeline_def:
             pipeline_start_idx = i

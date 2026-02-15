@@ -529,7 +529,7 @@ This is well within budget for a local dev server.
 
 ## Implementation plan
 
-### Phase A — Instrumented single-row executor (`src/runw/trace.py`)
+### Phase A — Instrumented single-row executor (`src/haute/trace.py`)
 
 New module that wraps `execute_graph` logic:
 
@@ -607,7 +607,7 @@ expression strings:
 ## File structure
 
 ```
-src/runw/
+src/haute/
 ├── trace.py              # TraceRequest, TraceResult, execute_trace()
 ├── schema_diff.py        # SchemaDiff, column classification
 ├── column_lineage.py     # Static column provenance analysis
@@ -681,7 +681,7 @@ assessments.
 
 ### Deliverable
 
-A `runw trace export` CLI command that generates a regulatory-ready PDF/HTML
+A `haute trace export` CLI command that generates a regulatory-ready PDF/HTML
 report showing the full trace for a set of policies. This is a future CLI
 command but the backend infrastructure (trace data structures) is designed
 to support it from day one.

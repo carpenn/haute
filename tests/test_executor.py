@@ -1,11 +1,11 @@
-"""Tests for runw.executor — graph execution engine."""
+"""Tests for haute.executor — graph execution engine."""
 
 from __future__ import annotations
 
 import pytest
 import polars as pl
 
-from runw.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
+from haute.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
 
 
 # ---------------------------------------------------------------------------

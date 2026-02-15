@@ -1,6 +1,6 @@
-"""MLflow PythonModel wrapper for deployed runw pipelines.
+"""MLflow PythonModel wrapper for deployed haute pipelines.
 
-``RunwayModel`` is logged as an MLflow pyfunc model. At serving time:
+``HauteModel`` is logged as an MLflow pyfunc model. At serving time:
 
 1. ``load_context()`` reads the deployment manifest and resolves artifact paths.
 2. ``predict()`` converts pandas → Polars, scores through the pruned graph,
@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from mlflow.pyfunc import PythonModelContext
 
 
-class RunwayModel:
-    """MLflow PythonModel wrapper for a deployed runw pipeline.
+class HauteModel:
+    """MLflow PythonModel wrapper for a deployed haute pipeline.
 
     This class is instantiated by MLflow when the model is loaded for
     serving.  It is not instantiated directly.
@@ -72,7 +72,7 @@ class RunwayModel:
         """
         import polars as pl
 
-        from runw.deploy._scorer import score_graph
+        from haute.deploy._scorer import score_graph
 
         input_df = pl.from_pandas(model_input)
 

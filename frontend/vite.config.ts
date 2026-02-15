@@ -23,7 +23,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../src/runw/static",
+    outDir: "../src/haute/static",
     emptyOutDir: true,
   },
 })

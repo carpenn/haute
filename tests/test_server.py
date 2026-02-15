@@ -1,4 +1,4 @@
-"""Tests for runw.server — FastAPI API endpoint integration tests."""
+"""Tests for haute.server — FastAPI API endpoint integration tests."""
 
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ def pipeline_dir(tmp_path: Path) -> Path:
 
     code = f'''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("test_pipeline", description="A test pipeline")
+pipeline = haute.Pipeline("test_pipeline", description="A test pipeline")
 
 
 @pipeline.node(path="{data_dir / 'input.parquet'}")
@@ -55,7 +55,7 @@ def client(pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """TestClient that runs with cwd set to the temp pipeline directory."""
     monkeypatch.chdir(pipeline_dir)
     # Re-import to pick up cwd change
-    from runw.server import app
+    from haute.server import app
     return TestClient(app)
 
 
@@ -96,7 +96,7 @@ class TestGetFirstPipeline:
 
     def test_empty_project_returns_empty_graph(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)
-        from runw.server import app
+        from haute.server import app
         c = TestClient(app)
         resp = c.get("/api/pipeline")
         assert resp.status_code == 200
@@ -126,7 +126,7 @@ class TestGetPipelineByName:
 
 class TestRunPipeline:
     def _graph_payload(self, pipeline_dir: Path) -> dict:
-        from runw.parser import parse_pipeline_file
+        from haute.parser import parse_pipeline_file
         graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
         return {"graph": graph}
 
@@ -153,7 +153,7 @@ class TestRunPipeline:
 
 class TestPreviewNode:
     def test_preview_returns_node_data(self, client: TestClient, pipeline_dir: Path):
-        from runw.parser import parse_pipeline_file
+        from haute.parser import parse_pipeline_file
         graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
         node_id = graph["nodes"][0]["id"]
 
@@ -180,7 +180,7 @@ class TestPreviewNode:
 
 class TestTraceRow:
     def test_trace_returns_steps(self, client: TestClient, pipeline_dir: Path):
-        from runw.parser import parse_pipeline_file
+        from haute.parser import parse_pipeline_file
         graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
 
         resp = client.post("/api/pipeline/trace", json={
@@ -230,7 +230,7 @@ class TestSavePipeline:
         assert 'Pipeline("saved_pipe"' in content
 
         # Sidecar should exist too
-        sidecar = py_file.with_suffix(".runw.json")
+        sidecar = py_file.with_suffix(".haute.json")
         assert sidecar.exists()
 
 

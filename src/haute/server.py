@@ -1,4 +1,4 @@
-"""FastAPI backend for runw."""
+"""FastAPI backend for haute."""
 
 import asyncio
 import json as _json
@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from runw.schemas import (
+from haute.schemas import (
     BrowseFilesResponse,
     FileItem,
     PipelineSummary,
@@ -44,7 +44,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         _watcher_task.cancel()
 
 
-app = FastAPI(title="Runway", version="0.1.0", lifespan=_lifespan)
+app = FastAPI(title="Haute", version="0.1.0", lifespan=_lifespan)
 
 # ---------------------------------------------------------------------------
 # Self-write tracking (avoid file-watcher feedback loops)
@@ -109,8 +109,8 @@ def _discover_pipelines() -> list[Path]:
 
 
 def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
-    """Load node positions from the sidecar .runw.json file."""
-    sidecar = py_path.with_suffix(".runw.json")
+    """Load node positions from the sidecar .haute.json file."""
+    sidecar = py_path.with_suffix(".haute.json")
     if sidecar.exists():
         try:
             data = _json.loads(sidecar.read_text())
@@ -121,18 +121,18 @@ def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
 
 
 def _save_sidecar(py_path: Path, graph: dict) -> None:
-    """Write node positions to the sidecar .runw.json file."""
+    """Write node positions to the sidecar .haute.json file."""
     positions = {}
     for node in graph.get("nodes", []):
         positions[node["id"]] = node.get("position", {"x": 0, "y": 0})
 
-    sidecar = py_path.with_suffix(".runw.json")
+    sidecar = py_path.with_suffix(".haute.json")
     sidecar.write_text(_json.dumps({"positions": positions}, indent=2) + "\n")
 
 
 def _parse_pipeline_to_graph(py_path: Path) -> dict:
     """Parse a .py file and merge with sidecar positions."""
-    from runw.parser import parse_pipeline_file
+    from haute.parser import parse_pipeline_file
 
     graph = parse_pipeline_file(py_path)
     positions = _load_sidecar_positions(py_path)
@@ -152,7 +152,7 @@ def _parse_pipeline_to_graph(py_path: Path) -> dict:
 @app.get("/api/pipelines", response_model=list[PipelineSummary])
 async def list_pipelines() -> list[PipelineSummary]:
     """List all discovered pipelines."""
-    from runw.parser import parse_pipeline_file
+    from haute.parser import parse_pipeline_file
 
     files = _discover_pipelines()
     result: list[PipelineSummary] = []
@@ -190,7 +190,7 @@ async def get_pipeline(name: str) -> dict:
 async def get_first_pipeline() -> dict:
     """Return the graph for the active pipeline, or an empty canvas.
 
-    Python file is the source of truth. Sidecar .runw.json provides positions.
+    Python file is the source of truth. Sidecar .haute.json provides positions.
     """
     cwd = Path.cwd()
     pipelines_dir = cwd / "pipelines"
@@ -227,8 +227,8 @@ async def get_first_pipeline() -> dict:
 
 @app.post("/api/pipeline/save", response_model=SavePipelineResponse)
 async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
-    """Save a graph: .py (source of truth) + .runw.json (positions)."""
-    from runw.codegen import graph_to_code
+    """Save a graph: .py (source of truth) + .haute.json (positions)."""
+    from haute.codegen import graph_to_code
 
     graph = body.graph.model_dump()
 
@@ -247,7 +247,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     _mark_self_write()
     py_path.write_text(code)
 
-    # Write sidecar .runw.json (node positions for the GUI)
+    # Write sidecar .haute.json (node positions for the GUI)
     _save_sidecar(py_path, graph)
 
     return SavePipelineResponse(
@@ -259,7 +259,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
 @app.post("/api/pipeline/run", response_model=RunPipelineResponse)
 async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
     """Execute the full pipeline graph and return per-node results."""
-    from runw.executor import execute_graph
+    from haute.executor import execute_graph
 
     graph = body.graph.model_dump()
     if not graph.get("nodes"):
@@ -275,7 +275,7 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
 @app.post("/api/pipeline/trace", response_model=TraceResponse)
 async def trace_row(body: TraceRequest) -> TraceResponse:
     """Trace a single row through the pipeline, returning per-node snapshots."""
-    from runw.trace import execute_trace, trace_result_to_dict
+    from haute.trace import execute_trace, trace_result_to_dict
 
     graph = body.graph.model_dump()
     if not graph.get("nodes"):
@@ -302,7 +302,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     Accepts an optional ``rowLimit`` (default 1000) that is pushed into
     the Polars lazy query plan so only that many rows are scanned.
     """
-    from runw.executor import execute_graph
+    from haute.executor import execute_graph
 
     graph = body.graph.model_dump()
     if not graph.get("nodes"):
@@ -334,7 +334,7 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
 
     Only called on explicit user action (Write button), not during normal run/preview.
     """
-    from runw.executor import execute_sink
+    from haute.executor import execute_sink
 
     graph = body.graph.model_dump()
     if not graph.get("nodes"):

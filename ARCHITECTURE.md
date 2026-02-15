@@ -1,4 +1,4 @@
-# Runway — Architecture & Plan
+# Haute — Architecture & Plan
 
 **Open-source pricing engine for insurance teams on Databricks**
 
@@ -6,27 +6,27 @@
 
 ## 1. Vision
 
-Runway is an open-source Python library that gives insurance pricing teams a **code-first, GUI-friendly** way to build, test, and deploy pricing pipelines. It bridges the gap between:
+Haute is an open-source Python library that gives insurance pricing teams a **code-first, GUI-friendly** way to build, test, and deploy pricing pipelines. It bridges the gap between:
 
 - **Pricing analysts** who are comfortable with visual tools (like WTW Radar)
 - **Engineering best practices** that come from working in code: version control, CI/CD, unit tests, linting, code review
 
 The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one — the other stays in sync.
 
-Runway leans heavily into the **Databricks/MLflow ecosystem** rather than reinventing model training, registry, or serving.
+Haute leans heavily into the **Databricks/MLflow ecosystem** rather than reinventing model training, registry, or serving.
 
 ---
 
-## 2. What Runway Is (and Isn't)
+## 2. What Haute Is (and Isn't)
 
-### Runway IS:
+### Haute IS:
 - A Python DSL for defining pricing pipelines as code
 - A browser-based React Flow UI for visualising and editing those pipelines
 - A thin orchestration layer over MLflow (experiment tracking, model registry) and Databricks (model serving, data)
 - A CLI that scaffolds projects with CI/CD, linting, tests, and deployment config out of the box
 - An opinionated framework that makes it hard to do the wrong thing
 
-### Runway IS NOT:
+### Haute IS NOT:
 - A model training framework (use MLflow, scikit-learn, XGBoost, LightGBM, etc.)
 - A replacement for Databricks (it's a client, not a platform)
 - A proprietary black box — everything is `.py` files on disk
@@ -40,7 +40,7 @@ Runway leans heavily into the **Databricks/MLflow ecosystem** rather than reinve
 A **Pipeline** is a directed acyclic graph (DAG) of **Nodes**. It represents the full journey from raw data to a deployable price.
 
 ```python
-from runw import Pipeline, DataSource, Transform, Model, RatingStep, Output
+from haute import Pipeline, DataSource, Transform, Model, RatingStep, Output
 
 pipeline = Pipeline(name="motor_pricing_v2")
 ```
@@ -64,7 +64,7 @@ Nodes are the building blocks. Each node is a Python class with defined inputs, 
 
 ```python
 # shared/transforms.py
-from runw import Transform
+from haute import Transform
 
 clean_vehicle = Transform(
     "clean_vehicle",
@@ -89,11 +89,11 @@ pipeline.add(data_source >> clean_vehicle >> model_score >> output)
 └──────────────────┘         └──────────────────┘
 ```
 
-**Code → GUI:** Runway parses pipeline `.py` files (via AST inspection or a lightweight registry) and renders them as a React Flow graph.
+**Code → GUI:** Haute parses pipeline `.py` files (via AST inspection or a lightweight registry) and renders them as a React Flow graph.
 
-**GUI → Code:** When a user adds/edits/connects nodes in the GUI, Runway writes valid Python code back to the `.py` files on disk. The generated code is clean, idiomatic, and diffable in git.
+**GUI → Code:** When a user adds/edits/connects nodes in the GUI, Haute writes valid Python code back to the `.py` files on disk. The generated code is clean, idiomatic, and diffable in git.
 
-### 3.5 Project Structure (what `runw init` creates)
+### 3.5 Project Structure (what `haute init` creates)
 
 ```
 my-pricing-project/
@@ -110,8 +110,8 @@ my-pricing-project/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml          # Pre-configured GitHub Actions
-├── pyproject.toml          # Project config (runw as dependency)
-├── .pre-commit-config.yaml # ruff, mypy, runw lint
+├── pyproject.toml          # Project config (haute as dependency)
+├── .pre-commit-config.yaml # ruff, mypy, haute lint
 ├── .python-version         # 3.13
 ├── uv.lock
 └── README.md
@@ -126,9 +126,9 @@ my-pricing-project/
 Single Python wheel with bundled React static assets (same model as atelier).
 
 ```
-pip install runw
+pip install haute
 # or
-uv add runw
+uv add haute
 ```
 
 ### 4.2 System Architecture
@@ -190,7 +190,7 @@ uv add runw
 | **WebSockets** | websockets | File watcher → UI sync |
 | **Validation** | Pydantic v2 | |
 | **DataFrames** | Polars | Fast, no pandas dependency |
-| **CLI** | Click | `runw init`, `runw serve`, `runw deploy`, `runw lint` |
+| **CLI** | Click | `haute init`, `haute serve`, `haute deploy`, `haute lint` |
 | **MLflow client** | mlflow | Model registry, tracking, serving |
 | **Databricks client** | databricks-sdk | Unity Catalog, Model Serving, jobs |
 | **AST / code gen** | libcst | Concrete syntax tree — parse & modify Python preserving formatting |
@@ -237,10 +237,10 @@ In live mode, the incoming request is parsed into a 1-row Polars DataFrame, pass
 ### 5.1 Local Scoring
 
 ```python
-import runw
+import haute
 import polars as pl
 
-pipeline = runw.Pipeline.load("pipelines/motor.py")
+pipeline = haute.Pipeline.load("pipelines/motor.py")
 
 # Batch — N rows
 quotes = pl.read_parquet("data/quotes_2025.parquet")
@@ -264,7 +264,7 @@ POST /serving-endpoints/motor-pricing/invocations
 ### 5.3 Real-time API (via Databricks Model Serving)
 
 ```bash
-runw deploy motor_pricing_v2 --target databricks --endpoint motor-pricing
+haute deploy motor_pricing_v2 --target databricks --endpoint motor-pricing
 ```
 
 This:
@@ -299,19 +299,19 @@ databricks:
 
 ## 6. Engineering Practices (Baked In)
 
-### 6.1 What `runw init` gives you for free
+### 6.1 What `haute init` gives you for free
 
 | Practice | Implementation |
 |---|---|
 | **Version control** | Git-native — everything is `.py` files, diffable and reviewable |
 | **CI/CD** | Pre-configured GitHub Actions: lint → test → deploy on merge to main |
-| **Linting** | `ruff` for Python, `runw lint` for pipeline-specific validation |
+| **Linting** | `ruff` for Python, `haute lint` for pipeline-specific validation |
 | **Type checking** | `mypy` (strict mode) |
-| **Testing** | `pytest` stubs auto-generated for each pipeline; `runw test` runs them |
-| **Pre-commit hooks** | ruff, mypy, runw lint — runs on every commit |
+| **Testing** | `pytest` stubs auto-generated for each pipeline; `haute test` runs them |
+| **Pre-commit hooks** | ruff, mypy, haute lint — runs on every commit |
 | **Dependency management** | `uv` with lockfile |
 
-### 6.2 `runw lint` — Pipeline-specific checks
+### 6.2 `haute lint` — Pipeline-specific checks
 
 - All nodes have unique names
 - No disconnected nodes in the pipeline graph
@@ -320,11 +320,11 @@ databricks:
 - Rating table files exist and have expected columns
 - No circular dependencies
 
-### 6.3 `runw test` — Auto-generated tests
+### 6.3 `haute test` — Auto-generated tests
 
 ```python
 # tests/test_motor.py (auto-generated, user can extend)
-from runw.testing import PipelineTestCase
+from haute.testing import PipelineTestCase
 
 class TestMotorPipeline(PipelineTestCase):
     pipeline = "pipelines/motor.py"
@@ -345,13 +345,13 @@ class TestMotorPipeline(PipelineTestCase):
 
 | Command | Description |
 |---|---|
-| `runw init [name]` | Scaffold a new pricing project |
-| `runw serve` | Start the browser UI (FastAPI + React Flow) |
-| `runw score <pipeline> <data>` | Score data locally |
-| `runw deploy <pipeline>` | Deploy to Databricks Model Serving |
-| `runw lint` | Validate pipelines |
-| `runw test` | Run pipeline tests |
-| `runw status` | Show deployed endpoints and their status |
+| `haute init [name]` | Scaffold a new pricing project |
+| `haute serve` | Start the browser UI (FastAPI + React Flow) |
+| `haute score <pipeline> <data>` | Score data locally |
+| `haute deploy <pipeline>` | Deploy to Databricks Model Serving |
+| `haute lint` | Validate pipelines |
+| `haute test` | Run pipeline tests |
+| `haute status` | Show deployed endpoints and their status |
 
 ---
 
@@ -361,20 +361,20 @@ class TestMotorPipeline(PipelineTestCase):
 Coarse pipeline stages by default, expandable to fine-grained operations. Users see a clean high-level graph and can drill into any node to see/edit individual operations.
 
 ### 8.2 Code generation strategy → Decorators + Declarative
-Each decorated block of code (`@runw.node`) corresponds to a node in the GUI. Code is organised into sections using decorators. Simple nodes can use a declarative API, complex nodes use decorated Python functions. Low floor, high ceiling.
+Each decorated block of code (`@haute.node`) corresponds to a node in the GUI. Code is organised into sections using decorators. Simple nodes can use a declarative API, complex nodes use decorated Python functions. Low floor, high ceiling.
 
 ```python
-import runw
+import haute
 
-@runw.node
+@haute.node
 def clean_vehicle(df: pl.DataFrame) -> pl.DataFrame:
     """Standardise vehicle make/model codes."""
     return df.with_columns(...)
 
-@runw.node
+@haute.node
 def score_frequency(df: pl.DataFrame) -> pl.DataFrame:
     """Score using the frequency GLM from MLflow."""
-    model = runw.mlflow_model("models:/freq_glm/Production")
+    model = haute.mlflow_model("models:/freq_glm/Production")
     return df.with_columns(pred_freq=model.predict(df))
 ```
 
@@ -384,14 +384,14 @@ All rating tables (even small ones) live in Databricks Unity Catalog. Referenced
 ### 8.4 Shared preprocessing logic
 Preprocessing transforms (e.g., categorical grouping) are defined once in `shared/` and reused across both modelling pipelines (for training) and rating pipelines (for deployment). The rating pipeline is the deployable unit; modelling pipelines are a separate workflow that produces MLflow-registered models.
 
-### 8.5 PyPI package name → `runw`
-Short, available, memorable. CLI command: `runw`. Import: `import runw`.
+### 8.5 PyPI package name → `haute`
+Short, available, memorable. CLI command: `haute`. Import: `import haute`.
 
 ---
 
 ## 9. Killer Features — What Gets Attention
 
-The features below are ordered by impact. Features 1–2 are what get **attention** (demos, HN, LinkedIn). Features 3–4 are what get **adoption** (teams choosing runw over alternatives). Features 5–6 are what make engineering teams **insist** on using it.
+The features below are ordered by impact. Features 1–2 are what get **attention** (demos, HN, LinkedIn). Features 3–4 are what get **adoption** (teams choosing haute over alternatives). Features 5–6 are what make engineering teams **insist** on using it.
 
 ### 9.1 Live Code ↔ GUI Sync (the headline feature)
 
@@ -423,7 +423,7 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 
 #### Implementation status
 
-**Phase A (done)** — Foundation in `src/runw/trace.py`:
+**Phase A (done)** — Foundation in `src/haute/trace.py`:
 - `execute_trace()` runs the pipeline on a single row and captures per-node input/output snapshots
 - `SchemaDiff` classifies columns at each node as `added`, `removed`, `modified`, or `passed_through`
 - `TraceStep` / `TraceResult` dataclasses carry the full trace payload
@@ -438,20 +438,20 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 - [ ] Human-readable expression generation ("base × area × ncd = £412")
 - [ ] Compare-trace: two rows side-by-side with per-node diff
 - [ ] Frontend trace panel (highlight path on graph, value badges on nodes)
-- [ ] `runw trace export` CLI for regulatory PDF/HTML reports
+- [ ] `haute trace export` CLI for regulatory PDF/HTML reports
 - [ ] Trace caching (LRU for recent row traces, cached schema diffs)
 
 ### 9.4 One-Command Deploy to Databricks (the adoption feature)
 
 ```bash
-runw deploy motor --endpoint motor-pricing
+haute deploy motor --endpoint motor-pricing
 ```
 
 Three commands from init to live API:
 ```bash
-runw init motor
+haute init motor
 # ... edit pipeline ...
-runw deploy motor --endpoint motor-pricing
+haute deploy motor --endpoint motor-pricing
 ```
 
 This packages the pipeline as an MLflow pyfunc model, registers it in MLflow Model Registry, creates/updates a Databricks Model Serving endpoint, and returns the URL. Pricing teams spend **weeks** on deployment plumbing — this makes it a one-liner.
@@ -459,7 +459,7 @@ This packages the pipeline as an MLflow pyfunc model, registers it in MLflow Mod
 ### 9.5 Pipeline Visual Diff (the engineering team feature)
 
 ```bash
-runw diff HEAD~1
+haute diff HEAD~1
 ```
 
 Renders a side-by-side graph diff: green nodes = added, red = removed, amber = changed (with inline code diff on hover). Turns every PR review into a visual experience.
@@ -492,10 +492,10 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 ## 10. Phased Roadmap
 
 ### Phase 1 — Hello World UI ✅
-- [x] Scaffold project (pyproject.toml, frontend/, src/runw/)
+- [x] Scaffold project (pyproject.toml, frontend/, src/haute/)
 - [x] FastAPI backend with pipeline API endpoints
 - [x] React Flow frontend rendering a pipeline graph
-- [x] `runw serve` CLI command opens browser
+- [x] `haute serve` CLI command opens browser
 - [x] Node palette, drag-and-drop, context menu, keyboard shortcuts
 - [x] Data preview panel with resizable split
 - [x] Polars lazy execution with configurable row limit
@@ -511,25 +511,25 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 
 ### Phase 3 — Deploy & Score
 - [ ] Package a pipeline as an MLflow pyfunc model
-- [ ] `runw deploy` registers model and deploys to Databricks Model Serving
+- [ ] `haute deploy` registers model and deploys to Databricks Model Serving
 - [ ] Local scoring engine (`pipeline.score(df)` for dev/testing)
 - [ ] DataSource node with Databricks Unity Catalog support
 - [ ] Rating table viewer (reads from Databricks)
 
 ### Phase 4 — Killer Demo Features
 - [ ] What-if sensitivity mode (slider-driven single-row scoring)
-- [x] Execution trace / data lineage — Phase A: single-row trace engine + schema diffs (`src/runw/trace.py`, `POST /api/pipeline/trace`)
+- [x] Execution trace / data lineage — Phase A: single-row trace engine + schema diffs (`src/haute/trace.py`, `POST /api/pipeline/trace`)
 - [ ] Execution trace / data lineage — Phase B+: row identity tracking, join/agg info, column provenance, expression gen, frontend panel, compare mode
 - [ ] Rating table hot-reload with impact preview
 - [ ] Natural language → Polars code (LLM-powered node assistant)
 
 ### Phase 5 — Engineering Practices
-- [ ] `runw init` scaffolds a new pricing project with CI/CD
+- [ ] `haute init` scaffolds a new pricing project with CI/CD
 - [ ] GitHub Actions template (lint → test → deploy on merge)
-- [ ] Pre-commit hooks (ruff, mypy, runw lint)
-- [ ] Auto-generated test stubs + `runw test`
-- [ ] `runw lint` pipeline-specific validation
-- [ ] Pipeline visual diff (`runw diff HEAD~1`)
+- [ ] Pre-commit hooks (ruff, mypy, haute lint)
+- [ ] Auto-generated test stubs + `haute test`
+- [ ] `haute lint` pipeline-specific validation
+- [ ] Pipeline visual diff (`haute diff HEAD~1`)
 
 ### Phase 6 — Advanced
 - [ ] Composable pipelines (sub-pipelines as nodes)

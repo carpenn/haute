@@ -24,8 +24,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from runw.executor import _build_node_fn
-from runw.graph_utils import _execute_lazy, _Frame, topo_sort_ids
+from haute.executor import _build_node_fn
+from haute.graph_utils import _execute_lazy, _Frame, topo_sort_ids
 
 # ---------------------------------------------------------------------------
 # Data structures

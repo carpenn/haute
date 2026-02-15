@@ -1,4 +1,4 @@
-"""Tests for the runw.deploy package.
+"""Tests for the haute.deploy package.
 
 Tests the target-agnostic layers (pruner, bundler, schema, scorer, validators,
 config). MLflow-specific tests are integration-level and require mlflow installed.
@@ -12,7 +12,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from runw.parser import parse_pipeline_file
+from haute.parser import parse_pipeline_file
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -34,19 +34,19 @@ def full_graph() -> dict:
 
 class TestPruner:
     def test_find_output_node(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node
+        from haute.deploy._pruner import find_output_node
 
         output_id = find_output_node(full_graph)
         assert output_id == "output"
 
     def test_find_deploy_input_nodes(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_deploy_input_nodes
+        from haute.deploy._pruner import find_deploy_input_nodes
 
         inputs = find_deploy_input_nodes(full_graph)
         assert inputs == ["policies"]
 
     def test_prune_for_deploy(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
 
         output_id = find_output_node(full_graph)
         pruned, kept, removed = prune_for_deploy(full_graph, output_id)
@@ -74,13 +74,13 @@ class TestPruner:
         assert len(pruned["nodes"]) == len(kept)
 
     def test_prune_missing_output_raises(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import prune_for_deploy
+        from haute.deploy._pruner import prune_for_deploy
 
         with pytest.raises(ValueError, match="not found in graph"):
             prune_for_deploy(full_graph, "nonexistent_node")
 
     def test_find_output_no_output_raises(self) -> None:
-        from runw.deploy._pruner import find_output_node
+        from haute.deploy._pruner import find_output_node
 
         graph = {"nodes": [
             {"id": "a", "data": {"nodeType": "dataSource", "config": {}}},
@@ -96,8 +96,8 @@ class TestPruner:
 
 class TestBundler:
     def test_collect_artifacts(self, full_graph: dict) -> None:
-        from runw.deploy._bundler import collect_artifacts
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._bundler import collect_artifacts
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
 
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
@@ -114,7 +114,7 @@ class TestBundler:
             assert path.is_file(), f"Artifact {name} not found at {path}"
 
     def test_missing_artifact_raises(self) -> None:
-        from runw.deploy._bundler import collect_artifacts
+        from haute.deploy._bundler import collect_artifacts
 
         graph = {"nodes": [
             {
@@ -137,8 +137,8 @@ class TestBundler:
 
 class TestScorer:
     def test_score_single_row(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._scorer import score_graph
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._scorer import score_graph
 
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
@@ -156,8 +156,8 @@ class TestScorer:
         assert len(result.columns) > 0
 
     def test_score_multiple_rows(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._scorer import score_graph
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._scorer import score_graph
 
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
@@ -181,8 +181,8 @@ class TestScorer:
 
 class TestSchema:
     def test_infer_input_schema(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._schema import infer_input_schema
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._schema import infer_input_schema
 
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
@@ -195,8 +195,8 @@ class TestSchema:
         assert "Area" in schema
 
     def test_infer_output_schema(self, full_graph: dict) -> None:
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._schema import infer_output_schema
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._schema import infer_output_schema
 
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
@@ -214,11 +214,11 @@ class TestSchema:
 
 class TestValidators:
     def test_validate_passes_for_good_config(self, full_graph: dict) -> None:
-        from runw.deploy._bundler import collect_artifacts
-        from runw.deploy._config import DeployConfig, ResolvedDeploy
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._schema import infer_input_schema, infer_output_schema
-        from runw.deploy._validators import validate_deploy
+        from haute.deploy._bundler import collect_artifacts
+        from haute.deploy._config import DeployConfig, ResolvedDeploy
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._schema import infer_input_schema, infer_output_schema
+        from haute.deploy._validators import validate_deploy
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
@@ -246,11 +246,11 @@ class TestValidators:
         assert errors == [], f"Unexpected validation errors: {errors}"
 
     def test_score_test_quotes(self, full_graph: dict) -> None:
-        from runw.deploy._bundler import collect_artifacts
-        from runw.deploy._config import DeployConfig, ResolvedDeploy
-        from runw.deploy._pruner import find_output_node, prune_for_deploy
-        from runw.deploy._schema import infer_input_schema, infer_output_schema
-        from runw.deploy._validators import score_test_quotes
+        from haute.deploy._bundler import collect_artifacts
+        from haute.deploy._config import DeployConfig, ResolvedDeploy
+        from haute.deploy._pruner import find_output_node, prune_for_deploy
+        from haute.deploy._schema import infer_input_schema, infer_output_schema
+        from haute.deploy._validators import score_test_quotes
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
@@ -289,26 +289,26 @@ class TestValidators:
 
 class TestConfig:
     def test_from_toml(self) -> None:
-        from runw.deploy._config import DeployConfig
+        from haute.deploy._config import DeployConfig
 
-        config = DeployConfig.from_toml(Path("runw.toml"))
+        config = DeployConfig.from_toml(Path("haute.toml"))
         assert config.model_name == "motor-pricing"
         assert config.pipeline_file == Path("pipelines/my_pipeline.py")
-        assert config.databricks.experiment_name == "/Shared/runway/motor-pricing"
+        assert config.databricks.experiment_name == "/Shared/haute/motor-pricing"
         assert config.databricks.serving_workload_size == "Small"
 
     def test_override(self) -> None:
-        from runw.deploy._config import DeployConfig
+        from haute.deploy._config import DeployConfig
 
-        config = DeployConfig.from_toml(Path("runw.toml"))
+        config = DeployConfig.from_toml(Path("haute.toml"))
         overridden = config.override(model_name="custom-name")
         assert overridden.model_name == "custom-name"
         assert config.model_name == "motor-pricing"  # original unchanged
 
     def test_resolve_config(self) -> None:
-        from runw.deploy._config import DeployConfig, resolve_config
+        from haute.deploy._config import DeployConfig, resolve_config
 
-        config = DeployConfig.from_toml(Path("runw.toml"))
+        config = DeployConfig.from_toml(Path("haute.toml"))
         resolved = resolve_config(config)
 
         assert resolved.output_node_id == "output"

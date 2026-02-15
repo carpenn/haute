@@ -1,11 +1,11 @@
-"""Tests for runw.pipeline — Pipeline and Node classes."""
+"""Tests for haute.pipeline — Pipeline and Node classes."""
 
 from __future__ import annotations
 
 import pytest
 import polars as pl
 
-from runw.pipeline import Node, Pipeline
+from haute.pipeline import Node, Pipeline
 
 
 # ---------------------------------------------------------------------------

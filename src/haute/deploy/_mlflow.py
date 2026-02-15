@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from runw.deploy._config import ResolvedDeploy
+from haute.deploy._config import ResolvedDeploy
 
 
 @dataclass
@@ -28,7 +28,7 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
     Steps:
         1. Build deployment manifest JSON
-        2. Log RunwayModel as mlflow.pyfunc with artifacts + signature
+        2. Log HauteModel as mlflow.pyfunc with artifacts + signature
         3. Register model version in MLflow Model Registry
         4. Return DeployResult with model URI and endpoint URL
 
@@ -126,21 +126,21 @@ def get_deploy_status(model_name: str) -> dict[str, str | int]:
 
 
 def _get_model_instance() -> object:
-    """Import and return a RunwayModel instance.
+    """Import and return a HauteModel instance.
 
     Deferred import to avoid loading mlflow at module level.
     """
-    from runw.deploy._model import RunwayModel
-    return RunwayModel()
+    from haute.deploy._model import HauteModel
+    return HauteModel()
 
 
 def _build_manifest(resolved: ResolvedDeploy) -> dict:
     """Build the deployment manifest dict."""
-    import runw
+    import haute
 
     config = resolved.config
     return {
-        "runw_version": runw.__version__,
+        "haute_version": haute.__version__,
         "pipeline_name": resolved.pruned_graph.get("pipeline_name", config.model_name),
         "pipeline_file": str(config.pipeline_file),
         "created_at": datetime.now(UTC).isoformat(),
@@ -199,10 +199,10 @@ def _build_signature(resolved: ResolvedDeploy) -> object:
 
 def _pip_requirements(resolved: ResolvedDeploy) -> list[str]:
     """Build pip requirements for the deployed model."""
-    import runw
+    import haute
 
     reqs = [
-        f"runw=={runw.__version__}",
+        f"haute=={haute.__version__}",
         "polars>=1.0.0",
     ]
 

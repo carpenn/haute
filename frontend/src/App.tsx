@@ -528,7 +528,7 @@ function FlowEditor() {
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <header className="h-11 flex items-center px-4 shrink-0" style={{ background: 'var(--chrome)', borderBottom: '1px solid var(--chrome-border)' }}>
         <div className="flex items-center gap-2.5">
-          <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Runway</h1>
+          <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Haute</h1>
           <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>v0.1.0</span>
           {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-dot" title="Unsaved changes" />}
         </div>
@@ -697,7 +697,7 @@ function FlowEditor() {
             </div>
             <div className="flex-1 min-h-0 p-4">
               <div className="text-[11px] font-mono mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
-                <span style={{ color: 'rgba(96,165,250,.5)' }}>import polars as pl</span> and <span style={{ color: 'rgba(96,165,250,.5)' }}>import runw</span> are always included
+                <span style={{ color: 'rgba(96,165,250,.5)' }}>import polars as pl</span> and <span style={{ color: 'rgba(96,165,250,.5)' }}>import haute</span> are always included
               </div>
               <textarea
                 defaultValue={preamble}

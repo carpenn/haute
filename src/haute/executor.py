@@ -16,7 +16,7 @@ from typing import Any
 
 import polars as pl
 
-from runw.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
+from haute.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
 
 
 def _exec_user_code(

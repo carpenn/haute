@@ -1,4 +1,4 @@
-"""CLI entrypoint for Runway."""
+"""CLI entrypoint for Haute."""
 
 import signal
 import subprocess
@@ -27,9 +27,9 @@ def _open_browser(url: str) -> None:
 
 
 @click.group()
-@click.version_option(package_name="runw")
+@click.version_option(package_name="haute")
 def cli() -> None:
-    """Runway — Open-source pricing engine for insurance teams on Databricks."""
+    """Haute — Open-source pricing engine for insurance teams on Databricks."""
 
 
 def _find_frontend_dir() -> Path | None:
@@ -45,7 +45,7 @@ def _find_frontend_dir() -> Path | None:
 @cli.command()
 @click.argument("name")
 def init(name: str) -> None:
-    """Scaffold a new Runway pricing project."""
+    """Scaffold a new Haute pricing project."""
     project_dir = Path.cwd() / name
 
     if project_dir.exists():
@@ -62,9 +62,9 @@ def init(name: str) -> None:
 """My first pricing pipeline."""
 
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("{name}", description="A new pricing pipeline")
+pipeline = haute.Pipeline("{name}", description="A new pricing pipeline")
 
 
 @pipeline.node(path="data/input.parquet", deploy_input=True)
@@ -92,10 +92,10 @@ pipeline.connect("transform", "output")
         starter.format(name=name)
     )
 
-    # runw.toml — project config
-    runw_toml = '''\
-# Runway project configuration
-# Docs: https://github.com/PricingFrontier/runway
+    # haute.toml — project config
+    haute_toml = '''\
+# Haute project configuration
+# Docs: https://github.com/PricingFrontier/haute
 
 [project]
 name = "{name}"
@@ -113,7 +113,7 @@ endpoint_name = "{name}"
 # Workspace credentials are read from .env (see .env.example)
 #   DATABRICKS_HOST  = https://adb-xxxxx.xx.azuredatabricks.net
 #   DATABRICKS_TOKEN = dapi...
-experiment_name = "/Shared/runway/{name}"
+experiment_name = "/Shared/haute/{name}"
 catalog = "main"
 schema = "pricing"
 serving_workload_size = "Small"
@@ -125,13 +125,13 @@ serving_scale_to_zero = true
 [test_quotes]
 dir = "test_quotes"
 '''
-    (project_dir / "runw.toml").write_text(
-        runw_toml.format(name=name)
+    (project_dir / "haute.toml").write_text(
+        haute_toml.format(name=name)
     )
 
     # .env.example — template for secrets
     env_example = '''\
-# Runway — Databricks credentials
+# Haute — Databricks credentials
 # Copy this file to .env and fill in your values.
 # .env is gitignored and will never be committed.
 #
@@ -164,7 +164,7 @@ DATABRICKS_TOKEN=your_databricks_token_here
     )
 
     click.echo(f"Created project '{name}/'")
-    click.echo("  runw.toml            — project & deploy config")
+    click.echo("  haute.toml            — project & deploy config")
     click.echo("  .env.example         — Databricks credentials template")
     click.echo("  pipelines/main.py    — starter pipeline")
     click.echo("  data/                — put your data files here")
@@ -172,7 +172,7 @@ DATABRICKS_TOKEN=your_databricks_token_here
     click.echo("\nNext steps:")
     click.echo(f"  cd {name}")
     click.echo("  cp .env.example .env   # fill in Databricks credentials")
-    click.echo("  runw serve")
+    click.echo("  haute serve")
 
 
 @cli.command()
@@ -183,8 +183,8 @@ def run(pipeline_file: str | None) -> None:
     Uses the same parse → execute_graph path as the GUI so both
     produce identical results from the same .py file.
     """
-    from runw.executor import execute_graph
-    from runw.parser import parse_pipeline_file
+    from haute.executor import execute_graph
+    from haute.parser import parse_pipeline_file
 
     if pipeline_file is None:
         # Auto-discover
@@ -262,10 +262,10 @@ def run(pipeline_file: str | None) -> None:
 @click.option("--port", default=8000, type=int, help="Backend API port.")
 @click.option("--no-browser", is_flag=True, help="Don't open browser automatically.")
 def serve(host: str, port: int, no_browser: bool) -> None:
-    """Start the Runway UI server."""
+    """Start the Haute UI server."""
     import uvicorn
 
-    from runw.server import STATIC_DIR
+    from haute.server import STATIC_DIR
 
     frontend_dir = _find_frontend_dir()
     dev_mode = frontend_dir is not None and (frontend_dir / "node_modules").exists()
@@ -295,11 +295,11 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
         try:
             uvicorn.run(
-                "runw.server:app",
+                "haute.server:app",
                 host=host,
                 port=port,
                 reload=True,
-                reload_excludes=["pipelines/*", "examples/*", "*.runw.json"],
+                reload_excludes=["pipelines/*", "examples/*", "*.haute.json"],
             )
         finally:
             vite_proc.terminate()
@@ -318,7 +318,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
             threading.Timer(1.5, _open_browser, args=(f"http://{host}:{port}",)).start()
 
         uvicorn.run(
-            "runw.server:app",
+            "haute.server:app",
             host=host,
             port=port,
         )
@@ -326,23 +326,23 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
 @cli.command()
 @click.argument("pipeline_file", required=False)
-@click.option("--model-name", default=None, help="Override model name from runw.toml.")
+@click.option("--model-name", default=None, help="Override model name from haute.toml.")
 @click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying.")
 def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> None:
     """Deploy a pipeline as a live scoring API.
 
-    Reads config from runw.toml + credentials from .env.
+    Reads config from haute.toml + credentials from .env.
     Pipeline file, model name, and target are all optional —
-    defaults come from [project] and [deploy] in runw.toml.
+    defaults come from [project] and [deploy] in haute.toml.
     """
-    from runw.deploy._config import DeployConfig, resolve_config
-    from runw.deploy._validators import score_test_quotes, validate_deploy
+    from haute.deploy._config import DeployConfig, resolve_config
+    from haute.deploy._validators import score_test_quotes, validate_deploy
 
     # 1. Load config
-    toml_path = Path.cwd() / "runw.toml"
+    toml_path = Path.cwd() / "haute.toml"
     if toml_path.exists():
         config = DeployConfig.from_toml(toml_path)
-        click.echo("  ✓ Loaded config from runw.toml")
+        click.echo("  ✓ Loaded config from haute.toml")
     elif pipeline_file:
         config = DeployConfig(
             pipeline_file=Path(pipeline_file),
@@ -350,7 +350,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
         )
     else:
         click.echo(
-            "Error: No runw.toml found and no pipeline file specified.",
+            "Error: No haute.toml found and no pipeline file specified.",
             err=True,
         )
         raise SystemExit(1)
@@ -419,7 +419,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 
     # 5. Deploy to MLflow
     try:
-        from runw.deploy._mlflow import deploy_to_mlflow
+        from haute.deploy._mlflow import deploy_to_mlflow
 
         result = deploy_to_mlflow(resolved)
         click.echo(f"  ✓ Logged MLflow model: {result.model_name} v{result.model_version}")
@@ -431,7 +431,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
             click.echo(f'  mlflow models serve -m "{result.model_uri}" -p 5001')
     except ImportError:
         click.echo(
-            "\n  ✗ mlflow is not installed. Install with: pip install runw[databricks]",
+            "\n  ✗ mlflow is not installed. Install with: pip install haute[databricks]",
             err=True,
         )
         raise SystemExit(1)
@@ -444,23 +444,23 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 @click.argument("model_name", required=False)
 def status(model_name: str | None) -> None:
     """Check the status of a deployed model."""
-    # Load model name from runw.toml if not specified
+    # Load model name from haute.toml if not specified
     if model_name is None:
-        toml_path = Path.cwd() / "runw.toml"
+        toml_path = Path.cwd() / "haute.toml"
         if toml_path.exists():
-            from runw.deploy._config import DeployConfig
+            from haute.deploy._config import DeployConfig
             config = DeployConfig.from_toml(toml_path)
             model_name = config.model_name
         else:
-            click.echo("Error: No model name specified and no runw.toml found.", err=True)
+            click.echo("Error: No model name specified and no haute.toml found.", err=True)
             raise SystemExit(1)
 
     try:
-        from runw.deploy._mlflow import get_deploy_status
+        from haute.deploy._mlflow import get_deploy_status
         info = get_deploy_status(model_name)
     except ImportError:
         click.echo(
-            "Error: mlflow is not installed. Install with: pip install runw[databricks]",
+            "Error: mlflow is not installed. Install with: pip install haute[databricks]",
             err=True,
         )
         raise SystemExit(1)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from runw.graph_utils import ancestors
+from haute.graph_utils import ancestors
 
 
 def prune_for_deploy(

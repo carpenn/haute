@@ -1,4 +1,4 @@
-# Runway Deploy — Design & Implementation Plan
+# Haute Deploy — Design & Implementation Plan
 
 **Status:** Design  
 **Scope:** Phase 3 — Deploy & Score  
@@ -7,7 +7,7 @@
 
 ## 1. Problem Statement
 
-A pricing analyst has built a pipeline in Runway (e.g. `my_pipeline.py`). They need to deploy it as a **live API** so that policy admin systems can send a JSON quote request and receive a priced response — with one command, no DevOps, no manual packaging.
+A pricing analyst has built a pipeline in Haute (e.g. `my_pipeline.py`). They need to deploy it as a **live API** so that policy admin systems can send a JSON quote request and receive a priced response — with one command, no DevOps, no manual packaging.
 
 The full pipeline typically contains branches that are irrelevant for live scoring (training data joins, data exports, exploratory sinks). The deployment must **prune** to only the scoring path: input → models → premium → output.
 
@@ -33,18 +33,18 @@ Only the **ancestors of the output node** are deployed. The `policies` source no
 
 Radar's deployment weaknesses (from research report §7):
 
-| Radar Weakness | Runway Advantage |
+| Radar Weakness | Haute Advantage |
 |---|---|
 | **Vendor lock-in** — models not portable, proprietary format | Pipeline is a `.py` file. Deployment is an MLflow model. Both are open standards. Zero lock-in. |
 | **Opaque pricing** — $100K–$1M+/year, no public pricing | Free and open source. MLflow Model Serving cost = cloud compute only. |
 | **Azure-only** — SaaS locked to Microsoft Azure | MLflow runs on Databricks (any cloud), local, or self-hosted. Future targets: SageMaker, GCP Vertex, Docker. |
 | **Proprietary tooling** — Radar-specific skills not transferable | Pure Python + Polars. Skills are portable to any data science role. |
 | **No public docs** — no Stack Overflow, no GitHub, no community | Open-source, public docs, community contributions. |
-| **Implementation complexity** — requires WTW consulting engagement | `runw deploy` — one command. No consultants required. |
+| **Implementation complexity** — requires WTW consulting engagement | `haute deploy` — one command. No consultants required. |
 | **Learning curve** — Radar's own modelling language | Standard `@pipeline.node` decorated Python functions. |
 | **No version control native** — audit trail is platform-managed | Git-native. Every deploy is a git commit + MLflow model version. Full diff, rollback, PR review. |
 
-### Runway-specific advantages
+### Haute-specific advantages
 
 1. **Identical code for dev and prod** — `pipeline.score(df)` locally is the same code path as the live API. No "export to ONNX/PMML" lossy translation.
 2. **Pre-deploy dry-run** — score a sample row locally before deploying. Catch errors before they reach production.
@@ -58,13 +58,13 @@ Radar's deployment weaknesses (from research report §7):
 
 ## 3. User Experience
 
-### 3.1 Project setup (`runw init`)
+### 3.1 Project setup (`haute init`)
 
-`runw init` scaffolds everything needed for deployment:
+`haute init` scaffolds everything needed for deployment:
 
 ```
 my_project/
-  runw.toml              ← project & deploy config (committed to git)
+  haute.toml              ← project & deploy config (committed to git)
   .env.example           ← Databricks credentials template (committed)
   .env                   ← actual secrets (gitignored)
   pipelines/main.py      ← starter pipeline
@@ -74,10 +74,10 @@ my_project/
   .gitignore             ← includes .env
 ```
 
-### 3.2 Configuration: `runw.toml` (implemented)
+### 3.2 Configuration: `haute.toml` (implemented)
 
 All deploy settings live in a single TOML file at the project root.
-Created by `runw init`, committed to git, shared by the team.
+Created by `haute init`, committed to git, shared by the team.
 
 ```toml
 [project]
@@ -90,7 +90,7 @@ model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
 
 [deploy.databricks]
-experiment_name = "/Shared/runway/motor-pricing"
+experiment_name = "/Shared/hauteay/motor-pricing"
 catalog = "main"
 schema = "pricing"
 serving_workload_size = "Small"
@@ -104,16 +104,16 @@ dir = "test_quotes"
 
 | Setting | Location | Committed? |
 |---|---|---|
-| Pipeline file, model name, endpoint | `runw.toml` | Yes |
-| Databricks experiment, catalog, schema | `runw.toml` | Yes |
-| Serving size, scale-to-zero | `runw.toml` | Yes |
+| Pipeline file, model name, endpoint | `haute.toml` | Yes |
+| Databricks experiment, catalog, schema | `haute.toml` | Yes |
+| Serving size, scale-to-zero | `haute.toml` | Yes |
 | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` | `.env` | **No** (gitignored) |
 | Test quote JSON payloads | `test_quotes/` | Yes |
 
 ### 3.3 Secrets: `.env` (implemented)
 
 Databricks credentials are loaded from `.env` at deploy time.
-A `.env.example` template is created by `runw init`:
+A `.env.example` template is created by `haute init`:
 
 ```bash
 # .env.example — copy to .env and fill in
@@ -158,7 +158,7 @@ Example `single_policy.json`:
 ]
 ```
 
-During `runw deploy`, **every** JSON file in `test_quotes/` is scored
+During `haute deploy`, **every** JSON file in `test_quotes/` is scored
 through the pruned pipeline. If any file fails, deployment is blocked
 with a clear error. This catches:
 - Schema mismatches (missing/wrong columns)
@@ -169,17 +169,17 @@ with a clear error. This catches:
 ### 3.5 One-command deploy
 
 ```bash
-# Reads everything from runw.toml + .env
-runw deploy
+# Reads everything from haute.toml + .env
+haute deploy
 
 # Or override specific settings
-runw deploy --model-name motor-pricing-v2 --dry-run
+haute deploy --model-name motor-pricing-v2 --dry-run
 ```
 
 Output:
 ```
 Deploying pipeline: my_pipeline
-  ✓ Loaded config from runw.toml
+  ✓ Loaded config from haute.toml
   ✓ Loaded credentials from .env
   ✓ Parsed pipeline (12 nodes, 14 edges)
   ✓ Pruned to output ancestors (5 nodes)
@@ -252,14 +252,14 @@ curl -X POST https://<workspace>.databricks.net/serving-endpoints/motor-pricing/
 ### 4.1 Module structure
 
 ```
-src/runw/
+src/haute/
   deploy/
-    __init__.py             # Public API: deploy(), DeployConfig, RunwayModel
-    _config.py              # DeployConfig dataclass, auto-detection, runw.toml loading
+    __init__.py             # Public API: deploy(), DeployConfig, HauteModel
+    _config.py              # DeployConfig dataclass, auto-detection, haute.toml loading
     _pruner.py              # Graph pruning to output ancestors
     _bundler.py             # Artifact discovery and collection
     _scorer.py              # score_graph() — the runtime scoring engine for deployed models
-    _model.py               # RunwayModel(mlflow.pyfunc.PythonModel)
+    _model.py               # HauteModel(mlflow.pyfunc.PythonModel)
     _schema.py              # Input/output schema inference
     _validators.py          # Pre-deploy validation (dry-run, artifact checks)
     _mlflow.py              # deploy_to_mlflow(), DeployResult, get_deploy_status()
@@ -289,15 +289,15 @@ def prune_for_deploy(
 
 ### 4.3 Deploy configuration (`_config.py`)
 
-User-provided config (from `runw.toml` + CLI overrides) is strictly separated
+User-provided config (from `haute.toml` + CLI overrides) is strictly separated
 from computed state (pruned graph, schemas, artifacts). This avoids mixing
 input and output in the same dataclass (commit standards §3 Single Responsibility).
 
 ```python
 @dataclass
 class DatabricksConfig:
-    """Typed Databricks-specific settings from [deploy.databricks] in runw.toml."""
-    experiment_name: str = "/Shared/runway/default"
+    """Typed Databricks-specific settings from [deploy.databricks] in haute.toml."""
+    experiment_name: str = "/Shared/hauteay/default"
     catalog: str = "main"
     schema: str = "pricing"
     serving_workload_size: str = "Small"
@@ -306,7 +306,7 @@ class DatabricksConfig:
 
 @dataclass
 class DeployConfig:
-    """User-provided deployment configuration (from runw.toml + CLI)."""
+    """User-provided deployment configuration (from haute.toml + CLI)."""
     pipeline_file: Path
     model_name: str                                   # MLflow registered model name
     endpoint_name: str | None = None                  # Databricks serving endpoint
@@ -316,7 +316,7 @@ class DeployConfig:
 
     @classmethod
     def from_toml(cls, path: Path) -> DeployConfig:
-        """Load from runw.toml, merging [project] and [deploy] sections."""
+        """Load from haute.toml, merging [project] and [deploy] sections."""
 
     def override(self, **cli_kwargs: str | None) -> DeployConfig:
         """Return a copy with non-None CLI flags applied over TOML values."""
@@ -344,7 +344,7 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
 **Auto-detection rules:**
 - **`output_node`**: Find the node with `config.output=True` or `nodeType="output"`. If exactly one exists, use it. Otherwise, error with a clear message.
 - **`input_node`**: After pruning, find source nodes with `config.deploy_input=True`. If none are marked, fall back to the single source node in the pruned graph. If multiple unmarked sources exist, error.
-- **`model_name`**: From `runw.toml [deploy].model_name`, falling back to `pipeline.name` (sanitized for MLflow).
+- **`model_name`**: From `haute.toml [deploy].model_name`, falling back to `pipeline.name` (sanitized for MLflow).
 
 ### 4.4 Artifact bundling (`_bundler.py`)
 
@@ -442,8 +442,8 @@ Uses a modified `_build_node_fn` that intercepts source/external nodes and redir
 ### 4.7 MLflow PythonModel (`_model.py`)
 
 ```python
-class RunwayModel(mlflow.pyfunc.PythonModel):
-    """MLflow PythonModel wrapper for a deployed runw pipeline.
+class HauteModel(mlflow.pyfunc.PythonModel):
+    """MLflow PythonModel wrapper for a deployed haute pipeline.
 
     Artifacts:
         - deploy_manifest.json: Deployment manifest with graph, config, schemas
@@ -483,7 +483,7 @@ class RunwayModel(mlflow.pyfunc.PythonModel):
         Output: pandas DataFrame
         """
         import polars as pl
-        from runw.deploy._scorer import score_graph
+        from haute.deploy._scorer import score_graph
 
         input_df = pl.from_pandas(model_input)
 
@@ -504,7 +504,7 @@ Written at deploy time, bundled as an MLflow artifact:
 
 ```json
 {
-    "runw_version": "0.1.0",
+    "haute_version": "0.1.0",
     "pipeline_name": "my_pipeline",
     "pipeline_file": "pipelines/my_pipeline.py",
     "created_at": "2026-02-15T16:06:00Z",
@@ -573,7 +573,7 @@ def deploy_to_mlflow(config: DeployConfig) -> DeployResult:
 
     Steps:
         1. Build deployment manifest JSON
-        2. Log RunwayModel as mlflow.pyfunc with artifacts + signature
+        2. Log HauteModel as mlflow.pyfunc with artifacts + signature
         3. Register model version in MLflow Model Registry
         4. (If Databricks) Create or update the serving endpoint
         5. Return DeployResult with model URI and endpoint URL
@@ -615,20 +615,20 @@ def validate_deploy(config: DeployConfig) -> list[str]:
 ```python
 @cli.command()
 @click.argument("pipeline_file", required=False)
-@click.option("--model-name", default=None, help="Override model name from runw.toml")
+@click.option("--model-name", default=None, help="Override model name from haute.toml")
 @click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying")
 def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> None:
     """Deploy a pipeline as a live scoring API.
 
-    Reads config from runw.toml + credentials from .env.
+    Reads config from haute.toml + credentials from .env.
     Pipeline file, model name, and target are all optional —
-    defaults come from [project] and [deploy] in runw.toml.
+    defaults come from [project] and [deploy] in haute.toml.
     """
 ```
 
 **Resolution order for settings:**
 1. CLI flags (highest priority)
-2. `runw.toml` `[deploy]` section
+2. `haute.toml` `[deploy]` section
 3. Auto-detection from the pipeline (input/output nodes)
 
 ---
@@ -646,7 +646,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 ┌──────────────────────────────────────────────────────────────────┐
 │  MLflow Model Serving / Databricks Endpoint                      │
 │                                                                  │
-│  RunwayModel.predict(model_input: pd.DataFrame)                  │
+│  HauteModel.predict(model_input: pd.DataFrame)                  │
 │  │                                                               │
 │  │  1. pl.from_pandas(model_input)          → 1-row Polars DF   │
 │  │  2. score_graph(graph, input_df, ...)    → pipeline exec      │
@@ -681,7 +681,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 ### Step 2: `_config.py` — Deploy configuration
 - `DeployConfig` dataclass with auto-detection logic
 - `resolve()` method that parses pipeline, prunes graph, detects I/O nodes
-- `runw.toml` loading + `.env` credential loading
+- `haute.toml` loading + `.env` credential loading
 - **Tests:** auto-detection on `my_pipeline`, explicit overrides
 
 ### Step 3: `_bundler.py` — Artifact collection
@@ -702,7 +702,7 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 - **Tests:** score 1 row and N rows, compare output to `Pipeline.score()`
 
 ### Step 6: `_model.py` — MLflow PythonModel
-- `RunwayModel` class with `load_context` / `predict`
+- `HauteModel` class with `load_context` / `predict`
 - Manifest loading and artifact path resolution
 - **Tests:** save and load model, verify predict output matches local scoring
 
@@ -717,14 +717,14 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 - **Tests:** end-to-end deploy to local MLflow tracking server
 
 ### Step 9: CLI integration
-- `runw deploy` command in `cli.py`
-- `runw status` command for checking deployed endpoints
+- `haute deploy` command in `cli.py`
+- `haute status` command for checking deployed endpoints
 - Rich console output with progress and summary
 - **Tests:** CLI integration tests
 
 ### Step 10: `pyproject.toml` updates
 - Add `mlflow` to `[project.optional-dependencies].databricks`
-- Ensure `runw[databricks]` installs everything needed for deploy
+- Ensure `haute[databricks]` installs everything needed for deploy
 
 ---
 
@@ -757,7 +757,7 @@ input and output. This is not optional — it's the MLflow serving protocol.
 We convert at the outermost boundary only:
 - `pd.DataFrame → pl.from_pandas() → score_graph() → result.to_pandas()`
 - All internal computation remains Polars `LazyFrame` throughout
-- The conversion happens in exactly one place: `RunwayModel.predict()`
+- The conversion happens in exactly one place: `HauteModel.predict()`
 - No pandas is used inside the pipeline graph execution
 
 If MLflow adds native Polars support in the future, this bridge is a
@@ -786,7 +786,7 @@ or care where the model ends up:
 ```
                           target-agnostic
                     ┌─────────────────────────┐
-  runw.toml ──→ DeployConfig ──→ resolve_config()
+  haute.toml ──→ DeployConfig ──→ resolve_config()
                                       │
                     _pruner.py        prune graph
                     _bundler.py       collect artifacts
@@ -801,7 +801,7 @@ or care where the model ends up:
                           target-specific (v1: MLflow only)
                     ┌─────────────────────────┐
                     _mlflow.py        deploy_to_mlflow()
-                    _model.py         RunwayModel (PythonModel)
+                    _model.py         HauteModel (PythonModel)
                     └─────────────────────────┘
 ```
 
@@ -812,7 +812,7 @@ needs to consume `ResolvedDeploy` and do its own packaging.
 
 When a second target arrives, the refactor is:
 
-1. **Add `[deploy] target = "docker"` to `runw.toml`** — the config already
+1. **Add `[deploy] target = "docker"` to `haute.toml`** — the config already
    has a `target` field
 2. **Write `_docker.py`** with a `deploy_to_docker(resolved: ResolvedDeploy) -> DeployResult` function
 3. **Add dispatch in `deploy/__init__.py`:**
@@ -850,7 +850,7 @@ This is a small, safe refactor because the target-agnostic layers don't change.
 | **Deploy diff** | Compare two deployed model versions |
 | **Canary/shadow deploy** | Route % of traffic to new model version |
 | **A/B testing** | Traffic splitting between model versions with metric tracking |
-| **Rollback** | `runw rollback motor-pricing` → revert to previous model version |
+| **Rollback** | `haute rollback motor-pricing` → revert to previous model version |
 | **Deploy hooks** | Pre/post-deploy scripts (e.g., notify Slack, run integration tests) |
 | **Input validation** | Runtime schema validation with clear error messages for missing/wrong-type fields |
 | **Response caching** | LRU cache for repeated identical inputs |
@@ -876,14 +876,14 @@ The deploy module uses only:
 
 | File | Lines (est.) | Purpose |
 |---|---|---|
-| `deploy/__init__.py` | ~30 | Public exports: `deploy()`, `DeployConfig`, `RunwayModel` |
+| `deploy/__init__.py` | ~30 | Public exports: `deploy()`, `DeployConfig`, `HauteModel` |
 | `deploy/_pruner.py` | ~60 | `prune_for_deploy()` — graph pruning |
 | `deploy/_config.py` | ~120 | `DeployConfig`, `DatabricksConfig`, `ResolvedDeploy`, `resolve_config()` |
 | `deploy/_bundler.py` | ~80 | `collect_artifacts()` — discover and collect model/data files |
 | `deploy/_schema.py` | ~80 | `infer_input_schema()`, `infer_output_schema()`, MLflow signature |
 | `deploy/_scorer.py` | ~100 | `score_graph()` — runtime scoring with input injection |
-| `deploy/_model.py` | ~90 | `RunwayModel(PythonModel)` — MLflow wrapper |
+| `deploy/_model.py` | ~90 | `HauteModel(PythonModel)` — MLflow wrapper |
 | `deploy/_validators.py` | ~100 | `validate_deploy()` — pre-deploy checks |
 | `deploy/_mlflow.py` | ~120 | `deploy_to_mlflow()`, `DeployResult`, `get_deploy_status()` |
-| `cli.py` (additions) | ~80 | `runw deploy` + `runw status` commands |
+| `cli.py` (additions) | ~80 | `haute deploy` + `haute status` commands |
 | **Total** | **~860** | |

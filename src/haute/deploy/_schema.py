@@ -65,7 +65,7 @@ def infer_output_schema(
     Returns:
         Dict of column_name → polars dtype string.
     """
-    from runw.deploy._scorer import score_graph
+    from haute.deploy._scorer import score_graph
 
     # Build a 1-row sample from the first input node's data
     node = _find_node(graph, input_node_ids[0])

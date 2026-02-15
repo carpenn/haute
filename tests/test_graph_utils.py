@@ -1,11 +1,11 @@
-"""Tests for runw.graph_utils — shared graph utilities."""
+"""Tests for haute.graph_utils — shared graph utilities."""
 
 from __future__ import annotations
 
 import polars as pl
 import pytest
 
-from runw.graph_utils import (
+from haute.graph_utils import (
     _execute_lazy,
     _prepare_graph,
     _sanitize_func_name,

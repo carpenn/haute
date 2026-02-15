@@ -1,6 +1,6 @@
-# Runway project configuration
-# Created by: runw init
-# Docs: https://github.com/PricingFrontier/runway
+# Haute project configuration
+# Created by: haute init
+# Docs: https://github.com/PricingFrontier/haute
 
 [project]
 name = "my_pipeline"
@@ -18,7 +18,7 @@ endpoint_name = "motor-pricing"           # Databricks serving endpoint name
 # Workspace credentials are read from .env (see .env.example)
 #   DATABRICKS_HOST  = https://adb-xxxxx.xx.azuredatabricks.net
 #   DATABRICKS_TOKEN = dapi...
-experiment_name = "/Shared/runway/motor-pricing"  # MLflow experiment
+experiment_name = "/Shared/haute/motor-pricing"  # MLflow experiment
 catalog = "main"                                   # Unity Catalog
 schema = "pricing"                                 # Unity Catalog schema
 serving_workload_size = "Small"                    # Small | Medium | Large

@@ -1,22 +1,22 @@
-# Runway
+# Haute
 
 **Open-source pricing engine for insurance teams on Databricks.**
 
 Build, visualise, and deploy pricing pipelines as Python code — with a browser-based GUI that stays in sync.
 
 ```bash
-pip install runw
+pip install haute
 ```
 
 ---
 
-## What is Runway?
+## What is Haute?
 
-Runway gives insurance pricing teams a **code-first, GUI-friendly** way to build rating pipelines. Write standard Python with Polars, see it instantly in a visual editor, and deploy to a live API with one command.
+Haute gives insurance pricing teams a **code-first, GUI-friendly** way to build rating pipelines. Write standard Python with Polars, see it instantly in a visual editor, and deploy to a live API with one command.
 
 - **Build** pipelines in code or the GUI — both stay in sync
 - **Run** the same pipeline for 1-row live quotes and million-row batch jobs
-- **Deploy** to Databricks MLflow Model Serving with `runw deploy`
+- **Deploy** to Databricks MLflow Model Serving with `haute deploy`
 
 Python code is always the source of truth. The GUI is a live, editable view.
 
@@ -27,16 +27,16 @@ Python code is always the source of truth. The GUI is a live, editable view.
 ### 1. Install
 
 ```bash
-pip install runw
+pip install haute
 
 # For deployment to Databricks:
-pip install runw[databricks]
+pip install haute[databricks]
 ```
 
 ### 2. Create a project
 
 ```bash
-runw init my_project
+haute init my_project
 cd my_project
 ```
 
@@ -44,7 +44,7 @@ This scaffolds everything you need:
 
 ```
 my_project/
-  runw.toml              ← project & deploy config
+  haute.toml              ← project & deploy config
   .env.example           ← Databricks credentials template
   pipelines/main.py      ← starter pipeline
   data/                  ← your data files
@@ -56,9 +56,9 @@ my_project/
 ```python
 # pipelines/main.py
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("motor_pricing", description="Motor premium calculation")
+pipeline = haute.Pipeline("motor_pricing", description="Motor premium calculation")
 
 
 @pipeline.node(path="data/policies.parquet", deploy_input=True)
@@ -93,13 +93,13 @@ def output(calculate_premium: pl.DataFrame) -> pl.DataFrame:
 ### 4. Run it
 
 ```bash
-runw run
+haute run
 ```
 
 ### 5. Open the GUI
 
 ```bash
-runw serve
+haute serve
 ```
 
 This opens a browser-based visual editor where you can:
@@ -116,7 +116,7 @@ This opens a browser-based visual editor where you can:
 
 ```bash
 cp .env.example .env     # fill in your Databricks credentials
-runw deploy
+haute deploy
 ```
 
 That's it. Your pipeline is now a live API on Databricks Model Serving.
@@ -125,19 +125,19 @@ That's it. Your pipeline is now a live API on Databricks Model Serving.
 
 ## Deployment
 
-Runway deploys your pipeline as an MLflow model on Databricks Model Serving. One command, no DevOps.
+Haute deploys your pipeline as an MLflow model on Databricks Model Serving. One command, no DevOps.
 
 ### How it works
 
 1. **Marks** — you tag one data source as `deploy_input=True` (the live API input) and one node as `output=True` (the API response)
-2. **Prunes** — Runway traces backwards from the output node and deploys only the scoring path. Training data branches, sinks, and exploratory nodes are automatically excluded
+2. **Prunes** — Haute traces backwards from the output node and deploys only the scoring path. Training data branches, sinks, and exploratory nodes are automatically excluded
 3. **Bundles** — model files (`.cbm`, `.pkl`, etc.) and static data are packaged as MLflow artifacts
 4. **Validates** — every JSON file in `test_quotes/` is scored through the pruned pipeline before deployment. If anything fails, deployment is blocked
 5. **Deploys** — the pipeline is logged as an MLflow pyfunc model and registered in the Model Registry
 
 ### Configuration
 
-All deploy settings live in `runw.toml` (committed to git):
+All deploy settings live in `haute.toml` (committed to git):
 
 ```toml
 [project]
@@ -150,7 +150,7 @@ model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
 
 [deploy.databricks]
-experiment_name = "/Shared/runway/motor-pricing"
+experiment_name = "/Shared/haute/motor-pricing"
 catalog = "main"
 schema = "pricing"
 serving_workload_size = "Small"
@@ -182,11 +182,11 @@ Put JSON files in `test_quotes/` with example requests. These are scored before 
 Validate everything without actually deploying:
 
 ```bash
-runw deploy --dry-run
+haute deploy --dry-run
 ```
 
 ```
-  ✓ Loaded config from runw.toml
+  ✓ Loaded config from haute.toml
   ✓ Parsed pipeline (12 nodes, 14 edges)
   ✓ Pruned to output ancestors (5 nodes)
   ✓ Collected 2 artifacts (freq.cbm, sev.cbm)
@@ -214,7 +214,7 @@ curl -X POST https://<workspace>.databricks.net/serving-endpoints/motor-pricing/
 A pipeline is a DAG of decorated Python functions. Each function is a **node** that takes DataFrames in and returns a DataFrame out.
 
 ```python
-pipeline = runw.Pipeline("my_pipeline")
+pipeline = haute.Pipeline("my_pipeline")
 
 @pipeline.node
 def transform(read_data: pl.DataFrame) -> pl.DataFrame:
@@ -357,7 +357,7 @@ Everything round-trips:
 
 ## Pipeline Imports & Helpers
 
-Every pipeline starts with `import polars as pl` and `import runw`. Add extra imports or helper functions via the **Imports** button (⚙) in the GUI toolbar, or write them directly in the `.py` file between the standard imports and the first `@pipeline.node`.
+Every pipeline starts with `import polars as pl` and `import haute`. Add extra imports or helper functions via the **Imports** button (⚙) in the GUI toolbar, or write them directly in the `.py` file between the standard imports and the first `@pipeline.node`.
 
 ```python
 import numpy as np
@@ -375,14 +375,14 @@ def apply_discount(df, col):
 
 | Command | Description |
 |---|---|
-| `runw init <name>` | Scaffold a new project with config, starter pipeline, and test quotes |
-| `runw run [file]` | Execute a pipeline and print results |
-| `runw serve` | Start the visual editor |
-| `runw deploy [file]` | Deploy the pipeline as a live API |
-| `runw deploy --dry-run` | Validate and score test quotes without deploying |
-| `runw status [model]` | Check the status of a deployed model |
+| `haute init <name>` | Scaffold a new project with config, starter pipeline, and test quotes |
+| `haute run [file]` | Execute a pipeline and print results |
+| `haute serve` | Start the visual editor |
+| `haute deploy [file]` | Deploy the pipeline as a live API |
+| `haute deploy --dry-run` | Validate and score test quotes without deploying |
+| `haute status [model]` | Check the status of a deployed model |
 
-### `runw serve` options
+### `haute serve` options
 
 | Flag | Default | Description |
 |---|---|---|
@@ -390,36 +390,36 @@ def apply_discount(df, col):
 | `--port` | `8000` | Backend API port |
 | `--no-browser` | off | Don't auto-open the browser |
 
-### `runw deploy` options
+### `haute deploy` options
 
 | Flag | Description |
 |---|---|
-| `--model-name` | Override model name from `runw.toml` |
+| `--model-name` | Override model name from `haute.toml` |
 | `--dry-run` | Validate and score test quotes without deploying |
 
 ---
 
 ## Project Structure
 
-After `runw init`, your project looks like:
+After `haute init`, your project looks like:
 
 ```
 my_project/
-  runw.toml                ← project & deploy config (committed)
+  haute.toml                ← project & deploy config (committed)
   .env.example             ← Databricks credentials template (committed)
   .env                     ← actual credentials (gitignored)
   .gitignore
   pipelines/
     main.py                ← pipeline code (source of truth)
-    main.runw.json         ← GUI layout state (node positions)
+    main.haute.json         ← GUI layout state (node positions)
   data/                    ← data files (.parquet, .csv)
   test_quotes/             ← JSON payloads for pre-deploy validation
     example.json
 ```
 
 - **`.py`** files are the source of truth — diffable, reviewable, testable
-- **`.runw.json`** files store GUI layout (node positions) — not execution logic
-- **`runw.toml`** is the single config file for project settings and deployment
+- **`.haute.json`** files store GUI layout (node positions) — not execution logic
+- **`haute.toml`** is the single config file for project settings and deployment
 
 ---
 
@@ -429,7 +429,7 @@ my_project/
 2. **Same pipeline, every context** — the same code runs for 1-row live quotes and million-row batch jobs.
 3. **Real Python, real Polars** — no proprietary formula language. Your skills transfer.
 4. **Git-native** — pipelines are plain files. Diff, review, branch, merge.
-5. **One-command deploy** — `runw deploy` handles pruning, bundling, validation, and MLflow registration.
+5. **One-command deploy** — `haute deploy` handles pruning, bundling, validation, and MLflow registration.
 6. **Testable** — every node is a plain function. `pytest` just works.
 
 ---
@@ -437,7 +437,7 @@ my_project/
 ## Requirements
 
 - Python >= 3.11
-- For deployment: `pip install runw[databricks]` (adds MLflow + Databricks SDK)
+- For deployment: `pip install haute[databricks]` (adds MLflow + Databricks SDK)
 - Works on **Linux**, **macOS**, and **Windows**
 
 ---

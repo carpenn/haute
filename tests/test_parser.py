@@ -1,4 +1,4 @@
-"""Tests for runw.parser — .py pipeline file → React Flow graph JSON."""
+"""Tests for haute.parser — .py pipeline file → React Flow graph JSON."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from runw.parser import parse_pipeline_file
+from haute.parser import parse_pipeline_file
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +28,9 @@ class TestParsePipelineFile:
     def test_simple_pipeline(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("test", description="A test pipeline")
+pipeline = haute.Pipeline("test", description="A test pipeline")
 
 
 @pipeline.node(path="data.parquet")
@@ -62,9 +62,9 @@ pipeline.connect("load_data", "transform")
     def test_pipeline_name_extracted(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("my_pricing", description="Motor pricing")
+pipeline = haute.Pipeline("my_pricing", description="Motor pricing")
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
@@ -73,9 +73,9 @@ pipeline = runw.Pipeline("my_pricing", description="Motor pricing")
     def test_edges_from_connect_calls(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("edges_test")
+pipeline = haute.Pipeline("edges_test")
 
 
 @pipeline.node
@@ -98,9 +98,9 @@ pipeline.connect("a", "b")
     def test_implicit_edges_from_param_names(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("implicit")
+pipeline = haute.Pipeline("implicit")
 
 
 @pipeline.node
@@ -120,9 +120,9 @@ def transform(source: pl.DataFrame) -> pl.DataFrame:
     def test_node_config_extracted(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("config_test")
+pipeline = haute.Pipeline("config_test")
 
 
 @pipeline.node(path="data/input.parquet")
@@ -138,9 +138,9 @@ def load_data() -> pl.DataFrame:
     def test_docstring_as_description(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("doc_test")
+pipeline = haute.Pipeline("doc_test")
 
 
 @pipeline.node
@@ -160,13 +160,13 @@ def my_node() -> pl.DataFrame:
     def test_preamble_extracted(self, tmp_path):
         code = '''\
 import polars as pl
-import runw
+import haute
 
 from pathlib import Path
 
 DATA_DIR = Path("data")
 
-pipeline = runw.Pipeline("preamble_test")
+pipeline = haute.Pipeline("preamble_test")
 
 
 @pipeline.node
@@ -183,13 +183,13 @@ class TestParsePipelineRoundtrip:
     """Test that parse → codegen → parse produces consistent results."""
 
     def test_roundtrip_preserves_structure(self, tmp_path):
-        from runw.codegen import graph_to_code
+        from haute.codegen import graph_to_code
 
         code = '''\
 import polars as pl
-import runw
+import haute
 
-pipeline = runw.Pipeline("roundtrip")
+pipeline = haute.Pipeline("roundtrip")
 
 
 @pipeline.node(path="data.parquet")

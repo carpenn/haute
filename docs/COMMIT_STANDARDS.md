@@ -6,11 +6,11 @@ Every commit merged into `main` must satisfy the checks below. Review this list 
 
 ## Design Philosophy
 
-These are the non-negotiable principles that shape every decision in runway. If a commit conflicts with any of these, it needs rethinking.
+These are the non-negotiable principles that shape every decision in hauteay. If a commit conflicts with any of these, it needs rethinking.
 
 ### Code is the source of truth
 
-The `.py` file is always canonical. The GUI is a live, editable *view* of that code — never the other way around. Layout metadata lives in a sidecar `.runw.json`, not in the Python. A pipeline must always be runnable with `python my_pipeline.py` — no GUI required.
+The `.py` file is always canonical. The GUI is a live, editable *view* of that code — never the other way around. Layout metadata lives in a sidecar `.haute.json`, not in the Python. A pipeline must always be runnable with `python my_pipeline.py` — no GUI required.
 
 ### Same pipeline, every context
 
@@ -34,7 +34,7 @@ The parser accepts messy, hand-edited Python — regex fallback, partial decorat
 
 ### Thin orchestration, not a platform
 
-Runway is a client library that leans on Databricks, MLflow, and Polars. It does not reimplement model training, data storage, or serving infrastructure. New integrations should wrap existing tools, not replace them.
+Haute is a client library that leans on Databricks, MLflow, and Polars. It does not reimplement model training, data storage, or serving infrastructure. New integrations should wrap existing tools, not replace them.
 
 ### Low floor, high ceiling
 
@@ -78,7 +78,7 @@ Every output value must be traceable back through the graph to its inputs, showi
 
 ## 5. Linter Clean
 
-- `ruff check src/runw/` must pass with zero errors before merge.
+- `ruff check src/haute/` must pass with zero errors before merge.
 - Frontend must have no TypeScript errors (`tsc --noEmit`).
 - New ruff rules are not silenced without a comment explaining why.
 
@@ -248,7 +248,7 @@ This is a brand new application. Do not add compatibility shims, version checks,
 - **No migration scripts** — if the data model changes, update the code. There is no production data to migrate yet.
 - **No deprecation warnings** — if something is wrong, remove it. Do not add `warnings.warn` with a future removal date.
 
-The only exception is the public PyPI package interface (`runw` CLI and core APIs). Prioritize clean, simple code over compatibility gymnastics.
+The only exception is the public PyPI package interface (`haute` CLI and core APIs). Prioritize clean, simple code over compatibility gymnastics.
 
 ---
 
@@ -271,7 +271,7 @@ Engineering Standards
 - [ ] No duplicated logic
 - [ ] All functions have type annotations
 - [ ] API endpoints use Pydantic request/response models
-- [ ] `ruff check src/runw/` passes with zero errors
+- [ ] `ruff check src/haute/` passes with zero errors
 - [ ] No unused imports, variables, or dead code
 - [ ] Docs updated if behaviour changed
 - [ ] No new heavy dependencies in core

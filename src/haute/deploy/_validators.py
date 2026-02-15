@@ -8,8 +8,8 @@ from pathlib import Path
 
 import polars as pl
 
-from runw.deploy._config import ResolvedDeploy
-from runw.deploy._scorer import score_graph
+from haute.deploy._config import ResolvedDeploy
+from haute.deploy._scorer import score_graph
 
 
 def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
