@@ -1,0 +1,144 @@
+"""Pre-deploy validation — catch errors before they reach production."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+import polars as pl
+
+from runw.deploy._config import ResolvedDeploy
+from runw.deploy._scorer import score_graph
+
+
+def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
+    """Run all pre-deploy validations.
+
+    Returns a list of error strings. An empty list means the deployment
+    is safe to proceed.
+    """
+    errors: list[str] = []
+
+    # 1. Output node exists in pruned graph
+    output_ids = {n["id"] for n in resolved.pruned_graph.get("nodes", [])}
+    if resolved.output_node_id not in output_ids:
+        errors.append(
+            f"Output node '{resolved.output_node_id}' not in pruned graph."
+        )
+
+    # 2. Input nodes exist in pruned graph
+    for nid in resolved.input_node_ids:
+        if nid not in output_ids:
+            errors.append(f"Input node '{nid}' not in pruned graph.")
+
+    # 3. Input nodes are sources (no incoming edges)
+    targets_with_incoming = {
+        e["target"] for e in resolved.pruned_graph.get("edges", [])
+    }
+    for nid in resolved.input_node_ids:
+        if nid in targets_with_incoming:
+            errors.append(
+                f"Input node '{nid}' has incoming edges — it should be a source node."
+            )
+
+    # 4. All artifacts exist on disk
+    for name, path in resolved.artifacts.items():
+        if not path.is_file():
+            errors.append(f"Artifact '{name}' not found: {path}")
+
+    # 5. No unresolved nodes (e.g. Databricks source stubs)
+    for node in resolved.pruned_graph.get("nodes", []):
+        data = node.get("data", {})
+        config = data.get("config", {})
+        if (
+            data.get("nodeType") == "dataSource"
+            and config.get("sourceType") == "databricks"
+            and node["id"] not in set(resolved.input_node_ids)
+        ):
+            errors.append(
+                f"Node '{node['id']}' is a Databricks source (not yet implemented) "
+                "and is not a deploy input. Cannot deploy."
+            )
+
+    # 6. Input schema is non-empty
+    if not resolved.input_schema:
+        errors.append("Input schema is empty — could not infer columns from input data.")
+
+    # 7. Output schema is non-empty
+    if not resolved.output_schema:
+        errors.append("Output schema is empty — dry-run produced no output columns.")
+
+    return errors
+
+
+def score_test_quotes(
+    resolved: ResolvedDeploy,
+    test_quotes_dir: Path | None = None,
+) -> list[dict[str, str | int | float]]:
+    """Score every JSON file in the test_quotes directory.
+
+    Each JSON file should contain a list of dicts (quote objects).
+
+    Args:
+        resolved: Fully resolved deployment config.
+        test_quotes_dir: Directory containing ``.json`` files.
+            Falls back to ``resolved.config.test_quotes_dir``.
+
+    Returns:
+        List of result dicts with keys: file, rows, status, time_ms, error.
+
+    Raises:
+        Nothing — errors are captured in the result dicts.
+    """
+    tq_dir = test_quotes_dir or resolved.config.test_quotes_dir
+    if tq_dir is None or not tq_dir.is_dir():
+        return []
+
+    json_files = sorted(tq_dir.glob("*.json"))
+    if not json_files:
+        return []
+
+    results: list[dict[str, str | int | float]] = []
+
+    for jf in json_files:
+        t0 = time.perf_counter()
+        try:
+            raw = json.loads(jf.read_text())
+            if not isinstance(raw, list):
+                raise ValueError("Expected a JSON array of quote objects")
+
+            # Strip metadata fields (prefixed with _)
+            cleaned = [
+                {k: v for k, v in row.items() if not k.startswith("_")}
+                for row in raw
+            ]
+
+            input_df = pl.DataFrame(cleaned)
+
+            output = score_graph(
+                graph=resolved.pruned_graph,
+                input_df=input_df,
+                input_node_ids=resolved.input_node_ids,
+                output_node_id=resolved.output_node_id,
+            )
+
+            elapsed = (time.perf_counter() - t0) * 1000
+            results.append({
+                "file": jf.name,
+                "rows": len(output),
+                "status": "ok",
+                "time_ms": round(elapsed, 1),
+                "error": "",
+            })
+        except Exception as exc:
+            elapsed = (time.perf_counter() - t0) * 1000
+            results.append({
+                "file": jf.name,
+                "rows": 0,
+                "status": "error",
+                "time_ms": round(elapsed, 1),
+                "error": str(exc),
+            })
+
+    return results

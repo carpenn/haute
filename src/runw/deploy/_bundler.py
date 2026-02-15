@@ -1,0 +1,88 @@
+"""Artifact discovery and collection for deployment."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def collect_artifacts(
+    pruned_graph: dict,
+    input_node_ids: list[str],
+    pipeline_dir: Path,
+) -> dict[str, Path]:
+    """Discover and collect all artifacts needed for deployment.
+
+    Walks the pruned graph and finds files that must be bundled:
+
+    - ``externalFile`` nodes: model files (``.cbm``, ``.pkl``, etc.)
+    - ``dataSource`` nodes that are NOT deploy inputs: static data files
+
+    Args:
+        pruned_graph: Pruned React Flow graph JSON.
+        input_node_ids: Source node IDs that receive live input (excluded).
+        pipeline_dir: Directory containing the pipeline file (for resolving
+            relative paths).
+
+    Returns:
+        Dict of artifact_name → absolute_path.
+
+    Raises:
+        FileNotFoundError: If a referenced artifact file does not exist.
+    """
+    input_set = set(input_node_ids)
+    artifacts: dict[str, Path] = {}
+
+    for node in pruned_graph.get("nodes", []):
+        nid = node["id"]
+        data = node.get("data", {})
+        node_type = data.get("nodeType", "")
+        config = data.get("config", {})
+
+        if node_type == "externalFile":
+            raw_path = config.get("path", "")
+            if not raw_path:
+                continue
+            abs_path = _resolve_path(raw_path, pipeline_dir)
+            artifact_name = _artifact_name(nid, abs_path)
+            _check_exists(abs_path, nid, "externalFile")
+            artifacts[artifact_name] = abs_path
+
+        elif node_type == "dataSource" and nid not in input_set:
+            raw_path = config.get("path", "")
+            if not raw_path:
+                continue
+            abs_path = _resolve_path(raw_path, pipeline_dir)
+            artifact_name = _artifact_name(nid, abs_path)
+            _check_exists(abs_path, nid, "dataSource (static)")
+            artifacts[artifact_name] = abs_path
+
+    return artifacts
+
+
+def _resolve_path(raw_path: str, pipeline_dir: Path) -> Path:
+    """Resolve a possibly-relative path against the pipeline directory."""
+    p = Path(raw_path)
+    if p.is_absolute():
+        return p
+    # Try relative to CWD first (matches runtime behavior), then pipeline dir
+    cwd_path = Path.cwd() / p
+    if cwd_path.exists():
+        return cwd_path.resolve()
+    pipe_path = pipeline_dir / p
+    if pipe_path.exists():
+        return pipe_path.resolve()
+    # Return CWD-relative (will be caught by _check_exists)
+    return cwd_path.resolve()
+
+
+def _artifact_name(node_id: str, path: Path) -> str:
+    """Generate a unique artifact name from node ID and filename."""
+    return f"{node_id}__{path.name}"
+
+
+def _check_exists(path: Path, node_id: str, node_type: str) -> None:
+    """Raise FileNotFoundError if the artifact file doesn't exist."""
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Artifact not found for {node_type} node '{node_id}': {path}"
+        )

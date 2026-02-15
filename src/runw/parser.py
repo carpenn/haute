@@ -344,6 +344,8 @@ def _build_node_config(
             config["table"] = decorator_kwargs["table"]
         else:
             config["sourceType"] = "flat_file"
+        if decorator_kwargs.get("deploy_input"):
+            config["deploy_input"] = True
     elif node_type == "modelScore":
         config["model_uri"] = decorator_kwargs.get("model_uri", "")
     elif node_type == "ratingStep":

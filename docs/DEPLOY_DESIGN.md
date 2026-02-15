@@ -255,14 +255,14 @@ curl -X POST https://<workspace>.databricks.net/serving-endpoints/motor-pricing/
 src/runw/
   deploy/
     __init__.py             # Public API: deploy(), DeployConfig, RunwayModel
-    _config.py              # DeployConfig dataclass, auto-detection, YAML loading
+    _config.py              # DeployConfig dataclass, auto-detection, runw.toml loading
     _pruner.py              # Graph pruning to output ancestors
     _bundler.py             # Artifact discovery and collection
     _scorer.py              # score_graph() — the runtime scoring engine for deployed models
     _model.py               # RunwayModel(mlflow.pyfunc.PythonModel)
     _schema.py              # Input/output schema inference
     _validators.py          # Pre-deploy validation (dry-run, artifact checks)
-    _targets.py             # DeployTarget protocol + MLflow implementation
+    _mlflow.py              # deploy_to_mlflow(), DeployResult, get_deploy_status()
 ```
 
 ### 4.2 Graph pruning (`_pruner.py`)
@@ -289,30 +289,62 @@ def prune_for_deploy(
 
 ### 4.3 Deploy configuration (`_config.py`)
 
+User-provided config (from `runw.toml` + CLI overrides) is strictly separated
+from computed state (pruned graph, schemas, artifacts). This avoids mixing
+input and output in the same dataclass (commit standards §3 Single Responsibility).
+
 ```python
 @dataclass
+class DatabricksConfig:
+    """Typed Databricks-specific settings from [deploy.databricks] in runw.toml."""
+    experiment_name: str = "/Shared/runway/default"
+    catalog: str = "main"
+    schema: str = "pricing"
+    serving_workload_size: str = "Small"
+    serving_scale_to_zero: bool = True
+
+
+@dataclass
 class DeployConfig:
-    """Configuration for deploying a pipeline."""
-
+    """User-provided deployment configuration (from runw.toml + CLI)."""
     pipeline_file: Path
-    model_name: str                         # MLflow model registry name
-    input_node: str | None = None           # Auto-detected if None
-    output_node: str | None = None          # Auto-detected if None
-    output_fields: list[str] | None = None  # Limit output columns
-    target: str = "mlflow"                  # "mlflow" | "databricks" (future)
-    target_config: dict = field(default_factory=dict)
+    model_name: str                                   # MLflow registered model name
+    endpoint_name: str | None = None                  # Databricks serving endpoint
+    output_fields: list[str] | None = None            # Limit output columns
+    test_quotes_dir: Path | None = None               # Directory of test JSON files
+    databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
 
-    # Auto-populated during resolve()
-    pruned_graph: dict = field(default_factory=dict, repr=False)
-    artifacts: dict[str, Path] = field(default_factory=dict)
-    input_schema: dict[str, str] = field(default_factory=dict)
-    output_schema: dict[str, str] = field(default_factory=dict)
+    @classmethod
+    def from_toml(cls, path: Path) -> DeployConfig:
+        """Load from runw.toml, merging [project] and [deploy] sections."""
+
+    def override(self, **cli_kwargs: str | None) -> DeployConfig:
+        """Return a copy with non-None CLI flags applied over TOML values."""
+
+
+@dataclass
+class ResolvedDeploy:
+    """Computed state after resolving a DeployConfig against a parsed pipeline.
+
+    Created by resolve_config() — never constructed directly.
+    """
+    config: DeployConfig
+    pruned_graph: dict[str, list[dict[str, str]]]     # React Flow graph JSON
+    input_node_ids: list[str]                          # deploy_input=True sources
+    output_node_id: str                                # output=True node
+    artifacts: dict[str, Path]                         # artifact_name → absolute_path
+    input_schema: dict[str, str]                       # column_name → polars dtype
+    output_schema: dict[str, str]                      # column_name → polars dtype
+
+
+def resolve_config(config: DeployConfig) -> ResolvedDeploy:
+    """Parse pipeline, prune graph, detect I/O nodes, collect artifacts, infer schemas."""
 ```
 
 **Auto-detection rules:**
-- `output_node`: Find the node with `config.output=True` or `nodeType="output"`. If exactly one exists, use it. Otherwise, require explicit specification.
-- `input_node`: After pruning, find all source nodes (`nodeType="dataSource"`). If exactly one exists, use it as the live input. If multiple exist, require explicit specification (others become static artifacts).
-- `model_name`: Default to `pipeline.name` (sanitized for MLflow).
+- **`output_node`**: Find the node with `config.output=True` or `nodeType="output"`. If exactly one exists, use it. Otherwise, error with a clear message.
+- **`input_node`**: After pruning, find source nodes with `config.deploy_input=True`. If none are marked, fall back to the single source node in the pruned graph. If multiple unmarked sources exist, error.
+- **`model_name`**: From `runw.toml [deploy].model_name`, falling back to `pipeline.name` (sanitized for MLflow).
 
 ### 4.4 Artifact bundling (`_bundler.py`)
 
@@ -519,36 +551,44 @@ Written at deploy time, bundled as an MLflow artifact:
 }
 ```
 
-### 4.9 Deploy targets (`_targets.py`)
+### 4.9 MLflow deploy (`_mlflow.py`)
+
+v1 has exactly one deployment target: MLflow (Databricks-backed). Per commit
+standards §"Over-abstraction": no `Protocol`, no base class, no factory — just
+a plain function. When a second target is needed, *that's* when we extract the
+common interface.
 
 ```python
-class DeployTarget(Protocol):
-    """Protocol for deployment targets."""
+@dataclass
+class DeployResult:
+    """Returned by deploy_to_mlflow()."""
+    model_name: str
+    model_version: int
+    model_uri: str               # e.g. "models:/motor-pricing/3"
+    endpoint_url: str | None     # Databricks serving URL, if created
+    manifest_path: Path
 
-    def deploy(self, config: DeployConfig) -> DeployResult: ...
-    def status(self, model_name: str) -> dict: ...
+def deploy_to_mlflow(config: DeployConfig) -> DeployResult:
+    """Deploy a resolved DeployConfig to MLflow + Databricks Model Serving.
 
+    Steps:
+        1. Build deployment manifest JSON
+        2. Log RunwayModel as mlflow.pyfunc with artifacts + signature
+        3. Register model version in MLflow Model Registry
+        4. (If Databricks) Create or update the serving endpoint
+        5. Return DeployResult with model URI and endpoint URL
+    """
 
-class MLflowTarget:
-    """Deploy to MLflow Model Registry (local or Databricks-backed)."""
-
-    def deploy(self, config: DeployConfig) -> DeployResult:
-        """
-        1. Create deployment manifest
-        2. Log RunwayModel as mlflow.pyfunc with artifacts
-        3. Register in MLflow Model Registry
-        4. Return model URI
-        """
-
-    def status(self, model_name: str) -> dict:
-        """Check model versions and serving status."""
-
-
-# Future targets (not implemented in v1):
-# class DatabricksServingTarget — creates/updates a Model Serving endpoint
-# class DockerTarget — builds a Docker image with the model
-# class FastAPITarget — generates a standalone FastAPI app
+def get_deploy_status(model_name: str) -> dict[str, str | int]:
+    """Query MLflow Model Registry for current model versions and serving status."""
 ```
+
+**Why no abstraction layer:** The pruner, bundler, schema inference, scorer,
+validator, and manifest are all target-agnostic already. Only the final
+"log model + create endpoint" step is MLflow-specific. When a second target
+arrives (e.g. Docker, SageMaker), the refactor is small: extract that one
+function into a dispatch, not rebuild a class hierarchy. See §8 for the
+extensibility plan.
 
 ### 4.10 Validation (`_validators.py`)
 
@@ -574,15 +614,22 @@ def validate_deploy(config: DeployConfig) -> list[str]:
 
 ```python
 @cli.command()
-@click.argument("pipeline_file")
-@click.option("--model-name", default=None, help="MLflow model name (default: pipeline name)")
-@click.option("--input-node", default=None, help="Source node for live input (auto-detected)")
-@click.option("--output-node", default=None, help="Output node (auto-detected)")
-@click.option("--target", default="mlflow", type=click.Choice(["mlflow"]), help="Deploy target")
-@click.option("--dry-run", is_flag=True, help="Validate and dry-run without deploying")
-def deploy(pipeline_file, model_name, input_node, output_node, target, dry_run):
-    """Deploy a pipeline as a live scoring API."""
+@click.argument("pipeline_file", required=False)
+@click.option("--model-name", default=None, help="Override model name from runw.toml")
+@click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying")
+def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> None:
+    """Deploy a pipeline as a live scoring API.
+
+    Reads config from runw.toml + credentials from .env.
+    Pipeline file, model name, and target are all optional —
+    defaults come from [project] and [deploy] in runw.toml.
+    """
 ```
+
+**Resolution order for settings:**
+1. CLI flags (highest priority)
+2. `runw.toml` `[deploy]` section
+3. Auto-detection from the pipeline (input/output nodes)
 
 ---
 
@@ -634,7 +681,7 @@ def deploy(pipeline_file, model_name, input_node, output_node, target, dry_run):
 ### Step 2: `_config.py` — Deploy configuration
 - `DeployConfig` dataclass with auto-detection logic
 - `resolve()` method that parses pipeline, prunes graph, detects I/O nodes
-- YAML sidecar loading (`*.deploy.yaml`)
+- `runw.toml` loading + `.env` credential loading
 - **Tests:** auto-detection on `my_pipeline`, explicit overrides
 
 ### Step 3: `_bundler.py` — Artifact collection
@@ -664,9 +711,9 @@ def deploy(pipeline_file, model_name, input_node, output_node, target, dry_run):
 - Clear error messages for each failure mode
 - **Tests:** intentionally break things and verify error messages
 
-### Step 8: `_targets.py` — MLflow deploy target
-- `MLflowTarget.deploy()`: create manifest, log model, register
-- `MLflowTarget.status()`: query model versions
+### Step 8: `_mlflow.py` — MLflow deploy function
+- `deploy_to_mlflow(resolved)`: create manifest, log model, register, create endpoint
+- `get_deploy_status(model_name)`: query model versions and serving status
 - **Tests:** end-to-end deploy to local MLflow tracking server
 
 ### Step 9: CLI integration
@@ -701,9 +748,20 @@ This means **dev and prod run the exact same code**. The only difference is wher
 
 ### 7.3 pandas bridge for MLflow compatibility
 
-MLflow's `PythonModel.predict()` receives/returns pandas DataFrames. We convert at the boundary:
+> **Documented exception to "Polars-native, never convert to pandas"**
+> (commit standards — Design Philosophy §"Polars-native, lazy by default")
+
+MLflow's `PythonModel.predict()` contract **requires** pandas DataFrames for
+input and output. This is not optional — it's the MLflow serving protocol.
+
+We convert at the outermost boundary only:
 - `pd.DataFrame → pl.from_pandas() → score_graph() → result.to_pandas()`
-- This is a thin bridge — all internal computation is Polars
+- All internal computation remains Polars `LazyFrame` throughout
+- The conversion happens in exactly one place: `RunwayModel.predict()`
+- No pandas is used inside the pipeline graph execution
+
+If MLflow adds native Polars support in the future, this bridge is a
+single-line removal.
 
 ### 7.4 Manifest-driven (not code-driven) deployment
 
@@ -718,22 +776,85 @@ This makes deployments **inspectable, reproducible, and debuggable**. You can lo
 
 ---
 
-## 8. Future Extensions (Not in v1)
+## 8. Extensibility — Adding Future Deploy Targets
+
+### 8.1 What's already target-agnostic
+
+The deploy pipeline is deliberately layered so that most modules don't know
+or care where the model ends up:
+
+```
+                          target-agnostic
+                    ┌─────────────────────────┐
+  runw.toml ──→ DeployConfig ──→ resolve_config()
+                                      │
+                    _pruner.py        prune graph
+                    _bundler.py       collect artifacts
+                    _schema.py        infer schemas
+                    _validators.py    run test quotes
+                    _scorer.py        dry-run scoring
+                                      │
+                                      ▼
+                              ResolvedDeploy
+                    └─────────────────────────┘
+                                      │
+                          target-specific (v1: MLflow only)
+                    ┌─────────────────────────┐
+                    _mlflow.py        deploy_to_mlflow()
+                    _model.py         RunwayModel (PythonModel)
+                    └─────────────────────────┘
+```
+
+The `ResolvedDeploy` dataclass is the clean handoff point. A new target only
+needs to consume `ResolvedDeploy` and do its own packaging.
+
+### 8.2 How to add a second target (when needed)
+
+When a second target arrives, the refactor is:
+
+1. **Add `[deploy] target = "docker"` to `runw.toml`** — the config already
+   has a `target` field
+2. **Write `_docker.py`** with a `deploy_to_docker(resolved: ResolvedDeploy) -> DeployResult` function
+3. **Add dispatch in `deploy/__init__.py`:**
+   ```python
+   def deploy(config: DeployConfig) -> DeployResult:
+       resolved = resolve_config(config)
+       if config.target == "databricks":
+           return deploy_to_mlflow(resolved)
+       elif config.target == "docker":
+           return deploy_to_docker(resolved)
+       raise ValueError(f"Unknown target: {config.target}")
+   ```
+4. **Extract a `DeployTarget` Protocol *only if* three targets exist** — at that
+   point the pattern is proven and the interface is obvious from the concrete
+   implementations
+
+This is a small, safe refactor because the target-agnostic layers don't change.
+
+### 8.3 Planned future targets
+
+| Target | `[deploy] target =` | What it produces | When |
+|---|---|---|---|
+| **Databricks MLflow** | `"databricks"` | MLflow model + serving endpoint | **v1 (now)** |
+| **Docker** | `"docker"` | Dockerfile + FastAPI app + `docker-compose.yml` | v2 |
+| **Databricks batch job** | `"databricks-batch"` | Databricks Job running `score_graph()` on a schedule | v2 |
+| **AWS SageMaker** | `"sagemaker"` | SageMaker endpoint via `sagemaker-sdk` | v3 |
+| **GCP Vertex AI** | `"vertex"` | Vertex endpoint | v3 |
+| **Standalone FastAPI** | `"fastapi"` | Self-contained Python package with FastAPI server | v3 |
+
+### 8.4 Other future features (not in v1)
 
 | Feature | Description |
 |---|---|
-| **Databricks Model Serving target** | Auto-create/update serving endpoint via `databricks-sdk` |
-| **Docker target** | Generate a Dockerfile + FastAPI wrapper for standalone deployment |
-| **Canary/shadow deploy** | Route % of traffic to new model version |
 | **Deploy from GUI** | "Deploy" button in the React Flow UI |
 | **Deploy diff** | Compare two deployed model versions |
+| **Canary/shadow deploy** | Route % of traffic to new model version |
 | **A/B testing** | Traffic splitting between model versions with metric tracking |
 | **Rollback** | `runw rollback motor-pricing` → revert to previous model version |
 | **Deploy hooks** | Pre/post-deploy scripts (e.g., notify Slack, run integration tests) |
-| **Batch scoring job** | `runw deploy --mode batch` → Databricks job instead of serving endpoint |
 | **Input validation** | Runtime schema validation with clear error messages for missing/wrong-type fields |
 | **Response caching** | LRU cache for repeated identical inputs |
-| **Monitoring integration** | Log predictions to MLflow for drift detection |
+| **Monitoring** | Log predictions to MLflow for drift detection |
 
 ---
 
@@ -757,12 +878,12 @@ The deploy module uses only:
 |---|---|---|
 | `deploy/__init__.py` | ~30 | Public exports: `deploy()`, `DeployConfig`, `RunwayModel` |
 | `deploy/_pruner.py` | ~60 | `prune_for_deploy()` — graph pruning |
-| `deploy/_config.py` | ~120 | `DeployConfig` dataclass, auto-detection, YAML loading |
+| `deploy/_config.py` | ~120 | `DeployConfig`, `DatabricksConfig`, `ResolvedDeploy`, `resolve_config()` |
 | `deploy/_bundler.py` | ~80 | `collect_artifacts()` — discover and collect model/data files |
 | `deploy/_schema.py` | ~80 | `infer_input_schema()`, `infer_output_schema()`, MLflow signature |
 | `deploy/_scorer.py` | ~100 | `score_graph()` — runtime scoring with input injection |
 | `deploy/_model.py` | ~90 | `RunwayModel(PythonModel)` — MLflow wrapper |
 | `deploy/_validators.py` | ~100 | `validate_deploy()` — pre-deploy checks |
-| `deploy/_targets.py` | ~120 | `DeployTarget` protocol + `MLflowTarget` implementation |
+| `deploy/_mlflow.py` | ~120 | `deploy_to_mlflow()`, `DeployResult`, `get_deploy_status()` |
 | `cli.py` (additions) | ~80 | `runw deploy` + `runw status` commands |
 | **Total** | **~860** | |

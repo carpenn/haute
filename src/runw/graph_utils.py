@@ -109,6 +109,33 @@ def _prepare_graph(
     return node_map, order, parents_of, id_to_name
 
 
+def load_external_object(path: str, file_type: str, model_class: str = "classifier") -> object:
+    """Load an external file (model, JSON, pickle, joblib) and return the object.
+
+    Shared by the development executor and the deploy scoring engine.
+    """
+    if file_type == "json":
+        import json as _json
+        with open(path) as f:
+            return _json.load(f)
+    elif file_type == "joblib":
+        import joblib
+        return joblib.load(path)
+    elif file_type == "catboost":
+        if model_class == "regressor":
+            from catboost import CatBoostRegressor
+            m = CatBoostRegressor()
+        else:
+            from catboost import CatBoostClassifier
+            m = CatBoostClassifier()
+        m.load_model(path)
+        return m
+    else:  # pickle
+        import pickle
+        with open(path, "rb") as f:
+            return pickle.load(f)
+
+
 def _execute_lazy(
     graph: dict,
     build_node_fn: Callable,

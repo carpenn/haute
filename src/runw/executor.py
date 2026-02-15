@@ -16,7 +16,7 @@ from typing import Any
 
 import polars as pl
 
-from runw.graph_utils import _execute_lazy, _Frame, _sanitize_func_name
+from runw.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
 
 
 def _exec_user_code(
@@ -124,32 +124,9 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         model_class = config.get("modelClass", "classifier")
         _src_names = list(source_names)
 
-        def _load_external(p: str, ft: str, mc: str = "classifier") -> Any:
-            """Load an external file and return the object."""
-            if ft == "json":
-                import json as _json
-                with open(p) as f:
-                    return _json.load(f)
-            elif ft == "joblib":
-                import joblib
-                return joblib.load(p)
-            elif ft == "catboost":
-                if mc == "regressor":
-                    from catboost import CatBoostRegressor
-                    m = CatBoostRegressor()
-                else:
-                    from catboost import CatBoostClassifier
-                    m = CatBoostClassifier()
-                m.load_model(p)
-                return m
-            else:  # pickle
-                import pickle
-                with open(p, "rb") as f:
-                    return pickle.load(f)
-
         if code:
             def external_fn(*dfs: _Frame) -> _Frame:
-                obj = _load_external(path, file_type, model_class)
+                obj = load_external_object(path, file_type, model_class)
                 return _exec_user_code(code, _src_names, dfs, extra_ns={"obj": obj})
             return func_name, external_fn, False
         else:

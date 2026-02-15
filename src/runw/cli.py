@@ -164,15 +164,15 @@ DATABRICKS_TOKEN=your_databricks_token_here
     )
 
     click.echo(f"Created project '{name}/'")
-    click.echo(f"  runw.toml            — project & deploy config")
-    click.echo(f"  .env.example         — Databricks credentials template")
-    click.echo(f"  pipelines/main.py    — starter pipeline")
-    click.echo(f"  data/                — put your data files here")
-    click.echo(f"  test_quotes/         — example JSON payloads for testing")
-    click.echo(f"\nNext steps:")
+    click.echo("  runw.toml            — project & deploy config")
+    click.echo("  .env.example         — Databricks credentials template")
+    click.echo("  pipelines/main.py    — starter pipeline")
+    click.echo("  data/                — put your data files here")
+    click.echo("  test_quotes/         — example JSON payloads for testing")
+    click.echo("\nNext steps:")
     click.echo(f"  cd {name}")
-    click.echo(f"  cp .env.example .env   # fill in Databricks credentials")
-    click.echo(f"  runw serve")
+    click.echo("  cp .env.example .env   # fill in Databricks credentials")
+    click.echo("  runw serve")
 
 
 @cli.command()
@@ -322,3 +322,155 @@ def serve(host: str, port: int, no_browser: bool) -> None:
             host=host,
             port=port,
         )
+
+
+@cli.command()
+@click.argument("pipeline_file", required=False)
+@click.option("--model-name", default=None, help="Override model name from runw.toml.")
+@click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying.")
+def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> None:
+    """Deploy a pipeline as a live scoring API.
+
+    Reads config from runw.toml + credentials from .env.
+    Pipeline file, model name, and target are all optional —
+    defaults come from [project] and [deploy] in runw.toml.
+    """
+    from runw.deploy._config import DeployConfig, resolve_config
+    from runw.deploy._validators import score_test_quotes, validate_deploy
+
+    # 1. Load config
+    toml_path = Path.cwd() / "runw.toml"
+    if toml_path.exists():
+        config = DeployConfig.from_toml(toml_path)
+        click.echo("  ✓ Loaded config from runw.toml")
+    elif pipeline_file:
+        config = DeployConfig(
+            pipeline_file=Path(pipeline_file),
+            model_name=model_name or Path(pipeline_file).stem,
+        )
+    else:
+        click.echo(
+            "Error: No runw.toml found and no pipeline file specified.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    # Apply CLI overrides
+    overrides: dict[str, str | Path | None] = {}
+    if pipeline_file:
+        overrides["pipeline_file"] = Path(pipeline_file)
+    if model_name:
+        overrides["model_name"] = model_name
+    config = config.override(**overrides)
+
+    click.echo(f"\nDeploying pipeline: {config.model_name}")
+    click.echo(f"  Pipeline: {config.pipeline_file}")
+
+    # 2. Resolve (parse, prune, detect I/O, collect artifacts, infer schemas)
+    try:
+        resolved = resolve_config(config)
+    except Exception as e:
+        click.echo(f"  ✗ Resolution failed: {e}", err=True)
+        raise SystemExit(1)
+
+    n_kept = len(resolved.pruned_graph.get("nodes", []))
+    n_removed = len(resolved.removed_node_ids)
+    click.echo(f"  ✓ Parsed pipeline ({n_kept + n_removed} nodes, "
+               f"{len(resolved.pruned_graph.get('edges', []))} edges)")
+    click.echo(f"  ✓ Pruned to output ancestors ({n_kept} nodes)")
+    if n_removed:
+        click.echo(f"  ✓ Skipped {n_removed} nodes not in scoring path "
+                   f"({', '.join(resolved.removed_node_ids)})")
+    click.echo(f"  ✓ Collected {len(resolved.artifacts)} artifacts")
+    click.echo(f"  ✓ Input node(s): {', '.join(resolved.input_node_ids)}")
+    click.echo(f"  ✓ Output node: {resolved.output_node_id}")
+    click.echo(f"  ✓ Inferred input schema ({len(resolved.input_schema)} columns)")
+    click.echo(f"  ✓ Inferred output schema ({len(resolved.output_schema)} columns)")
+
+    # 3. Validate
+    errors = validate_deploy(resolved)
+    if errors:
+        click.echo("\n  ✗ Validation failed:", err=True)
+        for err in errors:
+            click.echo(f"    - {err}", err=True)
+        raise SystemExit(1)
+    click.echo("  ✓ Validation passed")
+
+    # 4. Score test quotes
+    tq_results = score_test_quotes(resolved)
+    if tq_results:
+        all_ok = True
+        for r in tq_results:
+            status_icon = "✓" if r["status"] == "ok" else "✗"
+            click.echo(
+                f"  {status_icon} Test quotes: {r['file']:<30s} "
+                f"{r['rows']:>3} rows  {r['status']}  ({r['time_ms']}ms)"
+            )
+            if r["status"] != "ok":
+                click.echo(f"      Error: {r['error']}", err=True)
+                all_ok = False
+        if not all_ok:
+            click.echo("\n  ✗ Test quote scoring failed. Fix errors before deploying.", err=True)
+            raise SystemExit(1)
+
+    if dry_run:
+        click.echo("\n  Dry run complete — no model was deployed.")
+        return
+
+    # 5. Deploy to MLflow
+    try:
+        from runw.deploy._mlflow import deploy_to_mlflow
+
+        result = deploy_to_mlflow(resolved)
+        click.echo(f"  ✓ Logged MLflow model: {result.model_name} v{result.model_version}")
+        click.echo(f"  ✓ Model URI: {result.model_uri}")
+        if result.endpoint_url:
+            click.echo(f"\nEndpoint ready:\n  POST {result.endpoint_url}")
+        else:
+            click.echo("\nDeploy complete. Serve locally with:")
+            click.echo(f'  mlflow models serve -m "{result.model_uri}" -p 5001')
+    except ImportError:
+        click.echo(
+            "\n  ✗ mlflow is not installed. Install with: pip install runw[databricks]",
+            err=True,
+        )
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(f"\n  ✗ Deployment failed: {e}", err=True)
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.argument("model_name", required=False)
+def status(model_name: str | None) -> None:
+    """Check the status of a deployed model."""
+    # Load model name from runw.toml if not specified
+    if model_name is None:
+        toml_path = Path.cwd() / "runw.toml"
+        if toml_path.exists():
+            from runw.deploy._config import DeployConfig
+            config = DeployConfig.from_toml(toml_path)
+            model_name = config.model_name
+        else:
+            click.echo("Error: No model name specified and no runw.toml found.", err=True)
+            raise SystemExit(1)
+
+    try:
+        from runw.deploy._mlflow import get_deploy_status
+        info = get_deploy_status(model_name)
+    except ImportError:
+        click.echo(
+            "Error: mlflow is not installed. Install with: pip install runw[databricks]",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if info.get("status") == "not_found":
+        click.echo(f"Model '{model_name}' not found in MLflow Model Registry.")
+        return
+
+    click.echo(f"Model: {info['model_name']}")
+    click.echo(f"  Latest version: {info['latest_version']}")
+    click.echo(f"  Stage: {info.get('latest_stage', 'N/A')}")
+    click.echo(f"  Status: {info['status']}")
+    click.echo(f"  Run ID: {info.get('run_id', 'N/A')}")
