@@ -118,7 +118,7 @@ A `.env.example` template is created by `runw init`:
 ```bash
 # .env.example — copy to .env and fill in
 DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
-DATABRICKS_TOKEN=dapi0123456789abcdef0123456789abcdef
+DATABRICKS_TOKEN=your_databricks_token_here
 ```
 
 Setup is one command:

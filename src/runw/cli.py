@@ -141,7 +141,7 @@ dir = "test_quotes"
 DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
 
 # Personal access token (Databricks > User Settings > Developer > Access Tokens)
-DATABRICKS_TOKEN=dapi0123456789abcdef0123456789abcdef
+DATABRICKS_TOKEN=your_databricks_token_here
 '''
     (project_dir / ".env.example").write_text(env_example)
 
