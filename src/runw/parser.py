@@ -26,6 +26,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
         return "externalFile"
     if "sink" in decorator_kwargs:
         return "dataSink"
+    if decorator_kwargs.get("output"):
+        return "output"
     if "model_uri" in decorator_kwargs:
         return "modelScore"
     if "table" in decorator_kwargs and "key" in decorator_kwargs:
@@ -352,8 +354,10 @@ def _build_node_config(
         if config["fileType"] == "catboost":
             config["modelClass"] = decorator_kwargs.get("model_class", "classifier")
         config["code"] = _extract_external_user_code(body, param_names) if body else ""
+    elif node_type == "output":
+        config["fields"] = decorator_kwargs.get("fields", [])
     else:
-        # transform / output
+        # transform
         config["code"] = _extract_user_code(body, param_names) if body else ""
     return config
 
@@ -492,12 +496,22 @@ def _find_function_blocks(source: str) -> list[dict]:
     return blocks
 
 
-def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, str]:
+_RE_DECORATOR_BOOL_KWARG = re.compile(
+    r'(\w+)\s*=\s*(True|False)',
+)
+
+
+def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, Any]:
     """Extract keyword arguments from a decorator using regex."""
     # Strip the @pipeline.node( ... ) wrapper
     if "(" in decorator_text:
         inner = decorator_text.split("(", 1)[1].rstrip(")")
-        return dict(_RE_DECORATOR_KWARG.findall(inner))
+        result: dict[str, Any] = dict(_RE_DECORATOR_KWARG.findall(inner))
+        # Also capture boolean kwargs (e.g. output=True)
+        for key, val in _RE_DECORATOR_BOOL_KWARG.findall(inner):
+            if key not in result:
+                result[key] = val == "True"
+        return result
     return {}
 
 

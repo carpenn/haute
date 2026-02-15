@@ -267,6 +267,10 @@ function FlowEditor() {
           preview: result.preview || [],
           error: result.error || null,
         }))
+        // Cache columns on node data for instant access by output nodes
+        if (result.columns) {
+          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns } } : n))
+        }
       })
       .catch((err) => {
         setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "error", error: err.message }))
@@ -310,6 +314,12 @@ function FlowEditor() {
         setNodeStatuses(statuses)
         setRunStatus("Done")
         setTimeout(() => setRunStatus(null), 3000)
+
+        // Cache columns on all nodes from run results
+        setNodes((nds) => nds.map((n) => {
+          const r = results[n.id]
+          return r?.columns ? { ...n, data: { ...n.data, _columns: r.columns } } : n
+        }))
 
         // If a node is selected, update its preview with run results
         if (selectedNode && results[selectedNode.id]) {

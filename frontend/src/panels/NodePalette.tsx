@@ -41,7 +41,7 @@ const nodeTemplates = [
     description: "Final price / prediction",
     icon: CircleDot,
     accent: "#f43f5e",
-    defaultConfig: { columns: [] },
+    defaultConfig: { fields: [] },
   },
   {
     type: "dataSink",

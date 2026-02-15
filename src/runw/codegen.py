@@ -227,7 +227,26 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
             params=params, first=first,
         )
 
-    # transform / output — use source node names as params
+    elif node_type == "output":
+        fields = config.get("fields", []) or []
+        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        first = source_names[0] if source_names else "df"
+        dec_parts = ["output=True"]
+        if fields:
+            dec_parts.append(f"fields={fields!r}")
+            select_args = ", ".join(f'"{f}"' for f in fields)
+            body = f"    return {first}.select({select_args})"
+        else:
+            body = f"    return {first}"
+        dec = ", ".join(dec_parts)
+        return (
+            f"@pipeline.node({dec})\n"
+            f"def {func_name}({params}) -> pl.DataFrame:\n"
+            f'    """{description}"""\n'
+            f"{body}\n"
+        )
+
+    # transform — use source node names as params
     code = config.get("code", "").strip()
     params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
     body = _wrap_user_code(code, source_names)

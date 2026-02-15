@@ -159,7 +159,17 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
                 return dfs[0] if dfs else pl.LazyFrame()
             return func_name, external_passthrough, False
 
-    elif node_type in ("transform", "modelScore", "ratingStep", "output"):
+    elif node_type == "output":
+        fields = config.get("fields", []) or []
+
+        def output_fn(*dfs: _Frame) -> _Frame:
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            if fields:
+                lf = lf.select(fields)
+            return lf
+        return func_name, output_fn, False
+
+    elif node_type in ("transform", "modelScore", "ratingStep"):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
 

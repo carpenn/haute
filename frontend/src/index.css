@@ -54,6 +54,13 @@ html, body, #root {
 .react-flow__node {
   transition: filter 0.2s ease !important;
 }
+.react-flow__node-output {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;
