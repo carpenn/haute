@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
+import { sanitizeName } from "../utils/sanitizeName"
 
 type FileItem = {
   name: string
@@ -1019,13 +1020,6 @@ function OutputConfig({
       )}
     </div>
   )
-}
-
-function sanitizeName(label: string): string {
-  let name = label.trim().replace(/[\s-]/g, "_")
-  name = name.replace(/[^a-zA-Z0-9_]/g, "")
-  if (name && /^[0-9]/.test(name)) name = `node_${name}`
-  return name || "unnamed_node"
 }
 
 export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge }: NodePanelProps) {

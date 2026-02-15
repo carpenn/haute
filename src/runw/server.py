@@ -12,6 +12,23 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from runw.schemas import (
+    BrowseFilesResponse,
+    FileItem,
+    PipelineSummary,
+    PreviewNodeRequest,
+    PreviewNodeResponse,
+    RunPipelineRequest,
+    RunPipelineResponse,
+    SavePipelineRequest,
+    SavePipelineResponse,
+    SchemaResponse,
+    SinkRequest,
+    SinkResponse,
+    TraceRequest,
+    TraceResponse,
+)
+
 STATIC_DIR = Path(__file__).parent / "static"
 logger = logging.getLogger("uvicorn.error")
 
@@ -98,8 +115,8 @@ def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
         try:
             data = _json.loads(sidecar.read_text())
             return data.get("positions", {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Corrupt sidecar %s: %s", sidecar.name, e)
     return {}
 
 
@@ -132,42 +149,45 @@ def _parse_pipeline_to_graph(py_path: Path) -> dict:
 # API routes
 # ---------------------------------------------------------------------------
 
-@app.get("/api/pipelines")
-async def list_pipelines():
+@app.get("/api/pipelines", response_model=list[PipelineSummary])
+async def list_pipelines() -> list[PipelineSummary]:
     """List all discovered pipelines."""
     from runw.parser import parse_pipeline_file
 
     files = _discover_pipelines()
-    result = []
+    result: list[PipelineSummary] = []
     for f in files:
         try:
             graph = parse_pipeline_file(f)
-            result.append({
-                "name": graph.get("pipeline_name", f.stem),
-                "description": graph.get("pipeline_description", ""),
-                "file": str(f.relative_to(Path.cwd())),
-                "node_count": len(graph.get("nodes", [])),
-            })
+            result.append(PipelineSummary(
+                name=graph.get("pipeline_name", f.stem),
+                description=graph.get("pipeline_description", ""),
+                file=str(f.relative_to(Path.cwd())),
+                node_count=len(graph.get("nodes", [])),
+            ))
         except Exception as e:
-            result.append({"name": f.stem, "file": str(f), "error": str(e)})
+            result.append(PipelineSummary(
+                name=f.stem, file=str(f), error=str(e),
+            ))
     return result
 
 
 @app.get("/api/pipeline/{name}")
-async def get_pipeline(name: str):
+async def get_pipeline(name: str) -> dict:
     """Return the graph for a specific pipeline."""
     for f in _discover_pipelines():
         try:
             graph = _parse_pipeline_to_graph(f)
             if graph.get("pipeline_name") == name:
                 return graph
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", f.name, e)
             continue
     raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
 
 
 @app.get("/api/pipeline")
-async def get_first_pipeline():
+async def get_first_pipeline() -> dict:
     """Return the graph for the active pipeline, or an empty canvas.
 
     Python file is the source of truth. Sidecar .runw.json provides positions.
@@ -184,7 +204,8 @@ async def get_first_pipeline():
                 graph = _parse_pipeline_to_graph(f)
                 if graph.get("nodes"):
                     return graph
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", f.name, e)
                 continue
 
     # Fall back to examples/
@@ -197,94 +218,85 @@ async def get_first_pipeline():
                 graph = _parse_pipeline_to_graph(f)
                 if graph.get("nodes"):
                     return graph
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", f.name, e)
                 continue
 
     return {"nodes": [], "edges": []}
 
 
-@app.post("/api/pipeline/save")
-async def save_pipeline(body: dict):
+@app.post("/api/pipeline/save", response_model=SavePipelineResponse)
+async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     """Save a graph: .py (source of truth) + .runw.json (positions)."""
     from runw.codegen import graph_to_code
 
-    name = body.get("name", "my_pipeline")
-    description = body.get("description", "")
-    graph = body.get("graph", {})
-    preamble = body.get("preamble", "")
+    graph = body.graph.model_dump()
 
     cwd = Path.cwd()
     pipelines_dir = cwd / "pipelines"
     pipelines_dir.mkdir(exist_ok=True)
 
-    safe_name = name.lower().replace(" ", "_").replace("-", "_")
+    safe_name = body.name.lower().replace(" ", "_").replace("-", "_")
 
     # Write .py (source of truth — runnable code)
     py_path = pipelines_dir / f"{safe_name}.py"
-    code = graph_to_code(graph, pipeline_name=name, description=description, preamble=preamble)
+    code = graph_to_code(
+        graph, pipeline_name=body.name,
+        description=body.description, preamble=body.preamble,
+    )
     _mark_self_write()
     py_path.write_text(code)
 
     # Write sidecar .runw.json (node positions for the GUI)
     _save_sidecar(py_path, graph)
 
-    return {
-        "status": "saved",
-        "file": str(py_path.relative_to(cwd)),
-        "pipeline_name": name,
-    }
+    return SavePipelineResponse(
+        file=str(py_path.relative_to(cwd)),
+        pipeline_name=body.name,
+    )
 
 
-@app.post("/api/pipeline/run")
-async def run_pipeline(body: dict):
+@app.post("/api/pipeline/run", response_model=RunPipelineResponse)
+async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
     """Execute the full pipeline graph and return per-node results."""
     from runw.executor import execute_graph
 
-    graph = body.get("graph", {})
+    graph = body.graph.model_dump()
     if not graph.get("nodes"):
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
         results = execute_graph(graph)
-        return {"status": "ok", "results": results}
+        return RunPipelineResponse(status="ok", results=results)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/pipeline/trace")
-async def trace_row(body: dict):
-    """Trace a single row through the pipeline, returning per-node snapshots.
-
-    Request body:
-        graph: React Flow graph JSON
-        rowIndex: 0-indexed row to trace (default 0)
-        targetNodeId: node to trace from (default: last node)
-        column: optional column name to filter the trace to
-    """
+@app.post("/api/pipeline/trace", response_model=TraceResponse)
+async def trace_row(body: TraceRequest) -> TraceResponse:
+    """Trace a single row through the pipeline, returning per-node snapshots."""
     from runw.trace import execute_trace, trace_result_to_dict
 
-    graph = body.get("graph", {})
-    row_index = body.get("rowIndex", 0)
-    target_node_id = body.get("targetNodeId")
-    column = body.get("column")
-
+    graph = body.graph.model_dump()
     if not graph.get("nodes"):
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
         result = execute_trace(
             graph,
-            row_index=int(row_index),
-            target_node_id=target_node_id,
-            column=column,
+            row_index=body.rowIndex,
+            target_node_id=body.targetNodeId,
+            column=body.column,
         )
-        return {"status": "ok", "trace": trace_result_to_dict(result)}
+        return TraceResponse(
+            status="ok", trace=trace_result_to_dict(result),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/pipeline/preview")
-async def preview_node(body: dict):
+@app.post("/api/pipeline/preview", response_model=PreviewNodeResponse)
+async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     """Run pipeline up to a specific node and return its output.
 
     Accepts an optional ``rowLimit`` (default 1000) that is pushed into
@@ -292,53 +304,54 @@ async def preview_node(body: dict):
     """
     from runw.executor import execute_graph
 
-    graph = body.get("graph", {})
-    node_id = body.get("nodeId")
-    row_limit = body.get("rowLimit", 1000)
-
-    if not node_id:
-        raise HTTPException(status_code=400, detail="nodeId is required")
+    graph = body.graph.model_dump()
     if not graph.get("nodes"):
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        results = execute_graph(graph, target_node_id=node_id, row_limit=int(row_limit))
-        node_result = results.get(node_id)
+        results = execute_graph(
+            graph, target_node_id=body.nodeId,
+            row_limit=body.rowLimit,
+        )
+        node_result = results.get(body.nodeId)
         if not node_result:
-            raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found in results")
-        return {"nodeId": node_id, **node_result}
+            raise HTTPException(
+                status_code=404,
+                detail=f"Node '{body.nodeId}' not found in results",
+            )
+        return PreviewNodeResponse(nodeId=body.nodeId, **node_result)
     except HTTPException:
         raise
     except Exception as e:
-        return {"nodeId": node_id, "status": "error", "error": str(e),
-                "row_count": 0, "column_count": 0, "columns": [], "preview": []}
+        return PreviewNodeResponse(
+            nodeId=body.nodeId, status="error", error=str(e),
+        )
 
 
-@app.post("/api/pipeline/sink")
-async def execute_sink_node(body: dict):
+@app.post("/api/pipeline/sink", response_model=SinkResponse)
+async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     """Execute the pipeline up to a sink node and write output to disk.
 
     Only called on explicit user action (Write button), not during normal run/preview.
     """
     from runw.executor import execute_sink
 
-    graph = body.get("graph", {})
-    node_id = body.get("nodeId")
-
-    if not node_id:
-        raise HTTPException(status_code=400, detail="nodeId is required")
+    graph = body.graph.model_dump()
     if not graph.get("nodes"):
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        result = execute_sink(graph, sink_node_id=node_id)
-        return result
+        result = execute_sink(graph, sink_node_id=body.nodeId)
+        return SinkResponse(**result)
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return SinkResponse(status="error", message=str(e))
 
 
-@app.get("/api/files")
-async def browse_files(dir: str = ".", extensions: str = ".parquet,.csv,.json,.xml"):
+@app.get("/api/files", response_model=BrowseFilesResponse)
+async def browse_files(
+    dir: str = ".",
+    extensions: str = ".parquet,.csv,.json,.xml",
+) -> BrowseFilesResponse:
     """Browse files on disk for the file picker UI."""
     base = Path.cwd()
     target = (base / dir).resolve()
@@ -349,27 +362,27 @@ async def browse_files(dir: str = ".", extensions: str = ".parquet,.csv,.json,.x
         raise HTTPException(status_code=404, detail=f"Directory not found: {dir}")
 
     ext_list = [e.strip() for e in extensions.split(",")]
-    items = []
+    items: list[FileItem] = []
 
     for entry in sorted(target.iterdir()):
         rel = str(entry.relative_to(base))
         if entry.name.startswith("."):
             continue
         if entry.is_dir():
-            items.append({"name": entry.name, "path": rel, "type": "directory"})
+            items.append(FileItem(name=entry.name, path=rel, type="directory"))
         elif any(entry.name.endswith(ext) for ext in ext_list):
-            items.append({
-                "name": entry.name,
-                "path": rel,
-                "type": "file",
-                "size": entry.stat().st_size,
-            })
+            items.append(FileItem(
+                name=entry.name, path=rel,
+                type="file", size=entry.stat().st_size,
+            ))
 
-    return {"dir": str(target.relative_to(base)), "items": items}
+    return BrowseFilesResponse(
+        dir=str(target.relative_to(base)), items=items,
+    )
 
 
-@app.get("/api/schema")
-async def get_schema(path: str):
+@app.get("/api/schema", response_model=SchemaResponse)
+async def get_schema(path: str) -> SchemaResponse:
     """Read a data file and return its schema + preview."""
     import polars as pl
 
@@ -389,22 +402,23 @@ async def get_schema(path: str):
         elif target.suffix == ".json":
             df = pl.read_json(target)
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {target.suffix}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {target.suffix}",
+            )
 
         columns = [
             {"name": col, "dtype": str(df[col].dtype)}
             for col in df.columns
         ]
 
-        preview = df.head(5).to_dicts()
-
-        return {
-            "path": path,
-            "columns": columns,
-            "row_count": len(df),
-            "column_count": len(df.columns),
-            "preview": preview,
-        }
+        return SchemaResponse(
+            path=path,
+            columns=columns,
+            row_count=len(df),
+            column_count=len(df.columns),
+            preview=df.head(5).to_dicts(),
+        )
     except HTTPException:
         raise
     except Exception as e:

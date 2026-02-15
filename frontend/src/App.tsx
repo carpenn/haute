@@ -63,9 +63,6 @@ function makePreviewData(
   }
 }
 
-let nodeIdCounter = 0
-let toastCounter = 0
-
 const elk = new ELK()
 
 async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise<Node[]> {
@@ -121,11 +118,13 @@ function FlowEditor() {
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const preambleRef = useRef("")
+  const nodeIdCounter = useRef(0)
+  const toastCounter = useRef(0)
   const { screenToFlowPosition, fitView } = useReactFlow()
 
   const addToast = useCallback((type: ToastMessage["type"], text: string) => {
-    toastCounter += 1
-    setToasts((prev) => [...prev, { id: String(toastCounter), type, text }])
+    toastCounter.current += 1
+    setToasts((prev) => [...prev, { id: String(toastCounter.current), type, text }])
   }, [])
 
   const dismissToast = useCallback((id: string) => {
@@ -178,7 +177,7 @@ function FlowEditor() {
               setPreamble(g.preamble || "")
               preambleRef.current = g.preamble || ""
             }
-            nodeIdCounter = newNodes.length
+            nodeIdCounter.current = newNodes.length
             setSyncBanner(null)
             addToast("info", "Pipeline updated from file")
             setTimeout(() => fitView({ padding: 0.8 }), 100)
@@ -223,7 +222,7 @@ function FlowEditor() {
           setPreamble(data.preamble || "")
           preambleRef.current = data.preamble || ""
         }
-        nodeIdCounter = (data.nodes || []).length
+        nodeIdCounter.current = (data.nodes || []).length
         lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [], preamble: data.preamble || "" })
         setLoading(false)
       })
@@ -424,8 +423,8 @@ function FlowEditor() {
     const { nodes: n } = graphRef.current
     const original = n.find((node) => node.id === id)
     if (!original) return
-    nodeIdCounter += 1
-    const newId = `${original.type}_${nodeIdCounter}`
+    nodeIdCounter.current += 1
+    const newId = `${original.type}_${nodeIdCounter.current}`
     const newNode: Node = {
       ...original,
       id: newId,
@@ -493,15 +492,15 @@ function FlowEditor() {
         y: event.clientY,
       })
 
-      nodeIdCounter += 1
-      const id = `${type}_${nodeIdCounter}`
+      nodeIdCounter.current += 1
+      const id = `${type}_${nodeIdCounter.current}`
 
       const newNode: Node = {
         id,
         type,
         position,
         data: {
-          label: `${labelMap[type] || "Node"} ${nodeIdCounter}`,
+          label: `${labelMap[type] || "Node"} ${nodeIdCounter.current}`,
           description: "",
           nodeType: type,
           config,

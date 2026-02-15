@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from runw.graph_utils import _sanitize_func_name, topo_sort_ids  # noqa: F401
+from runw.graph_utils import _sanitize_func_name, topo_sort_ids
+
+
+def _build_params(source_names: list[str]) -> str:
+    """Build the function parameter string from upstream node names."""
+    if source_names:
+        return ", ".join(f"{s}: pl.DataFrame" for s in source_names)
+    return "df: pl.DataFrame"
+
 
 # Template fragments for each node type
 _SOURCE_FLAT_FILE = '''\
@@ -196,7 +204,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         path = config.get("path", "model.pkl")
         file_type = config.get("fileType", "pickle")
         code = config.get("code", "").strip()
-        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        params = _build_params(source_names)
         body = _wrap_external_code(code)
         if file_type == "catboost":
             model_class = config.get("modelClass", "classifier")
@@ -219,7 +227,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
     elif node_type == "dataSink":
         path = config.get("path", "output.parquet")
         fmt = config.get("format", "parquet")
-        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        params = _build_params(source_names)
         first = source_names[0] if source_names else "df"
         template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
         return template.format(
@@ -229,7 +237,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
 
     elif node_type == "output":
         fields = config.get("fields", []) or []
-        params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+        params = _build_params(source_names)
         first = source_names[0] if source_names else "df"
         dec_parts = ["output=True"]
         if fields:
@@ -248,7 +256,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
 
     # transform — use source node names as params
     code = config.get("code", "").strip()
-    params = ", ".join(f"{s}: pl.DataFrame" for s in source_names) if source_names else "df: pl.DataFrame"
+    params = _build_params(source_names)
     body = _wrap_user_code(code, source_names)
 
     return (

@@ -70,7 +70,7 @@ class Pipeline:
         self._node_map: dict[str, Node] = {}
         self._edges: list[tuple[str, str]] = []
 
-    def node(self, fn: Callable | None = None, **config):
+    def node(self, fn: Callable | None = None, **config) -> Callable:
         """Decorator to register a function as a pipeline node.
 
         Can be used bare or with config:

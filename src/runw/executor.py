@@ -263,7 +263,8 @@ def execute_sink(graph: dict, sink_node_id: str) -> dict:
     if not sink_node:
         raise ValueError(f"Sink node '{sink_node_id}' not found")
 
-    config = sink_node.get("data", {}).get("config", {})
+    data = sink_node["data"]
+    config = data.get("config", {})
     path = config.get("path", "")
     fmt = config.get("format", "parquet")
 

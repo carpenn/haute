@@ -103,8 +103,13 @@ def output(df: pl.DataFrame) -> pl.DataFrame:
 @cli.command()
 @click.argument("pipeline_file", required=False)
 def run(pipeline_file: str | None) -> None:
-    """Execute a pipeline and print the result."""
-    import importlib.util
+    """Execute a pipeline and print the result.
+
+    Uses the same parse → execute_graph path as the GUI so both
+    produce identical results from the same .py file.
+    """
+    from runw.executor import execute_graph
+    from runw.parser import parse_pipeline_file
 
     if pipeline_file is None:
         # Auto-discover
@@ -126,32 +131,55 @@ def run(pipeline_file: str | None) -> None:
     filepath = Path(pipeline_file)
     click.echo(f"Running pipeline: {filepath}")
 
-    spec = importlib.util.spec_from_file_location(filepath.stem, filepath)
-    if spec is None or spec.loader is None:
-        click.echo(f"Error: Cannot load {filepath}", err=True)
+    if not filepath.exists():
+        click.echo(f"Error: File not found: {filepath}", err=True)
         raise SystemExit(1)
 
-    import sys as _sys
-    module = importlib.util.module_from_spec(spec)
-    _sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-
-    from runw.pipeline import Pipeline
-
-    pipeline_obj = None
-    for attr in dir(module):
-        obj = getattr(module, attr)
-        if isinstance(obj, Pipeline):
-            pipeline_obj = obj
-            break
-
-    if pipeline_obj is None:
-        click.echo("Error: No Pipeline instance found in file.", err=True)
+    try:
+        graph = parse_pipeline_file(filepath)
+    except Exception as e:
+        click.echo(f"Error parsing pipeline: {e}", err=True)
         raise SystemExit(1)
 
-    result = pipeline_obj.run()
-    click.echo(f"\nResult ({len(result)} rows):")
-    click.echo(result)
+    nodes = graph.get("nodes", [])
+    if not nodes:
+        click.echo("Error: No pipeline nodes found in file.", err=True)
+        raise SystemExit(1)
+
+    name = graph.get("pipeline_name", filepath.stem)
+    click.echo(f"Pipeline: {name} ({len(nodes)} nodes)")
+
+    try:
+        results = execute_graph(graph)
+    except Exception as e:
+        click.echo(f"Error executing pipeline: {e}", err=True)
+        raise SystemExit(1)
+
+    # Report per-node results
+    errors = 0
+    for nid, res in results.items():
+        status = res.get("status", "unknown")
+        if status == "ok":
+            rows = res.get("row_count", 0)
+            cols = res.get("column_count", 0)
+            click.echo(f"  ✓ {nid}: {rows:,} rows × {cols} cols")
+        else:
+            errors += 1
+            click.echo(f"  ✗ {nid}: {res.get('error', 'unknown error')}")
+
+    if errors:
+        click.echo(f"\n{errors} node(s) failed.", err=True)
+        raise SystemExit(1)
+
+    # Print the last node's preview
+    last_nid = list(results.keys())[-1]
+    last = results[last_nid]
+    if last.get("preview"):
+        import polars as pl
+
+        df = pl.DataFrame(last["preview"])
+        click.echo(f"\nOutput — {last_nid} ({last['row_count']:,} rows):")
+        click.echo(df)
 
 
 @cli.command()

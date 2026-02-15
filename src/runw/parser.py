@@ -117,11 +117,16 @@ def _dedent(code: str) -> str:
     code_lines = code.splitlines()
     if not code_lines:
         return code
-    indents = [len(l) - len(l.lstrip()) for l in code_lines if l.strip()]
+    indents = [
+        len(line) - len(line.lstrip())
+        for line in code_lines if line.strip()
+    ]
     if not indents:
         return code
     m = min(indents)
-    return "\n".join(l[m:] if len(l) >= m else l for l in code_lines)
+    return "\n".join(
+        line[m:] if len(line) >= m else line for line in code_lines
+    )
 
 
 def _extract_user_code(body_source: str, param_names: list[str]) -> str:
@@ -384,7 +389,11 @@ def _build_edges(
             if param in node_names and param != node_info["func_name"]:
                 pair = (param, node_info["func_name"])
                 if pair not in explicit_edges:
-                    edges.append({"id": f"e_{pair[0]}_{pair[1]}", "source": pair[0], "target": pair[1]})
+                    edges.append({
+                        "id": f"e_{pair[0]}_{pair[1]}",
+                        "source": pair[0],
+                        "target": pair[1],
+                    })
 
     # Fallback: if still no edges, infer linear chain from definition order
     if not edges and len(raw_nodes) > 1:
@@ -537,7 +546,12 @@ def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) ->
         node_type = _infer_node_type(decorator_kwargs, n_params)
 
         # Try to parse the function individually to get the docstring
-        func_source = f"{block['decorator_text']}\ndef {func_name}({', '.join(param_names)}):\n{block['body_text']}"
+        params_str = ", ".join(param_names)
+        func_source = (
+            f"{block['decorator_text']}\n"
+            f"def {func_name}({params_str}):\n"
+            f"{block['body_text']}"
+        )
         description = ""
         has_syntax_error = False
 
@@ -607,7 +621,11 @@ def _extract_preamble(source: str) -> str:
     pipeline_start_idx = len(lines)
     for i in range(last_standard_idx + 1, len(lines)):
         stripped = lines[i].strip()
-        if stripped.startswith("pipeline") and ("runw.Pipeline" in stripped or "= runw.Pipeline" in stripped):
+        is_pipeline_def = (
+            stripped.startswith("pipeline")
+            and ("runw.Pipeline" in stripped or "= runw.Pipeline" in stripped)
+        )
+        if is_pipeline_def:
             pipeline_start_idx = i
             break
         if stripped.startswith("@pipeline.node"):
