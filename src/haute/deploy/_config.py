@@ -51,7 +51,7 @@ class DeployConfig:
         db_raw = deploy.get("databricks", {})
         tq = data.get("test_quotes", {})
 
-        pipeline_file = Path(project.get("pipeline", "pipelines/main.py"))
+        pipeline_file = Path(project.get("pipeline", "main.py"))
         model_name = deploy.get("model_name", project.get("name", pipeline_file.stem))
         endpoint_name = deploy.get("endpoint_name")
 
@@ -135,7 +135,8 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
     from haute.parser import parse_pipeline_file
 
     # Load .env for Databricks credentials
-    project_root = config.pipeline_file.parent.parent
+    # Pipeline is in project root by default; handle both root and subdir cases
+    project_root = config.pipeline_file.resolve().parent
     _load_env(project_root)
 
     # Parse the pipeline

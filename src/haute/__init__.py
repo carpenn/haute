@@ -1,6 +1,11 @@
 """Haute — Open-source pricing engine for insurance teams on Databricks."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("haute")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"
 
 from haute.pipeline import Pipeline
 

@@ -45,7 +45,7 @@ This scaffolds everything you need in the current directory:
 ```
 haute.toml              ← project & deploy config
 .env.example           ← Databricks credentials template
-pipelines/main.py      ← starter pipeline
+main.py                ← starter pipeline
 data/                  ← your data files
 test_quotes/           ← JSON payloads for pre-deploy testing
 ```
@@ -53,7 +53,7 @@ test_quotes/           ← JSON payloads for pre-deploy testing
 ### 3. Write a pipeline
 
 ```python
-# pipelines/main.py
+# main.py
 import polars as pl
 import haute
 
@@ -141,7 +141,7 @@ All deploy settings live in `haute.toml` (committed to git):
 ```toml
 [project]
 name = "motor-pricing"
-pipeline = "pipelines/my_pipeline.py"
+pipeline = "main.py"
 
 [deploy]
 target = "databricks"
@@ -407,9 +407,8 @@ haute.toml                ← project & deploy config (committed)
 .env.example             ← Databricks credentials template (committed)
 .env                     ← actual credentials (gitignored)
 .gitignore
-pipelines/
-  main.py                ← pipeline code (source of truth)
-  main.haute.json         ← GUI layout state (node positions)
+main.py                  ← pipeline code (source of truth)
+main.haute.json           ← GUI layout state (node positions)
 data/                    ← data files (.parquet, .csv)
 test_quotes/             ← JSON payloads for pre-deploy validation
   example.json

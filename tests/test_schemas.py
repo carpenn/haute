@@ -90,7 +90,7 @@ class TestGraphModels:
 class TestRequestModels:
     def test_save_pipeline_defaults(self):
         r = SavePipelineRequest(graph=Graph())
-        assert r.name == "my_pipeline"
+        assert r.name == "main"
         assert r.description == ""
         assert r.preamble == ""
 
@@ -119,7 +119,7 @@ class TestRequestModels:
 
 class TestResponseModels:
     def test_save_pipeline_response(self):
-        r = SavePipelineResponse(file="pipelines/test.py", pipeline_name="test")
+        r = SavePipelineResponse(file="test.py", pipeline_name="test")
         assert r.status == "saved"
 
     def test_run_pipeline_response_with_results(self):

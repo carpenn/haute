@@ -67,7 +67,7 @@ my_project/
   haute.toml              ← project & deploy config (committed to git)
   .env.example           ← Databricks credentials template (committed)
   .env                   ← actual secrets (gitignored)
-  pipelines/main.py      ← starter pipeline
+  main.py               ← starter pipeline
   data/                  ← input data files
   test_quotes/           ← JSON payloads for pre-deploy testing
     example.json
@@ -82,7 +82,7 @@ Created by `haute init`, committed to git, shared by the team.
 ```toml
 [project]
 name = "my_pipeline"
-pipeline = "pipelines/my_pipeline.py"
+pipeline = "main.py"
 
 [deploy]
 target = "databricks"
@@ -506,7 +506,7 @@ Written at deploy time, bundled as an MLflow artifact:
 {
     "haute_version": "0.1.0",
     "pipeline_name": "my_pipeline",
-    "pipeline_file": "pipelines/my_pipeline.py",
+    "pipeline_file": "main.py",
     "created_at": "2026-02-15T16:06:00Z",
     "created_by": "ralph",
 
@@ -535,8 +535,8 @@ Written at deploy time, bundled as an MLflow artifact:
     },
 
     "artifacts": {
-        "freq_model": "pipelines/models/freq.cbm",
-        "sev_model": "pipelines/models/sev.cbm"
+        "freq_model": "models/freq.cbm",
+        "sev_model": "models/sev.cbm"
     },
 
     "graph": { "...pruned graph JSON..." },

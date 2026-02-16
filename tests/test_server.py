@@ -17,10 +17,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def pipeline_dir(tmp_path: Path) -> Path:
-    """Create a temporary project with a pipelines/ directory and sample data."""
-    pipelines = tmp_path / "pipelines"
-    pipelines.mkdir()
-
+    """Create a temporary project with a root-level pipeline and sample data."""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]}).write_parquet(data_dir / "input.parquet")
@@ -46,7 +43,7 @@ def transform(source: pl.DataFrame) -> pl.DataFrame:
 
 pipeline.connect("source", "transform")
 '''
-    (pipelines / "test_pipeline.py").write_text(code)
+    (tmp_path / "test_pipeline.py").write_text(code)
     return tmp_path
 
 
@@ -127,7 +124,7 @@ class TestGetPipelineByName:
 class TestRunPipeline:
     def _graph_payload(self, pipeline_dir: Path) -> dict:
         from haute.parser import parse_pipeline_file
-        graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
         return {"graph": graph}
 
     def test_run_returns_results(self, client: TestClient, pipeline_dir: Path):
@@ -154,7 +151,7 @@ class TestRunPipeline:
 class TestPreviewNode:
     def test_preview_returns_node_data(self, client: TestClient, pipeline_dir: Path):
         from haute.parser import parse_pipeline_file
-        graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
         node_id = graph["nodes"][0]["id"]
 
         resp = client.post("/api/pipeline/preview", json={
@@ -181,7 +178,7 @@ class TestPreviewNode:
 class TestTraceRow:
     def test_trace_returns_steps(self, client: TestClient, pipeline_dir: Path):
         from haute.parser import parse_pipeline_file
-        graph = parse_pipeline_file(pipeline_dir / "pipelines" / "test_pipeline.py")
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
 
         resp = client.post("/api/pipeline/trace", json={
             "graph": graph, "rowIndex": 0,
@@ -274,9 +271,9 @@ class TestBrowseFiles:
         assert resp.status_code == 200
         data = resp.json()
         assert "items" in data
-        # Should find at least the data/ and pipelines/ dirs
+        # Should find at least the data/ dir
         names = [item["name"] for item in data["items"]]
-        assert "data" in names or "pipelines" in names
+        assert "data" in names
 
     def test_browse_data_dir(self, client: TestClient, pipeline_dir: Path):
         resp = client.get("/api/files", params={"dir": "data", "extensions": ".parquet"})

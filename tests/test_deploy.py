@@ -18,7 +18,7 @@ from haute.parser import parse_pipeline_file
 # Fixtures
 # ---------------------------------------------------------------------------
 
-PIPELINE_FILE = Path("pipelines/my_pipeline.py")
+PIPELINE_FILE = Path("main.py")
 
 
 @pytest.fixture()
@@ -143,7 +143,7 @@ class TestScorer:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        sample = pl.read_parquet("pipelines/data/policies.parquet", n_rows=1)
+        sample = pl.read_parquet("data/policies.parquet", n_rows=1)
         result = score_graph(
             graph=pruned,
             input_df=sample,
@@ -162,7 +162,7 @@ class TestScorer:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        sample = pl.read_parquet("pipelines/data/policies.parquet", n_rows=5)
+        sample = pl.read_parquet("data/policies.parquet", n_rows=5)
         result = score_graph(
             graph=pruned,
             input_df=sample,
@@ -293,7 +293,7 @@ class TestConfig:
 
         config = DeployConfig.from_toml(Path("haute.toml"))
         assert config.model_name == "motor-pricing"
-        assert config.pipeline_file == Path("pipelines/my_pipeline.py")
+        assert config.pipeline_file == Path("main.py")
         assert config.databricks.experiment_name == "/Shared/haute/motor-pricing"
         assert config.databricks.serving_workload_size == "Small"
 

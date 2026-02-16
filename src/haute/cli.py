@@ -66,7 +66,7 @@ import haute
 
 pipeline = haute.Pipeline("{name}", description="")
 '''
-    (project_dir / "main.py").write_text(starter_pipeline.format(name=name))
+    (project_dir / "main.py").write_text(starter_pipeline.format(name=name), encoding="utf-8")
 
     # haute.toml — project config
     haute_toml = '''\
@@ -101,7 +101,7 @@ serving_scale_to_zero = true
 [test_quotes]
 dir = "test_quotes"
 '''
-    (project_dir / "haute.toml").write_text(haute_toml.format(name=name))
+    (project_dir / "haute.toml").write_text(haute_toml.format(name=name), encoding="utf-8")
 
     # .env.example — template for secrets
     env_example = '''\
@@ -117,7 +117,7 @@ DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
 # Personal access token (Databricks > User Settings > Developer > Access Tokens)
 DATABRICKS_TOKEN=your_databricks_token_here
 '''
-    (project_dir / ".env.example").write_text(env_example)
+    (project_dir / ".env.example").write_text(env_example, encoding="utf-8")
 
     # Starter test quote
     test_quote = '''\
@@ -130,11 +130,11 @@ DATABRICKS_TOKEN=your_databricks_token_here
   }
 ]
 '''
-    (project_dir / "test_quotes" / "example.json").write_text(test_quote)
+    (project_dir / "test_quotes" / "example.json").write_text(test_quote, encoding="utf-8")
 
     # .gitignore
     (project_dir / ".gitignore").write_text(
-        "__pycache__/\n*.pyc\n.venv/\n.env\n"
+        "__pycache__/\n*.pyc\n.venv/\n.env\n", encoding="utf-8"
     )
 
     click.echo("Initialised Haute project in current directory.")
@@ -160,18 +160,23 @@ def run(pipeline_file: str | None) -> None:
     from haute.parser import parse_pipeline_file
 
     if pipeline_file is None:
-        # Auto-discover
-        for loc in [Path.cwd() / "pipelines", Path.cwd() / "examples"]:
-            if loc.is_dir():
-                candidates = sorted(loc.glob("*.py"))
-                candidates = [c for c in candidates if c.name != "__init__.py"]
-                if candidates:
-                    pipeline_file = str(candidates[0])
-                    break
+        cwd = Path.cwd()
+        skip = {"__init__.py", "setup.py", "conftest.py"}
+
+        for f in sorted(cwd.glob("*.py")):
+            if f.name in skip:
+                continue
+            try:
+                text = f.read_text(errors="replace")
+            except OSError:
+                continue
+            if "haute.Pipeline" in text:
+                pipeline_file = str(f)
+                break
 
     if not pipeline_file:
         click.echo(
-            "Error: No pipeline file found. Pass a path or create pipelines/main.py",
+            "Error: No pipeline file found. Pass a path or create main.py",
             err=True,
         )
         raise SystemExit(1)
@@ -272,7 +277,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
                 host=host,
                 port=port,
                 reload=True,
-                reload_excludes=["pipelines/*", "examples/*", "*.haute.json"],
+                reload_excludes=["*.haute.json"],
                 log_level="warning",
             )
         finally:

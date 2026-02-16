@@ -9,10 +9,10 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
-@pipeline.node(path="pipelines/data/claims_amounts.parquet")
+@pipeline.node(path="data/claims_amounts.parquet")
 def claims() -> pl.DataFrame:
     """claims node"""
-    return pl.scan_parquet("pipelines/data/claims_amounts.parquet")
+    return pl.scan_parquet("data/claims_amounts.parquet")
 
 
 @pipeline.node
@@ -34,24 +34,24 @@ def claims_aggregate(claims: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-@pipeline.node(path="pipelines/data/exposure.parquet")
+@pipeline.node(path="data/exposure.parquet")
 def exposure() -> pl.DataFrame:
     """exposure node"""
-    return pl.scan_parquet("pipelines/data/exposure.parquet")
+    return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(path="pipelines/data/policies.parquet", deploy_input=True)
+@pipeline.node(path="data/policies.parquet", deploy_input=True)
 def policies() -> pl.DataFrame:
     """data_source node"""
-    return pl.scan_parquet("pipelines/data/policies.parquet")
+    return pl.scan_parquet("data/policies.parquet")
 
 
-@pipeline.node(external="pipelines/models/freq.cbm", file_type="catboost", model_class="regressor")
+@pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
 def frequency_model(policies: pl.DataFrame) -> pl.DataFrame:
     """catboost_load node"""
     from catboost import CatBoostRegressor
     obj = CatBoostRegressor()
-    obj.load_model("pipelines/models/freq.cbm")
+    obj.load_model("models/freq.cbm")
     X = (
         policies
         .select(obj.feature_names_)
@@ -93,12 +93,12 @@ def frequency_write(frequency_set: pl.DataFrame) -> pl.DataFrame:
     return frequency_set
 
 
-@pipeline.node(external="pipelines/models/sev.cbm", file_type="catboost", model_class="regressor")
+@pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.DataFrame) -> pl.DataFrame:
     """catboost_load node"""
     from catboost import CatBoostRegressor
     obj = CatBoostRegressor()
-    obj.load_model("pipelines/models/sev.cbm")
+    obj.load_model("models/sev.cbm")
     X = (
         policies
         .select(obj.feature_names_)

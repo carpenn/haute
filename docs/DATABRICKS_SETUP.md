@@ -156,7 +156,7 @@ Here's a complete example with all the Databricks settings:
 ```toml
 [project]
 name = "motor-pricing"
-pipeline = "pipelines/my_pipeline.py"
+pipeline = "main.py"
 
 [deploy]
 target = "databricks"

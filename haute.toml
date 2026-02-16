@@ -4,7 +4,7 @@
 
 [project]
 name = "main"
-pipeline = "pipelines/main.py"
+pipeline = "main.py"
 
 # ─────────────────────────────────────────────────────────────────
 # Deployment — Databricks MLflow Model Serving

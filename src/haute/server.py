@@ -98,14 +98,22 @@ async def ws_sync(websocket: WebSocket) -> None:
 
 
 def _discover_pipelines() -> list[Path]:
-    """Find pipeline .py files in the project."""
+    """Find pipeline .py files in the project root that contain ``haute.Pipeline``."""
     cwd = Path.cwd()
-    locations = [cwd / "pipelines", cwd / "examples"]
-    found = []
-    for loc in locations:
-        if loc.is_dir():
-            found.extend(sorted(loc.glob("*.py")))
-    return [f for f in found if f.name != "__init__.py" and f.name != "create_sample_data.py"]
+    skip = {"__init__.py", "setup.py", "conftest.py"}
+    found: list[Path] = []
+
+    for f in sorted(cwd.glob("*.py")):
+        if f.name in skip:
+            continue
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        if "haute.Pipeline" in text:
+            found.append(f)
+
+    return found
 
 
 def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
@@ -193,36 +201,16 @@ async def get_first_pipeline() -> dict:
     Python file is the source of truth. Sidecar .haute.json provides positions.
     """
     cwd = Path.cwd()
-    pipelines_dir = cwd / "pipelines"
 
-    # Parse .py files from pipelines/ directory
-    if pipelines_dir.is_dir():
-        for f in sorted(pipelines_dir.glob("*.py")):
-            if f.name == "__init__.py":
-                continue
-            try:
-                graph = _parse_pipeline_to_graph(f)
-                if graph.get("nodes"):
-                    graph["source_file"] = str(f.relative_to(cwd))
-                    return graph
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", f.name, e)
-                continue
-
-    # Fall back to examples/
-    examples_dir = cwd / "examples"
-    if examples_dir.is_dir():
-        for f in sorted(examples_dir.glob("*.py")):
-            if f.name == "__init__.py":
-                continue
-            try:
-                graph = _parse_pipeline_to_graph(f)
-                if graph.get("nodes"):
-                    graph["source_file"] = str(f.relative_to(cwd))
-                    return graph
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", f.name, e)
-                continue
+    for f in _discover_pipelines():
+        try:
+            graph = _parse_pipeline_to_graph(f)
+            if graph.get("nodes"):
+                graph["source_file"] = str(f.relative_to(cwd))
+                return graph
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", f.name, e)
+            continue
 
     return {"nodes": [], "edges": []}
 
@@ -240,12 +228,13 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     if body.source_file:
         py_path = (cwd / body.source_file).resolve()
         if not py_path.is_relative_to(cwd):
-            raise HTTPException(status_code=400, detail="source_file must be within the project directory")
+            raise HTTPException(
+                status_code=400,
+                detail="source_file must be within the project directory",
+            )
     else:
-        pipelines_dir = cwd / "pipelines"
-        pipelines_dir.mkdir(exist_ok=True)
         safe_name = body.name.lower().replace(" ", "_").replace("-", "_")
-        py_path = pipelines_dir / f"{safe_name}.py"
+        py_path = cwd / f"{safe_name}.py"
     code = graph_to_code(
         graph, pipeline_name=body.name,
         description=body.description, preamble=body.preamble,
@@ -444,14 +433,14 @@ async def _file_watcher() -> None:
         return
 
     cwd = Path.cwd()
-    watch_dirs = [d for d in [cwd / "pipelines", cwd / "examples"] if d.is_dir()]
-    if not watch_dirs:
-        logger.info("No pipelines/ or examples/ directory — file watcher idle")
-        return
+    watch_dirs = [cwd]
+    modules_dir = cwd / "modules"
+    if modules_dir.is_dir():
+        watch_dirs.append(modules_dir)
 
     logger.info("File watcher started, watching: %s", [str(d) for d in watch_dirs])
 
-    async for changes in awatch(*watch_dirs):
+    async for changes in awatch(*watch_dirs, recursive=False):
         if _is_self_write():
             continue
 

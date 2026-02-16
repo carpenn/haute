@@ -189,7 +189,7 @@ This preserves:
 watchfiles → detects .py change → parser → graph JSON → WebSocket push
 ```
 
-- Use `watchfiles` (already in the tech stack plan) to watch the `pipelines/` directory
+- Use `watchfiles` (already in the tech stack plan) to watch the project root (and `modules/` if present)
 - On change: debounce 300ms, then parse
 - Compare new graph JSON to previous — if different, push via WebSocket
 - **Self-write detection**: track file writes made by codegen. Ignore watcher events within 500ms of a codegen write to prevent feedback loops.
@@ -223,9 +223,8 @@ Replace dagre with [ELK](https://eclipse.dev/elk/) (Eclipse Layout Kernel) via t
 Node positions are stored in a sidecar file alongside the pipeline:
 
 ```
-pipelines/
-├── motor.py              ← source of truth (Python code)
-└── motor.haute.json       ← UI metadata (positions, layout preferences)
+motor.py              ← source of truth (Python code)
+motor.haute.json       ← UI metadata (positions, layout preferences)
 ```
 
 **`motor.haute.json`:**

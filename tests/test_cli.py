@@ -22,9 +22,7 @@ def runner() -> CliRunner:
 
 @pytest.fixture()
 def project_dir(tmp_path: Path) -> Path:
-    """Temp project with pipelines/ and data/."""
-    pipelines = tmp_path / "pipelines"
-    pipelines.mkdir()
+    """Temp project with a root-level pipeline and data/."""
     data = tmp_path / "data"
     data.mkdir()
     pl.DataFrame({"x": [1, 2, 3]}).write_parquet(data / "input.parquet")
@@ -50,7 +48,7 @@ def transform(source: pl.DataFrame) -> pl.DataFrame:
 
 pipeline.connect("source", "transform")
 '''
-    (pipelines / "test_pipeline.py").write_text(code)
+    (tmp_path / "main.py").write_text(code)
     return tmp_path
 
 
@@ -105,7 +103,7 @@ class TestInit:
 
 class TestRun:
     def test_run_explicit_file(self, runner: CliRunner, project_dir: Path):
-        pipeline_file = str(project_dir / "pipelines" / "test_pipeline.py")
+        pipeline_file = str(project_dir / "main.py")
         result = runner.invoke(
             cli, ["run", pipeline_file], catch_exceptions=False,
         )

@@ -72,7 +72,7 @@ clean_vehicle = Transform(
     description="Standardise vehicle make/model codes"
 )
 
-# pipelines/motor.py
+# motor.py
 from shared.transforms import clean_vehicle
 
 pipeline = Pipeline("motor")
@@ -97,25 +97,18 @@ pipeline.add(data_source >> clean_vehicle >> model_score >> output)
 
 ```
 my-pricing-project/
-├── pipelines/              # Pipeline definitions (.py)
-│   └── motor.py
-├── shared/                 # Shared transforms, rating tables, etc.
-│   ├── transforms.py
-│   └── tables/
-│       └── area_factors.csv
-├── tests/                  # pytest tests (auto-generated stubs)
-│   └── test_motor.py
-├── deployment/             # Deployment configs
-│   └── databricks.yaml
-├── .github/
-│   └── workflows/
-│       └── ci.yml          # Pre-configured GitHub Actions
-├── pyproject.toml          # Project config (haute as dependency)
-├── .pre-commit-config.yaml # ruff, mypy, haute lint
-├── .python-version         # 3.13
-├── uv.lock
-└── README.md
+├── data/                   # Local data files (parquet, CSV)
+├── test_quotes/            # JSON test quotes for deploy validation
+│   └── sample.json
+├── main.py                 # Pipeline definition (root-level)
+├── haute.toml              # Project + deployment config
+├── .env.example            # Template for secrets (DATABRICKS_HOST, etc.)
+└── .gitignore
 ```
+
+Pipeline files live in the **project root** (e.g. `main.py`), not in a subdirectory. This keeps the structure flat and simple for single-pipeline projects. The `haute.toml` `[project]` section points to the pipeline file.
+
+For multi-pipeline projects, users can organise pipelines into a `pipelines/` directory and update `haute.toml` accordingly — but the default is root-level.
 
 ---
 
@@ -212,9 +205,8 @@ uv add haute
 
 ### 4.5 Key Technical Decisions
 
-- **libcst over AST**: We use [libcst](https://github.com/Instagram/LibCST) (concrete syntax tree) rather than Python's `ast` module because libcst preserves comments, formatting, and whitespace — critical for round-tripping code without mangling it.
+- **AST for parsing, libcst reserved for surgical write-back**: The read path (`parser.py`) uses Python's `ast` module with a regex fallback for syntax errors. `libcst` is reserved for Phase 2 surgical write-back — editing individual nodes in a `.py` file without regenerating the whole file. The current write path (`codegen.py`) regenerates the full file, which is fine while the GUI is the only write source.
 - **Polars over pandas**: Faster, more memory efficient, better API.
-- **Zustand over Redux**: Simpler state management, pairs well with React Flow's internal state.
 - **File watcher for sync**: When a user edits `.py` files in their IDE, the file watcher detects changes and pushes updated graph state to the React Flow UI via WebSocket. This enables true bidirectional editing.
 
 ---
@@ -240,7 +232,7 @@ In live mode, the incoming request is parsed into a 1-row Polars DataFrame, pass
 import haute
 import polars as pl
 
-pipeline = haute.Pipeline.load("pipelines/motor.py")
+pipeline = haute.Pipeline.load("motor.py")
 
 # Batch — N rows
 quotes = pl.read_parquet("data/quotes_2025.parquet")
@@ -285,7 +277,7 @@ endpoint:
     size: Small
     scale_to_zero: true
   environment:
-    mlflow_model: pipelines/motor.py
+    mlflow_model: motor.py
     model_version: Production  # or a specific version
   
 databricks:
@@ -327,7 +319,7 @@ databricks:
 from haute.testing import PipelineTestCase
 
 class TestMotorPipeline(PipelineTestCase):
-    pipeline = "pipelines/motor.py"
+    pipeline = "motor.py"
     
     def test_pipeline_loads(self):
         """Pipeline parses and all nodes resolve."""
@@ -502,17 +494,24 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 - [x] Dark theme, polished UI
 - [ ] Static asset bundling (frontend builds into Python wheel)
 
-### Phase 2 — Live Code ↔ GUI Sync
-- [ ] Parse decorated `.py` files → React Flow graph (libcst)
-- [ ] GUI edits write back to `.py` files (clean, diffable code)
-- [ ] File watcher pushes changes to UI via WebSocket
-- [ ] Conflict resolution (file = source of truth, debounced sync)
+### Phase 2 — Live Code ↔ GUI Sync (partially complete)
+- [x] Parse decorated `.py` files → React Flow graph (AST + regex fallback)
+- [x] GUI edits write back to `.py` files (clean, diffable code via full regeneration)
+- [x] File watcher pushes changes to UI via WebSocket
+- [x] Conflict resolution (file = source of truth, debounced sync with self-write detection)
+- [ ] Surgical write-back with libcst (edit individual nodes without regenerating the whole file)
 - [ ] Schema validation between connected nodes (red edge on mismatch)
 
-### Phase 3 — Deploy & Score
-- [ ] Package a pipeline as an MLflow pyfunc model
-- [ ] `haute deploy` registers model and deploys to Databricks Model Serving
-- [ ] Local scoring engine (`pipeline.score(df)` for dev/testing)
+### Phase 3 — Deploy & Score (partially complete)
+- [x] Package a pipeline as an MLflow pyfunc model
+- [x] `haute deploy` registers model and deploys to Databricks Model Serving
+- [x] Local scoring engine (`pipeline.score(df)` for dev/testing)
+- [x] Graph pruning for deployment (only ancestors of output node)
+- [x] Artifact bundling (model files, static data)
+- [x] Schema inference (input + output) via dry-run
+- [x] Pre-deploy validation (`_validators.py`)
+- [x] Test quote scoring
+- [x] `haute status` to check deployed model versions
 - [ ] DataSource node with Databricks Unity Catalog support
 - [ ] Rating table viewer (reads from Databricks)
 

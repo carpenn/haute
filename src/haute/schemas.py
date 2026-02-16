@@ -18,6 +18,7 @@ class GraphEdge(BaseModel):
 
 class GraphNodeData(BaseModel):
     label: str = "Unnamed"
+    description: str = ""
     nodeType: str = "transform"
     config: dict[str, Any] = Field(default_factory=dict)
 
