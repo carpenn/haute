@@ -340,7 +340,8 @@ uv add "haute[databricks,aws]"
 Docker is special because it has **zero cloud dependencies**. It produces a self-contained container that runs anywhere — on-prem Kubernetes, ECS, Cloud Run, or a laptop.
 
 ```bash
-haute deploy --target docker
+# Set target = "docker" in haute.toml, then:
+haute deploy
 # → Builds: Dockerfile, docker-compose.yml, FastAPI app
 # → Optionally pushes to a registry
 ```

@@ -1,444 +1,242 @@
-# Haute
+<div align="center">
 
-**Open-source pricing engine for insurance teams on Databricks.**
+# ✦ Haute
 
-Build, visualise, and deploy pricing pipelines as Python code — with a browser-based GUI that stays in sync.
+### The open-source pricing engine for insurance.
 
-```bash
-pip install haute
-```
+Build pricing pipelines visually. Deploy them anywhere. Own the code forever.
 
----
+<br>
 
-## What is Haute?
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Elastic License 2.0](https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square)](LICENSE)
+[![Databricks](https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white)](https://databricks.com)
+[![AWS](https://img.shields.io/badge/deploy-SageMaker-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
+[![Azure](https://img.shields.io/badge/deploy-Azure_ML-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/machine-learning)
+[![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 
-Haute gives insurance pricing teams a **code-first, GUI-friendly** way to build rating pipelines. Write standard Python with Polars, see it instantly in a visual editor, and deploy to a live API with one command.
-
-- **Build** pipelines in code or the GUI — both stay in sync
-- **Run** the same pipeline for 1-row live quotes and million-row batch jobs
-- **Deploy** to Databricks MLflow Model Serving with `haute deploy`
-
-Python code is always the source of truth. The GUI is a live, editable view.
+</div>
 
 ---
 
-## Quick Start
+## The Pricing Industry Has a Problem
 
-### 1. Install
+Insurance pricing sits at a crossroads. Teams are caught between **enterprise platforms** that cost six or seven figures a year and **ad hoc scripts** that never make it to production.
 
-```bash
-pip install haute
+### The legacy platform trap
 
-# For deployment to Databricks:
-pip install haute[databricks]
-```
+Tools like WTW Radar have dominated for 30 years. They offer visual editing, model deployment, and monitoring — but at a price:
 
-### 2. Create a project
+- **Vendor lock-in** — models built inside the platform don't leave it. Your IP lives in someone else's proprietary format.
+- **Opaque pricing** — $100K to $1M+ per year in licensing alone, before implementation, training, and ongoing consulting.
+- **Proprietary skills** — your team learns a platform-specific language instead of building transferable, industry-standard capabilities.
+- **Single-cloud dependency** — locked to one cloud provider's infrastructure.
+- **Closed ecosystem** — no open community, no public documentation, no way to inspect what the platform is actually doing under the hood.
 
-```bash
-mkdir my_project && cd my_project
-haute init
-```
+These platforms were groundbreaking in the 1990s. But the world has moved on. Python is the lingua franca of data science. Git is how teams collaborate. Cloud infrastructure is a commodity. The pricing industry hasn't kept up.
 
-This scaffolds everything you need in the current directory:
+### The DIY trap
 
-```
-haute.toml              ← project & deploy config
-.env.example           ← Databricks credentials template
-main.py                ← starter pipeline
-data/                  ← your data files
-test_quotes/           ← JSON payloads for pre-deploy testing
-```
+The alternative — building everything in-house with Python notebooks and custom deployment scripts — gives you flexibility but none of the guardrails:
 
-### 3. Write a pipeline
+- **No visual editing** — analysts lose the drag-and-drop workflow they rely on for building and communicating rating structures.
+- **No deployment path** — models stall in notebooks. Getting a pipeline to a live API takes weeks of DevOps work.
+- **No safety rails** — no impact analysis, no approval gates, no audit trail. One wrong factor can misprice millions of pounds of premium before anyone notices.
+- **No standardisation** — every team reinvents the wheel. No shared structure, no consistency, no institutional knowledge.
 
-```python
-# main.py
-import polars as pl
-import haute
-
-pipeline = haute.Pipeline("motor_pricing", description="Motor premium calculation")
-
-
-@pipeline.node(path="data/policies.parquet", deploy_input=True)
-def policies() -> pl.DataFrame:
-    """Read policy data — this is the live API input."""
-    return pl.scan_parquet("data/policies.parquet")
-
-
-@pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
-def frequency_model(policies: pl.DataFrame) -> pl.DataFrame:
-    """Predict claim frequency."""
-    df = policies.with_columns(
-        freq_pred=pl.Series(obj.predict(policies.select("Area", "VehPower", "DrivAge").to_numpy()))
-    )
-    return df
-
-
-@pipeline.node
-def calculate_premium(frequency_model: pl.DataFrame) -> pl.DataFrame:
-    """Calculate the technical premium."""
-    return frequency_model.with_columns(
-        premium=(pl.col("freq_pred") * 500).round(2)
-    )
-
-
-@pipeline.node(output=True)
-def output(calculate_premium: pl.DataFrame) -> pl.DataFrame:
-    """Final output returned by the API."""
-    return calculate_premium
-```
-
-### 4. Run it
-
-```bash
-haute run
-```
-
-### 5. Open the GUI
-
-```bash
-haute serve
-```
-
-This opens a browser-based visual editor where you can:
-
-- Drag and drop nodes from a palette
-- Connect them with edges to define data flow
-- Write Polars code in each transform node
-- Click any node to preview its output data
-- Toggle **API Input** on a data source to mark it as the live input
-- Hit **Run** to execute the full pipeline
-- Hit **Save** to write back to `.py`
-
-### 6. Deploy
-
-```bash
-cp .env.example .env     # fill in your Databricks credentials
-haute deploy
-```
-
-That's it. Your pipeline is now a live API on Databricks Model Serving.
+WTW themselves have said that insurers who've tried to build their own solutions have found them *"astronomically expensive to maintain"*. They're right. But the answer isn't to hand your pricing IP to a vendor. **The answer is better tooling.**
 
 ---
 
-## Deployment
+## What Haute Does Differently
 
-Haute deploys your pipeline as an MLflow model on Databricks Model Serving. One command, no DevOps.
+Haute is a free, open-source pricing engine that gives you the best of both worlds — **visual tooling with the power and freedom of code**.
 
-### How it works
+### The core idea
 
-1. **Marks** — you tag one data source as `deploy_input=True` (the live API input) and one node as `output=True` (the API response)
-2. **Prunes** — Haute traces backwards from the output node and deploys only the scoring path. Training data branches, sinks, and exploratory nodes are automatically excluded
-3. **Bundles** — model files (`.cbm`, `.pkl`, etc.) and static data are packaged as MLflow artifacts
-4. **Validates** — every JSON file in `test_quotes/` is scored through the pruned pipeline before deployment. If anything fails, deployment is blocked
-5. **Deploys** — the pipeline is logged as an MLflow pyfunc model and registered in the Model Registry
+Your pricing pipeline is a Python file. It's a real file on your computer, version-controlled in Git, reviewable in a pull request, testable with standard tools. But it's also a **visual graph** — a drag-and-drop editor in your browser where you can see the entire rating structure, click into any node, and watch data flow through the pipeline in real time.
 
-### Configuration
+Edit either one. They stay in sync. Always.
 
-All deploy settings live in `haute.toml` (committed to git):
+This isn't "export to code" or "import from code". The visual editor and the Python file are **the same thing**, viewed two ways. Change a node in the GUI and the Python file updates on disk instantly. Change the Python file in your editor and the graph updates in the browser. No export step, no translation layer, no drift.
 
-```toml
-[project]
-name = "motor-pricing"
-pipeline = "main.py"
+### Why this matters
 
-[deploy]
-target = "databricks"
-model_name = "motor-pricing"
-endpoint_name = "motor-pricing"
-
-[deploy.databricks]
-experiment_name = "/Shared/haute/motor-pricing"
-catalog = "main"
-schema = "pricing"
-serving_workload_size = "Small"
-serving_scale_to_zero = true
-
-[test_quotes]
-dir = "test_quotes"
-```
-
-Secrets go in `.env` (gitignored):
-
-```bash
-DATABRICKS_HOST=https://adb-xxxxx.azuredatabricks.net
-DATABRICKS_TOKEN=your_token_here
-```
-
-### Test quotes
-
-Put JSON files in `test_quotes/` with example requests. These are scored before every deploy:
-
-```json
-[
-  {"IDpol": 99001, "VehPower": 7, "DrivAge": 42, "Area": "C", "VehBrand": "B12"}
-]
-```
-
-### Dry run
-
-Validate everything without actually deploying:
-
-```bash
-haute deploy --dry-run
-```
-
-```
-  ✓ Loaded config from haute.toml
-  ✓ Parsed pipeline (12 nodes, 14 edges)
-  ✓ Pruned to output ancestors (5 nodes)
-  ✓ Collected 2 artifacts (freq.cbm, sev.cbm)
-  ✓ Inferred input schema (10 columns)
-  ✓ Test quotes: single_policy.json     1 rows  ok  (18ms)
-  ✓ Test quotes: batch_policies.json    5 rows  ok  (24ms)
-  ✓ Validation passed
-  Dry run complete — no model was deployed.
-```
-
-### Calling the deployed API
-
-```bash
-curl -X POST https://<workspace>.databricks.net/serving-endpoints/motor-pricing/invocations \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"dataframe_records": [{"Area": "A", "VehPower": 5, "DrivAge": 35}]}'
-```
+- **Analysts** get the visual, interactive experience they're used to — without being trapped in a proprietary platform.
+- **Technical teams** get real Python, real version control, real CI/CD — without losing the visual layer that makes pricing structures communicable.
+- **Leadership** gets full audit trails, impact analysis, and deployment safety — without a seven-figure platform license.
 
 ---
 
-## Key Concepts
+## Deploy Anywhere
 
-### Pipelines
+Haute doesn't lock you to a single cloud. Your pipeline deploys as a standard, portable model — the same scoring logic, the same API contract — to whichever infrastructure your organisation already uses.
 
-A pipeline is a DAG of decorated Python functions. Each function is a **node** that takes DataFrames in and returns a DataFrame out.
-
-```python
-pipeline = haute.Pipeline("my_pipeline")
-
-@pipeline.node
-def transform(read_data: pl.DataFrame) -> pl.DataFrame:
-    return read_data.filter(pl.col("age") > 25)
-```
-
-### Edges
-
-Edges define data flow. Function parameter names match upstream node names:
-
-```python
-pipeline.connect("read_data", "transform")
-pipeline.connect("transform", "output")
-```
-
-### Fan-out / Fan-in
-
-One node can feed multiple downstream nodes, and a node can receive multiple inputs:
-
-```python
-@pipeline.node
-def joined(claims: pl.DataFrame, exposure: pl.DataFrame) -> pl.DataFrame:
-    return claims.join(exposure, on="IDpol", how="left")
-
-pipeline.connect("claims", "joined")
-pipeline.connect("exposure", "joined")
-```
-
-### Scoring
-
-The same pipeline code works for batch and live scoring:
-
-```python
-# Batch: run the full pipeline
-result = pipeline.run()
-
-# Live: score a single row (same code path as the deployed API)
-row = pl.DataFrame({"Area": ["A"], "DrivAge": [35]})
-prediction = pipeline.score(row)
-```
-
----
-
-## Node Types
-
-### Data Source
-
-Reads data from a file. No code needed — just configure the path.
-
-```python
-@pipeline.node(path="data/policies.parquet", deploy_input=True)
-def policies() -> pl.DataFrame:
-    return pl.scan_parquet("data/policies.parquet")
-```
-
-- **`deploy_input=True`** — marks this source as the live API input for deployment
-- Supported formats: **Parquet**, **CSV**, **JSON**
-
-### Transform
-
-The workhorse node. Write Polars code to filter, join, aggregate, or reshape data.
-
-```python
-@pipeline.node
-def frequency_set(policies: pl.DataFrame, claims: pl.DataFrame) -> pl.DataFrame:
-    return policies.join(claims, on="IDpol", how="left")
-```
-
-In the GUI, two shorthand syntaxes are available:
-
-- **Chain syntax** — start with `.` to chain off the first input:
-  `.filter(pl.col("Area") == "A").select("IDpol", "premium")`
-- **Expression syntax** — reference multiple inputs by name:
-  `policies.join(claims, on="IDpol", how="left")`
-
-### External File
-
-Load a model or config file, then use it in your code. The loaded object is available as `obj`.
-
-```python
-@pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
-def frequency_model(policies: pl.DataFrame) -> pl.DataFrame:
-    df = policies.with_columns(
-        freq_pred=pl.Series(obj.predict(policies.select("Area", "VehAge").to_numpy()))
-    )
-    return df
-```
-
-| Type | Extension | How it loads |
-|---|---|---|
-| **Pickle** | `.pkl` | `pickle.load()` |
-| **JSON** | `.json` | `json.load()` |
-| **Joblib** | `.joblib` | `joblib.load()` |
-| **CatBoost** | `.cbm` | `CatBoostClassifier` / `CatBoostRegressor` |
-
-### Output
-
-Marks the final node whose result becomes the API response:
-
-```python
-@pipeline.node(output=True)
-def output(calculate_premium: pl.DataFrame) -> pl.DataFrame:
-    return calculate_premium
-```
-
-### Data Sink
-
-Writes data to disk. Sinks are pass-through during normal runs — writing only happens when you click **Write** in the GUI.
-
-```python
-@pipeline.node(sink="output/frequency.parquet", format="parquet")
-def frequency_write(frequency_set: pl.DataFrame) -> pl.DataFrame:
-    return frequency_set
-```
-
----
-
-## GUI
-
-The visual editor runs in your browser at `http://localhost:5173`.
-
-| Area | Description |
+| Target | What you get |
 |---|---|
-| **Left palette** | Drag node types onto the canvas |
-| **Center canvas** | Visual DAG with drag, zoom, connect |
-| **Right panel** | Configure the selected node |
-| **Bottom panel** | Data preview — click any node to see its output |
+| **Databricks** | MLflow model → Databricks Model Serving endpoint |
+| **AWS SageMaker** | MLflow model → SageMaker real-time endpoint |
+| **Azure ML** | MLflow model → Azure ML managed online endpoint |
+| **Docker** | Self-contained container → runs on any infrastructure (Kubernetes, ECS, on-prem, laptop) |
 
-Nodes marked `deploy_input=True` show a green **API** badge. Toggle it on/off in the node's config panel.
+Docker is the universal fallback — zero cloud dependencies, runs anywhere you can run a container.
 
-### Code ↔ GUI sync
-
-Everything round-trips:
-
-- Edit in the GUI → saves back to `.py`
-- Edit the `.py` in your text editor → GUI picks it up on next load
-- Custom imports, helper functions, and constants are preserved in both directions
+You choose your deployment target once, in configuration. From that point on, the entire workflow — validation, staging, approval, production — is handled for you.
 
 ---
 
-## Pipeline Imports & Helpers
+## Built-In Safety — Because Pricing Carries Risk
 
-Every pipeline starts with `import polars as pl` and `import haute`. Add extra imports or helper functions via the **Imports** button (⚙) in the GUI toolbar, or write them directly in the `.py` file between the standard imports and the first `@pipeline.node`.
+Most pricing tools treat deployment as a feature. Haute treats it as a **risk management problem**.
 
-```python
-import numpy as np
-from catboost import CatBoostClassifier
+A single wrong rating factor can misprice an entire book before anyone notices. Haute's deployment pipeline is designed around this reality:
 
-DISCOUNT_RATE = 0.95
+### Every change is tested before it goes live
 
-def apply_discount(df, col):
-    return df.with_columns(pl.col(col) * DISCOUNT_RATE)
-```
+Before any deployment, Haute scores your test quotes — real example requests — through the pipeline. If anything breaks, the deployment is blocked. You can also define **expected outputs with tolerances**: not just "it doesn't crash", but "this input produces this price, within 1%".
+
+### Every change shows its impact
+
+Before merging a pricing change, Haute scores a portfolio sample through both the old and new pipeline, and produces an **impact report**: how many quotes changed, by how much, which segments are affected, what the annual premium impact looks like. This is posted directly to your pull request so reviewers can see the financial impact before they approve.
+
+### Every change goes through staging first
+
+Every deployment follows the same path: **staging → smoke test → approval gate → production**. There is no shortcut. A solo actuary gets the same pipeline as a 50-person team. Insurance pricing carries risk regardless of team size.
+
+### Every change is auditable
+
+Every deployment records who approved it, what PR it came from, what git commit it points to, what the impact report showed, and what version it replaced. Full regulatory traceability — Solvency II, IFRS 17, FCA requirements — without building anything custom.
 
 ---
 
-## CLI Reference
+## Real Python. Transferable Skills. No Walled Garden.
 
-| Command | Description |
+Haute doesn't invent a new language. Every pricing pipeline is standard Python using [Polars](https://pola.rs/) DataFrames — the fastest dataframe library available.
+
+What this means in practice:
+
+- **Your team's skills transfer.** Everything they learn building pricing pipelines in Haute — Python, Polars, Git, CI/CD — is valuable everywhere. They're not learning a proprietary tool that only exists inside one vendor's ecosystem.
+- **Any model works.** GLMs from scikit-learn, gradient boosting from CatBoost or LightGBM, deep learning from PyTorch — if it runs in Python, it runs in Haute. No ONNX conversion, no PMML export, no compatibility layer.
+- **Everything is inspectable.** The pipeline is a file you can read. The models are files you can load. There is no black box.
+- **Testing is native.** Every node in your pipeline is a plain Python function. Standard testing tools work out of the box.
+
+---
+
+## One Pipeline, Every Context
+
+The same pipeline code — the exact same file — runs in every context:
+
+| Context | What happens |
 |---|---|
-| `haute init` | Scaffold a new project in the current directory |
-| `haute run [file]` | Execute a pipeline and print results |
-| `haute serve` | Start the visual editor |
-| `haute deploy [file]` | Deploy the pipeline as a live API |
-| `haute deploy --dry-run` | Validate and score test quotes without deploying |
-| `haute status [model]` | Check the status of a deployed model |
+| **Live quoting** | A single JSON request comes in, gets scored through the pipeline, returns a price. Sub-second. |
+| **Batch scoring** | A million-row dataset goes through the same pipeline. Same logic, same code path. |
+| **What-if analysis** | An analyst adjusts input variables with sliders and watches the price update through every node in real time. |
+| **Impact analysis** | The pipeline scores a portfolio sample to measure the effect of a proposed change before it goes live. |
+| **Regulatory trace** | Click any output price and trace it back through every node — see the intermediate value at each step. |
 
-### `haute serve` options
+No separate "batch mode" and "API mode". No reimplementation. One source of truth.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--host` | `127.0.0.1` | Host to bind to |
-| `--port` | `8000` | Backend API port |
-| `--no-browser` | off | Don't auto-open the browser |
+---
 
-### `haute deploy` options
+## Git-Native by Design
 
-| Flag | Description |
+Every pricing pipeline is a plain text file, stored in Git. This unlocks the entire modern software engineering workflow that other industries take for granted:
+
+- **Branching** — work on a new rating structure without touching production.
+- **Pull requests** — every pricing change is reviewed, discussed, and approved before it goes live. With Haute's impact report posted directly to the PR.
+- **History** — see exactly what changed, when, and who approved it. Roll back to any previous version instantly.
+- **Collaboration** — multiple analysts can work on different parts of the pipeline simultaneously, on separate branches, and merge when ready.
+
+No proprietary file formats. No binary blobs. No "who changed what and when?" mysteries. Just files, diffs, and reviews.
+
+---
+
+## CI/CD Out of the Box
+
+Haute generates your entire continuous integration and deployment pipeline when you start a project. You choose your CI provider — **GitHub Actions**, **Azure DevOps**, or **GitLab CI** — and Haute creates the workflow files for you.
+
+Every pull request automatically runs:
+
+- **Linting** — catches code quality issues
+- **Validation** — ensures the pipeline is structurally sound
+- **Test quotes** — scores example requests to verify correctness
+- **Impact analysis** — measures the financial effect of the change
+
+Every merge to the main branch automatically:
+
+- **Deploys to staging** — a production-like environment for final verification
+- **Runs smoke tests** — scores test quotes against the live staging endpoint
+- **Waits for approval** — a human must sign off before production
+- **Deploys to production** — the live endpoint is updated
+
+This is the same release discipline used by teams deploying financial trading systems, medical devices, and safety-critical software. Haute makes it the default for pricing.
+
+---
+
+## Visual Execution Trace — Regulatory Explainability
+
+Click any output price in the data preview and Haute highlights the path through every node that produced it, showing the intermediate value at each step:
+
+```
+base rate £300  →  area factor ×1.2  →  NCD ×0.85  →  frequency load ×1.35  →  £412.50
+```
+
+Traced visually through the pipeline graph, with each node lit up and its contribution shown.
+
+This is what regulators ask for. Solvency II, IFRS 17, and FCA pricing practices all require the ability to explain how a price was derived. Most teams build this manually, after the fact, as a compliance exercise. In Haute, it's a feature of the pipeline itself.
+
+---
+
+## Who Haute Is For
+
+**Pricing teams at insurers of any size** who want to own their pricing IP, deploy with confidence, and stop paying platform rent.
+
+- **Heads of Pricing** — full audit trail, impact analysis, deployment safety, and regulatory traceability. No vendor lock-in. No seven-figure license.
+- **Pricing Analysts** — a visual editor that feels familiar, with the full power of Python underneath. Build, test, and iterate faster than in any legacy tool.
+- **Data Scientists** — real Python, real models, real deployment. Your work doesn't stall in a notebook.
+- **Actuarial Teams** — every pricing change is reviewed, impact-tested, and approved before production. The discipline your work demands, automated.
+
+---
+
+## How Haute Compares
+
+|  | Haute | WTW Radar | Earnix | In-House Scripts |
+|---|---|---|---|---|
+| **Cost** | Free | $100K–$1M+/yr | Enterprise | Dev team salaries |
+| **Visual editor** | ✅ | ✅ | ✅ | ❌ |
+| **Code-native** | ✅ Real Python | ❌ Proprietary | ❌ Proprietary | ✅ |
+| **Version control** | ✅ Git | ❌ | ❌ | ✅ (if disciplined) |
+| **Deployment** | ✅ Multi-cloud + Docker | Azure only | Vendor-managed | ❌ DIY |
+| **Impact analysis** | ✅ Built-in | Manual | Partial | ❌ |
+| **Vendor lock-in** | None | High | High | None |
+| **Open source** | ✅ | ❌ | ❌ | N/A |
+| **Skills transferable** | ✅ Python + Git | ❌ Platform-specific | ❌ Platform-specific | ✅ |
+
+---
+
+## Architecture
+
+| Layer | Technology |
 |---|---|
-| `--model-name` | Override model name from `haute.toml` |
-| `--dry-run` | Validate and score test quotes without deploying |
+| **Visual Editor** | React, TypeScript, React Flow |
+| **Backend** | Python, FastAPI, Polars, WebSocket sync |
+| **Models** | MLflow (registry, tracking, serving) |
+| **Deploy Targets** | Databricks · AWS SageMaker · Azure ML · Docker |
+| **CI/CD** | GitHub Actions · Azure DevOps · GitLab CI |
+| **Safety** | Impact analysis · test quotes · staging gates · audit trail |
 
 ---
 
-## Project Structure
+## Docs
 
-After `haute init`, your project looks like:
+Detailed documentation lives in [`docs/`](docs/):
 
-```
-haute.toml                ← project & deploy config (committed)
-.env.example             ← Databricks credentials template (committed)
-.env                     ← actual credentials (gitignored)
-.gitignore
-main.py                  ← pipeline code (source of truth)
-main.haute.json           ← GUI layout state (node positions)
-data/                    ← data files (.parquet, .csv)
-test_quotes/             ← JSON payloads for pre-deploy validation
-  example.json
-```
-
-- **`.py`** files are the source of truth — diffable, reviewable, testable
-- **`.haute.json`** files store GUI layout (node positions) — not execution logic
-- **`haute.toml`** is the single config file for project settings and deployment
-
----
-
-## Design Principles
-
-1. **Code is the source of truth** — the `.py` file is the pipeline. The GUI is a view.
-2. **Same pipeline, every context** — the same code runs for 1-row live quotes and million-row batch jobs.
-3. **Real Python, real Polars** — no proprietary formula language. Your skills transfer.
-4. **Git-native** — pipelines are plain files. Diff, review, branch, merge.
-5. **One-command deploy** — `haute deploy` handles pruning, bundling, validation, and MLflow registration.
-6. **Testable** — every node is a plain function. `pytest` just works.
-
----
-
-## Requirements
-
-- Python >= 3.11
-- For deployment: `pip install haute[databricks]` (adds MLflow + Databricks SDK)
-- Works on **Linux**, **macOS**, and **Windows**
+- **[Architecture & Roadmap](ARCHITECTURE.md)** — system design, technical decisions, phased plan
+- **[Deployment Strategy](docs/DEPLOY_STRATEGY.md)** — deploy targets, CI/CD, safety gates
+- **[Databricks Setup](docs/DATABRICKS_SETUP.md)** — configuring your Databricks workspace
 
 ---
 
 ## License
 
-MIT
+Elastic License 2.0 — **free to use** for your pricing team, your models, your infrastructure. You own everything you build. The only restriction: you can't sell Haute itself as a hosted service. See [LICENSE](LICENSE) for full terms.
