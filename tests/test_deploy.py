@@ -324,6 +324,16 @@ class TestConfig:
 # ---------------------------------------------------------------------------
 
 
+class TestHauteModel:
+    def test_inherits_from_python_model(self) -> None:
+        """HauteModel must inherit from mlflow.pyfunc.PythonModel (MLflow 3.x)."""
+        from mlflow.pyfunc import PythonModel
+
+        from haute.deploy._model import HauteModel
+
+        assert issubclass(HauteModel, PythonModel)
+
+
 class TestParserDeployInput:
     def test_deploy_input_preserved_in_config(self) -> None:
         """deploy_input=True in decorator should appear in parsed config."""

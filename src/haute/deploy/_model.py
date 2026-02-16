@@ -18,12 +18,14 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import mlflow.pyfunc
+
 if TYPE_CHECKING:
     import pandas as pd
     from mlflow.pyfunc import PythonModelContext
 
 
-class HauteModel:
+class HauteModel(mlflow.pyfunc.PythonModel):
     """MLflow PythonModel wrapper for a deployed haute pipeline.
 
     This class is instantiated by MLflow when the model is loaded for

@@ -8,8 +8,12 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from haute.deploy._config import ResolvedDeploy
+
+if TYPE_CHECKING:
+    import mlflow.pyfunc
 
 
 @dataclass
@@ -70,7 +74,7 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
             mlflow.log_dict(manifest, "deploy_manifest.json")
 
             mlflow.pyfunc.log_model(
-                artifact_path="model",
+                name="model",
                 python_model=_get_model_instance(),
                 artifacts=artifacts,
                 signature=signature,
@@ -125,7 +129,7 @@ def get_deploy_status(model_name: str) -> dict[str, str | int]:
     }
 
 
-def _get_model_instance() -> object:
+def _get_model_instance() -> mlflow.pyfunc.PythonModel:
     """Import and return a HauteModel instance.
 
     Deferred import to avoid loading mlflow at module level.
