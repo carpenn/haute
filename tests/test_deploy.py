@@ -6,7 +6,6 @@ config). MLflow-specific tests are integration-level and require mlflow installe
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import polars as pl
@@ -106,8 +105,12 @@ class TestBundler:
 
         # Should find the catboost model files
         artifact_names = set(artifacts.keys())
-        assert any("freq" in name for name in artifact_names), f"Expected freq model in {artifact_names}"
-        assert any("sev" in name for name in artifact_names), f"Expected sev model in {artifact_names}"
+        assert any("freq" in name for name in artifact_names), (
+            f"Expected freq model in {artifact_names}"
+        )
+        assert any("sev" in name for name in artifact_names), (
+            f"Expected sev model in {artifact_names}"
+        )
 
         # All artifact paths should exist
         for name, path in artifacts.items():
@@ -322,6 +325,160 @@ class TestConfig:
 # ---------------------------------------------------------------------------
 # Parser deploy_input round-trip test
 # ---------------------------------------------------------------------------
+
+
+class TestDatabricksTracking:
+    """Regression tests: deploy must target Databricks, not local MLflow."""
+
+    def test_deploy_sets_tracking_uri(self) -> None:
+        """deploy_to_mlflow() must call mlflow.set_tracking_uri('databricks')."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DeployConfig, ResolvedDeploy
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+        )
+        resolved = ResolvedDeploy(
+            config=config,
+            full_graph={"nodes": [], "edges": []},
+            pruned_graph={"nodes": [], "edges": []},
+            input_node_ids=["policies"],
+            output_node_id="output",
+            artifacts={},
+            input_schema={"col": "Int64"},
+            output_schema={"col": "Int64"},
+        )
+
+        with patch("mlflow.set_tracking_uri") as mock_set_tracking, \
+             patch("mlflow.set_registry_uri") as mock_set_registry, \
+             patch("mlflow.set_experiment"), \
+             patch("mlflow.start_run") as mock_run, \
+             patch("mlflow.log_dict"), \
+             patch("mlflow.pyfunc.log_model"), \
+             patch("mlflow.tracking.MlflowClient") as mock_client, \
+             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
+             patch("haute.deploy._mlflow._build_signature"), \
+             patch("haute.deploy._mlflow._get_model_instance"):
+            mock_client.return_value.search_model_versions.return_value = []
+            mock_run.return_value.__enter__ = MagicMock()
+            mock_run.return_value.__exit__ = MagicMock(return_value=False)
+
+            deploy_to_mlflow(resolved)
+
+            mock_set_tracking.assert_called_once_with("databricks")
+            mock_set_registry.assert_called_once_with("databricks-uc")
+
+    def test_deploy_uses_uc_model_name(self) -> None:
+        """Model must be registered with catalog.schema.model_name format."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            databricks=DatabricksConfig(catalog="workspace", schema="default"),
+        )
+        resolved = ResolvedDeploy(
+            config=config,
+            full_graph={"nodes": [], "edges": []},
+            pruned_graph={"nodes": [], "edges": []},
+            input_node_ids=["policies"],
+            output_node_id="output",
+            artifacts={},
+            input_schema={"col": "Int64"},
+            output_schema={"col": "Int64"},
+        )
+
+        with patch("mlflow.set_tracking_uri"), \
+             patch("mlflow.set_registry_uri"), \
+             patch("mlflow.set_experiment"), \
+             patch("mlflow.start_run") as mock_run, \
+             patch("mlflow.log_dict"), \
+             patch("mlflow.pyfunc.log_model") as mock_log_model, \
+             patch("mlflow.tracking.MlflowClient") as mock_client, \
+             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
+             patch("haute.deploy._mlflow._build_signature"), \
+             patch("haute.deploy._mlflow._get_model_instance"):
+            mock_client.return_value.search_model_versions.return_value = []
+            mock_run.return_value.__enter__ = MagicMock()
+            mock_run.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = deploy_to_mlflow(resolved)
+
+            # Verify the UC three-level namespace was used in log_model
+            log_call = mock_log_model.call_args
+            assert log_call.kwargs["registered_model_name"] == "workspace.default.my-model"
+
+            # Verify the model URI uses the UC name
+            assert "workspace.default.my-model" in result.model_uri
+
+    def test_ensure_experiment_directory_called(self) -> None:
+        """Experiment parent directories must be created before set_experiment."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+            databricks=DatabricksConfig(experiment_name="/Shared/haute/test"),
+        )
+        resolved = ResolvedDeploy(
+            config=config,
+            full_graph={"nodes": [], "edges": []},
+            pruned_graph={"nodes": [], "edges": []},
+            input_node_ids=["policies"],
+            output_node_id="output",
+            artifacts={},
+            input_schema={"col": "Int64"},
+            output_schema={"col": "Int64"},
+        )
+
+        with patch("mlflow.set_tracking_uri"), \
+             patch("mlflow.set_registry_uri"), \
+             patch("mlflow.set_experiment"), \
+             patch("mlflow.start_run") as mock_run, \
+             patch("mlflow.log_dict"), \
+             patch("mlflow.pyfunc.log_model"), \
+             patch("mlflow.tracking.MlflowClient") as mock_client, \
+             patch("haute.deploy._mlflow._ensure_experiment_directory") as mock_ensure, \
+             patch("haute.deploy._mlflow._build_signature"), \
+             patch("haute.deploy._mlflow._get_model_instance"):
+            mock_client.return_value.search_model_versions.return_value = []
+            mock_run.return_value.__enter__ = MagicMock()
+            mock_run.return_value.__exit__ = MagicMock(return_value=False)
+
+            deploy_to_mlflow(resolved)
+
+            mock_ensure.assert_called_once_with("/Shared/haute/test")
+
+    def test_ensure_experiment_directory_skips_top_level(self) -> None:
+        """Top-level experiment paths (parent is '/') should not trigger mkdirs."""
+        from unittest.mock import patch
+
+        from haute.deploy._mlflow import _ensure_experiment_directory
+
+        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls:
+            _ensure_experiment_directory("/top_level_experiment")
+            mock_ws_cls.return_value.workspace.mkdirs.assert_not_called()
+
+    def test_ensure_experiment_directory_creates_parent(self) -> None:
+        """Nested experiment paths should trigger mkdirs on the parent."""
+        from unittest.mock import patch
+
+        from haute.deploy._mlflow import _ensure_experiment_directory
+
+        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls:
+            _ensure_experiment_directory("/Shared/haute/my-experiment")
+            mock_ws_cls.return_value.workspace.mkdirs.assert_called_once_with(
+                "/Shared/haute"
+            )
 
 
 class TestHauteModel:

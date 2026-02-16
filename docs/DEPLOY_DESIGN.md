@@ -564,23 +564,30 @@ class DeployResult:
     """Returned by deploy_to_mlflow()."""
     model_name: str
     model_version: int
-    model_uri: str               # e.g. "models:/motor-pricing/3"
+    model_uri: str               # e.g. "models:/main.pricing.motor-pricing/3"
     endpoint_url: str | None     # Databricks serving URL, if created
     manifest_path: Path
 
-def deploy_to_mlflow(config: DeployConfig) -> DeployResult:
-    """Deploy a resolved DeployConfig to MLflow + Databricks Model Serving.
+def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
+    """Deploy a resolved pipeline to MLflow + Databricks Model Serving.
 
     Steps:
-        1. Build deployment manifest JSON
-        2. Log HauteModel as mlflow.pyfunc with artifacts + signature
-        3. Register model version in MLflow Model Registry
-        4. (If Databricks) Create or update the serving endpoint
-        5. Return DeployResult with model URI and endpoint URL
+        1. Set tracking URI (``databricks``) and registry URI (``databricks-uc``)
+        2. Build Unity Catalog model name (``catalog.schema.model_name``)
+        3. Ensure experiment parent directories exist in the workspace
+        4. Build deployment manifest JSON
+        5. Log HauteModel as mlflow.pyfunc with artifacts + signature
+        6. Register model version in MLflow Model Registry
+        7. Return DeployResult with model URI and endpoint URL
     """
 
-def get_deploy_status(model_name: str) -> dict[str, str | int]:
-    """Query MLflow Model Registry for current model versions and serving status."""
+def get_deploy_status(
+    model_name: str, catalog: str = "main", schema: str = "default"
+) -> dict[str, str | int]:
+    """Query MLflow Model Registry for current model versions and serving status.
+
+    Sets tracking/registry URIs and constructs the UC three-level model name.
+    """
 ```
 
 **Why no abstraction layer:** The pruner, bundler, schema inference, scorer,

@@ -47,6 +47,13 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
     config = resolved.config
     model_name = config.model_name
 
+    # Point MLflow at the Databricks workspace (uses DATABRICKS_HOST/TOKEN env vars)
+    mlflow.set_tracking_uri("databricks")
+    mlflow.set_registry_uri("databricks-uc")
+
+    # Use Unity Catalog three-level namespace: catalog.schema.model_name
+    uc_model_name = f"{config.databricks.catalog}.{config.databricks.schema}.{model_name}"
+
     # 1. Build deployment manifest
     manifest = _build_manifest(resolved)
 
@@ -67,6 +74,7 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
         # 5. Set experiment if configured
         experiment_name = config.databricks.experiment_name
+        _ensure_experiment_directory(experiment_name)
         mlflow.set_experiment(experiment_name)
 
         # 6. Log the model
@@ -79,18 +87,18 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
                 artifacts=artifacts,
                 signature=signature,
                 pip_requirements=_pip_requirements(resolved),
-                registered_model_name=model_name,
+                registered_model_name=uc_model_name,
             )
 
         # 7. Get the registered model version
         client = mlflow.tracking.MlflowClient()
-        versions = client.search_model_versions(f"name='{model_name}'")
+        versions = client.search_model_versions(f"name='{uc_model_name}'")
         if versions:
             latest_version = max(v.version for v in versions)
         else:
             latest_version = 1
 
-        model_uri = f"models:/{model_name}/{latest_version}"
+        model_uri = f"models:/{uc_model_name}/{latest_version}"
 
     return DeployResult(
         model_name=model_name,
@@ -101,16 +109,29 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
     )
 
 
-def get_deploy_status(model_name: str) -> dict[str, str | int]:
+def get_deploy_status(
+    model_name: str,
+    catalog: str = "main",
+    schema: str = "default",
+) -> dict[str, str | int]:
     """Query MLflow Model Registry for current model versions and status.
+
+    Args:
+        model_name: Short model name (e.g. ``"motor-pricing"``).
+        catalog: Unity Catalog catalog name.
+        schema: Unity Catalog schema name.
 
     Returns:
         Dict with keys: model_name, latest_version, latest_stage, status.
     """
     import mlflow
 
+    mlflow.set_tracking_uri("databricks")
+    mlflow.set_registry_uri("databricks-uc")
+
+    uc_model_name = f"{catalog}.{schema}.{model_name}"
     client = mlflow.tracking.MlflowClient()
-    versions = client.search_model_versions(f"name='{model_name}'")
+    versions = client.search_model_versions(f"name='{uc_model_name}'")
 
     if not versions:
         return {
@@ -218,6 +239,29 @@ def _pip_requirements(resolved: ResolvedDeploy) -> list[str]:
             break
 
     return reqs
+
+
+def _ensure_experiment_directory(experiment_name: str) -> None:
+    """Create parent directories for the experiment path in the Databricks workspace.
+
+    Uses the Databricks SDK workspace client, which is already available
+    via the ``haute[databricks]`` optional dependency.  The ``mkdirs``
+    call is idempotent — it creates all missing ancestors and no-ops if
+    the directory already exists.
+
+    Requires ``DATABRICKS_HOST`` and ``DATABRICKS_TOKEN`` in the
+    environment (already loaded from ``.env`` by ``_load_env()``).
+    """
+    from pathlib import PurePosixPath
+
+    from databricks.sdk import WorkspaceClient
+
+    parent_dir = str(PurePosixPath(experiment_name).parent)
+    if parent_dir in ("/", "."):
+        return
+
+    ws = WorkspaceClient()
+    ws.workspace.mkdirs(parent_dir)
 
 
 def _get_user() -> str:

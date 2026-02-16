@@ -109,7 +109,7 @@ Haute logs each deployment as an MLflow run. You need an experiment to hold thes
 
 ### Option A: Let Haute create it automatically
 
-If the experiment doesn't exist, MLflow will create it on first deploy. Just set the path in `haute.toml`:
+If the experiment doesn't exist, MLflow will create it on first deploy. Haute automatically creates any missing parent directories (e.g. `/Shared/haute/`) before setting the experiment. Just set the path in `haute.toml`:
 
 ```toml
 [deploy.databricks]
@@ -223,7 +223,7 @@ Output:
   ✓ Test quotes: single_policy.json     1 rows  ok  (18ms)
   ✓ Test quotes: batch_policies.json    5 rows  ok  (24ms)
   ✓ Logged MLflow model: motor-pricing v1
-  ✓ Model URI: models:/motor-pricing/1
+  ✓ Model URI: models:/main.pricing.motor-pricing/1
 ```
 
 ### Check status
