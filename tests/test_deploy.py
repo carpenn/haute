@@ -361,7 +361,8 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory"), \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"):
+             patch("haute.deploy._mlflow._get_model_instance"), \
+             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -403,7 +404,8 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory"), \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"):
+             patch("haute.deploy._mlflow._get_model_instance"), \
+             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -449,7 +451,8 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory") as mock_ensure, \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"):
+             patch("haute.deploy._mlflow._get_model_instance"), \
+             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -479,6 +482,140 @@ class TestDatabricksTracking:
             mock_ws_cls.return_value.workspace.mkdirs.assert_called_once_with(
                 "/Shared/haute"
             )
+
+
+class TestServingEndpoint:
+    """Regression tests: deploy must create/update the Databricks serving endpoint."""
+
+    def test_deploy_calls_create_or_update_endpoint(self) -> None:
+        """deploy_to_mlflow() must call _create_or_update_serving_endpoint."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_name="my-endpoint",
+            databricks=DatabricksConfig(catalog="ws", schema="default"),
+        )
+        resolved = ResolvedDeploy(
+            config=config,
+            full_graph={"nodes": [], "edges": []},
+            pruned_graph={"nodes": [], "edges": []},
+            input_node_ids=["policies"],
+            output_node_id="output",
+            artifacts={},
+            input_schema={"col": "Int64"},
+            output_schema={"col": "Int64"},
+        )
+
+        with patch("mlflow.set_tracking_uri"), \
+             patch("mlflow.set_registry_uri"), \
+             patch("mlflow.set_experiment"), \
+             patch("mlflow.start_run") as mock_run, \
+             patch("mlflow.log_dict"), \
+             patch("mlflow.pyfunc.log_model"), \
+             patch("mlflow.tracking.MlflowClient") as mock_client, \
+             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
+             patch("haute.deploy._mlflow._build_signature"), \
+             patch("haute.deploy._mlflow._get_model_instance"), \
+             patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as mock_ep:
+            mock_client.return_value.search_model_versions.return_value = []
+            mock_run.return_value.__enter__ = MagicMock()
+            mock_run.return_value.__exit__ = MagicMock(return_value=False)
+            mock_ep.return_value = "https://host/serving-endpoints/my-endpoint/invocations"
+
+            result = deploy_to_mlflow(resolved)
+
+            mock_ep.assert_called_once_with(
+                config=config,
+                uc_model_name="ws.default.my-model",
+                model_version=1,
+            )
+            assert result.endpoint_url == (
+                "https://host/serving-endpoints/my-endpoint/invocations"
+            )
+
+    def test_endpoint_returns_none_when_no_endpoint_name(self) -> None:
+        """If endpoint_name is not set, _create_or_update_serving_endpoint returns None."""
+        from haute.deploy._config import DeployConfig
+        from haute.deploy._mlflow import _create_or_update_serving_endpoint
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_name=None,
+        )
+        result = _create_or_update_serving_endpoint(
+            config=config, uc_model_name="main.pricing.my-model", model_version=1
+        )
+        assert result is None
+
+    def test_endpoint_creates_new_endpoint(self) -> None:
+        """When endpoint doesn't exist, it should be created."""
+        from unittest.mock import patch
+
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import _create_or_update_serving_endpoint
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_name="my-endpoint",
+            databricks=DatabricksConfig(
+                serving_workload_size="Small",
+                serving_scale_to_zero=True,
+            ),
+        )
+
+        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls, \
+             patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}):
+            mock_ws = mock_ws_cls.return_value
+            from databricks.sdk.errors import NotFound
+            mock_ws.serving_endpoints.get.side_effect = NotFound("not found")
+
+            url = _create_or_update_serving_endpoint(
+                config=config,
+                uc_model_name="main.pricing.my-model",
+                model_version=2,
+            )
+
+            mock_ws.serving_endpoints.create.assert_called_once()
+            assert url == "https://myhost/serving-endpoints/my-endpoint/invocations"
+
+    def test_endpoint_updates_existing_endpoint(self) -> None:
+        """When endpoint already exists, it should update the config."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import _create_or_update_serving_endpoint
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_name="my-endpoint",
+            databricks=DatabricksConfig(
+                serving_workload_size="Medium",
+                serving_scale_to_zero=False,
+            ),
+        )
+
+        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls, \
+             patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}):
+            mock_ws = mock_ws_cls.return_value
+            mock_ws.serving_endpoints.get.return_value = MagicMock()
+
+            url = _create_or_update_serving_endpoint(
+                config=config,
+                uc_model_name="main.pricing.my-model",
+                model_version=3,
+            )
+
+            mock_ws.serving_endpoints.update_config.assert_called_once()
+            mock_ws.serving_endpoints.create.assert_not_called()
+            assert url == "https://myhost/serving-endpoints/my-endpoint/invocations"
 
 
 class TestHauteModel:

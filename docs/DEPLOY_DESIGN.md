@@ -578,7 +578,8 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
         4. Build deployment manifest JSON
         5. Log HauteModel as mlflow.pyfunc with artifacts + signature
         6. Register model version in MLflow Model Registry
-        7. Return DeployResult with model URI and endpoint URL
+        7. Create or update Databricks Model Serving endpoint (if endpoint_name is set)
+        8. Return DeployResult with model URI and endpoint URL
     """
 
 def get_deploy_status(

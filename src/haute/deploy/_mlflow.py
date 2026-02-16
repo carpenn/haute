@@ -15,6 +15,8 @@ from haute.deploy._config import ResolvedDeploy
 if TYPE_CHECKING:
     import mlflow.pyfunc
 
+    from haute.deploy._config import DeployConfig
+
 
 @dataclass
 class DeployResult:
@@ -100,11 +102,18 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
         model_uri = f"models:/{uc_model_name}/{latest_version}"
 
+    # 8. Create or update the serving endpoint
+    endpoint_url = _create_or_update_serving_endpoint(
+        config=config,
+        uc_model_name=uc_model_name,
+        model_version=int(latest_version),
+    )
+
     return DeployResult(
         model_name=model_name,
         model_version=int(latest_version),
         model_uri=model_uri,
-        endpoint_url=None,
+        endpoint_url=endpoint_url,
         manifest_path=manifest_path,
     )
 
@@ -239,6 +248,71 @@ def _pip_requirements(resolved: ResolvedDeploy) -> list[str]:
             break
 
     return reqs
+
+
+def _create_or_update_serving_endpoint(
+    config: DeployConfig,
+    uc_model_name: str,
+    model_version: int,
+) -> str | None:
+    """Create or update a Databricks Model Serving endpoint.
+
+    Uses the Databricks SDK to create an endpoint if it doesn't exist,
+    or update the served model version if it does.
+
+    Args:
+        config: The deployment configuration (provides endpoint_name and
+                serving settings from haute.toml).
+        uc_model_name: The Unity Catalog three-level model name
+                       (e.g. ``"workspace.default.haute-test"``).
+        model_version: The model version number to serve.
+
+    Returns:
+        The endpoint invocation URL, or ``None`` if endpoint_name is not
+        configured.
+    """
+    import os
+
+    endpoint_name = config.endpoint_name
+    if not endpoint_name:
+        return None
+
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.errors import NotFound
+    from databricks.sdk.service.serving import (
+        EndpointCoreConfigInput,
+        ServedEntityInput,
+    )
+
+    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+
+    ws = WorkspaceClient()
+
+    served_entity = ServedEntityInput(
+        entity_name=uc_model_name,
+        entity_version=str(model_version),
+        workload_size=config.databricks.serving_workload_size,
+        scale_to_zero_enabled=config.databricks.serving_scale_to_zero,
+    )
+
+    try:
+        ws.serving_endpoints.get(endpoint_name)
+        # Endpoint exists — update the served model version
+        ws.serving_endpoints.update_config(
+            name=endpoint_name,
+            served_entities=[served_entity],
+        )
+    except NotFound:
+        # Endpoint doesn't exist — create it
+        ws.serving_endpoints.create(
+            name=endpoint_name,
+            config=EndpointCoreConfigInput(
+                name=endpoint_name,
+                served_entities=[served_entity],
+            ),
+        )
+
+    return f"{host}/serving-endpoints/{endpoint_name}/invocations"
 
 
 def _ensure_experiment_directory(experiment_name: str) -> None:
