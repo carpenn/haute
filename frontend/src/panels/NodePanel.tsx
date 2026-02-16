@@ -399,7 +399,7 @@ function CodeEditor({
 
   const lineCount = Math.max((code || "").split("\n").length, 1)
 
-  // Undo-safe text insertion — goes through the browser input pipeline
+  // Undo-safe text insertion - goes through the browser input pipeline
   // so Ctrl+Z / Ctrl+Shift+Z work natively.
   const insertText = useCallback((ta: HTMLTextAreaElement, text: string) => {
     ta.focus()
@@ -1099,7 +1099,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
   const isOutput = node.data.nodeType === "output"
   const isTransform = node.data.nodeType === "transform"
 
-  // Compute input sources — variable name = sanitized source node label
+  // Compute input sources - variable name = sanitized source node label
   const nodeMap = Object.fromEntries(allNodes.map((n) => [n.id, n]))
   const inputSources: InputSource[] = edges
     .filter((e) => e.target === node.id)

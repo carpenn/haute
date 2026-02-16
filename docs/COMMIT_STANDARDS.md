@@ -10,7 +10,7 @@ These are the non-negotiable principles that shape every decision in hauteay. If
 
 ### Code is the source of truth
 
-The `.py` file is always canonical. The GUI is a live, editable *view* of that code — never the other way around. Layout metadata lives in a sidecar `.haute.json`, not in the Python. A pipeline must always be runnable with `python main.py` — no GUI required.
+The `.py` file is always canonical. The GUI is a live, editable *view* of that code - never the other way around. Layout metadata lives in a sidecar `.haute.json`, not in the Python. A pipeline must always be runnable with `python main.py` - no GUI required.
 
 ### Same pipeline, every context
 
@@ -30,7 +30,7 @@ Bad code in a `.py` file shows an error banner, not a white screen. Parse errors
 
 ### Permissive parsing, strict generation
 
-The parser accepts messy, hand-edited Python — regex fallback, partial decorators, missing type hints. The code generator always emits clean, idiomatic, `ruff`-passing Python. Round-tripping through the GUI improves code quality.
+The parser accepts messy, hand-edited Python - regex fallback, partial decorators, missing type hints. The code generator always emits clean, idiomatic, `ruff`-passing Python. Round-tripping through the GUI improves code quality.
 
 ### Thin orchestration, not a platform
 
@@ -42,7 +42,7 @@ A pricing analyst with no engineering background can drag nodes and connect them
 
 ### Everything is diffable
 
-Pipeline logic is `.py` files — reviewable in PRs, diffable in git, testable in CI. Node positions are JSON. There are no opaque binary formats. If it can't be diffed, it shouldn't be committed.
+Pipeline logic is `.py` files - reviewable in PRs, diffable in git, testable in CI. Node positions are JSON. There are no opaque binary formats. If it can't be diffed, it shouldn't be committed.
 
 ### Explain every price
 
@@ -67,7 +67,7 @@ Every output value must be traceable back through the graph to its inputs, showi
 ## 3. Single Responsibility
 
 - Each module, class, and function does one thing.
-- API endpoints are thin — validation and response shaping only. Business logic lives in the library layer (`executor.py`, `pipeline.py`, etc.).
+- API endpoints are thin - validation and response shaping only. Business logic lives in the library layer (`executor.py`, `pipeline.py`, etc.).
 - React components: rendering only. Side effects in hooks, logic in utils.
 
 ## 4. Type Safety
@@ -166,7 +166,7 @@ AI coding assistants produce plausible-looking code that often hides real proble
 ### Dangerous fallbacks that mask errors
 
 ```python
-# BAD — silently returns empty data instead of crashing
+# BAD - silently returns empty data instead of crashing
 def get_data(path):
     try:
         return pl.read_parquet(path)
@@ -181,7 +181,7 @@ def get_data(path):
 ### Broad exception swallowing
 
 - `except Exception: pass` is almost never correct. Catch the specific exception you expect.
-- `except Exception as e: return {"error": str(e)}` in API endpoints is fine — but only at the outermost layer. Inner code should not catch broadly.
+- `except Exception as e: return {"error": str(e)}` in API endpoints is fine - but only at the outermost layer. Inner code should not catch broadly.
 
 ### Hallucinated APIs and parameters
 
@@ -198,7 +198,7 @@ def get_data(path):
 ### Defensive code that hides bugs
 
 ```python
-# BAD — if node_map is missing a key, this silently skips it
+# BAD - if node_map is missing a key, this silently skips it
 result = node_map.get(nid, {}).get("data", {}).get("config", {})
 ```
 
@@ -219,7 +219,7 @@ result = node_map.get(nid, {}).get("data", {}).get("config", {})
 ### Comments that restate the code
 
 ```python
-# BAD — the comment adds zero information
+# BAD - the comment adds zero information
 x = x + 1  # increment x by 1
 ```
 
@@ -228,7 +228,7 @@ x = x + 1  # increment x by 1
 
 ### Untested edge cases presented as handled
 
-- LLMs generate `if` branches for edge cases but don't test them. An untested branch is worse than no branch — it gives false confidence.
+- LLMs generate `if` branches for edge cases but don't test them. An untested branch is worse than no branch - it gives false confidence.
 - If you add an edge case handler, add a test for it. If you can't test it, add a `# TODO: untested` comment.
 
 ### Import bloat
@@ -242,11 +242,11 @@ x = x + 1  # increment x by 1
 
 This is a brand new application. Do not add compatibility shims, version checks, or migration code.
 
-- **No "legacy" support** — if an API is poorly designed, change it. Do not keep the old version alongside the new one.
-- **No feature flags** — if a feature is ready, ship it. Do not add `ENABLE_NEW_X` environment variables.
-- **No versioned endpoints** — `/api/v1/` is unnecessary. Use `/api/` and evolve it as needed.
-- **No migration scripts** — if the data model changes, update the code. There is no production data to migrate yet.
-- **No deprecation warnings** — if something is wrong, remove it. Do not add `warnings.warn` with a future removal date.
+- **No "legacy" support** - if an API is poorly designed, change it. Do not keep the old version alongside the new one.
+- **No feature flags** - if a feature is ready, ship it. Do not add `ENABLE_NEW_X` environment variables.
+- **No versioned endpoints** - `/api/v1/` is unnecessary. Use `/api/` and evolve it as needed.
+- **No migration scripts** - if the data model changes, update the code. There is no production data to migrate yet.
+- **No deprecation warnings** - if something is wrong, remove it. Do not add `warnings.warn` with a future removal date.
 
 The only exception is the public PyPI package interface (`haute` CLI and core APIs). Prioritize clean, simple code over compatibility gymnastics.
 
@@ -258,10 +258,10 @@ Copy into PR descriptions:
 
 ```
 Design Philosophy
-- [ ] Code (.py) is the source of truth — GUI is a view, not the canonical form
+- [ ] Code (.py) is the source of truth - GUI is a view, not the canonical form
 - [ ] Same code path works for 1-row and N-row execution
 - [ ] Uses the single execution engine (parse → execute_graph), no parallel paths
-- [ ] Polars LazyFrame throughout — no premature .collect() or pandas conversion
+- [ ] Polars LazyFrame throughout - no premature .collect() or pandas conversion
 - [ ] GUI handles errors gracefully (error banner, not crash)
 - [ ] Generated code is clean, idiomatic, ruff-passing Python
 - [ ] No unnecessary abstraction layers or platform reimplementation
@@ -287,10 +287,10 @@ LLM Code Review
 - [ ] No broad exception swallowing (`except Exception: pass`)
 - [ ] All API calls and imports verified against actual codebase/library docs
 - [ ] No deprecated patterns (old typing imports, on_event, pandas)
-- [ ] No chained .get() on keys that should exist — fail loudly on missing data
+- [ ] No chained .get() on keys that should exist - fail loudly on missing data
 - [ ] No redundant validation that duplicates upstream checks
 - [ ] No premature abstraction (base classes with one subclass)
-- [ ] Comments explain why, not what — no restating the code
+- [ ] Comments explain why, not what - no restating the code
 - [ ] Edge case branches have tests, or are marked # TODO: untested
 
 Backward Compatibility

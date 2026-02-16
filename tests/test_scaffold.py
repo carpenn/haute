@@ -1,4 +1,4 @@
-"""Tests for haute._scaffold — template generation for ``haute init``."""
+"""Tests for haute._scaffold - template generation for ``haute init``."""
 
 from haute._scaffold import (
     env_example,

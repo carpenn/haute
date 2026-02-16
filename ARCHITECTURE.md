@@ -1,4 +1,4 @@
-# Haute — Architecture & Plan
+# Haute - Architecture & Plan
 
 **Open-source pricing engine for insurance teams on Databricks**
 
@@ -11,7 +11,7 @@ Haute is an open-source Python library that gives insurance pricing teams a **co
 - **Pricing analysts** who are comfortable with visual tools (like WTW Radar)
 - **Engineering best practices** that come from working in code: version control, CI/CD, unit tests, linting, code review
 
-The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one — the other stays in sync.
+The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one - the other stays in sync.
 
 Haute leans heavily into the **Databricks/MLflow ecosystem** rather than reinventing model training, registry, or serving.
 
@@ -29,7 +29,7 @@ Haute leans heavily into the **Databricks/MLflow ecosystem** rather than reinven
 ### Haute IS NOT:
 - A model training framework (use MLflow, scikit-learn, XGBoost, LightGBM, etc.)
 - A replacement for Databricks (it's a client, not a platform)
-- A proprietary black box — everything is `.py` files on disk
+- A proprietary black box - everything is `.py` files on disk
 
 ---
 
@@ -111,9 +111,9 @@ my-pricing-project/
 
 Pipeline files live in the **project root** (e.g. `main.py`), not in a subdirectory. This keeps the structure flat and simple for single-pipeline projects. The `haute.toml` `[project]` section points to the pipeline file.
 
-For multi-pipeline projects, users can organise pipelines into a `pipelines/` directory and update `haute.toml` accordingly — but the default is root-level.
+For multi-pipeline projects, users can organise pipelines into a `pipelines/` directory and update `haute.toml` accordingly - but the default is root-level.
 
-CI/CD workflows are optional — pass `--ci github` to generate them, or `--ci none` to skip. The deploy target is selected with `--target` (databricks, docker, sagemaker, azure-ml).
+CI/CD workflows are optional - pass `--ci github` to generate them, or `--ci none` to skip. The deploy target is selected with `--target` (databricks, docker, sagemaker, azure-ml).
 
 ---
 
@@ -191,7 +191,7 @@ uv add haute
 | **CLI** | Click | `haute init`, `haute serve`, `haute deploy`, `haute lint` |
 | **MLflow client** | mlflow | Model registry, tracking, serving |
 | **Databricks client** | databricks-sdk | Unity Catalog, Model Serving, jobs |
-| **AST / code gen** | libcst | Concrete syntax tree — parse & modify Python preserving formatting |
+| **AST / code gen** | libcst | Concrete syntax tree - parse & modify Python preserving formatting |
 | **File watching** | watchfiles | Detect .py changes, push to UI |
 
 ### 4.4 Frontend Stack
@@ -210,7 +210,7 @@ uv add haute
 
 ### 4.5 Key Technical Decisions
 
-- **AST for parsing, libcst reserved for surgical write-back**: The read path (`parser.py`) uses Python's `ast` module with a regex fallback for syntax errors. `libcst` is reserved for Phase 2 surgical write-back — editing individual nodes in a `.py` file without regenerating the whole file. The current write path (`codegen.py`) regenerates the full file, which is fine while the GUI is the only write source.
+- **AST for parsing, libcst reserved for surgical write-back**: The read path (`parser.py`) uses Python's `ast` module with a regex fallback for syntax errors. `libcst` is reserved for Phase 2 surgical write-back - editing individual nodes in a `.py` file without regenerating the whole file. The current write path (`codegen.py`) regenerates the full file, which is fine while the GUI is the only write source.
 - **Polars over pandas**: Faster, more memory efficient, better API.
 - **File watcher for sync**: When a user edits `.py` files in their IDE, the file watcher detects changes and pushes updated graph state to the React Flow UI via WebSocket. This enables true bidirectional editing.
 
@@ -222,7 +222,7 @@ uv add haute
 
 A pipeline is a small data transformation: **input → Polars DataFrame → pipeline nodes → output DataFrame**.
 
-The same pipeline code runs in both modes — only the input differs:
+The same pipeline code runs in both modes - only the input differs:
 
 | Mode | Input | DataFrame shape | Use case |
 |---|---|---|---|
@@ -239,11 +239,11 @@ import polars as pl
 
 pipeline = haute.Pipeline.load("motor.py")
 
-# Batch — N rows
+# Batch - N rows
 quotes = pl.read_parquet("data/quotes_2025.parquet")
 results = pipeline.score(quotes)  # Polars DataFrame in, Polars DataFrame out
 
-# Single quote — same code, 1 row
+# Single quote - same code, 1 row
 single = pl.DataFrame({"vehicle_age": [3], "postcode": ["SW1A"], "driver_age": [35]})
 price = pipeline.score(single)
 ```
@@ -279,7 +279,7 @@ This:
 5. Creates/updates a Databricks Model Serving endpoint
 6. Returns the endpoint URL
 
-The pricing pipeline itself becomes the MLflow model — it wraps model lookups, rating steps, and business logic into a single deployable unit.
+The pricing pipeline itself becomes the MLflow model - it wraps model lookups, rating steps, and business logic into a single deployable unit.
 
 ### 5.4 Deployment Configuration
 
@@ -335,15 +335,15 @@ Credentials are read from `.env` (loaded automatically, gitignored). TOML values
 
 | Practice | Implementation |
 |---|---|
-| **Version control** | Git-native — everything is `.py` files, diffable and reviewable |
+| **Version control** | Git-native - everything is `.py` files, diffable and reviewable |
 | **CI/CD** | Pre-configured GitHub Actions: lint → test → deploy on merge to main |
 | **Linting** | `ruff` for Python, `haute lint` for pipeline-specific validation |
 | **Type checking** | `mypy` (strict mode) |
 | **Testing** | `pytest` stubs auto-generated for each pipeline; `haute test` runs them |
-| **Pre-commit hooks** | ruff, mypy, haute lint — runs on every commit |
+| **Pre-commit hooks** | ruff, mypy, haute lint - runs on every commit |
 | **Dependency management** | `uv` with lockfile |
 
-### 6.2 `haute lint` — Pipeline-specific checks
+### 6.2 `haute lint` - Pipeline-specific checks
 
 - Pipeline parses without syntax errors
 - At least one node exists
@@ -353,7 +353,7 @@ Credentials are read from `.env` (loaded automatically, gitignored). TOML values
 
 Runs as `haute lint` (auto-discovers pipeline from `haute.toml`) or `haute lint path/to/pipeline.py`.
 
-### 6.3 `haute test` — Auto-generated tests
+### 6.3 `haute test` - Auto-generated tests
 
 ```python
 # tests/test_motor.py (auto-generated, user can extend)
@@ -422,7 +422,7 @@ Short, available, memorable. CLI command: `haute`. Import: `import haute`.
 
 ---
 
-## 9. Killer Features — What Gets Attention
+## 9. Killer Features - What Gets Attention
 
 The features below are ordered by impact. Features 1–2 are what get **attention** (demos, HN, LinkedIn). Features 3–4 are what get **adoption** (teams choosing haute over alternatives). Features 5–6 are what make engineering teams **insist** on using it.
 
@@ -432,13 +432,13 @@ Edit a `.py` file in VS Code → the React Flow graph updates in real-time. Edit
 
 Implementation: libcst for round-trip-safe Python parsing. File watcher (watchfiles) detects `.py` changes, pushes updated graph state to the React Flow UI via WebSocket. GUI edits generate clean, idiomatic, diffable Python code back to disk.
 
-The hard part isn't parsing — it's **conflict resolution** when both sides edit simultaneously. Treat the `.py` file as the single source of truth; GUI edits write to disk immediately, and the file watcher debounces to avoid loops.
+The hard part isn't parsing - it's **conflict resolution** when both sides edit simultaneously. Treat the `.py` file as the single source of truth; GUI edits write to disk immediately, and the file watcher debounces to avoid loops.
 
 ### 9.2 What-If Sensitivity Mode (the "wow" demo feature)
 
 Pin a single input row and show sliders for each input variable. Drag "driver age" from 25 to 45 and watch the price update **live** through every node in the graph. Each node shows its intermediate output updating in real-time.
 
-This is what pricing analysts do all day in spreadsheets. Making it visual and instant in the pipeline graph is a **demo moment** — the kind of thing people share.
+This is what pricing analysts do all day in spreadsheets. Making it visual and instant in the pipeline graph is a **demo moment** - the kind of thing people share.
 
 Implementation: Since the pipeline uses Polars lazy evaluation, scoring a single row is near-instant. The frontend sends a modified 1-row DataFrame on each slider change, the backend runs the pipeline and returns per-node results. Debounce slider input to ~100ms.
 
@@ -456,15 +456,15 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 
 #### Implementation status
 
-**Phase A (done)** — Foundation in `src/haute/trace.py`:
+**Phase A (done)** - Foundation in `src/haute/trace.py`:
 - `execute_trace()` runs the pipeline on a single row and captures per-node input/output snapshots
 - `SchemaDiff` classifies columns at each node as `added`, `removed`, `modified`, or `passed_through`
 - `TraceStep` / `TraceResult` dataclasses carry the full trace payload
 - Column filtering: pass a `column` name to prune the trace to only nodes that touch it
 - `POST /api/pipeline/trace` endpoint wired up in `server.py`
-- Reuses the existing `executor._build_node_fn` infrastructure — no duplication
+- Reuses the existing `executor._build_node_fn` infrastructure - no duplication
 
-**TODO — future phases** (see `docs/EXECUTION_TRACE_DESIGN.md` for full design):
+**TODO - future phases** (see `docs/EXECUTION_TRACE_DESIGN.md` for full design):
 - [ ] Row-identity tracking (`__trace_row_id`) for filters, joins, sorts
 - [ ] `JoinInfo` / `AggregationInfo` for cardinality-changing nodes
 - [ ] Column provenance via Polars expression plan inspection
@@ -487,7 +487,7 @@ haute init
 haute deploy
 ```
 
-This parses the pipeline, prunes to the scoring path, validates against test quotes, packages it as an MLflow pyfunc model, registers it in MLflow Model Registry, creates/updates a Databricks Model Serving endpoint, and returns the URL. Pricing teams spend **weeks** on deployment plumbing — this makes it a one-liner.
+This parses the pipeline, prunes to the scoring path, validates against test quotes, packages it as an MLflow pyfunc model, registers it in MLflow Model Registry, creates/updates a Databricks Model Serving endpoint, and returns the URL. Pricing teams spend **weeks** on deployment plumbing - this makes it a one-liner.
 
 Staging deploys use `haute deploy --endpoint-suffix "-staging"`, followed by `haute smoke --endpoint-suffix "-staging"` to validate the live endpoint before promoting to production.
 
@@ -499,7 +499,7 @@ haute diff HEAD~1
 
 Renders a side-by-side graph diff: green nodes = added, red = removed, amber = changed (with inline code diff on hover). Turns every PR review into a visual experience.
 
-Git diffs of pipeline `.py` files are hard to review; a graph diff is immediately legible. This is genuinely novel — no pipeline tool does this.
+Git diffs of pipeline `.py` files are hard to review; a graph diff is immediately legible. This is genuinely novel - no pipeline tool does this.
 
 ### 9.6 Natural Language → Polars Code (the adoption accelerator)
 
@@ -508,7 +508,7 @@ Add a "describe what you want" input to the Polars node. Type:
 
 → generates the Polars code automatically.
 
-This massively lowers the barrier for pricing analysts who know SQL/Excel but can't write Polars. Implementation: call an LLM API (OpenAI/Anthropic) with a well-crafted prompt that includes the input schema (already available from lazy scan) and available column names. No need to build an LLM — just a smart prompt.
+This massively lowers the barrier for pricing analysts who know SQL/Excel but can't write Polars. Implementation: call an LLM API (OpenAI/Anthropic) with a well-crafted prompt that includes the input schema (already available from lazy scan) and available column names. No need to build an LLM - just a smart prompt.
 
 ### 9.7 Rating Table Hot-Reload with Impact Preview
 
@@ -520,13 +520,13 @@ This is the #1 workflow in pricing. Making it instant and visual (instead of re-
 
 Automatically check that the output columns of node A match the expected input of node B. Show a **red edge** if there's a mismatch. Catch "column not found" errors before execution, not during.
 
-Low-hanging fruit with high impact — the schema is already available from Polars lazy scans. This is the kind of polish that makes the tool feel professional.
+Low-hanging fruit with high impact - the schema is already available from Polars lazy scans. This is the kind of polish that makes the tool feel professional.
 
 ---
 
 ## 10. Phased Roadmap
 
-### Phase 1 — Hello World UI ✅
+### Phase 1 - Hello World UI ✅
 - [x] Scaffold project (pyproject.toml, frontend/, src/haute/)
 - [x] FastAPI backend with pipeline API endpoints
 - [x] React Flow frontend rendering a pipeline graph
@@ -537,7 +537,7 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 - [x] Dark theme, polished UI
 - [ ] Static asset bundling (frontend builds into Python wheel)
 
-### Phase 2 — Live Code ↔ GUI Sync (partially complete)
+### Phase 2 - Live Code ↔ GUI Sync (partially complete)
 - [x] Parse decorated `.py` files → React Flow graph (AST + regex fallback)
 - [x] GUI edits write back to `.py` files (clean, diffable code via full regeneration)
 - [x] File watcher pushes changes to UI via WebSocket
@@ -545,7 +545,7 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 - [ ] Surgical write-back with libcst (edit individual nodes without regenerating the whole file)
 - [ ] Schema validation between connected nodes (red edge on mismatch)
 
-### Phase 3 — Deploy & Score (partially complete)
+### Phase 3 - Deploy & Score (partially complete)
 - [x] Package a pipeline as an MLflow pyfunc model
 - [x] `haute deploy` registers model and deploys to Databricks Model Serving
 - [x] Local scoring engine (`pipeline.score(df)` for dev/testing)
@@ -564,14 +564,14 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 - [ ] DataSource node with Databricks Unity Catalog support
 - [ ] Rating table viewer (reads from Databricks)
 
-### Phase 4 — Killer Demo Features
+### Phase 4 - Killer Demo Features
 - [ ] What-if sensitivity mode (slider-driven single-row scoring)
-- [x] Execution trace / data lineage — Phase A: single-row trace engine + schema diffs (`src/haute/trace.py`, `POST /api/pipeline/trace`)
-- [ ] Execution trace / data lineage — Phase B+: row identity tracking, join/agg info, column provenance, expression gen, frontend panel, compare mode
+- [x] Execution trace / data lineage - Phase A: single-row trace engine + schema diffs (`src/haute/trace.py`, `POST /api/pipeline/trace`)
+- [ ] Execution trace / data lineage - Phase B+: row identity tracking, join/agg info, column provenance, expression gen, frontend panel, compare mode
 - [ ] Rating table hot-reload with impact preview
 - [ ] Natural language → Polars code (LLM-powered node assistant)
 
-### Phase 5 — Engineering Practices (partially complete)
+### Phase 5 - Engineering Practices (partially complete)
 - [x] `haute init` scaffolds a new pricing project (`--target`, `--ci` flags)
 - [x] GitHub Actions CI template (lint → type check → test → pipeline validation)
 - [x] GitHub Actions deploy template (staging → smoke test → production with approval)
@@ -581,7 +581,7 @@ Low-hanging fruit with high impact — the schema is already available from Pola
 - [ ] Auto-generated test stubs + `haute test`
 - [ ] Pipeline visual diff (`haute diff HEAD~1`)
 
-### Phase 6 — Advanced
+### Phase 6 - Advanced
 - [ ] Composable pipelines (sub-pipelines as nodes)
 - [ ] Monitoring dashboard (actual vs expected pricing)
 - [ ] A/B testing for deployed endpoints

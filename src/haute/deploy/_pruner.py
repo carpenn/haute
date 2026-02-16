@@ -1,4 +1,4 @@
-"""Graph pruning for deployment — keep only ancestors of the output node."""
+"""Graph pruning for deployment - keep only ancestors of the output node."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Haute — Open-source pricing engine for insurance teams on Databricks."""
+"""Haute - Open-source pricing engine for insurance teams on Databricks."""
 
 from importlib.metadata import PackageNotFoundError, version
 

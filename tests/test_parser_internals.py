@@ -1,4 +1,4 @@
-"""Tests for parser internals — unit tests for extraction and config building."""
+"""Tests for parser internals - unit tests for extraction and config building."""
 
 from __future__ import annotations
 

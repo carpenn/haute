@@ -1,4 +1,4 @@
-"""Deploy configuration — user input, TOML loading, and resolution."""
+"""Deploy configuration - user input, TOML loading, and resolution."""
 
 from __future__ import annotations
 
@@ -189,7 +189,7 @@ def _apply_env_overrides(config: DeployConfig) -> DeployConfig:
 class ResolvedDeploy:
     """Computed state after resolving a DeployConfig against a parsed pipeline.
 
-    Created by ``resolve_config()`` — never constructed directly.
+    Created by ``resolve_config()`` - never constructed directly.
     """
 
     config: DeployConfig

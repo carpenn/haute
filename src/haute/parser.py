@@ -590,7 +590,7 @@ def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) ->
         "pipeline_description": pipeline_desc,
         "preamble": preamble,
         "source_file": source_file,
-        "warning": f"File has syntax errors — some nodes may show errors. {syntax_error}",
+        "warning": f"File has syntax errors - some nodes may show errors. {syntax_error}",
     }
 
 
@@ -674,7 +674,7 @@ def parse_pipeline_file(filepath: str | Path) -> dict:
 def parse_pipeline_source(source: str, source_file: str = "") -> dict:
     """Parse pipeline source code and return graph JSON."""
 
-    # Syntax check — fall back to regex if the file has errors
+    # Syntax check - fall back to regex if the file has errors
     try:
         tree = ast.parse(source)
     except SyntaxError as e:

@@ -1,4 +1,4 @@
-"""Tests for haute.cli — CLI command tests using click.testing.CliRunner."""
+"""Tests for haute.cli - CLI command tests using click.testing.CliRunner."""
 
 from __future__ import annotations
 
@@ -267,7 +267,7 @@ pipeline.connect("source", "bad")
 
 
 # ---------------------------------------------------------------------------
-# haute serve (smoke test only — can't test the long-running server)
+# haute serve (smoke test only - can't test the long-running server)
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -313,7 +313,7 @@ class TestLint:
 
 
 # ---------------------------------------------------------------------------
-# haute smoke (offline error paths only — live endpoint tests require network)
+# haute smoke (offline error paths only - live endpoint tests require network)
 # ---------------------------------------------------------------------------
 
 class TestSmoke:

@@ -1,8 +1,8 @@
-# Code ↔ GUI Sync — Design Document
+# Code ↔ GUI Sync - Design Document
 
 ## 1. Core Principle
 
-**Python is the source of truth.** The `.py` file on disk is the canonical representation of a pipeline. The GUI is a live, editable view of that file. Edit either one — the other stays in sync.
+**Python is the source of truth.** The `.py` file on disk is the canonical representation of a pipeline. The GUI is a live, editable view of that file. Edit either one - the other stays in sync.
 
 ---
 
@@ -28,8 +28,8 @@ The JSON graph is currently the source of truth. The `.py` file is a secondary e
 
 ### Two execution engines (need to converge)
 
-1. **`executor.py`** — runs from JSON graph (used by GUI preview/run)
-2. **`pipeline.py` `Pipeline.run()`** — runs from decorated Python (used by CLI `haute run`)
+1. **`executor.py`** - runs from JSON graph (used by GUI preview/run)
+2. **`pipeline.py` `Pipeline.run()`** - runs from decorated Python (used by CLI `haute run`)
 
 These must converge so the same pipeline code drives both the GUI and the CLI.
 
@@ -70,7 +70,7 @@ These must converge so the same pipeline code drives both the GUI and the CLI.
 
 1. User edits a node in the GUI (drag, rename, edit code, connect)
 2. Frontend sends the edit to the backend
-3. `codegen.py` performs a **surgical edit** on the `.py` file (libcst — replace just the changed function, don't regenerate the whole file)
+3. `codegen.py` performs a **surgical edit** on the `.py` file (libcst - replace just the changed function, don't regenerate the whole file)
 4. File is written to disk
 5. File watcher detects the change → but backend debounces to avoid a feedback loop (ignore writes it made itself within the last 500ms)
 
@@ -145,7 +145,7 @@ The parser is **permissive, not strict**:
 - String quote style
 - Trailing commas
 
-This is critical for **round-trip fidelity**: parse a file, modify one function, write it back — everything else stays exactly as the user wrote it.
+This is critical for **round-trip fidelity**: parse a file, modify one function, write it back - everything else stays exactly as the user wrote it.
 
 ---
 
@@ -191,7 +191,7 @@ watchfiles → detects .py change → parser → graph JSON → WebSocket push
 
 - Use `watchfiles` (already in the tech stack plan) to watch the project root (and `modules/` if present)
 - On change: debounce 300ms, then parse
-- Compare new graph JSON to previous — if different, push via WebSocket
+- Compare new graph JSON to previous - if different, push via WebSocket
 - **Self-write detection**: track file writes made by codegen. Ignore watcher events within 500ms of a codegen write to prevent feedback loops.
 
 ### Frontend (React)
@@ -202,7 +202,7 @@ WebSocket message → update React Flow state → re-render graph
 
 - Maintain a WebSocket connection to `/ws/sync`
 - On receiving a new graph: merge with current state (preserve positions if available)
-- If the GUI has unsaved in-progress edits (e.g. user is typing in the code editor), show a "file changed externally — reload?" prompt instead of clobbering
+- If the GUI has unsaved in-progress edits (e.g. user is typing in the code editor), show a "file changed externally - reload?" prompt instead of clobbering
 
 ---
 
@@ -251,8 +251,8 @@ motor.haute.json       ← UI metadata (positions, layout preferences)
 ## 8. Convergence Plan for Execution Engines
 
 Currently there are two ways to run a pipeline:
-1. `executor.py` — from JSON graph (GUI)
-2. `pipeline.py` `Pipeline.run()` — from decorated Python (CLI)
+1. `executor.py` - from JSON graph (GUI)
+2. `pipeline.py` `Pipeline.run()` - from decorated Python (CLI)
 
 ### Target: single execution path
 
@@ -272,7 +272,7 @@ Both GUI and CLI use the same path:
 
 | Layer | When | What |
 |---|---|---|
-| **Syntax** | On file save / watcher trigger | `ast.parse()` — is it valid Python? |
+| **Syntax** | On file save / watcher trigger | `ast.parse()` - is it valid Python? |
 | **Structure** | After successful parse | Does it have `@pipeline.node` functions? Are edges valid? |
 | **Schema** | After structure validation | Do output columns of node A match input expectations of node B? (Polars lazy schema) |
 | **Runtime** | On preview / run | Does the code actually execute without error? |
@@ -289,8 +289,8 @@ Each layer produces specific error messages shown in the GUI:
 
 | Component | File | Priority | Effort |
 |---|---|---|---|
-| **Parser** | `src/haute/parser.py` | P0 — critical path | Medium |
-| **Surgical codegen** | modify `src/haute/codegen.py` | P0 — critical path | Medium |
+| **Parser** | `src/haute/parser.py` | P0 - critical path | Medium |
+| **Surgical codegen** | modify `src/haute/codegen.py` | P0 - critical path | Medium |
 | **WebSocket endpoint** | modify `src/haute/server.py` | P1 | Small |
 | **File watcher** | modify `src/haute/server.py` | P1 | Small |
 | **Frontend WebSocket handler** | modify `frontend/src/App.tsx` | P1 | Small |
@@ -301,13 +301,13 @@ Each layer produces specific error messages shown in the GUI:
 
 ### Build order
 
-1. **Parser** — without this, nothing works. `.py` → graph JSON.
-2. **ELK layout** — swap dagre for ELK so auto-layout is good enough out of the box.
-3. **WebSocket + file watcher** — live sync from file changes to GUI.
-4. **Surgical codegen** — GUI edits write back to `.py` without mangling.
-5. **Sidecar metadata** — persist node positions.
-6. **Error handling + banners** — graceful degradation for bad code.
-7. **Execution convergence** — single path for CLI and GUI.
+1. **Parser** - without this, nothing works. `.py` → graph JSON.
+2. **ELK layout** - swap dagre for ELK so auto-layout is good enough out of the box.
+3. **WebSocket + file watcher** - live sync from file changes to GUI.
+4. **Surgical codegen** - GUI edits write back to `.py` without mangling.
+5. **Sidecar metadata** - persist node positions.
+6. **Error handling + banners** - graceful degradation for bad code.
+7. **Execution convergence** - single path for CLI and GUI.
 
 ---
 
@@ -317,7 +317,7 @@ Each layer produces specific error messages shown in the GUI:
 |---|---|
 | libcst can't handle some Python syntax | Fall back to treating the whole file as unparseable; show error banner, don't crash |
 | Feedback loop (watcher → parse → codegen → watcher → ...) | Self-write detection: ignore watcher events within 500ms of a codegen write |
-| User writes code that doesn't map to any node type | Permissive parser — unknown code is preserved but invisible to GUI |
+| User writes code that doesn't map to any node type | Permissive parser - unknown code is preserved but invisible to GUI |
 | Large pipelines (50+ nodes) look messy | ELK layout handles complex DAGs well; sidecar file preserves manual arrangement |
 | Merge conflicts in sidecar `.haute.json` | Positions are non-critical; auto-layout resolves any conflict. File is optional. |
-| Two users editing same file via GUI | Out of scope for now. Same as two people editing any file — git handles it. |
+| Two users editing same file via GUI | Out of scope for now. Same as two people editing any file - git handles it. |

@@ -1,4 +1,4 @@
-"""Tests for haute.graph_utils — shared graph utilities."""
+"""Tests for haute.graph_utils - shared graph utilities."""
 
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ class TestExecuteLazy:
                     return dfs[0].with_columns(y=pl.lit(99))
                 return nid, fn, False
 
-        # Two nodes, no edge — "t" should fallback to src's output
+        # Two nodes, no edge - "t" should fallback to src's output
         g = _make_graph([("src", "Src"), ("t", "T")], [])
         g["nodes"][0]["data"]["nodeType"] = "dataSource"
 

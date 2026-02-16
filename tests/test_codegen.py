@@ -1,4 +1,4 @@
-"""Tests for haute.codegen — graph JSON → Python code generation."""
+"""Tests for haute.codegen - graph JSON → Python code generation."""
 
 from __future__ import annotations
 

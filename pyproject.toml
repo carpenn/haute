@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "haute"
 version = "0.1.11"
-description = "Haute — Open-source pricing engine for insurance teams on Databricks"
+description = "Haute - Open-source pricing engine for insurance teams on Databricks"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

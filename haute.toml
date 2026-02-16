@@ -7,7 +7,7 @@ name = "main"
 pipeline = "main.py"
 
 # ─────────────────────────────────────────────────────────────────
-# Deployment — Databricks MLflow Model Serving
+# Deployment - Databricks MLflow Model Serving
 # ─────────────────────────────────────────────────────────────────
 [deploy]
 target = "databricks"                     # deployment target
@@ -25,7 +25,7 @@ serving_workload_size = "Small"                    # Small | Medium | Large
 serving_scale_to_zero = true                       # scale to zero when idle
 
 # ─────────────────────────────────────────────────────────────────
-# Test quotes — example JSON payloads for pre-deploy validation
+# Test quotes - example JSON payloads for pre-deploy validation
 # ─────────────────────────────────────────────────────────────────
 [test_quotes]
 dir = "test_quotes"                       # directory containing .json files

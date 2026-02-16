@@ -159,7 +159,7 @@ def severity_write(severity_set: pl.DataFrame) -> pl.DataFrame:
 
 
 
-# Wire nodes together — edges define data flow
+# Wire nodes together - edges define data flow
 pipeline.connect("policies", "frequency_set")
 pipeline.connect("exposure", "frequency_set")
 pipeline.connect("exposure", "severity_set")

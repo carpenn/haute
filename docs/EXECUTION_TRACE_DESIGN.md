@@ -1,4 +1,4 @@
-# Execution Trace & Data Lineage — Design
+# Execution Trace & Data Lineage - Design
 
 ## Problem
 
@@ -16,9 +16,9 @@ A mature motor pricing pipeline might have:
 
 - **50–100 nodes** (data sources, feature engineering, model scores, rating steps, blenders, outputs)
 - **100–300 columns** flowing through the graph (raw features, derived features, model scores, factors, intermediate prices)
-- **Branching/merging DAGs** — separate frequency/severity branches that merge at a blender node
-- **Cardinality-changing operations** — joins (fan-out), group_bys (collapse), filters (reduce)
-- **Multiple model scores** — GLMs, GBMs, blended outputs
+- **Branching/merging DAGs** - separate frequency/severity branches that merge at a blender node
+- **Cardinality-changing operations** - joins (fan-out), group_bys (collapse), filters (reduce)
+- **Multiple model scores** - GLMs, GBMs, blended outputs
 
 The trace system must handle all of this without requiring O(nodes × rows × columns) memory.
 
@@ -26,17 +26,17 @@ The trace system must handle all of this without requiring O(nodes × rows × co
 
 ## Three levels of lineage
 
-### Level 1 — Node lineage (static, free)
+### Level 1 - Node lineage (static, free)
 
 > "Which nodes contributed to this output?"
 
 Already available via `graph_utils.ancestors()`. Given any node, walk backwards
 through edges to find all upstream nodes. This is the **path highlight** on the
-React Flow graph — no execution required.
+React Flow graph - no execution required.
 
 **Augmentation for column lineage**: At each node, diff the input schema against
 the output schema to classify every column as `added`, `removed`, `passed_through`,
-or `modified`. This gives a **column-level node lineage** — when tracing a specific
+or `modified`. This gives a **column-level node lineage** - when tracing a specific
 column, we can dim nodes that don't touch it.
 
 ```
@@ -47,7 +47,7 @@ Schema diff at node "area_factor":
   → passed_through: [postcode, driver_age, vehicle_age, base_rate]
 ```
 
-### Level 2 — Row trace (dynamic, cheap for 1 row)
+### Level 2 - Row trace (dynamic, cheap for 1 row)
 
 > "For this specific policy, what happened at each node?"
 
@@ -57,13 +57,13 @@ lazy evaluation, this is near-instant even with 100 nodes.
 
 This is the "click a row → light up the graph with intermediate values" feature.
 
-### Level 3 — Cell trace (dynamic, targeted)
+### Level 3 - Cell trace (dynamic, targeted)
 
 > "Why is this specific cell £412.50?"
 
 Given an output (row_index, column_name), trace backwards through the graph
 showing only the **relevant columns** at each node. This requires column
-provenance — knowing which upstream columns a given output column depends on.
+provenance - knowing which upstream columns a given output column depends on.
 
 This is the deepest level: the `base rate £300 → area factor ×1.2 → NCD ×0.85 → £412.50` view.
 
@@ -98,7 +98,7 @@ class TraceStep:
     columns_modified: list[str]
     columns_passed: list[str]
 
-    # Row snapshot — only the relevant columns (all columns if no column filter)
+    # Row snapshot - only the relevant columns (all columns if no column filter)
     input_values: dict[str, Any]   # column → value, before this node
     output_values: dict[str, Any]  # column → value, after this node
 
@@ -258,7 +258,7 @@ Three approaches, used in combination:
        ...
    ```
 
-   This annotation is optional — the trace system works without it but gives
+   This annotation is optional - the trace system works without it but gives
    better targeted traces when present.
 
 ---
@@ -501,7 +501,7 @@ TraceCache:
 ```
 
 - **Schema diffs**: Computed once per pipeline execution, cached until the graph changes.
-- **LazyFrame intermediates**: Kept from the last `execute_graph` call. When the user clicks different rows, we don't re-execute the pipeline — we just collect different rows from the cached lazy frames.
+- **LazyFrame intermediates**: Kept from the last `execute_graph` call. When the user clicks different rows, we don't re-execute the pipeline - we just collect different rows from the cached lazy frames.
 - **Row traces**: LRU cache of recent trace results. Pricing analysts typically trace 5–10 rows when investigating a pricing issue.
 
 ### Large pipeline optimisation
@@ -529,7 +529,7 @@ This is well within budget for a local dev server.
 
 ## Implementation plan
 
-### Phase A — Instrumented single-row executor (`src/haute/trace.py`)
+### Phase A - Instrumented single-row executor (`src/haute/trace.py`)
 
 New module that wraps `execute_graph` logic:
 
@@ -542,7 +542,7 @@ New module that wraps `execute_graph` logic:
 
 **Depends on**: existing executor infrastructure (no changes needed to `execute_graph`)
 
-### Phase B — Schema diff engine
+### Phase B - Schema diff engine
 
 Function that compares two DataFrames (input vs output of a node) and classifies
 each column:
@@ -568,7 +568,7 @@ def schema_diff(input_df: pl.DataFrame, output_df: pl.DataFrame) -> SchemaDiff:
     return SchemaDiff(added, removed, modified, passed)
 ```
 
-### Phase C — Row identity tracking
+### Phase C - Row identity tracking
 
 Inject `__trace_row_id` at source nodes. Track through the DAG:
 
@@ -577,17 +577,17 @@ Inject `__trace_row_id` at source nodes. Track through the DAG:
 - **Joins**: match on join keys, record both source row_ids
 - **Group_bys**: record group keys and count of source rows
 
-### Phase D — API endpoint + frontend integration
+### Phase D - API endpoint + frontend integration
 
 1. `POST /api/pipeline/trace` endpoint in `server.py`
 2. Frontend: click a cell in the data preview → call trace API → highlight path on graph → show trace panel
 
-### Phase E — Column lineage (static analysis)
+### Phase E - Column lineage (static analysis)
 
 Parse node code (Polars expressions) to determine column dependencies.
 This enables the "dim irrelevant nodes" feature for column-specific traces.
 
-### Phase F — Expression generation
+### Phase F - Expression generation
 
 For known node types (rating steps, simple transforms), generate human-readable
 expression strings:
@@ -596,7 +596,7 @@ expression strings:
 - Multiply: `"base_rate × area_factor × ncd_factor = 412.50"`
 - Filter: `"Kept: driver_age >= 18 (True)"`
 
-### Phase G — Compare traces + What-If integration
+### Phase G - Compare traces + What-If integration
 
 - Compare two rows side-by-side with diff highlighting
 - Connect to What-If mode: when a slider changes an input, re-run the trace
@@ -612,8 +612,8 @@ src/haute/
 ├── schema_diff.py        # SchemaDiff, column classification
 ├── column_lineage.py     # Static column provenance analysis
 ├── expression_gen.py     # Human-readable expression generation
-├── executor.py           # (existing) — add trace-aware hooks
-├── server.py             # (existing) — add /api/pipeline/trace endpoints
+├── executor.py           # (existing) - add trace-aware hooks
+├── server.py             # (existing) - add /api/pipeline/trace endpoints
 ```
 
 ---

@@ -212,7 +212,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
 
     cwd = Path.cwd()
 
-    # Write .py (source of truth — runnable code)
+    # Write .py (source of truth - runnable code)
     if body.source_file:
         py_path = (cwd / body.source_file).resolve()
         if not py_path.is_relative_to(cwd):
@@ -409,7 +409,7 @@ async def get_schema(path: str) -> SchemaResponse:
 
 
 # ---------------------------------------------------------------------------
-# File watcher — live sync from .py edits to GUI
+# File watcher - live sync from .py edits to GUI
 # ---------------------------------------------------------------------------
 
 async def _file_watcher() -> None:
@@ -417,7 +417,7 @@ async def _file_watcher() -> None:
     try:
         from watchfiles import Change, awatch
     except ImportError:
-        logger.warning("watchfiles not installed — live sync disabled")
+        logger.warning("watchfiles not installed - live sync disabled")
         return
 
     cwd = Path.cwd()
@@ -439,7 +439,7 @@ async def _file_watcher() -> None:
             if change_type not in (Change.modified, Change.added):
                 continue
 
-            logger.info("File changed: %s — re-parsing", p.name)
+            logger.info("File changed: %s - re-parsing", p.name)
             try:
                 graph = _parse_pipeline_to_graph(p)
                 await _broadcast({
@@ -470,7 +470,7 @@ if STATIC_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve the React SPA — all non-API routes return index.html."""
+        """Serve the React SPA - all non-API routes return index.html."""
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

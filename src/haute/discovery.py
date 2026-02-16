@@ -1,4 +1,4 @@
-"""Pipeline file discovery — shared by CLI and server."""
+"""Pipeline file discovery - shared by CLI and server."""
 
 from __future__ import annotations
 

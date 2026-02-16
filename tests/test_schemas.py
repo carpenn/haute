@@ -1,4 +1,4 @@
-"""Tests for haute.schemas — Pydantic model validation."""
+"""Tests for haute.schemas - Pydantic model validation."""
 
 from __future__ import annotations
 

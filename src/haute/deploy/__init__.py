@@ -1,4 +1,4 @@
-"""Haute Deploy — package a pipeline as a live scoring API.
+"""Haute Deploy - package a pipeline as a live scoring API.
 
 Public API::
 

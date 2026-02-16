@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import polars as pl
 
-# Type alias — nodes pass lazy frames between each other
+# Type alias - nodes pass lazy frames between each other
 _Frame = pl.LazyFrame
 
 
@@ -163,7 +163,7 @@ def _execute_lazy(
         _, fn, is_source = build_node_fn(node_map[nid], source_names=source_names)
         funcs[nid] = (fn, is_source)
 
-    # Execute — all intermediate results stay lazy
+    # Execute - all intermediate results stay lazy
     lazy_outputs: dict[str, _Frame] = {}
 
     for nid in order:

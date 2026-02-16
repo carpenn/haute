@@ -74,7 +74,7 @@ def infer_output_schema(
 
     if not path:
         raise ValueError(
-            f"Input node '{input_node_ids[0]}' has no path — cannot create sample row."
+            f"Input node '{input_node_ids[0]}' has no path - cannot create sample row."
         )
 
     try:

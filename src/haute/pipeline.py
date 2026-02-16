@@ -50,7 +50,7 @@ class Node:
 
 
 class Pipeline:
-    """A haute pricing pipeline — a DAG of decorated nodes.
+    """A haute pricing pipeline - a DAG of decorated nodes.
 
     Nodes are functions. Edges define data flow: the output DataFrame
     of the source node is passed as the input to the target node.
@@ -127,7 +127,7 @@ class Pipeline:
     def _topo_order(self) -> list[Node]:
         """Return nodes in topological order based on edges."""
         if not self._edges:
-            # No explicit edges — fall back to registration order
+            # No explicit edges - fall back to registration order
             return list(self._nodes)
 
         node_ids = [n.name for n in self._nodes]
@@ -161,7 +161,7 @@ class Pipeline:
                     input_dfs = [outputs[name] for name in input_names if name in outputs]
                     outputs[n.name] = n(*input_dfs)
                 else:
-                    # No explicit edges — use last available output (backward compat)
+                    # No explicit edges - use last available output (backward compat)
                     last_df = list(outputs.values())[-1] if outputs else None
                     if last_df is None:
                         raise ValueError(f"Node '{n.name}' has no input")
@@ -189,7 +189,7 @@ class Pipeline:
                 if seed_all or n.is_deploy_input:
                     outputs[n.name] = df
                 else:
-                    # Not a deploy input — run its own load logic
+                    # Not a deploy input - run its own load logic
                     outputs[n.name] = n()
 
         for n in order:
@@ -240,7 +240,7 @@ class Pipeline:
                     "target": tgt,
                 })
         else:
-            # No explicit edges — infer linear chain
+            # No explicit edges - infer linear chain
             for i in range(1, len(self._nodes)):
                 rf_edges.append({
                     "id": f"e_{self._nodes[i - 1].name}_{self._nodes[i].name}",

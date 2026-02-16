@@ -1,4 +1,4 @@
-"""Tests for haute.trace — execution trace / data lineage."""
+"""Tests for haute.trace - execution trace / data lineage."""
 
 from __future__ import annotations
 
@@ -157,9 +157,9 @@ class TestExecuteTrace:
         graph = {
             "nodes": [
                 _source_node("src", str(p)),
-                # passthrough — doesn't touch 'y'
+                # passthrough - doesn't touch 'y'
                 _transform_node("mid"),
-                # adds 'y' — should be included
+                # adds 'y' - should be included
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "mid"), _edge("mid", "t")],

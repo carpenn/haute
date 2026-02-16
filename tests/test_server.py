@@ -1,4 +1,4 @@
-"""Tests for haute.server — FastAPI API endpoint integration tests."""
+"""Tests for haute.server - FastAPI API endpoint integration tests."""
 
 from __future__ import annotations
 

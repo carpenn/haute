@@ -1,4 +1,4 @@
-"""Tests for haute.pipeline — Pipeline and Node classes."""
+"""Tests for haute.pipeline - Pipeline and Node classes."""
 
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ class TestPipeline:
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") * 3)
 
-        # No connect() calls — relies on fallback
+        # No connect() calls - relies on fallback
         result = p.run()
         assert "y" in result.columns
         assert result["y"].to_list() == [3, 6]

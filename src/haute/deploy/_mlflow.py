@@ -1,4 +1,4 @@
-"""MLflow deployment target — log model + create Databricks serving endpoint."""
+"""MLflow deployment target - log model + create Databricks serving endpoint."""
 
 from __future__ import annotations
 
@@ -290,13 +290,13 @@ def _create_or_update_serving_endpoint(
 
     try:
         ws.serving_endpoints.get(endpoint_name)
-        # Endpoint exists — update the served model version
+        # Endpoint exists - update the served model version
         ws.serving_endpoints.update_config(
             name=endpoint_name,
             served_entities=[served_entity],
         )
     except NotFound:
-        # Endpoint doesn't exist — create it
+        # Endpoint doesn't exist - create it
         ws.serving_endpoints.create(
             name=endpoint_name,
             config=EndpointCoreConfigInput(
@@ -313,7 +313,7 @@ def _ensure_experiment_directory(experiment_name: str) -> None:
 
     Uses the Databricks SDK workspace client, which is already available
     via the ``haute[databricks]`` optional dependency.  The ``mkdirs``
-    call is idempotent — it creates all missing ancestors and no-ops if
+    call is idempotent - it creates all missing ancestors and no-ops if
     the directory already exists.
 
     Requires ``DATABRICKS_HOST`` and ``DATABRICKS_TOKEN`` in the

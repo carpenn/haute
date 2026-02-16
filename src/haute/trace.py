@@ -5,9 +5,9 @@ Runs a pipeline graph on a single row and captures per-node snapshots
 foundation for the data-lineage / explainability feature described in
 ARCHITECTURE.md §9.3.
 
-Phase A — what's here now:
-  • execute_trace()  — run graph, collect 1-row snapshots at every node
-  • SchemaDiff       — classify columns as added/removed/modified/passed
+Phase A - what's here now:
+  • execute_trace()  - run graph, collect 1-row snapshots at every node
+  • SchemaDiff       - classify columns as added/removed/modified/passed
   • TraceStep / TraceResult dataclasses
 
 TODO (future phases):
@@ -87,7 +87,7 @@ def _compute_schema_diff(
 ) -> SchemaDiff:
     """Compare input and output row dicts to classify columns."""
     if input_row is None:
-        # Source node — everything is "added"
+        # Source node - everything is "added"
         return SchemaDiff(
             columns_added=list(output_row.keys()),
             columns_removed=[],
@@ -174,7 +174,7 @@ def execute_trace(
         graph: React Flow graph with "nodes" and "edges".
         row_index: Which row in the target node's output to trace (0-indexed).
         target_node_id: Node to trace from. Defaults to the last node in topo order.
-        column: Optional column name — if set, only include nodes that touch it.
+        column: Optional column name - if set, only include nodes that touch it.
 
     Returns:
         TraceResult with per-node steps showing how the row was produced.
@@ -185,7 +185,7 @@ def execute_trace(
     edges = graph.get("edges", [])
 
     if not nodes:
-        raise ValueError("Empty graph — nothing to trace")
+        raise ValueError("Empty graph - nothing to trace")
 
     node_map = {n["id"]: n for n in nodes}
     all_ids = set(node_map.keys())
@@ -267,7 +267,7 @@ def execute_trace(
 
 
 # ---------------------------------------------------------------------------
-# Column filtering — keep only nodes that touch the target column
+# Column filtering - keep only nodes that touch the target column
 # ---------------------------------------------------------------------------
 
 def _filter_steps_by_column(steps: list[TraceStep], column: str) -> list[TraceStep]:
@@ -284,7 +284,7 @@ def _filter_steps_by_column(steps: list[TraceStep], column: str) -> list[TraceSt
 
 
 # ---------------------------------------------------------------------------
-# Serialisation — TraceResult → JSON-safe dict
+# Serialisation - TraceResult → JSON-safe dict
 # ---------------------------------------------------------------------------
 
 def trace_result_to_dict(result: TraceResult) -> dict[str, Any]:

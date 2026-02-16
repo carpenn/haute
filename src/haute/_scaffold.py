@@ -14,7 +14,7 @@ def haute_toml(name: str, target: str, ci: str) -> str:
 
     Defaults to team mode (min_approvers=2, require_approval=true).
     Solo users set min_approvers=0 and require_approval=false in the
-    generated file — no separate CLI flag needed.
+    generated file - no separate CLI flag needed.
     """
     min_approvers = 2
     require_approval = "true"
@@ -100,7 +100,7 @@ instance_count = 1
 def env_example(target: str) -> str:
     """Generate ``.env.example`` with only the credentials for the chosen target."""
     header = """\
-# Haute — {label} credentials
+# Haute - {label} credentials
 # Copy this file to .env and fill in your values.
 # .env is gitignored and will never be committed.
 #
@@ -361,7 +361,7 @@ def starter_test_quote() -> str:
     return """\
 [
   {
-    "_description": "Example quote — replace with your own fields",
+    "_description": "Example quote - replace with your own fields",
     "id": 1,
     "field_a": "value",
     "field_b": 42

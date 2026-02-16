@@ -1,4 +1,4 @@
-"""Tests for haute.parser — .py pipeline file → React Flow graph JSON."""
+"""Tests for haute.parser - .py pipeline file → React Flow graph JSON."""
 
 from __future__ import annotations
 

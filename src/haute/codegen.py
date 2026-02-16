@@ -111,7 +111,7 @@ def {func_name}({params}) -> pl.DataFrame:
 def _wrap_external_code(code: str) -> str:
     """Wrap external file user code: indent each line and append ``return df``.
 
-    Unlike transforms, external file code is multi-statement — the user
+    Unlike transforms, external file code is multi-statement - the user
     is responsible for assigning a Polars DataFrame to ``df``.
     """
     code = code.strip()
@@ -258,7 +258,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
             f"{body}\n"
         )
 
-    # transform — use source node names as params
+    # transform - use source node names as params
     code = config.get("code", "").strip()
     params = _build_params(source_names)
     body = _wrap_user_code(code, source_names)
@@ -331,7 +331,7 @@ def graph_to_code(
     # Emit edges as pipeline.connect() calls
     if edges:
         lines.append("")
-        lines.append("# Wire nodes together — edges define data flow")
+        lines.append("# Wire nodes together - edges define data flow")
         for edge in edges:
             src_func = id_to_func.get(edge["source"], edge["source"])
             tgt_func = id_to_func.get(edge["target"], edge["target"])

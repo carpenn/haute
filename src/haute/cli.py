@@ -31,7 +31,7 @@ def _open_browser(url: str) -> None:
 @click.group()
 @click.version_option(package_name="haute")
 def cli() -> None:
-    """Haute — Open-source pricing engine for insurance teams on Databricks."""
+    """Haute - Open-source pricing engine for insurance teams on Databricks."""
 
 
 def _find_frontend_dir() -> Path | None:
@@ -61,7 +61,7 @@ def init(target: str, ci: str) -> None:
     """Scaffold a Haute pricing project in the current directory.
 
     Generates haute.toml, CI/CD workflows, credentials template, and a
-    starter pipeline — all configured for the chosen deploy target and
+    starter pipeline - all configured for the chosen deploy target and
     CI provider.
 
     \b
@@ -87,7 +87,7 @@ def init(target: str, ci: str) -> None:
     project_dir = Path.cwd()
 
     if (project_dir / "haute.toml").exists():
-        click.echo("Error: haute.toml already exists — project already initialised.", err=True)
+        click.echo("Error: haute.toml already exists - project already initialised.", err=True)
         raise SystemExit(1)
 
     # ── Resolve project name ──────────────────────────────────────
@@ -100,22 +100,22 @@ def init(target: str, ci: str) -> None:
         if "project" in pyproject and "name" in pyproject["project"]:
             name = pyproject["project"]["name"]
 
-    # ── pyproject.toml — ensure haute is a dependency ─────────────
+    # ── pyproject.toml - ensure haute is a dependency ─────────────
     _ensure_haute_dependency(pyproject_path, name)
 
     # ── Directories ───────────────────────────────────────────────
     (project_dir / "data").mkdir(exist_ok=True)
     (project_dir / "test_quotes").mkdir(exist_ok=True)
 
-    # ── main.py — starter pipeline ────────────────────────────────
+    # ── main.py - starter pipeline ────────────────────────────────
     (project_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
 
-    # ── haute.toml — project + deploy + safety + CI config ────────
+    # ── haute.toml - project + deploy + safety + CI config ────────
     (project_dir / "haute.toml").write_text(
         haute_toml(name, target, ci), encoding="utf-8",
     )
 
-    # ── .env.example — target-specific credentials ────────────────
+    # ── .env.example - target-specific credentials ────────────────
     (project_dir / ".env.example").write_text(env_example(target), encoding="utf-8")
 
     # ── Starter test quote ────────────────────────────────────────
@@ -134,7 +134,7 @@ def init(target: str, ci: str) -> None:
         )
         ci_files = [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]
 
-    # ── .gitignore — append if exists, create if not ──────────────
+    # ── .gitignore - append if exists, create if not ──────────────
     gitignore_path = project_dir / ".gitignore"
     haute_entries = ".env\n*.haute.json\n"
     if gitignore_path.exists():
@@ -154,12 +154,12 @@ def init(target: str, ci: str) -> None:
 
     # ── Summary ───────────────────────────────────────────────────
     click.echo(f"Initialised Haute project '{name}' ({target} + {ci})\n")
-    click.echo("  pyproject.toml        — haute added as dependency")
-    click.echo("  haute.toml            — project, deploy, safety & CI config")
-    click.echo(f"  .env.example         — {target} credentials template")
-    click.echo("  main.py              — starter pipeline")
-    click.echo("  data/                — put your data files here")
-    click.echo("  test_quotes/         — example JSON payloads for testing")
+    click.echo("  pyproject.toml        - haute added as dependency")
+    click.echo("  haute.toml            - project, deploy, safety & CI config")
+    click.echo(f"  .env.example         - {target} credentials template")
+    click.echo("  main.py              - starter pipeline")
+    click.echo("  data/                - put your data files here")
+    click.echo("  test_quotes/         - example JSON payloads for testing")
     for f in ci_files:
         click.echo(f"  {f}")
     click.echo("\nNext steps:")
@@ -187,7 +187,7 @@ def _ensure_haute_dependency(pyproject_path: Path, name: str) -> None:
                 1,
             )
         else:
-            # No dependencies key — append a section
+            # No dependencies key - append a section
             text += '\n[project]\ndependencies = [\n    "haute",\n]\n'
         pyproject_path.write_text(text, encoding="utf-8")
     else:
@@ -274,7 +274,7 @@ def run(pipeline_file: str | None) -> None:
         import polars as pl
 
         df = pl.DataFrame(last["preview"])
-        click.echo(f"\nOutput — {last_nid} ({last['row_count']:,} rows):")
+        click.echo(f"\nOutput - {last_nid} ({last['row_count']:,} rows):")
         click.echo(df)
 
 
@@ -363,7 +363,7 @@ def deploy(
     """Deploy a pipeline as a live scoring API.
 
     Reads config from haute.toml + credentials from .env.
-    Pipeline file, model name, and target are all optional —
+    Pipeline file, model name, and target are all optional -
     defaults come from [project] and [deploy] in haute.toml.
     """
     from haute.deploy._config import DeployConfig, resolve_config
@@ -448,7 +448,7 @@ def deploy(
             raise SystemExit(1)
 
     if dry_run:
-        click.echo("\n  Dry run complete — no model was deployed.")
+        click.echo("\n  Dry run complete - no model was deployed.")
         return
 
     # 5. Deploy to MLflow

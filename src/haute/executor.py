@@ -5,7 +5,7 @@ Polars pipeline, without needing a saved .py file.
 
 Uses LazyFrames throughout so Polars can push predicates and limits
 down into scans.  Preview mode slaps a .head(row_limit) before
-.collect() — the query optimiser folds this into the scan.
+.collect() - the query optimiser folds this into the scan.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
             if path.endswith(".csv"):
                 return pl.scan_csv(path)
             elif path.endswith(".json"):
-                # json has no scan — read eagerly then make lazy
+                # json has no scan - read eagerly then make lazy
                 return pl.read_json(path).lazy()
             else:
                 return pl.scan_parquet(path)

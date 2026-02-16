@@ -1,4 +1,4 @@
-"""Tests for DeployConfig — new [safety], [ci] sections, env overrides, endpoint suffix."""
+"""Tests for DeployConfig - new [safety], [ci] sections, env overrides, endpoint suffix."""
 
 from __future__ import annotations
 

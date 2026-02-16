@@ -1,6 +1,6 @@
-# Haute — Deployment Strategy
+# Haute - Deployment Strategy
 
-**Status:** Draft — refining before implementation  
+**Status:** Draft - refining before implementation  
 **Scope:** Config design, CI/CD, deploy targets, safety gates  
 
 ---
@@ -10,10 +10,10 @@
 A pricing team builds a pipeline in Haute. They need to:
 
 1. **Deploy it** to a live scoring API (Databricks, AWS, Azure, Docker, etc.)
-2. **Release safely** — every change is tested, reviewed, impact-analysed, and auditable
-3. **Configure once** — deployment target, CI provider, and safety thresholds defined in version-controlled config
+2. **Release safely** - every change is tested, reviewed, impact-analysed, and auditable
+3. **Configure once** - deployment target, CI provider, and safety thresholds defined in version-controlled config
 
-The insurance industry adds a hard constraint: **a single wrong factor can misprice millions of pounds of premium before anyone notices**. The release process must catch bugs, unintended impact, and compliance violations — without slowing teams to a crawl.
+The insurance industry adds a hard constraint: **a single wrong factor can misprice millions of pounds of premium before anyone notices**. The release process must catch bugs, unintended impact, and compliance violations - without slowing teams to a crawl.
 
 Haute's competitive edge: all of this works out of the box from `haute init`. No DevOps team required.
 
@@ -21,11 +21,11 @@ Haute's competitive edge: all of this works out of the box from `haute init`. No
 
 ## 2. Design Principles
 
-1. **`haute.toml` is the single source of truth** — everything about *what* gets deployed, *where*, and *with what safety checks* lives in one committed file
-2. **Secrets never go in config** — credentials live in `.env` (local) or CI secrets (remote), never in `haute.toml`
-3. **Deploy targets and CI providers are independent choices** — you can deploy to Databricks from GitHub Actions, or to Docker from Azure DevOps, or any combination
-4. **Convention over configuration** — sensible defaults for everything; most teams only need to fill in target-specific credentials
-5. **Merge to main = deploy** — production deployments are triggered by merging to the main branch, never by running a manual command in production
+1. **`haute.toml` is the single source of truth** - everything about *what* gets deployed, *where*, and *with what safety checks* lives in one committed file
+2. **Secrets never go in config** - credentials live in `.env` (local) or CI secrets (remote), never in `haute.toml`
+3. **Deploy targets and CI providers are independent choices** - you can deploy to Databricks from GitHub Actions, or to Docker from Azure DevOps, or any combination
+4. **Convention over configuration** - sensible defaults for everything; most teams only need to fill in target-specific credentials
+5. **Merge to main = deploy** - production deployments are triggered by merging to the main branch, never by running a manual command in production
 
 ---
 
@@ -53,7 +53,7 @@ For GitLab users, `.gitlab-ci.yml`.
 
 ---
 
-## 4. Configuration Design — `haute.toml`
+## 4. Configuration Design - `haute.toml`
 
 ### 4.1 Target-Specific Generation
 
@@ -183,7 +183,7 @@ min_approvers = 2
 
 ### 4.2 All Target-Specific Sections (reference)
 
-These are never in the same file — only the one matching `--target` is generated.
+These are never in the same file - only the one matching `--target` is generated.
 
 ```toml
 # ── Databricks ────────────────────────────────────────────────
@@ -214,7 +214,7 @@ instance_type = "Standard_DS3_v2"
 instance_count = 1
 ```
 
-### 4.3 What Goes Where — The Separation
+### 4.3 What Goes Where - The Separation
 
 | Setting | Where | Committed to git? | Example |
 |---|---|---|---|
@@ -235,16 +235,16 @@ We considered `deployment/databricks.yaml`, `deployment/docker.yaml` etc. but re
 - **More files = more confusion** for pricing teams who aren't DevOps engineers
 - All targets share the same top-level fields (`model_name`, `endpoint_name`)
 - Only one target is active at a time (`[deploy].target`)
-- `haute init` generates only the relevant target section — no dead config
-- If a team needs to switch target, they edit the `[deploy]` section and add the new `[deploy.<target>]` section — or re-run `haute init` in a clean project
+- `haute init` generates only the relevant target section - no dead config
+- If a team needs to switch target, they edit the `[deploy]` section and add the new `[deploy.<target>]` section - or re-run `haute init` in a clean project
 
 ### 4.5 Credentials by Target
 
-Each deploy target reads credentials from environment variables. `haute init` generates a `.env.example` containing **only** the credentials for the chosen target — not a master list of every possible provider.
+Each deploy target reads credentials from environment variables. `haute init` generates a `.env.example` containing **only** the credentials for the chosen target - not a master list of every possible provider.
 
 #### `--target databricks` generates:
 ```bash
-# Haute — Databricks credentials
+# Haute - Databricks credentials
 # Copy to .env and fill in your values. .env is gitignored.
 DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
 DATABRICKS_TOKEN=your_token_here
@@ -252,7 +252,7 @@ DATABRICKS_TOKEN=your_token_here
 
 #### `--target sagemaker` generates:
 ```bash
-# Haute — AWS SageMaker credentials
+# Haute - AWS SageMaker credentials
 # Copy to .env and fill in your values. .env is gitignored.
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
@@ -262,7 +262,7 @@ SAGEMAKER_ROLE_ARN=arn:aws:iam::123456789012:role/SageMakerRole
 
 #### `--target azure-ml` generates:
 ```bash
-# Haute — Azure ML credentials
+# Haute - Azure ML credentials
 # Copy to .env and fill in your values. .env is gitignored.
 AZURE_SUBSCRIPTION_ID=
 AZURE_TENANT_ID=
@@ -272,7 +272,7 @@ AZURE_CLIENT_SECRET=
 
 #### `--target docker` generates:
 ```bash
-# Haute — Docker registry credentials (optional)
+# Haute - Docker registry credentials (optional)
 # Only needed if pushing to a private registry.
 # Copy to .env and fill in your values. .env is gitignored.
 DOCKER_USERNAME=
@@ -285,7 +285,7 @@ DOCKER_PASSWORD=
 
 ### 5.1 Target Architecture
 
-All targets consume the same `ResolvedDeploy` dataclass (already implemented). The target-specific layer is thin — it only handles "put this model somewhere and give me a URL".
+All targets consume the same `ResolvedDeploy` dataclass (already implemented). The target-specific layer is thin - it only handles "put this model somewhere and give me a URL".
 
 ```
 haute.toml ──→ DeployConfig ──→ resolve_config()
@@ -312,7 +312,7 @@ haute.toml ──→ DeployConfig ──→ resolve_config()
 | Target | `[deploy].target` | Install extra | What it produces | Credential env vars |
 |---|---|---|---|---|
 | **Databricks** | `"databricks"` | `haute[databricks]` | MLflow model → Databricks Model Serving endpoint | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` |
-| **Docker** | `"docker"` | (none — core) | OCI container image with FastAPI server | `DOCKER_USERNAME`, `DOCKER_PASSWORD` (optional, for registry push) |
+| **Docker** | `"docker"` | (none - core) | OCI container image with FastAPI server | `DOCKER_USERNAME`, `DOCKER_PASSWORD` (optional, for registry push) |
 | **AWS SageMaker** | `"sagemaker"` | `haute[aws]` | MLflow model → SageMaker real-time endpoint | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SAGEMAKER_ROLE_ARN` |
 | **Azure ML** | `"azure-ml"` | `haute[azure]` | MLflow model → Azure ML managed online endpoint | `AZURE_SUBSCRIPTION_ID`, `AZURE_CLIENT_ID`, etc. |
 
@@ -328,16 +328,16 @@ uv add "haute[aws]"            # mlflow, sagemaker, boto3
 # Azure
 uv add "haute[azure]"          # mlflow, azure-ai-ml, azure-identity
 
-# Docker (no extra needed — uses only stdlib + Dockerfile generation)
+# Docker (no extra needed - uses only stdlib + Dockerfile generation)
 uv add haute
 
 # Multiple targets
 uv add "haute[databricks,aws]"
 ```
 
-### 5.4 Docker Target — The Universal Escape Hatch
+### 5.4 Docker Target - The Universal Escape Hatch
 
-Docker is special because it has **zero cloud dependencies**. It produces a self-contained container that runs anywhere — on-prem Kubernetes, ECS, Cloud Run, or a laptop.
+Docker is special because it has **zero cloud dependencies**. It produces a self-contained container that runs anywhere - on-prem Kubernetes, ECS, Cloud Run, or a laptop.
 
 ```bash
 # Set target = "docker" in haute.toml, then:
@@ -353,7 +353,7 @@ The generated container:
 - Configurable via environment variables
 - No runtime dependency on Databricks, AWS, or Azure
 
-This makes Docker the **foundation target** — if you can run a container, you can run Haute.
+This makes Docker the **foundation target** - if you can run a container, you can run Haute.
 
 ---
 
@@ -385,9 +385,9 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
 | **GitLab CI** | `provider = "gitlab"` | `.gitlab-ci.yml` | v2 |
 | **None** | `provider = "none"` | No CI files generated | v1 |
 
-All providers run the same logical steps — only the YAML syntax differs.
+All providers run the same logical steps - only the YAML syntax differs.
 
-### 6.3 GitHub Actions — CI Workflow (`ci.yml`)
+### 6.3 GitHub Actions - CI Workflow (`ci.yml`)
 
 Runs on every PR to `main`:
 
@@ -399,23 +399,23 @@ Runs on every PR to `main`:
 | **pipeline-validate** | `haute lint` + `haute deploy --dry-run` | Yes |
 | **impact** | `haute impact --base origin/main` → PR comment | Configurable (default: warning only) |
 
-### 6.4 GitHub Actions — Deploy Workflow (`deploy.yml`)
+### 6.4 GitHub Actions - Deploy Workflow (`deploy.yml`)
 
 Runs on push to `main` (i.e. after PR merge):
 
 | Step | What it does | Environment |
 |---|---|---|
-| **validate** | Re-runs lint, typecheck, test, pipeline validation on merge commit | — |
+| **validate** | Re-runs lint, typecheck, test, pipeline validation on merge commit | - |
 | **deploy-staging** | `haute deploy` with `--endpoint-suffix "-staging"` | `staging` (GitHub environment) |
-| **smoke-test** | Score test quotes against the live staging endpoint | — |
+| **smoke-test** | Score test quotes against the live staging endpoint | - |
 | **deploy-production** | `haute deploy` | `production` (GitHub environment, requires approval) |
-| **tag** | Git tag with version: `deploy/v{model_version}` | — |
+| **tag** | Git tag with version: `deploy/v{model_version}` | - |
 
 The staging→production promotion uses **GitHub environment protection rules**:
 - `staging`: no protection (auto-deploys)
 - `production`: requires N approvers (configurable in `haute.toml [ci.production]`)
 
-### 6.5 Azure DevOps — Pipeline (`azure-pipelines.yml`)
+### 6.5 Azure DevOps - Pipeline (`azure-pipelines.yml`)
 
 Same logical flow, Azure syntax:
 
@@ -442,9 +442,9 @@ stages:
     # Uses Azure DevOps Environments with approval checks
 ```
 
-Credentials use Azure DevOps **variable groups** or **service connections** instead of GitHub secrets — but the env var names are identical (`DATABRICKS_HOST`, etc.).
+Credentials use Azure DevOps **variable groups** or **service connections** instead of GitHub secrets - but the env var names are identical (`DATABRICKS_HOST`, etc.).
 
-### 6.6 No Shortcuts — Every Team Gets the Full Pipeline
+### 6.6 No Shortcuts - Every Team Gets the Full Pipeline
 
 Insurance pricing carries risk regardless of team size. A solo actuary mispricing a book is just as dangerous as a large team doing it. Every `haute init` project gets the full pipeline:
 
@@ -460,11 +460,11 @@ Teams can adjust the `min_approvers` count in `haute.toml`, but the staging→ap
 
 ## 7. Safety Gates
 
-### 7.1 Test Quotes — Golden File Testing
+### 7.1 Test Quotes - Golden File Testing
 
 Already implemented. Every deploy scores `test_quotes/*.json` through the pruned pipeline and blocks on failure.
 
-**Enhancement needed:** Support for **expected outputs** — not just "it doesn't crash" but "this input produces this exact price". This is the golden file pattern:
+**Enhancement needed:** Support for **expected outputs** - not just "it doesn't crash" but "this input produces this exact price". This is the golden file pattern:
 
 ```json
 [
@@ -478,13 +478,13 @@ Already implemented. Every deploy scores `test_quotes/*.json` through the pruned
 
 If the output drifts beyond `tolerance_pct`, the deploy is blocked with a diff showing exactly which quotes changed and by how much.
 
-### 7.2 Impact Report — `haute impact`
+### 7.2 Impact Report - `haute impact`
 
 The headline safety feature. Scores a portfolio sample through both the current branch and the base branch, then produces a comparison:
 
 ```
 ╔══════════════════════════════════════════════════╗
-║  IMPACT REPORT — motor-pricing                   ║
+║  IMPACT REPORT - motor-pricing                   ║
 ║  Compared: feature/area-factors → main            ║
 ║  Dataset: 50,000 policies                         ║
 ╠══════════════════════════════════════════════════╣
@@ -502,9 +502,9 @@ The headline safety feature. Scores a portfolio sample through both the current 
 In CI, this is posted as a PR comment. Reviewers see the pricing impact before approving.
 
 Threshold enforcement comes from `haute.toml [safety]`:
-- `max_single_quote_change_pct` — any individual quote
-- `max_avg_change_pct` — portfolio average
-- `block_on_threshold_breach` — hard block vs. warning
+- `max_single_quote_change_pct` - any individual quote
+- `max_avg_change_pct` - portfolio average
+- `block_on_threshold_breach` - hard block vs. warning
 
 ### 7.3 Approval Gates
 
@@ -597,7 +597,7 @@ CI workflow sets `HAUTE_SERVING_WORKLOAD_SIZE=Medium` in the production job's en
 
 - `haute.toml [ci]` declares intent: "this project uses GitHub Actions"
 - The generated workflow file contains the actual YAML steps
-- `haute init` generates the workflow file **once** — teams own it from that point
+- `haute init` generates the workflow file **once** - teams own it from that point
 - No re-generation on config changes (avoids the "managed file you can't customise" antipattern)
 
 ### D6: Same target for staging and production
@@ -606,9 +606,9 @@ Staging and production always use the same deploy target. If you deploy to Datab
 
 This keeps the deployment pipeline simple and ensures staging is a true replica of production. The only differences between staging and production are:
 
-- **Endpoint name** — staging gets the `-staging` suffix (e.g. `motor-pricing-staging`)
-- **Infra overrides** — production may use larger workload sizes via `HAUTE_` env vars
-- **Approval gate** — production requires human approval, staging auto-deploys
+- **Endpoint name** - staging gets the `-staging` suffix (e.g. `motor-pricing-staging`)
+- **Infra overrides** - production may use larger workload sizes via `HAUTE_` env vars
+- **Approval gate** - production requires human approval, staging auto-deploys
 
 ```toml
 [deploy]
@@ -639,7 +639,7 @@ min_approvers = 0
 
 And skips adding protection rules to the `production` GitHub environment.
 
-The full pipeline still runs identically — validate → staging → smoke test → production. The only difference is there's no pause for human approval. When the team grows, bump the values back up and add environment protection rules. No workflow regeneration needed.
+The full pipeline still runs identically - validate → staging → smoke test → production. The only difference is there's no pause for human approval. When the team grows, bump the values back up and add environment protection rules. No workflow regeneration needed.
 
 ### D9: `pyproject.toml` extras
 
@@ -650,7 +650,7 @@ haute[aws]          → mlflow, sagemaker, boto3     (new)
 haute[azure]        → mlflow, azure-ai-ml, azure-identity  (new)
 ```
 
-Docker target needs no extra — it generates a Dockerfile using only stdlib.
+Docker target needs no extra - it generates a Dockerfile using only stdlib.
 
 ---
 
@@ -664,7 +664,7 @@ All design questions have been resolved. See §8 Decisions Made.
 
 | Phase | What | Depends on |
 |---|---|---|
-| **Now** | Finalise this design doc, resolve open questions | — |
+| **Now** | Finalise this design doc, resolve open questions | - |
 | **P1** | Expand `haute.toml` schema with `[safety]` and `[ci]` sections | Design finalised |
 | **P2** | `haute init` generates CI/CD workflow files based on `[ci].provider` | P1 |
 | **P3** | `haute impact` command + PR comment integration | P1 |
@@ -680,9 +680,9 @@ All design questions have been resolved. See §8 Decisions Made.
 ## 11. Summary
 
 - **One config file** (`haute.toml`) defines project, deploy target, safety thresholds, and CI shape
-- **Secrets in env vars** — `.env` locally, CI secrets remotely, `HAUTE_` prefix for overrides
-- **Deploy targets are pluggable** — all share `ResolvedDeploy`, only the final push differs
-- **Docker is the universal target** — zero cloud dependencies, runs anywhere
-- **Merge to main = deploy** — every change is tested, reviewed, and impact-analysed before production
-- **`haute init --target <t> --ci <p>` scaffolds everything** — only the relevant config, credentials, and CI/CD workflows for the chosen target and provider
-- **No shortcuts** — every team gets staging → approval gate → production, regardless of size
+- **Secrets in env vars** - `.env` locally, CI secrets remotely, `HAUTE_` prefix for overrides
+- **Deploy targets are pluggable** - all share `ResolvedDeploy`, only the final push differs
+- **Docker is the universal target** - zero cloud dependencies, runs anywhere
+- **Merge to main = deploy** - every change is tested, reviewed, and impact-analysed before production
+- **`haute init --target <t> --ci <p>` scaffolds everything** - only the relevant config, credentials, and CI/CD workflows for the chosen target and provider
+- **No shortcuts** - every team gets staging → approval gate → production, regardless of size

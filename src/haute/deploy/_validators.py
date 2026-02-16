@@ -1,4 +1,4 @@
-"""Pre-deploy validation — catch errors before they reach production."""
+"""Pre-deploy validation - catch errors before they reach production."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     for nid in resolved.input_node_ids:
         if nid in targets_with_incoming:
             errors.append(
-                f"Input node '{nid}' has incoming edges — it should be a source node."
+                f"Input node '{nid}' has incoming edges - it should be a source node."
             )
 
     # 4. All artifacts exist on disk
@@ -80,11 +80,11 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
 
     # 6. Input schema is non-empty
     if not resolved.input_schema:
-        errors.append("Input schema is empty — could not infer columns from input data.")
+        errors.append("Input schema is empty - could not infer columns from input data.")
 
     # 7. Output schema is non-empty
     if not resolved.output_schema:
-        errors.append("Output schema is empty — dry-run produced no output columns.")
+        errors.append("Output schema is empty - dry-run produced no output columns.")
 
     return errors
 
@@ -106,7 +106,7 @@ def score_test_quotes(
         List of result dicts with keys: file, rows, status, time_ms, error.
 
     Raises:
-        Nothing — errors are captured in the result dicts.
+        Nothing - errors are captured in the result dicts.
     """
     tq_dir = test_quotes_dir or resolved.config.test_quotes_dir
     if tq_dir is None or not tq_dir.is_dir():

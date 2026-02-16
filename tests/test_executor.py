@@ -1,4 +1,4 @@
-"""Tests for haute.executor — graph execution engine."""
+"""Tests for haute.executor - graph execution engine."""
 
 from __future__ import annotations
 
@@ -332,7 +332,7 @@ class TestExecuteGraph:
         graph = {
             "nodes": [
                 _source_node("src", str(p)),
-                # Select a column that doesn't exist — triggers ColumnNotFoundError at collect
+                # Select a column that doesn't exist - triggers ColumnNotFoundError at collect
                 _transform_node("bad", code=".select('nonexistent_col')"),
             ],
             "edges": [_edge("src", "bad")],
