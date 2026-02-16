@@ -78,16 +78,67 @@ class TestInit:
         assert (tmp_path / ".env.example").exists()
         assert (tmp_path / ".gitignore").exists()
         assert (tmp_path / "main.py").exists()
+        assert (tmp_path / "pyproject.toml").exists()
 
-        # haute.toml should reference main.py and the project name
+        # haute.toml should reference main.py
         toml_content = (tmp_path / "haute.toml").read_text()
-        assert "rating" in toml_content
         assert 'pipeline = "main.py"' in toml_content
 
         # Starter pipeline should be valid Python
         py_content = (tmp_path / "main.py").read_text()
         compile(py_content, "<test>", "exec")
-        assert "rating" in py_content
+
+        # pyproject.toml should have haute as a dependency
+        pyproject_content = (tmp_path / "pyproject.toml").read_text()
+        assert '"haute"' in pyproject_content
+
+    def test_works_alongside_uv_init(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """haute init should layer on top of an existing pyproject.toml from uv init."""
+        monkeypatch.chdir(tmp_path)
+        # Simulate uv init output
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "motor-pricing"\nversion = "0.1.0"\n'
+            'requires-python = ">=3.11"\ndependencies = []\n',
+        )
+        (tmp_path / "main.py").write_text("print('hello')\n")
+
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+
+        # Should pick up the project name from pyproject.toml
+        toml_content = (tmp_path / "haute.toml").read_text()
+        assert "motor-pricing" in toml_content
+
+        # Should add haute to existing dependencies
+        pyproject_content = (tmp_path / "pyproject.toml").read_text()
+        assert '"haute"' in pyproject_content
+
+        # main.py should be overwritten with the starter pipeline
+        py_content = (tmp_path / "main.py").read_text()
+        assert "haute.Pipeline" in py_content
+
+    def test_skips_haute_dep_if_already_present(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """If pyproject.toml already lists haute, don't duplicate it."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "my-project"\nversion = "0.1.0"\n'
+            'dependencies = [\n    "haute",\n]\n',
+        )
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        content = (tmp_path / "pyproject.toml").read_text()
+        assert content.count('"haute"') == 1
+
+    def test_appends_to_existing_gitignore(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """If .gitignore exists (from uv init), append haute entries."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".gitignore").write_text("__pycache__/\n.venv/\n")
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        content = (tmp_path / ".gitignore").read_text()
+        assert "__pycache__/" in content  # original preserved
+        assert ".env" in content
+        assert "*.haute.json" in content
 
     def test_already_initialised_fails(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)

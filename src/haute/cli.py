@@ -46,18 +46,37 @@ def _find_frontend_dir() -> Path | None:
 
 @cli.command()
 def init() -> None:
-    """Scaffold a Haute pricing project in the current directory."""
+    """Scaffold a Haute pricing project in the current directory.
+
+    Works alongside ``uv init`` — if pyproject.toml already exists,
+    haute is added as a dependency.  If not, a minimal pyproject.toml
+    is created.
+    """
+    import tomllib
+
     project_dir = Path.cwd()
-    name = "rating"
 
     if (project_dir / "haute.toml").exists():
         click.echo("Error: haute.toml already exists — project already initialised.", err=True)
         raise SystemExit(1)
 
+    # ── Resolve project name ──────────────────────────────────────
+    pyproject_path = project_dir / "pyproject.toml"
+    name = project_dir.name.replace("-", "_").replace(" ", "_").lower()
+
+    if pyproject_path.exists():
+        with open(pyproject_path, "rb") as f:
+            pyproject = tomllib.load(f)
+        name = pyproject.get("project", {}).get("name", name)
+
+    # ── pyproject.toml — ensure haute is a dependency ─────────────
+    _ensure_haute_dependency(pyproject_path, name)
+
+    # ── Directories ───────────────────────────────────────────────
     (project_dir / "data").mkdir(exist_ok=True)
     (project_dir / "test_quotes").mkdir(exist_ok=True)
 
-    # main.py — starter pipeline (overwrites uv init default)
+    # ── main.py — starter pipeline (overwrites uv init default) ──
     starter_pipeline = '''\
 """Pipeline: {name}"""
 
@@ -68,7 +87,7 @@ pipeline = haute.Pipeline("{name}", description="")
 '''
     (project_dir / "main.py").write_text(starter_pipeline.format(name=name), encoding="utf-8")
 
-    # haute.toml — project config
+    # ── haute.toml — project config ──────────────────────────────
     haute_toml = '''\
 # Haute project configuration
 # Docs: https://github.com/PricingFrontier/haute
@@ -103,7 +122,7 @@ dir = "test_quotes"
 '''
     (project_dir / "haute.toml").write_text(haute_toml.format(name=name), encoding="utf-8")
 
-    # .env.example — template for secrets
+    # ── .env.example ─────────────────────────────────────────────
     env_example = '''\
 # Haute — Databricks credentials
 # Copy this file to .env and fill in your values.
@@ -119,7 +138,7 @@ DATABRICKS_TOKEN=your_databricks_token_here
 '''
     (project_dir / ".env.example").write_text(env_example, encoding="utf-8")
 
-    # Starter test quote
+    # ── Starter test quote ───────────────────────────────────────
     test_quote = '''\
 [
   {
@@ -132,20 +151,66 @@ DATABRICKS_TOKEN=your_databricks_token_here
 '''
     (project_dir / "test_quotes" / "example.json").write_text(test_quote, encoding="utf-8")
 
-    # .gitignore
-    (project_dir / ".gitignore").write_text(
-        "__pycache__/\n*.pyc\n.venv/\n.env\n", encoding="utf-8"
-    )
+    # ── .gitignore — append if exists, create if not ─────────────
+    gitignore_path = project_dir / ".gitignore"
+    haute_entries = ".env\n*.haute.json\n"
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text()
+        missing = [
+            line for line in haute_entries.splitlines()
+            if line and line not in existing
+        ]
+        if missing:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.write("\n# Haute\n" + "\n".join(missing) + "\n")
+    else:
+        gitignore_path.write_text(
+            "__pycache__/\n*.pyc\n.venv/\n.env\n*.haute.json\n",
+            encoding="utf-8",
+        )
 
-    click.echo("Initialised Haute project in current directory.")
+    click.echo(f"Initialised Haute project '{name}' in current directory.")
+    click.echo("  pyproject.toml        — haute added as dependency")
     click.echo("  haute.toml            — project & deploy config")
     click.echo("  .env.example         — Databricks credentials template")
-    click.echo("  main.py              — put your pipeline code here")
+    click.echo("  main.py              — starter pipeline")
     click.echo("  data/                — put your data files here")
     click.echo("  test_quotes/         — example JSON payloads for testing")
     click.echo("\nNext steps:")
+    click.echo("  uv sync                # install dependencies")
     click.echo("  cp .env.example .env   # fill in Databricks credentials")
     click.echo("  haute serve")
+
+
+def _ensure_haute_dependency(pyproject_path: Path, name: str) -> None:
+    """Add ``haute`` to pyproject.toml dependencies.
+
+    If pyproject.toml exists, insert ``"haute"`` into the dependencies
+    list (if not already present).  If it doesn't exist, create a
+    minimal pyproject.toml.
+    """
+    if pyproject_path.exists():
+        text = pyproject_path.read_text(encoding="utf-8")
+        if "haute" in text:
+            return
+        # Insert into existing dependencies list
+        if "dependencies = [" in text:
+            text = text.replace(
+                "dependencies = [",
+                'dependencies = [\n    "haute",',
+                1,
+            )
+        else:
+            # No dependencies key — append a section
+            text += '\n[project]\ndependencies = [\n    "haute",\n]\n'
+        pyproject_path.write_text(text, encoding="utf-8")
+    else:
+        pyproject_path.write_text(
+            f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
+            f'requires-python = ">=3.11"\n'
+            f'dependencies = [\n    "haute",\n]\n',
+            encoding="utf-8",
+        )
 
 
 @cli.command()
