@@ -28,19 +28,58 @@ class DatabricksConfig:
 
 
 @dataclass
+class SafetyConfig:
+    """Thresholds and gates from [safety] in haute.toml."""
+
+    impact_dataset: str = ""
+    max_single_quote_change_pct: float = 25.0
+    max_avg_change_pct: float = 10.0
+    block_on_threshold_breach: bool = True
+    min_approvers: int = 2
+
+
+@dataclass
+class CIConfig:
+    """CI/CD settings from [ci] in haute.toml."""
+
+    provider: str = "github"
+    staging_endpoint_suffix: str = "-staging"
+    production_require_approval: bool = True
+    production_min_approvers: int = 2
+
+
+@dataclass
 class DeployConfig:
     """User-provided deployment configuration (from haute.toml + CLI)."""
 
     pipeline_file: Path
     model_name: str
+    target: str = "databricks"
     endpoint_name: str | None = None
+    endpoint_suffix: str | None = None
     output_fields: list[str] | None = None
     test_quotes_dir: Path | None = None
     databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
+    ci: CIConfig = field(default_factory=CIConfig)
+
+    @property
+    def effective_endpoint_name(self) -> str | None:
+        """Endpoint name with optional suffix applied (e.g. for staging).
+
+        Returns None when endpoint_name is unset and no suffix is given,
+        which signals that no serving endpoint should be created.
+        """
+        if self.endpoint_name is None and self.endpoint_suffix is None:
+            return None
+        base = self.endpoint_name or self.model_name
+        if self.endpoint_suffix:
+            return base + self.endpoint_suffix
+        return base
 
     @classmethod
     def from_toml(cls, path: Path) -> DeployConfig:
-        """Load from haute.toml, merging [project] and [deploy] sections."""
+        """Load from haute.toml, merging [project], [deploy], [safety], [ci]."""
         import tomllib
 
         text = path.read_text()
@@ -50,10 +89,16 @@ class DeployConfig:
         deploy = data.get("deploy", {})
         db_raw = deploy.get("databricks", {})
         tq = data.get("test_quotes", {})
+        safety_raw = data.get("safety", {})
+        approval_raw = safety_raw.get("approval", {})
+        ci_raw = data.get("ci", {})
+        ci_staging = ci_raw.get("staging", {})
+        ci_prod = ci_raw.get("production", {})
 
         pipeline_file = Path(project.get("pipeline", "main.py"))
         model_name = deploy.get("model_name", project.get("name", pipeline_file.stem))
         endpoint_name = deploy.get("endpoint_name")
+        target = deploy.get("target", "databricks")
 
         output_fields_raw = deploy.get("output_fields")
         output_fields = list(output_fields_raw) if output_fields_raw else None
@@ -68,14 +113,34 @@ class DeployConfig:
             serving_scale_to_zero=db_raw.get("serving_scale_to_zero", True),
         )
 
-        return cls(
+        safety_config = SafetyConfig(
+            impact_dataset=safety_raw.get("impact_dataset", ""),
+            max_single_quote_change_pct=safety_raw.get("max_single_quote_change_pct", 25.0),
+            max_avg_change_pct=safety_raw.get("max_avg_change_pct", 10.0),
+            block_on_threshold_breach=safety_raw.get("block_on_threshold_breach", True),
+            min_approvers=approval_raw.get("min_approvers", 2),
+        )
+
+        ci_config = CIConfig(
+            provider=ci_raw.get("provider", "github"),
+            staging_endpoint_suffix=ci_staging.get("endpoint_suffix", "-staging"),
+            production_require_approval=ci_prod.get("require_approval", True),
+            production_min_approvers=ci_prod.get("min_approvers", 2),
+        )
+
+        config = cls(
             pipeline_file=pipeline_file,
             model_name=model_name,
+            target=target,
             endpoint_name=endpoint_name,
             output_fields=output_fields,
             test_quotes_dir=tq_dir,
             databricks=db_config,
+            safety=safety_config,
+            ci=ci_config,
         )
+
+        return _apply_env_overrides(config)
 
     def override(self, **cli_kwargs: Any) -> DeployConfig:
         """Return a copy with non-None CLI flags applied over TOML values."""
@@ -84,6 +149,40 @@ class DeployConfig:
             if val is not None and hasattr(c, key):
                 setattr(c, key, val)
         return c
+
+
+def _apply_env_overrides(config: DeployConfig) -> DeployConfig:
+    """Apply HAUTE_ prefixed env vars over TOML values.
+
+    Resolution order (highest wins):
+      1. CLI flags          (applied later via .override())
+      2. Environment vars   HAUTE_MODEL_NAME=foo
+      3. haute.toml         model_name = "foo"
+    """
+    env_map: dict[str, tuple[str, type]] = {
+        "HAUTE_MODEL_NAME": ("model_name", str),
+        "HAUTE_ENDPOINT_NAME": ("endpoint_name", str),
+        "HAUTE_TARGET": ("target", str),
+        "HAUTE_SERVING_WORKLOAD_SIZE": ("databricks.serving_workload_size", str),
+        "HAUTE_SERVING_SCALE_TO_ZERO": ("databricks.serving_scale_to_zero", bool),
+    }
+    for env_key, (attr_path, attr_type) in env_map.items():
+        val = os.environ.get(env_key)
+        if val is None:
+            continue
+        if "." in attr_path:
+            obj_name, field_name = attr_path.split(".", 1)
+            obj = getattr(config, obj_name)
+            if attr_type is bool:
+                setattr(obj, field_name, val.lower() in ("true", "1", "yes"))
+            else:
+                setattr(obj, field_name, val)
+        else:
+            if attr_type is bool:
+                setattr(config, attr_path, val.lower() in ("true", "1", "yes"))
+            else:
+                setattr(config, attr_path, val)
+    return config
 
 
 @dataclass

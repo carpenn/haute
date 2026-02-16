@@ -12,6 +12,23 @@ from haute.deploy._config import ResolvedDeploy
 from haute.deploy._scorer import score_graph
 
 
+def load_test_quote_file(path: Path) -> list[dict]:
+    """Load a test quote JSON file, strip metadata fields (``_`` prefixed).
+
+    Returns a list of cleaned quote dicts ready for scoring.
+
+    Raises:
+        ValueError: If the file is not a JSON array.
+    """
+    raw = json.loads(path.read_text())
+    if not isinstance(raw, list):
+        raise ValueError("Expected a JSON array of quote objects")
+    return [
+        {k: v for k, v in row.items() if not k.startswith("_")}
+        for row in raw
+    ]
+
+
 def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     """Run all pre-deploy validations.
 
@@ -104,16 +121,7 @@ def score_test_quotes(
     for jf in json_files:
         t0 = time.perf_counter()
         try:
-            raw = json.loads(jf.read_text())
-            if not isinstance(raw, list):
-                raise ValueError("Expected a JSON array of quote objects")
-
-            # Strip metadata fields (prefixed with _)
-            cleaned = [
-                {k: v for k, v in row.items() if not k.startswith("_")}
-                for row in raw
-            ]
-
+            cleaned = load_test_quote_file(jf)
             input_df = pl.DataFrame(cleaned)
 
             output = score_graph(

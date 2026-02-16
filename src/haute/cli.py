@@ -45,14 +45,44 @@ def _find_frontend_dir() -> Path | None:
 
 
 @cli.command()
-def init() -> None:
+@click.option(
+    "--target",
+    type=click.Choice(["databricks", "docker", "sagemaker", "azure-ml"]),
+    default="databricks",
+    help="Deploy target (default: databricks).",
+)
+@click.option(
+    "--ci",
+    type=click.Choice(["github", "none"]),
+    default="github",
+    help="CI/CD provider (default: github).",
+)
+def init(target: str, ci: str) -> None:
     """Scaffold a Haute pricing project in the current directory.
 
-    Works alongside ``uv init`` — if pyproject.toml already exists,
-    haute is added as a dependency.  If not, a minimal pyproject.toml
-    is created.
+    Generates haute.toml, CI/CD workflows, credentials template, and a
+    starter pipeline — all configured for the chosen deploy target and
+    CI provider.
+
+    \b
+    Examples:
+      haute init                                  # databricks + github
+      haute init --target docker --ci none        # docker, no CI
+      haute init --target sagemaker --ci github   # AWS + github
     """
     import tomllib
+
+    from haute._scaffold import (
+        env_example,
+        github_ci_yml,
+        github_deploy_yml,
+        haute_toml,
+        starter_pipeline,
+        starter_test_quote,
+    )
+
+    # Solo mode is configured in haute.toml, not via a CLI flag.
+    # Default is team mode; user sets min_approvers = 0 for solo.
 
     project_dir = Path.cwd()
 
@@ -77,82 +107,34 @@ def init() -> None:
     (project_dir / "data").mkdir(exist_ok=True)
     (project_dir / "test_quotes").mkdir(exist_ok=True)
 
-    # ── main.py — starter pipeline (overwrites uv init default) ──
-    starter_pipeline = '''\
-"""Pipeline: {name}"""
+    # ── main.py — starter pipeline ────────────────────────────────
+    (project_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
 
-import polars as pl
-import haute
+    # ── haute.toml — project + deploy + safety + CI config ────────
+    (project_dir / "haute.toml").write_text(
+        haute_toml(name, target, ci), encoding="utf-8",
+    )
 
-pipeline = haute.Pipeline("{name}", description="")
-'''
-    (project_dir / "main.py").write_text(starter_pipeline.format(name=name), encoding="utf-8")
+    # ── .env.example — target-specific credentials ────────────────
+    (project_dir / ".env.example").write_text(env_example(target), encoding="utf-8")
 
-    # ── haute.toml — project config ──────────────────────────────
-    haute_toml = '''\
-# Haute project configuration
-# Docs: https://github.com/PricingFrontier/haute
+    # ── Starter test quote ────────────────────────────────────────
+    (project_dir / "test_quotes" / "example.json").write_text(
+        starter_test_quote(), encoding="utf-8",
+    )
 
-[project]
-name = "{name}"
-pipeline = "main.py"
+    # ── CI/CD workflow files ──────────────────────────────────────
+    ci_files: list[str] = []
+    if ci == "github":
+        workflows_dir = project_dir / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "ci.yml").write_text(github_ci_yml(), encoding="utf-8")
+        (workflows_dir / "deploy.yml").write_text(
+            github_deploy_yml(target), encoding="utf-8",
+        )
+        ci_files = [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]
 
-# ─────────────────────────────────────────────────────────────────
-# Deployment — Databricks MLflow Model Serving
-# ─────────────────────────────────────────────────────────────────
-[deploy]
-target = "databricks"
-model_name = "{name}"
-endpoint_name = "{name}"
-
-[deploy.databricks]
-# Workspace credentials are read from .env (see .env.example)
-#   DATABRICKS_HOST  = https://adb-xxxxx.xx.azuredatabricks.net
-#   DATABRICKS_TOKEN = dapi...
-experiment_name = "/Shared/haute/{name}"
-catalog = "main"
-schema = "pricing"
-serving_workload_size = "Small"
-serving_scale_to_zero = true
-
-# ─────────────────────────────────────────────────────────────────
-# Test quotes — example JSON payloads for pre-deploy validation
-# ─────────────────────────────────────────────────────────────────
-[test_quotes]
-dir = "test_quotes"
-'''
-    (project_dir / "haute.toml").write_text(haute_toml.format(name=name), encoding="utf-8")
-
-    # ── .env.example ─────────────────────────────────────────────
-    env_example = '''\
-# Haute — Databricks credentials
-# Copy this file to .env and fill in your values.
-# .env is gitignored and will never be committed.
-#
-#   cp .env.example .env
-
-# Databricks workspace URL (no trailing slash)
-DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
-
-# Personal access token (Databricks > User Settings > Developer > Access Tokens)
-DATABRICKS_TOKEN=your_databricks_token_here
-'''
-    (project_dir / ".env.example").write_text(env_example, encoding="utf-8")
-
-    # ── Starter test quote ───────────────────────────────────────
-    test_quote = '''\
-[
-  {
-    "_description": "Example quote — replace with your own fields",
-    "id": 1,
-    "field_a": "value",
-    "field_b": 42
-  }
-]
-'''
-    (project_dir / "test_quotes" / "example.json").write_text(test_quote, encoding="utf-8")
-
-    # ── .gitignore — append if exists, create if not ─────────────
+    # ── .gitignore — append if exists, create if not ──────────────
     gitignore_path = project_dir / ".gitignore"
     haute_entries = ".env\n*.haute.json\n"
     if gitignore_path.exists():
@@ -170,16 +152,19 @@ DATABRICKS_TOKEN=your_databricks_token_here
             encoding="utf-8",
         )
 
-    click.echo(f"Initialised Haute project '{name}' in current directory.")
+    # ── Summary ───────────────────────────────────────────────────
+    click.echo(f"Initialised Haute project '{name}' ({target} + {ci})\n")
     click.echo("  pyproject.toml        — haute added as dependency")
-    click.echo("  haute.toml            — project & deploy config")
-    click.echo("  .env.example         — Databricks credentials template")
+    click.echo("  haute.toml            — project, deploy, safety & CI config")
+    click.echo(f"  .env.example         — {target} credentials template")
     click.echo("  main.py              — starter pipeline")
     click.echo("  data/                — put your data files here")
     click.echo("  test_quotes/         — example JSON payloads for testing")
+    for f in ci_files:
+        click.echo(f"  {f}")
     click.echo("\nNext steps:")
     click.echo("  uv sync                # install dependencies")
-    click.echo("  cp .env.example .env   # fill in Databricks credentials")
+    click.echo("  cp .env.example .env   # fill in credentials")
     click.echo("  haute serve")
 
 
@@ -364,8 +349,17 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 @cli.command()
 @click.argument("pipeline_file", required=False)
 @click.option("--model-name", default=None, help="Override model name from haute.toml.")
+@click.option(
+    "--endpoint-suffix", default=None,
+    help='Suffix appended to endpoint name (e.g. "-staging").',
+)
 @click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying.")
-def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> None:
+def deploy(
+    pipeline_file: str | None,
+    model_name: str | None,
+    endpoint_suffix: str | None,
+    dry_run: bool,
+) -> None:
     """Deploy a pipeline as a live scoring API.
 
     Reads config from haute.toml + credentials from .env.
@@ -398,10 +392,13 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
         overrides["pipeline_file"] = Path(pipeline_file)
     if model_name:
         overrides["model_name"] = model_name
+    if endpoint_suffix:
+        overrides["endpoint_suffix"] = endpoint_suffix
     config = config.override(**overrides)
 
     click.echo(f"\nDeploying pipeline: {config.model_name}")
     click.echo(f"  Pipeline: {config.pipeline_file}")
+    click.echo(f"  Endpoint: {config.effective_endpoint_name}")
 
     # 2. Resolve (parse, prune, detect I/O, collect artifacts, infer schemas)
     try:
@@ -479,7 +476,11 @@ def deploy(pipeline_file: str | None, model_name: str | None, dry_run: bool) -> 
 
 @cli.command()
 @click.argument("model_name", required=False)
-def status(model_name: str | None) -> None:
+@click.option(
+    "--version-only", is_flag=True,
+    help="Print only the latest version number (for scripting).",
+)
+def status(model_name: str | None, version_only: bool) -> None:
     """Check the status of a deployed model."""
     # Load model name from haute.toml if not specified
     if model_name is None:
@@ -502,6 +503,10 @@ def status(model_name: str | None) -> None:
         )
         raise SystemExit(1)
 
+    if version_only:
+        click.echo(info.get("latest_version", 0))
+        return
+
     if info.get("status") == "not_found":
         click.echo(f"Model '{model_name}' not found in MLflow Model Registry.")
         return
@@ -511,3 +516,166 @@ def status(model_name: str | None) -> None:
     click.echo(f"  Stage: {info.get('latest_stage', 'N/A')}")
     click.echo(f"  Status: {info['status']}")
     click.echo(f"  Run ID: {info.get('run_id', 'N/A')}")
+
+
+@cli.command()
+@click.argument("pipeline_file", required=False)
+def lint(pipeline_file: str | None) -> None:
+    """Validate pipeline structure without deploying.
+
+    Parses the pipeline, checks for structural issues (orphan nodes,
+    missing edges, syntax errors), and reports any problems found.
+    """
+    from haute.parser import parse_pipeline_file
+
+    if pipeline_file is None:
+        toml_path = Path.cwd() / "haute.toml"
+        if toml_path.exists():
+            import tomllib
+            with open(toml_path, "rb") as f:
+                data = tomllib.load(f)
+            pipeline_file = data.get("project", {}).get("pipeline", "main.py")
+        else:
+            pipeline_file = "main.py"
+
+    filepath = Path(pipeline_file)
+    if not filepath.exists():
+        click.echo(f"Error: Pipeline file not found: {filepath}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Linting pipeline: {filepath}")
+
+    try:
+        graph = parse_pipeline_file(filepath)
+    except Exception as e:
+        click.echo(f"  ✗ Parse error: {e}", err=True)
+        raise SystemExit(1)
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    node_ids = {n["id"] for n in nodes}
+
+    if not nodes:
+        click.echo("  ✗ No nodes found in pipeline.", err=True)
+        raise SystemExit(1)
+
+    errors: list[str] = []
+
+    # Check for edges referencing non-existent nodes
+    for edge in edges:
+        if edge["source"] not in node_ids:
+            errors.append(f"Edge references missing source node: {edge['source']}")
+        if edge["target"] not in node_ids:
+            errors.append(f"Edge references missing target node: {edge['target']}")
+
+    # Check for nodes with parse errors
+    for node in nodes:
+        data = node.get("data", {})
+        if data.get("parseError"):
+            errors.append(f"Node '{node['id']}' has parse error: {data['parseError']}")
+
+    # Check for orphan nodes (no edges at all, in a multi-node graph)
+    if len(nodes) > 1:
+        connected = set()
+        for edge in edges:
+            connected.add(edge["source"])
+            connected.add(edge["target"])
+        orphans = node_ids - connected
+        for orphan in orphans:
+            errors.append(f"Node '{orphan}' is disconnected (no edges)")
+
+    if errors:
+        click.echo(f"\n  Found {len(errors)} issue(s):", err=True)
+        for err in errors:
+            click.echo(f"  ✗ {err}", err=True)
+        raise SystemExit(1)
+
+    name = graph.get("pipeline_name", filepath.stem)
+    click.echo(f"  ✓ Pipeline '{name}': {len(nodes)} nodes, {len(edges)} edges")
+    click.echo("  ✓ No structural issues found.")
+
+
+@cli.command()
+@click.option(
+    "--endpoint-suffix", default=None,
+    help='Suffix appended to endpoint name (e.g. "-staging").',
+)
+def smoke(endpoint_suffix: str | None) -> None:
+    """Score test quotes against a live serving endpoint.
+
+    Sends each test quote JSON file as an HTTP request to the deployed
+    endpoint and validates the response. Used after staging deploys to
+    verify the endpoint is functional.
+    """
+    from haute.deploy._config import DeployConfig
+    from haute.deploy._validators import load_test_quote_file
+
+    toml_path = Path.cwd() / "haute.toml"
+    if not toml_path.exists():
+        click.echo("Error: No haute.toml found.", err=True)
+        raise SystemExit(1)
+
+    config = DeployConfig.from_toml(toml_path)
+    if endpoint_suffix:
+        config = config.override(endpoint_suffix=endpoint_suffix)
+
+    endpoint_name = config.effective_endpoint_name
+    tq_dir = config.test_quotes_dir
+
+    if tq_dir is None or not tq_dir.is_dir():
+        click.echo("Error: No test_quotes directory found.", err=True)
+        raise SystemExit(1)
+
+    json_files = sorted(tq_dir.glob("*.json"))
+    if not json_files:
+        click.echo("Error: No .json files in test_quotes/.", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Smoke testing endpoint: {endpoint_name}")
+    click.echo(f"  Target: {config.target}")
+
+    if config.target != "databricks":
+        click.echo(f"  ⚠ Smoke test not yet implemented for target '{config.target}'.", err=True)
+        click.echo("  Skipping smoke test.")
+        return
+
+    # Databricks endpoint scoring
+    try:
+        from databricks.sdk import WorkspaceClient
+    except ImportError:
+        click.echo(
+            "Error: databricks-sdk not installed. Install with: uv add haute[databricks]",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    from haute.deploy._config import _load_env
+    _load_env(Path.cwd())
+
+    ws = WorkspaceClient()
+    all_ok = True
+
+    for jf in json_files:
+        try:
+            cleaned = load_test_quote_file(jf)
+
+            response = ws.serving_endpoints.query(
+                name=endpoint_name,
+                dataframe_records=cleaned,
+            )
+
+            predictions = response.predictions
+            if predictions is None:
+                raise ValueError("Endpoint returned no predictions")
+
+            n_rows = len(predictions) if isinstance(predictions, list) else 1
+            click.echo(f"  ✓ {jf.name}: {n_rows} predictions returned")
+        except Exception as exc:
+            click.echo(f"  ✗ {jf.name}: {exc}", err=True)
+            all_ok = False
+
+    if not all_ok:
+        click.echo("\n  ✗ Smoke test failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo("\n  ✓ All smoke tests passed.")

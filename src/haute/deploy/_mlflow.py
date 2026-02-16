@@ -266,7 +266,7 @@ def _create_or_update_serving_endpoint(
     """
     import os
 
-    endpoint_name = config.endpoint_name
+    endpoint_name = config.effective_endpoint_name
     if not endpoint_name:
         return None
 

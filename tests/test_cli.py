@@ -147,6 +147,49 @@ class TestInit:
         assert result.exit_code == 1
         assert "already" in result.output.lower()
 
+    def test_target_flag_docker(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["init", "--target", "docker"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        toml_content = (tmp_path / "haute.toml").read_text()
+        assert 'target = "docker"' in toml_content
+        assert "[deploy.docker]" in toml_content
+        assert "[deploy.databricks]" not in toml_content
+        env_content = (tmp_path / ".env.example").read_text()
+        assert "DOCKER_" in env_content
+        assert "DATABRICKS_" not in env_content
+
+    def test_ci_github_generates_workflows(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["init", "--ci", "github"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / ".github" / "workflows" / "ci.yml").exists()
+        assert (tmp_path / ".github" / "workflows" / "deploy.yml").exists()
+
+    def test_ci_none_skips_workflows(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["init", "--ci", "none"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert not (tmp_path / ".github").exists()
+
+    def test_safety_and_ci_sections_generated(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        toml_content = (tmp_path / "haute.toml").read_text()
+        assert "[safety]" in toml_content
+        assert "[ci]" in toml_content
+        assert "[ci.staging]" in toml_content
+        assert "[ci.production]" in toml_content
+
 
 # ---------------------------------------------------------------------------
 # haute run
@@ -226,6 +269,88 @@ pipeline.connect("source", "bad")
 # ---------------------------------------------------------------------------
 # haute serve (smoke test only — can't test the long-running server)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# haute lint
+# ---------------------------------------------------------------------------
+
+class TestLint:
+    def test_lint_valid_pipeline(
+        self, runner: CliRunner, project_dir: Path,
+    ):
+        pipeline_file = str(project_dir / "main.py")
+        result = runner.invoke(cli, ["lint", pipeline_file], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "No structural issues" in result.output
+
+    def test_lint_auto_discover(
+        self, runner: CliRunner, project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(project_dir)
+        # Create a haute.toml pointing to main.py
+        (project_dir / "haute.toml").write_text(
+            '[project]\nname = "test"\npipeline = "main.py"\n',
+        )
+        result = runner.invoke(cli, ["lint"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+
+    def test_lint_no_pipeline_fails(
+        self, runner: CliRunner, tmp_path: Path,
+    ):
+        result = runner.invoke(cli, ["lint", str(tmp_path / "nonexistent.py")])
+        assert result.exit_code == 1
+
+    def test_lint_empty_pipeline_fails(
+        self, runner: CliRunner, tmp_path: Path,
+    ):
+        empty = tmp_path / "empty.py"
+        empty.write_text(
+            "import haute\npipeline = haute.Pipeline('e')\n",
+        )
+        result = runner.invoke(cli, ["lint", str(empty)])
+        assert result.exit_code == 1
+        assert "No nodes" in result.output
+
+
+# ---------------------------------------------------------------------------
+# haute smoke (offline error paths only — live endpoint tests require network)
+# ---------------------------------------------------------------------------
+
+class TestSmoke:
+    def test_smoke_no_toml_fails(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["smoke"])
+        assert result.exit_code == 1
+        assert "haute.toml" in result.output.lower()
+
+    def test_smoke_no_test_quotes_dir_fails(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "haute.toml").write_text(
+            '[project]\nname = "t"\npipeline = "main.py"\n'
+            '[deploy]\nmodel_name = "t"\nendpoint_name = "t"\n',
+        )
+        result = runner.invoke(cli, ["smoke"])
+        assert result.exit_code == 1
+        assert "test_quotes" in result.output.lower()
+
+    def test_smoke_empty_test_quotes_fails(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "haute.toml").write_text(
+            '[project]\nname = "t"\npipeline = "main.py"\n'
+            '[deploy]\nmodel_name = "t"\nendpoint_name = "t"\n'
+            '[test_quotes]\ndir = "test_quotes"\n',
+        )
+        (tmp_path / "test_quotes").mkdir()
+        result = runner.invoke(cli, ["smoke"])
+        assert result.exit_code == 1
+        assert "no .json" in result.output.lower()
+
 
 class TestServe:
     def test_serve_no_frontend_no_static_fails(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

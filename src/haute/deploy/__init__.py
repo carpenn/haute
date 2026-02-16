@@ -9,14 +9,23 @@ Public API::
     print(result.model_uri)
 """
 
-from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy, resolve_config
+from haute.deploy._config import (
+    CIConfig,
+    DatabricksConfig,
+    DeployConfig,
+    ResolvedDeploy,
+    SafetyConfig,
+    resolve_config,
+)
 from haute.deploy._mlflow import DeployResult, deploy_to_mlflow, get_deploy_status
 
 __all__ = [
+    "CIConfig",
     "DatabricksConfig",
     "DeployConfig",
     "DeployResult",
     "ResolvedDeploy",
+    "SafetyConfig",
     "deploy",
     "deploy_to_mlflow",
     "get_deploy_status",
