@@ -99,21 +99,9 @@ async def ws_sync(websocket: WebSocket) -> None:
 
 def _discover_pipelines() -> list[Path]:
     """Find pipeline .py files in the project root that contain ``haute.Pipeline``."""
-    cwd = Path.cwd()
-    skip = {"__init__.py", "setup.py", "conftest.py"}
-    found: list[Path] = []
+    from haute.discovery import discover_pipelines
 
-    for f in sorted(cwd.glob("*.py")):
-        if f.name in skip:
-            continue
-        try:
-            text = f.read_text(errors="replace")
-        except OSError:
-            continue
-        if "haute.Pipeline" in text:
-            found.append(f)
-
-    return found
+    return discover_pipelines()
 
 
 def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:

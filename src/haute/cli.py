@@ -67,7 +67,8 @@ def init() -> None:
     if pyproject_path.exists():
         with open(pyproject_path, "rb") as f:
             pyproject = tomllib.load(f)
-        name = pyproject.get("project", {}).get("name", name)
+        if "project" in pyproject and "name" in pyproject["project"]:
+            name = pyproject["project"]["name"]
 
     # ── pyproject.toml — ensure haute is a dependency ─────────────
     _ensure_haute_dependency(pyproject_path, name)
@@ -225,19 +226,11 @@ def run(pipeline_file: str | None) -> None:
     from haute.parser import parse_pipeline_file
 
     if pipeline_file is None:
-        cwd = Path.cwd()
-        skip = {"__init__.py", "setup.py", "conftest.py"}
+        from haute.discovery import discover_pipelines
 
-        for f in sorted(cwd.glob("*.py")):
-            if f.name in skip:
-                continue
-            try:
-                text = f.read_text(errors="replace")
-            except OSError:
-                continue
-            if "haute.Pipeline" in text:
-                pipeline_file = str(f)
-                break
+        found = discover_pipelines()
+        if found:
+            pipeline_file = str(found[0])
 
     if not pipeline_file:
         click.echo(
