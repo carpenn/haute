@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import importlib.resources
 import json
 import tempfile
 from dataclasses import dataclass
@@ -12,9 +13,10 @@ from typing import TYPE_CHECKING
 
 from haute.deploy._config import ResolvedDeploy
 
-if TYPE_CHECKING:
-    import mlflow.pyfunc
+# Resolve the path to the models-from-code script shipped with the package
+_MODEL_CODE_PATH = str(importlib.resources.files("haute.deploy") / "_model_code.py")
 
+if TYPE_CHECKING:
     from haute.deploy._config import DeployConfig
 
 
@@ -85,7 +87,7 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
             mlflow.pyfunc.log_model(
                 name="model",
-                python_model=_get_model_instance(),
+                python_model=_MODEL_CODE_PATH,
                 artifacts=artifacts,
                 signature=signature,
                 pip_requirements=_pip_requirements(resolved),
@@ -157,15 +159,6 @@ def get_deploy_status(
         "status": latest.status,
         "run_id": latest.run_id,
     }
-
-
-def _get_model_instance() -> mlflow.pyfunc.PythonModel:
-    """Import and return a HauteModel instance.
-
-    Deferred import to avoid loading mlflow at module level.
-    """
-    from haute.deploy._model import HauteModel
-    return HauteModel()
 
 
 def _build_manifest(resolved: ResolvedDeploy) -> dict:

@@ -361,7 +361,6 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory"), \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"), \
              patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
@@ -404,7 +403,6 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory"), \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"), \
              patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
@@ -451,7 +449,6 @@ class TestDatabricksTracking:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory") as mock_ensure, \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"), \
              patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
@@ -520,7 +517,6 @@ class TestServingEndpoint:
              patch("mlflow.tracking.MlflowClient") as mock_client, \
              patch("haute.deploy._mlflow._ensure_experiment_directory"), \
              patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._get_model_instance"), \
              patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as mock_ep:
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
@@ -618,12 +614,85 @@ class TestServingEndpoint:
             assert url == "https://myhost/serving-endpoints/my-endpoint/invocations"
 
 
+class TestModelsFromCode:
+    """Regression tests: deploy must use models-from-code, not CloudPickle."""
+
+    def test_model_code_path_is_string(self) -> None:
+        """_MODEL_CODE_PATH must be a str file path, not a Python object."""
+        from haute.deploy._mlflow import _MODEL_CODE_PATH
+
+        assert isinstance(_MODEL_CODE_PATH, str)
+        assert _MODEL_CODE_PATH.endswith("_model_code.py")
+
+    def test_model_code_file_exists(self) -> None:
+        """The models-from-code script must exist on disk."""
+        from pathlib import Path
+
+        from haute.deploy._mlflow import _MODEL_CODE_PATH
+
+        assert Path(_MODEL_CODE_PATH).is_file()
+
+    def test_model_code_contains_set_model(self) -> None:
+        """The script must call set_model() so MLflow can discover the model."""
+        from pathlib import Path
+
+        from haute.deploy._mlflow import _MODEL_CODE_PATH
+
+        source = Path(_MODEL_CODE_PATH).read_text()
+        assert "set_model(" in source
+
+    def test_log_model_receives_file_path(self) -> None:
+        """log_model(python_model=...) must receive a file path, not an object."""
+        from unittest.mock import MagicMock, patch
+
+        from haute.deploy._config import DeployConfig, ResolvedDeploy
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+        )
+        resolved = ResolvedDeploy(
+            config=config,
+            full_graph={"nodes": [], "edges": []},
+            pruned_graph={"nodes": [], "edges": []},
+            input_node_ids=["policies"],
+            output_node_id="output",
+            artifacts={},
+            input_schema={"col": "Int64"},
+            output_schema={"col": "Int64"},
+        )
+
+        with patch("mlflow.set_tracking_uri"), \
+             patch("mlflow.set_registry_uri"), \
+             patch("mlflow.set_experiment"), \
+             patch("mlflow.start_run") as mock_run, \
+             patch("mlflow.log_dict"), \
+             patch("mlflow.pyfunc.log_model") as mock_log, \
+             patch("mlflow.tracking.MlflowClient") as mock_client, \
+             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
+             patch("haute.deploy._mlflow._build_signature"), \
+             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
+            mock_client.return_value.search_model_versions.return_value = []
+            mock_run.return_value.__enter__ = MagicMock()
+            mock_run.return_value.__exit__ = MagicMock(return_value=False)
+
+            deploy_to_mlflow(resolved)
+
+            log_call = mock_log.call_args
+            python_model_arg = log_call.kwargs["python_model"]
+            assert isinstance(python_model_arg, str), (
+                f"Expected file path (str), got {type(python_model_arg)}"
+            )
+            assert python_model_arg.endswith("_model_code.py")
+
+
 class TestHauteModel:
     def test_inherits_from_python_model(self) -> None:
         """HauteModel must inherit from mlflow.pyfunc.PythonModel (MLflow 3.x)."""
         from mlflow.pyfunc import PythonModel
 
-        from haute.deploy._model import HauteModel
+        from haute.deploy._model_code import HauteModel
 
         assert issubclass(HauteModel, PythonModel)
 

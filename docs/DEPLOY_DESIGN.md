@@ -576,7 +576,7 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
         2. Build Unity Catalog model name (``catalog.schema.model_name``)
         3. Ensure experiment parent directories exist in the workspace
         4. Build deployment manifest JSON
-        5. Log HauteModel as mlflow.pyfunc with artifacts + signature
+        5. Log HauteModel via models-from-code (file path, not CloudPickle) with artifacts + signature
         6. Register model version in MLflow Model Registry
         7. Create or update Databricks Model Serving endpoint (if endpoint_name is set)
         8. Return DeployResult with model URI and endpoint URL
