@@ -8,28 +8,28 @@ from haute.graph_utils import _sanitize_func_name, topo_sort_ids
 def _build_params(source_names: list[str]) -> str:
     """Build the function parameter string from upstream node names."""
     if source_names:
-        return ", ".join(f"{s}: pl.DataFrame" for s in source_names)
-    return "df: pl.DataFrame"
+        return ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
+    return "df: pl.LazyFrame"
 
 
 # Template fragments for each node type
 _SOURCE_FLAT_FILE = '''\
 @pipeline.node(path="{path}"{deploy_kw})
-def {func_name}() -> pl.DataFrame:
+def {func_name}() -> pl.LazyFrame:
     """{description}"""
     return pl.scan_parquet("{path}")
 '''
 
 _SOURCE_CSV = '''\
 @pipeline.node(path="{path}"{deploy_kw})
-def {func_name}() -> pl.DataFrame:
+def {func_name}() -> pl.LazyFrame:
     """{description}"""
     return pl.scan_csv("{path}")
 '''
 
 _SOURCE_DATABRICKS = '''\
 @pipeline.node(table="{table}"{deploy_kw})
-def {func_name}() -> pl.DataFrame:
+def {func_name}() -> pl.LazyFrame:
     """{description}"""
     import databricks.sdk
     # TODO: implement Databricks table read
@@ -38,7 +38,7 @@ def {func_name}() -> pl.DataFrame:
 
 _MODEL_SCORE = '''\
 @pipeline.node(model_uri="{model_uri}")
-def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
+def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
     """{description}"""
     # TODO: implement model scoring
     return df
@@ -46,7 +46,7 @@ def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
 
 _RATING_STEP = '''\
 @pipeline.node(table="{table}", key="{key}")
-def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
+def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
     """{description}"""
     # TODO: implement rating step lookup
     return df
@@ -54,7 +54,7 @@ def {func_name}(df: pl.DataFrame) -> pl.DataFrame:
 
 _SINK_PARQUET = '''\
 @pipeline.node(sink="{path}", format="parquet")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     {first}.collect().write_parquet("{path}")
     return {first}
@@ -62,7 +62,7 @@ def {func_name}({params}) -> pl.DataFrame:
 
 _SINK_CSV = '''\
 @pipeline.node(sink="{path}", format="csv")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     {first}.collect().write_csv("{path}")
     return {first}
@@ -70,7 +70,7 @@ def {func_name}({params}) -> pl.DataFrame:
 
 _EXTERNAL_PICKLE = '''\
 @pipeline.node(external="{path}", file_type="pickle")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     import pickle
     with open("{path}", "rb") as _f:
@@ -80,7 +80,7 @@ def {func_name}({params}) -> pl.DataFrame:
 
 _EXTERNAL_JSON = '''\
 @pipeline.node(external="{path}", file_type="json")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     import json
     with open("{path}", "r") as _f:
@@ -90,7 +90,7 @@ def {func_name}({params}) -> pl.DataFrame:
 
 _EXTERNAL_JOBLIB = '''\
 @pipeline.node(external="{path}", file_type="joblib")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     import joblib
     obj = joblib.load("{path}")
@@ -99,7 +99,7 @@ def {func_name}({params}) -> pl.DataFrame:
 
 _EXTERNAL_CATBOOST = '''\
 @pipeline.node(external="{path}", file_type="catboost", model_class="{model_class}")
-def {func_name}({params}) -> pl.DataFrame:
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from catboost import {cb_class}
     obj = {cb_class}()
@@ -137,22 +137,11 @@ def _wrap_user_code(code: str, source_names: list[str]) -> str:
         # Chain syntax: .filter(...).select(...)
         first = source_names[0] if source_names else "df"
         chain_indented = "\n".join(f"        {line}" for line in code.splitlines())
-        return (
-            f"    df = (\n"
-            f"        {first}\n"
-            f"{chain_indented}\n"
-            f"    )\n"
-            f"    return df"
-        )
+        return f"    df = (\n        {first}\n{chain_indented}\n    )\n    return df"
     else:
         # Full expression: transform_2.join(transform_3, ...)
         indented = "\n".join(f"    {line}" for line in code.splitlines())
-        return (
-            f"    df = (\n"
-            f"{indented}\n"
-            f"    )\n"
-            f"    return df"
-        )
+        return f"    df = (\n{indented}\n    )\n    return df"
 
 
 def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
@@ -177,17 +166,23 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         if source_type == "databricks":
             table = config.get("table", "catalog.schema.table")
             return _SOURCE_DATABRICKS.format(
-                func_name=func_name, description=description, table=table,
+                func_name=func_name,
+                description=description,
+                table=table,
                 deploy_kw=deploy_kw,
             )
         elif path.endswith(".csv"):
             return _SOURCE_CSV.format(
-                func_name=func_name, description=description, path=path,
+                func_name=func_name,
+                description=description,
+                path=path,
                 deploy_kw=deploy_kw,
             )
         else:
             return _SOURCE_FLAT_FILE.format(
-                func_name=func_name, description=description, path=path,
+                func_name=func_name,
+                description=description,
+                path=path,
                 deploy_kw=deploy_kw,
             )
 
@@ -214,8 +209,13 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
             model_class = config.get("modelClass", "classifier")
             cb_class = "CatBoostRegressor" if model_class == "regressor" else "CatBoostClassifier"
             return _EXTERNAL_CATBOOST.format(
-                func_name=func_name, description=description, path=path,
-                params=params, body=body, model_class=model_class, cb_class=cb_class,
+                func_name=func_name,
+                description=description,
+                path=path,
+                params=params,
+                body=body,
+                model_class=model_class,
+                cb_class=cb_class,
             )
         templates = {
             "pickle": _EXTERNAL_PICKLE,
@@ -224,8 +224,11 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         }
         template = templates.get(file_type, _EXTERNAL_PICKLE)
         return template.format(
-            func_name=func_name, description=description, path=path,
-            params=params, body=body,
+            func_name=func_name,
+            description=description,
+            path=path,
+            params=params,
+            body=body,
         )
 
     elif node_type == "dataSink":
@@ -235,8 +238,11 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         first = source_names[0] if source_names else "df"
         template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
         return template.format(
-            func_name=func_name, description=description, path=path,
-            params=params, first=first,
+            func_name=func_name,
+            description=description,
+            path=path,
+            params=params,
+            first=first,
         )
 
     elif node_type == "output":
@@ -253,7 +259,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
         dec = ", ".join(dec_parts)
         return (
             f"@pipeline.node({dec})\n"
-            f"def {func_name}({params}) -> pl.DataFrame:\n"
+            f"def {func_name}({params}) -> pl.LazyFrame:\n"
             f'    """{description}"""\n'
             f"{body}\n"
         )
@@ -265,7 +271,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
 
     return (
         f"@pipeline.node\n"
-        f"def {func_name}({params}) -> pl.DataFrame:\n"
+        f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"{body}\n"
     )

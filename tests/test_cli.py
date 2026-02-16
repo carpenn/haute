@@ -73,7 +73,7 @@ class TestInit:
         result = runner.invoke(cli, ["init"], catch_exceptions=False)
         assert result.exit_code == 0, result.output
         assert (tmp_path / "data").is_dir()
-        assert (tmp_path / "test_quotes").is_dir()
+        assert (tmp_path / "tests" / "quotes").is_dir()
         assert (tmp_path / "haute.toml").exists()
         assert (tmp_path / ".env.example").exists()
         assert (tmp_path / ".gitignore").exists()
@@ -91,6 +91,43 @@ class TestInit:
         # pyproject.toml should have haute as a dependency
         pyproject_content = (tmp_path / "pyproject.toml").read_text()
         assert '"haute"' in pyproject_content
+
+        # pyproject.toml should have dev dependency-groups for CI tools
+        assert "[dependency-groups]" in pyproject_content
+        assert '"ruff' in pyproject_content
+        assert '"mypy' in pyproject_content
+        assert '"pytest' in pyproject_content
+
+        # pyproject.toml should have mypy config for untyped ML libraries
+        assert "[tool.mypy]" in pyproject_content
+        assert "catboost" in pyproject_content
+
+        # Starter test should be generated
+        test_file = tmp_path / "tests" / "test_pipeline.py"
+        assert test_file.exists()
+        test_content = test_file.read_text()
+        assert "test_pipeline_parses" in test_content
+        compile(test_content, "<test>", "exec")
+
+        # Pre-commit hook should be generated
+        hook = tmp_path / ".githooks" / "pre-commit"
+        assert hook.exists()
+        hook_content = hook.read_text()
+        assert "ruff format" in hook_content
+        assert hook.stat().st_mode & 0o755
+
+    def test_pre_commit_hook_installed_in_git_repo(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """If .git/hooks exists, the pre-commit hook is installed there too."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".git" / "hooks").mkdir(parents=True)
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        installed = tmp_path / ".git" / "hooks" / "pre-commit"
+        assert installed.exists()
+        assert "ruff format" in installed.read_text()
+        assert installed.stat().st_mode & 0o755
 
     def test_works_alongside_uv_init(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """haute init should layer on top of an existing pyproject.toml from uv init."""
@@ -113,6 +150,12 @@ class TestInit:
         pyproject_content = (tmp_path / "pyproject.toml").read_text()
         assert '"haute"' in pyproject_content
 
+        # Should add dev dependency-groups for CI tools
+        assert "[dependency-groups]" in pyproject_content
+        assert '"ruff' in pyproject_content
+        assert '"mypy' in pyproject_content
+        assert '"pytest' in pyproject_content
+
         # main.py should be overwritten with the starter pipeline
         py_content = (tmp_path / "main.py").read_text()
         assert "haute.Pipeline" in py_content
@@ -128,6 +171,25 @@ class TestInit:
         assert result.exit_code == 0, result.output
         content = (tmp_path / "pyproject.toml").read_text()
         assert content.count('"haute"') == 1
+
+        # Should still add dev dependency-groups even when haute dep exists
+        assert "[dependency-groups]" in content
+        assert '"ruff' in content
+
+    def test_skips_dev_deps_if_already_present(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """If pyproject.toml already has [dependency-groups], don't duplicate it."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "my-project"\nversion = "0.1.0"\n'
+            'dependencies = [\n    "haute",\n]\n\n'
+            '[dependency-groups]\ndev = [\n    "ruff>=0.8",\n]\n',
+        )
+        result = runner.invoke(cli, ["init"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        content = (tmp_path / "pyproject.toml").read_text()
+        assert content.count("[dependency-groups]") == 1
 
     def test_appends_to_existing_gitignore(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """If .gitignore exists (from uv init), append haute entries."""
@@ -335,7 +397,7 @@ class TestSmoke:
         )
         result = runner.invoke(cli, ["smoke"])
         assert result.exit_code == 1
-        assert "test_quotes" in result.output.lower()
+        assert "test quotes" in result.output.lower()
 
     def test_smoke_empty_test_quotes_fails(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -344,9 +406,9 @@ class TestSmoke:
         (tmp_path / "haute.toml").write_text(
             '[project]\nname = "t"\npipeline = "main.py"\n'
             '[deploy]\nmodel_name = "t"\nendpoint_name = "t"\n'
-            '[test_quotes]\ndir = "test_quotes"\n',
+            '[test_quotes]\ndir = "tests/quotes"\n',
         )
-        (tmp_path / "test_quotes").mkdir()
+        (tmp_path / "tests" / "quotes").mkdir(parents=True)
         result = runner.invoke(cli, ["smoke"])
         assert result.exit_code == 1
         assert "no .json" in result.output.lower()

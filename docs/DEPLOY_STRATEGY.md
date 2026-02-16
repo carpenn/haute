@@ -38,8 +38,9 @@ my-pricing-project/
 ├── .env.example                 # Credentials template (committed)
 ├── .env                         # Actual secrets (gitignored)
 ├── data/                        # Local data files
-├── test_quotes/                 # JSON test payloads
-│   └── example.json
+├── tests/                       # Tests + JSON test payloads
+│   ├── quotes/
+│   │   └── example.json
 ├── .github/                     # CI/CD workflows (if provider=github)
 │   └── workflows/
 │       ├── ci.yml               # PR checks: lint, test, validate, impact
@@ -79,7 +80,7 @@ serving_workload_size = "Small"       # Small | Medium | Large
 serving_scale_to_zero = true
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
@@ -119,7 +120,7 @@ port = 8080
 base_image = "python:3.11-slim"
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
@@ -159,7 +160,7 @@ instance_type = "ml.m5.large"
 initial_instance_count = 1
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
@@ -225,7 +226,7 @@ instance_count = 1
 | CI workflow files | `.github/workflows/` etc. | ✅ Yes | `ci.yml`, `deploy.yml` |
 | Workspace credentials | `.env` (local) | ❌ No | `DATABRICKS_TOKEN=dapi...` |
 | Workspace credentials (CI) | CI secrets | ❌ No | GitHub repo secrets |
-| Test quote payloads | `test_quotes/*.json` | ✅ Yes | `single_policy.json` |
+| Test quote payloads | `tests/quotes/*.json` | ✅ Yes | `single_policy.json` |
 | Impact comparison dataset | `data/` | ✅ Yes | `portfolio_sample.parquet` |
 
 ### 4.4 Why One File, Not Many
@@ -462,7 +463,7 @@ Teams can adjust the `min_approvers` count in `haute.toml`, but the staging→ap
 
 ### 7.1 Test Quotes - Golden File Testing
 
-Already implemented. Every deploy scores `test_quotes/*.json` through the pruned pipeline and blocks on failure.
+Already implemented. Every deploy scores `tests/quotes/*.json` through the pruned pipeline and blocks on failure.
 
 **Enhancement needed:** Support for **expected outputs** - not just "it doesn't crash" but "this input produces this exact price". This is the golden file pattern:
 
@@ -668,7 +669,7 @@ All design questions have been resolved. See §8 Decisions Made.
 | **P1** | Expand `haute.toml` schema with `[safety]` and `[ci]` sections | Design finalised |
 | **P2** | `haute init` generates CI/CD workflow files based on `[ci].provider` | P1 |
 | **P3** | `haute impact` command + PR comment integration | P1 |
-| **P4** | Golden file test quotes (expected outputs with tolerance) | Existing test_quotes infra |
+| **P4** | Golden file test quotes (expected outputs with tolerance) | Existing tests/quotes infra |
 | **P5** | Docker deploy target (`_docker.py`) | Existing `ResolvedDeploy` |
 | **P6** | AWS SageMaker deploy target (`_sagemaker.py`) | P5 pattern |
 | **P7** | Azure ML deploy target (`_azure_ml.py`) | P5 pattern |

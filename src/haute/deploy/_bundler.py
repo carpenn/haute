@@ -83,6 +83,4 @@ def _artifact_name(node_id: str, path: Path) -> str:
 def _check_exists(path: Path, node_id: str, node_type: str) -> None:
     """Raise FileNotFoundError if the artifact file doesn't exist."""
     if not path.is_file():
-        raise FileNotFoundError(
-            f"Artifact not found for {node_type} node '{node_id}': {path}"
-        )
+        raise FileNotFoundError(f"Artifact not found for {node_type} node '{node_id}': {path}")

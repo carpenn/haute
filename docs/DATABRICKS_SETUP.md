@@ -171,7 +171,7 @@ serving_workload_size = "Small"           # Small | Medium | Large
 serving_scale_to_zero = true              # Scale to zero when idle
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 ```
 
 ### Where each value comes from
@@ -203,7 +203,7 @@ This will:
 - Parse your pipeline
 - Prune to the scoring path
 - Collect model artifacts
-- Score all test quotes in `test_quotes/`
+- Score all test quotes in `tests/quotes/`
 - Report any errors
 
 ### Deploy for real
@@ -351,5 +351,5 @@ Before your first deploy, confirm:
 - [ ] Unity Catalog enabled with catalog + schema
 - [ ] MLflow experiment path set in `haute.toml`
 - [ ] Model Serving available in your workspace
-- [ ] At least one test quote JSON in `test_quotes/`
+- [ ] At least one test quote JSON in `tests/quotes/`
 - [ ] `haute deploy --dry-run` passes

@@ -73,10 +73,10 @@ def _prepare_graph(
     graph: dict,
     target_node_id: str | None = None,
 ) -> tuple[
-    dict[str, dict],       # node_map
-    list[str],             # order (topo-sorted node IDs)
+    dict[str, dict],  # node_map
+    list[str],  # order (topo-sorted node IDs)
     dict[str, list[str]],  # parents_of
-    dict[str, str],        # id_to_name
+    dict[str, str],  # id_to_name
 ]:
     """Shared graph preparation: filter, topo-sort, and build lookups.
 
@@ -116,22 +116,27 @@ def load_external_object(path: str, file_type: str, model_class: str = "classifi
     """
     if file_type == "json":
         import json as _json
+
         with open(path) as f:
             return _json.load(f)
     elif file_type == "joblib":
         import joblib
+
         return joblib.load(path)
     elif file_type == "catboost":
         if model_class == "regressor":
             from catboost import CatBoostRegressor
+
             m = CatBoostRegressor()
         else:
             from catboost import CatBoostClassifier
+
             m = CatBoostClassifier()
         m.load_model(path)
         return m
     else:  # pickle
         import pickle
+
         with open(path, "rb") as f:
             return pickle.load(f)
 

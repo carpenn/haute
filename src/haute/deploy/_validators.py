@@ -23,10 +23,7 @@ def load_test_quote_file(path: Path) -> list[dict]:
     raw = json.loads(path.read_text())
     if not isinstance(raw, list):
         raise ValueError("Expected a JSON array of quote objects")
-    return [
-        {k: v for k, v in row.items() if not k.startswith("_")}
-        for row in raw
-    ]
+    return [{k: v for k, v in row.items() if not k.startswith("_")} for row in raw]
 
 
 def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
@@ -40,9 +37,7 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     # 1. Output node exists in pruned graph
     output_ids = {n["id"] for n in resolved.pruned_graph.get("nodes", [])}
     if resolved.output_node_id not in output_ids:
-        errors.append(
-            f"Output node '{resolved.output_node_id}' not in pruned graph."
-        )
+        errors.append(f"Output node '{resolved.output_node_id}' not in pruned graph.")
 
     # 2. Input nodes exist in pruned graph
     for nid in resolved.input_node_ids:
@@ -50,14 +45,10 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
             errors.append(f"Input node '{nid}' not in pruned graph.")
 
     # 3. Input nodes are sources (no incoming edges)
-    targets_with_incoming = {
-        e["target"] for e in resolved.pruned_graph.get("edges", [])
-    }
+    targets_with_incoming = {e["target"] for e in resolved.pruned_graph.get("edges", [])}
     for nid in resolved.input_node_ids:
         if nid in targets_with_incoming:
-            errors.append(
-                f"Input node '{nid}' has incoming edges - it should be a source node."
-            )
+            errors.append(f"Input node '{nid}' has incoming edges - it should be a source node.")
 
     # 4. All artifacts exist on disk
     for name, path in resolved.artifacts.items():
@@ -132,21 +123,25 @@ def score_test_quotes(
             )
 
             elapsed = (time.perf_counter() - t0) * 1000
-            results.append({
-                "file": jf.name,
-                "rows": len(output),
-                "status": "ok",
-                "time_ms": round(elapsed, 1),
-                "error": "",
-            })
+            results.append(
+                {
+                    "file": jf.name,
+                    "rows": len(output),
+                    "status": "ok",
+                    "time_ms": round(elapsed, 1),
+                    "error": "",
+                }
+            )
         except Exception as exc:
             elapsed = (time.perf_counter() - t0) * 1000
-            results.append({
-                "file": jf.name,
-                "rows": 0,
-                "status": "error",
-                "time_ms": round(elapsed, 1),
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "file": jf.name,
+                    "rows": 0,
+                    "status": "error",
+                    "time_ms": round(elapsed, 1),
+                    "error": str(exc),
+                }
+            )
 
     return results

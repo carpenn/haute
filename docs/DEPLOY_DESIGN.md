@@ -69,8 +69,9 @@ my_project/
   .env                   ← actual secrets (gitignored)
   main.py               ← starter pipeline
   data/                  ← input data files
-  test_quotes/           ← JSON payloads for pre-deploy testing
-    example.json
+  tests/                 ← Tests + JSON payloads for pre-deploy testing
+    quotes/
+      example.json
   .gitignore             ← includes .env
 ```
 
@@ -97,7 +98,7 @@ serving_workload_size = "Small"
 serving_scale_to_zero = true
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 ```
 
 **What lives where:**
@@ -108,7 +109,7 @@ dir = "test_quotes"
 | Databricks experiment, catalog, schema | `haute.toml` | Yes |
 | Serving size, scale-to-zero | `haute.toml` | Yes |
 | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` | `.env` | **No** (gitignored) |
-| Test quote JSON payloads | `test_quotes/` | Yes |
+| Test quote JSON payloads | `tests/quotes/` | Yes |
 
 ### 3.3 Secrets: `.env` (implemented)
 
@@ -129,12 +130,12 @@ cp .env.example .env
 
 ### 3.4 Test quotes (implemented)
 
-The `test_quotes/` directory contains JSON files that are run through the
+The `tests/quotes/` directory contains JSON files that are run through the
 pipeline during pre-deploy validation. Each file is a JSON array of quote
 objects matching the input schema:
 
 ```
-test_quotes/
+tests/quotes/
   single_policy.json     ← 1 quote, quick smoke test
   batch_policies.json    ← 5 quotes, variety of risk profiles
   edge_cases.json        ← extreme values (young driver, old vehicle, etc.)
@@ -158,7 +159,7 @@ Example `single_policy.json`:
 ]
 ```
 
-During `haute deploy`, **every** JSON file in `test_quotes/` is scored
+During `haute deploy`, **every** JSON file in `tests/quotes/` is scored
 through the pruned pipeline. If any file fails, deployment is blocked
 with a clear error. This catches:
 - Schema mismatches (missing/wrong columns)

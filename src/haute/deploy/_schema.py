@@ -26,8 +26,7 @@ def infer_input_schema(graph: dict, input_node_id: str) -> dict[str, str]:
 
     if not path:
         raise ValueError(
-            f"Input node '{input_node_id}' has no path configured. "
-            "Cannot infer schema."
+            f"Input node '{input_node_id}' has no path configured. Cannot infer schema."
         )
 
     try:
@@ -40,8 +39,7 @@ def infer_input_schema(graph: dict, input_node_id: str) -> dict[str, str]:
             df = pl.read_parquet(path, n_rows=0)
     except Exception as exc:
         raise ValueError(
-            f"Failed to read schema from '{path}' for input node "
-            f"'{input_node_id}': {exc}"
+            f"Failed to read schema from '{path}' for input node '{input_node_id}': {exc}"
         ) from exc
 
     return {col: str(df[col].dtype) for col in df.columns}
@@ -85,9 +83,7 @@ def infer_output_schema(
         else:
             sample = pl.read_parquet(path, n_rows=1)
     except Exception as exc:
-        raise ValueError(
-            f"Failed to read sample from '{path}': {exc}"
-        ) from exc
+        raise ValueError(f"Failed to read sample from '{path}': {exc}") from exc
 
     result = score_graph(
         graph=graph,

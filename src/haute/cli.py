@@ -14,13 +14,17 @@ def _open_browser(url: str) -> None:
     try:
         if sys.platform == "linux":
             rc = subprocess.call(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             if rc != 0:
                 webbrowser.open(url)
         elif sys.platform == "darwin":
             subprocess.Popen(
-                ["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
             webbrowser.open(url)
@@ -77,7 +81,9 @@ def init(target: str, ci: str) -> None:
         github_ci_yml,
         github_deploy_yml,
         haute_toml,
+        pre_commit_hook,
         starter_pipeline,
+        starter_test,
         starter_test_quote,
     )
 
@@ -105,22 +111,31 @@ def init(target: str, ci: str) -> None:
 
     # ── Directories ───────────────────────────────────────────────
     (project_dir / "data").mkdir(exist_ok=True)
-    (project_dir / "test_quotes").mkdir(exist_ok=True)
 
     # ── main.py - starter pipeline ────────────────────────────────
     (project_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
 
     # ── haute.toml - project + deploy + safety + CI config ────────
     (project_dir / "haute.toml").write_text(
-        haute_toml(name, target, ci), encoding="utf-8",
+        haute_toml(name, target, ci),
+        encoding="utf-8",
     )
 
     # ── .env.example - target-specific credentials ────────────────
     (project_dir / ".env.example").write_text(env_example(target), encoding="utf-8")
 
-    # ── Starter test quote ────────────────────────────────────────
-    (project_dir / "test_quotes" / "example.json").write_text(
-        starter_test_quote(), encoding="utf-8",
+    # ── Starter test file + test quotes ─────────────────────────────
+    tests_dir = project_dir / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    quotes_dir = tests_dir / "quotes"
+    quotes_dir.mkdir(exist_ok=True)
+    (quotes_dir / "example.json").write_text(
+        starter_test_quote(),
+        encoding="utf-8",
+    )
+    (tests_dir / "test_pipeline.py").write_text(
+        starter_test(name),
+        encoding="utf-8",
     )
 
     # ── CI/CD workflow files ──────────────────────────────────────
@@ -130,19 +145,31 @@ def init(target: str, ci: str) -> None:
         workflows_dir.mkdir(parents=True, exist_ok=True)
         (workflows_dir / "ci.yml").write_text(github_ci_yml(), encoding="utf-8")
         (workflows_dir / "deploy.yml").write_text(
-            github_deploy_yml(target), encoding="utf-8",
+            github_deploy_yml(target),
+            encoding="utf-8",
         )
         ci_files = [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]
+
+    # ── Pre-commit hook ───────────────────────────────────────────
+    hooks_dir = project_dir / ".githooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / "pre-commit"
+    hook_path.write_text(pre_commit_hook(), encoding="utf-8")
+    hook_path.chmod(0o755)
+
+    # Install into .git/hooks if inside a git repo
+    git_hooks_dir = project_dir / ".git" / "hooks"
+    if git_hooks_dir.is_dir():
+        installed = git_hooks_dir / "pre-commit"
+        installed.write_text(pre_commit_hook(), encoding="utf-8")
+        installed.chmod(0o755)
 
     # ── .gitignore - append if exists, create if not ──────────────
     gitignore_path = project_dir / ".gitignore"
     haute_entries = ".env\n*.haute.json\n"
     if gitignore_path.exists():
         existing = gitignore_path.read_text()
-        missing = [
-            line for line in haute_entries.splitlines()
-            if line and line not in existing
-        ]
+        missing = [line for line in haute_entries.splitlines() if line and line not in existing]
         if missing:
             with open(gitignore_path, "a", encoding="utf-8") as f:
                 f.write("\n# Haute\n" + "\n".join(missing) + "\n")
@@ -159,13 +186,35 @@ def init(target: str, ci: str) -> None:
     click.echo(f"  .env.example         - {target} credentials template")
     click.echo("  main.py              - starter pipeline")
     click.echo("  data/                - put your data files here")
-    click.echo("  test_quotes/         - example JSON payloads for testing")
+    click.echo("  tests/               - starter test + example quote payloads")
+    click.echo("  .githooks/pre-commit - auto-format on commit (ruff)")
     for f in ci_files:
         click.echo(f"  {f}")
+    if git_hooks_dir.is_dir():
+        click.echo("  .git/hooks/pre-commit  (installed)")
     click.echo("\nNext steps:")
     click.echo("  uv sync                # install dependencies")
     click.echo("  cp .env.example .env   # fill in credentials")
     click.echo("  haute serve")
+
+
+_DEV_DEPS_BLOCK = """
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+]
+"""
+
+_MYPY_BLOCK = """
+[tool.mypy]
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["haute.*", "catboost.*", "xgboost.*", "lightgbm.*", "sklearn.*"]
+ignore_missing_imports = true
+"""
 
 
 def _ensure_haute_dependency(pyproject_path: Path, name: str) -> None:
@@ -174,27 +223,33 @@ def _ensure_haute_dependency(pyproject_path: Path, name: str) -> None:
     If pyproject.toml exists, insert ``"haute"`` into the dependencies
     list (if not already present).  If it doesn't exist, create a
     minimal pyproject.toml.
+
+    Also ensures a ``[dependency-groups]`` dev section exists with
+    ruff, mypy, and pytest so that the generated CI workflows work.
     """
     if pyproject_path.exists():
         text = pyproject_path.read_text(encoding="utf-8")
-        if "haute" in text:
-            return
-        # Insert into existing dependencies list
-        if "dependencies = [" in text:
-            text = text.replace(
-                "dependencies = [",
-                'dependencies = [\n    "haute",',
-                1,
-            )
-        else:
-            # No dependencies key - append a section
-            text += '\n[project]\ndependencies = [\n    "haute",\n]\n'
+        if "haute" not in text:
+            # Insert into existing dependencies list
+            if "dependencies = [" in text:
+                text = text.replace(
+                    "dependencies = [",
+                    'dependencies = [\n    "haute",',
+                    1,
+                )
+            else:
+                # No dependencies key - append a section
+                text += '\n[project]\ndependencies = [\n    "haute",\n]\n'
+        if "[dependency-groups]" not in text:
+            text += _DEV_DEPS_BLOCK
+        if "[tool.mypy]" not in text:
+            text += _MYPY_BLOCK
         pyproject_path.write_text(text, encoding="utf-8")
     else:
         pyproject_path.write_text(
             f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
             f'requires-python = ">=3.11"\n'
-            f'dependencies = [\n    "haute",\n]\n',
+            f'dependencies = [\n    "haute",\n]\n' + _DEV_DEPS_BLOCK + _MYPY_BLOCK,
             encoding="utf-8",
         )
 
@@ -312,6 +367,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
         if not no_browser:
             import threading
+
             threading.Timer(2.0, _open_browser, args=("http://localhost:5173",)).start()
 
         try:
@@ -337,6 +393,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
         if not no_browser:
             import threading
+
             threading.Timer(1.5, _open_browser, args=(f"http://{host}:{port}",)).start()
 
         uvicorn.run(
@@ -350,7 +407,8 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 @click.argument("pipeline_file", required=False)
 @click.option("--model-name", default=None, help="Override model name from haute.toml.")
 @click.option(
-    "--endpoint-suffix", default=None,
+    "--endpoint-suffix",
+    default=None,
     help='Suffix appended to endpoint name (e.g. "-staging").',
 )
 @click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying.")
@@ -409,12 +467,16 @@ def deploy(
 
     n_kept = len(resolved.pruned_graph.get("nodes", []))
     n_removed = len(resolved.removed_node_ids)
-    click.echo(f"  ✓ Parsed pipeline ({n_kept + n_removed} nodes, "
-               f"{len(resolved.pruned_graph.get('edges', []))} edges)")
+    click.echo(
+        f"  ✓ Parsed pipeline ({n_kept + n_removed} nodes, "
+        f"{len(resolved.pruned_graph.get('edges', []))} edges)"
+    )
     click.echo(f"  ✓ Pruned to output ancestors ({n_kept} nodes)")
     if n_removed:
-        click.echo(f"  ✓ Skipped {n_removed} nodes not in scoring path "
-                   f"({', '.join(resolved.removed_node_ids)})")
+        click.echo(
+            f"  ✓ Skipped {n_removed} nodes not in scoring path "
+            f"({', '.join(resolved.removed_node_ids)})"
+        )
     click.echo(f"  ✓ Collected {len(resolved.artifacts)} artifacts")
     click.echo(f"  ✓ Input node(s): {', '.join(resolved.input_node_ids)}")
     click.echo(f"  ✓ Output node: {resolved.output_node_id}")
@@ -477,7 +539,8 @@ def deploy(
 @cli.command()
 @click.argument("model_name", required=False)
 @click.option(
-    "--version-only", is_flag=True,
+    "--version-only",
+    is_flag=True,
     help="Print only the latest version number (for scripting).",
 )
 def status(model_name: str | None, version_only: bool) -> None:
@@ -487,6 +550,7 @@ def status(model_name: str | None, version_only: bool) -> None:
         toml_path = Path.cwd() / "haute.toml"
         if toml_path.exists():
             from haute.deploy._config import DeployConfig
+
             config = DeployConfig.from_toml(toml_path)
             model_name = config.model_name
         else:
@@ -495,6 +559,7 @@ def status(model_name: str | None, version_only: bool) -> None:
 
     try:
         from haute.deploy._mlflow import get_deploy_status
+
         info = get_deploy_status(model_name)
     except ImportError:
         click.echo(
@@ -532,6 +597,7 @@ def lint(pipeline_file: str | None) -> None:
         toml_path = Path.cwd() / "haute.toml"
         if toml_path.exists():
             import tomllib
+
             with open(toml_path, "rb") as f:
                 data = tomllib.load(f)
             pipeline_file = data.get("project", {}).get("pipeline", "main.py")
@@ -597,7 +663,8 @@ def lint(pipeline_file: str | None) -> None:
 
 @cli.command()
 @click.option(
-    "--endpoint-suffix", default=None,
+    "--endpoint-suffix",
+    default=None,
     help='Suffix appended to endpoint name (e.g. "-staging").',
 )
 def smoke(endpoint_suffix: str | None) -> None:
@@ -623,12 +690,12 @@ def smoke(endpoint_suffix: str | None) -> None:
     tq_dir = config.test_quotes_dir
 
     if tq_dir is None or not tq_dir.is_dir():
-        click.echo("Error: No test_quotes directory found.", err=True)
+        click.echo("Error: No test quotes directory found (expected tests/quotes/).", err=True)
         raise SystemExit(1)
 
     json_files = sorted(tq_dir.glob("*.json"))
     if not json_files:
-        click.echo("Error: No .json files in test_quotes/.", err=True)
+        click.echo("Error: No .json files in tests/quotes/.", err=True)
         raise SystemExit(1)
 
     click.echo(f"Smoke testing endpoint: {endpoint_name}")
@@ -650,6 +717,7 @@ def smoke(endpoint_suffix: str | None) -> None:
         raise SystemExit(1)
 
     from haute.deploy._config import _load_env
+
     _load_env(Path.cwd())
 
     ws = WorkspaceClient()

@@ -177,9 +177,7 @@ def _build_manifest(resolved: ResolvedDeploy) -> dict:
         "output_fields": config.output_fields,
         "input_schema": resolved.input_schema,
         "output_schema": resolved.output_schema,
-        "artifacts": {
-            name: str(path) for name, path in resolved.artifacts.items()
-        },
+        "artifacts": {name: str(path) for name, path in resolved.artifacts.items()},
         "graph": resolved.pruned_graph,
         "nodes_deployed": len(resolved.pruned_graph.get("nodes", [])),
         "nodes_skipped": len(resolved.removed_node_ids),

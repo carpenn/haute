@@ -28,4 +28,4 @@ serving_scale_to_zero = true                       # scale to zero when idle
 # Test quotes - example JSON payloads for pre-deploy validation
 # ─────────────────────────────────────────────────────────────────
 [test_quotes]
-dir = "test_quotes"                       # directory containing .json files
+dir = "tests/quotes"                      # directory containing .json files

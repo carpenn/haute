@@ -31,6 +31,7 @@ from haute.graph_utils import _execute_lazy, _Frame, topo_sort_ids
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SchemaDiff:
     """Column-level diff between a node's input and output."""
@@ -81,6 +82,7 @@ class TraceResult:
 # Schema diff
 # ---------------------------------------------------------------------------
 
+
 def _compute_schema_diff(
     input_row: dict[str, Any] | None,
     output_row: dict[str, Any],
@@ -123,6 +125,7 @@ def _compute_schema_diff(
 def _is_nan(v: Any) -> bool:
     try:
         import math
+
         return isinstance(v, float) and math.isnan(v)
     except (TypeError, ValueError):
         return False
@@ -131,6 +134,7 @@ def _is_nan(v: Any) -> bool:
 # ---------------------------------------------------------------------------
 # Collect a single row from a LazyFrame, with JSON-safe values
 # ---------------------------------------------------------------------------
+
 
 def _collect_row(lf: _Frame, row_index: int) -> dict[str, Any]:
     """Collect one row from a LazyFrame and return as a dict with JSON-safe values."""
@@ -161,6 +165,7 @@ def _jsonify_row(row: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Main trace executor
 # ---------------------------------------------------------------------------
+
 
 def execute_trace(
     graph: dict,
@@ -199,7 +204,9 @@ def execute_trace(
 
     # Execute lazily via shared core
     lazy_outputs, order, parents_of, _id_to_name = _execute_lazy(
-        graph, _build_node_fn, target_node_id,
+        graph,
+        _build_node_fn,
+        target_node_id,
     )
 
     # Determine which nodes are sources
@@ -234,15 +241,17 @@ def execute_trace(
 
         schema_diff = _compute_schema_diff(input_row, output_row)
 
-        steps.append(TraceStep(
-            node_id=nid,
-            node_name=node_name,
-            node_type=node_type,
-            schema_diff=schema_diff,
-            input_values=input_row if input_row is not None else {},
-            output_values=output_row,
-            execution_ms=round((time.perf_counter() - t_node) * 1000, 2),
-        ))
+        steps.append(
+            TraceStep(
+                node_id=nid,
+                node_name=node_name,
+                node_type=node_type,
+                schema_diff=schema_diff,
+                input_values=input_row if input_row is not None else {},
+                output_values=output_row,
+                execution_ms=round((time.perf_counter() - t_node) * 1000, 2),
+            )
+        )
 
     # ---------- Column filter ----------
     if column:
@@ -270,15 +279,18 @@ def execute_trace(
 # Column filtering - keep only nodes that touch the target column
 # ---------------------------------------------------------------------------
 
+
 def _filter_steps_by_column(steps: list[TraceStep], column: str) -> list[TraceStep]:
     """Keep only trace steps where the column appears in the schema diff."""
     filtered: list[TraceStep] = []
     for step in steps:
         sd = step.schema_diff
-        if (column in sd.columns_added
-                or column in sd.columns_modified
-                or column in sd.columns_passed
-                or column in step.output_values):
+        if (
+            column in sd.columns_added
+            or column in sd.columns_modified
+            or column in sd.columns_passed
+            or column in step.output_values
+        ):
             filtered.append(step)
     return filtered
 
@@ -286,6 +298,7 @@ def _filter_steps_by_column(steps: list[TraceStep], column: str) -> list[TraceSt
 # ---------------------------------------------------------------------------
 # Serialisation - TraceResult → JSON-safe dict
 # ---------------------------------------------------------------------------
+
 
 def trace_result_to_dict(result: TraceResult) -> dict[str, Any]:
     """Convert a TraceResult to a JSON-serialisable dict for the API."""

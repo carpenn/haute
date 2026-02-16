@@ -33,7 +33,7 @@ endpoint_name = "{name}"
         _target_section(name, target),
         f"""\
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
@@ -107,29 +107,41 @@ def env_example(target: str) -> str:
 #   cp .env.example .env
 """
     if target == "databricks":
-        return header.format(label="Databricks") + """
+        return (
+            header.format(label="Databricks")
+            + """
 DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
 DATABRICKS_TOKEN=your_databricks_token_here
 """
+        )
     if target == "sagemaker":
-        return header.format(label="AWS SageMaker") + """
+        return (
+            header.format(label="AWS SageMaker")
+            + """
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 AWS_DEFAULT_REGION=eu-west-1
 SAGEMAKER_ROLE_ARN=arn:aws:iam::123456789012:role/SageMakerRole
 """
+        )
     if target == "azure-ml":
-        return header.format(label="Azure ML") + """
+        return (
+            header.format(label="Azure ML")
+            + """
 AZURE_SUBSCRIPTION_ID=
 AZURE_TENANT_ID=
 AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
 """
+        )
     if target == "docker":
-        return header.format(label="Docker registry (optional)") + """
+        return (
+            header.format(label="Docker registry (optional)")
+            + """
 DOCKER_USERNAME=
 DOCKER_PASSWORD=
 """
+        )
     msg = f"Unknown target: {target}"
     raise ValueError(msg)
 
@@ -244,7 +256,7 @@ on:
       - "haute.toml"
       - "data/**"
       - "models/**"
-      - "test_quotes/**"
+      - "tests/quotes/**"
   workflow_dispatch:
 
 concurrency:
@@ -341,6 +353,25 @@ def _github_secrets_env(target: str) -> str:
     raise ValueError(msg)
 
 
+# ── Pre-commit hook ───────────────────────────────────────────────────
+
+
+def pre_commit_hook() -> str:
+    """Generate a Git pre-commit hook that auto-formats with ruff."""
+    return """\
+#!/bin/sh
+# Haute pre-commit hook - auto-format staged Python files with ruff.
+# Installed by `haute init`. To reinstall: cp .githooks/pre-commit .git/hooks/
+
+FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+[ -z "$FILES" ] && exit 0
+
+uv run ruff format $FILES
+uv run ruff check --fix $FILES 2>/dev/null || true
+git add $FILES
+"""
+
+
 # ── Starter files ─────────────────────────────────────────────────────
 
 
@@ -356,8 +387,25 @@ pipeline = haute.Pipeline("{name}", description="")
 '''
 
 
+def starter_test(name: str) -> str:
+    """Generate a starter ``tests/test_pipeline.py`` so pytest passes out of the box."""
+    return f'''\
+"""Starter tests for {name}."""
+
+from pathlib import Path
+
+
+def test_pipeline_parses():
+    """Pipeline file is valid Python and contains a haute Pipeline."""
+    pipeline_path = Path(__file__).resolve().parent.parent / "main.py"
+    source = pipeline_path.read_text()
+    compile(source, str(pipeline_path), "exec")
+    assert "haute.Pipeline" in source
+'''
+
+
 def starter_test_quote() -> str:
-    """Generate the starter ``test_quotes/example.json``."""
+    """Generate the starter ``tests/quotes/example.json``."""
     return """\
 [
   {

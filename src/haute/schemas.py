@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 # Shared sub-models
 # ---------------------------------------------------------------------------
 
+
 class GraphEdge(BaseModel):
     id: str
     source: str
@@ -47,6 +48,7 @@ class ColumnInfo(BaseModel):
 # /api/pipeline/save
 # ---------------------------------------------------------------------------
 
+
 class SavePipelineRequest(BaseModel):
     name: str = "main"
     description: str = ""
@@ -64,6 +66,7 @@ class SavePipelineResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # /api/pipeline/run
 # ---------------------------------------------------------------------------
+
 
 class RunPipelineRequest(BaseModel):
     graph: Graph
@@ -87,6 +90,7 @@ class RunPipelineResponse(BaseModel):
 # /api/pipeline/preview
 # ---------------------------------------------------------------------------
 
+
 class PreviewNodeRequest(BaseModel):
     graph: Graph
     nodeId: str
@@ -106,6 +110,7 @@ class PreviewNodeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # /api/pipeline/trace
 # ---------------------------------------------------------------------------
+
 
 class TraceRequest(BaseModel):
     graph: Graph
@@ -151,6 +156,7 @@ class TraceResponse(BaseModel):
 # /api/pipeline/sink
 # ---------------------------------------------------------------------------
 
+
 class SinkRequest(BaseModel):
     graph: Graph
     nodeId: str
@@ -168,6 +174,7 @@ class SinkResponse(BaseModel):
 # /api/files
 # ---------------------------------------------------------------------------
 
+
 class FileItem(BaseModel):
     name: str
     path: str
@@ -184,6 +191,7 @@ class BrowseFilesResponse(BaseModel):
 # /api/schema
 # ---------------------------------------------------------------------------
 
+
 class SchemaResponse(BaseModel):
     path: str
     columns: list[ColumnInfo]
@@ -195,6 +203,7 @@ class SchemaResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # /api/pipelines (list)
 # ---------------------------------------------------------------------------
+
 
 class PipelineSummary(BaseModel):
     name: str

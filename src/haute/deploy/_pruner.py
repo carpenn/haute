@@ -27,8 +27,7 @@ def prune_for_deploy(
     all_ids = {n["id"] for n in nodes}
     if output_node_id not in all_ids:
         raise ValueError(
-            f"Output node '{output_node_id}' not found in graph. "
-            f"Available nodes: {sorted(all_ids)}"
+            f"Output node '{output_node_id}' not found in graph. Available nodes: {sorted(all_ids)}"
         )
 
     needed = ancestors(output_node_id, edges, all_ids)
@@ -63,9 +62,7 @@ def find_output_node(graph: dict) -> str:
             candidates.append(n["id"])
 
     if len(candidates) == 0:
-        raise ValueError(
-            "No output node found. Mark a node with @pipeline.node(output=True)."
-        )
+        raise ValueError("No output node found. Mark a node with @pipeline.node(output=True).")
     if len(candidates) > 1:
         raise ValueError(
             f"Multiple output nodes found: {candidates}. "

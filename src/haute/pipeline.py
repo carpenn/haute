@@ -32,10 +32,7 @@ class Node:
         if self.is_source:
             return 0
         sig = inspect.signature(self.fn)
-        return len([
-            p for p in sig.parameters.values()
-            if p.name != "self"
-        ])
+        return len([p for p in sig.parameters.values() if p.name != "self"])
 
     def __call__(self, *dfs: pl.DataFrame) -> pl.DataFrame:
         if self.is_source:
@@ -44,7 +41,7 @@ class Node:
             raise ValueError(f"Node '{self.name}' expects a DataFrame input")
         # If function accepts multiple params, pass separately
         if self.n_inputs > 1:
-            return self.fn(*dfs[:self.n_inputs])
+            return self.fn(*dfs[: self.n_inputs])
         # Single-param function gets first df
         return self.fn(dfs[0])
 
@@ -85,12 +82,10 @@ class Pipeline:
             @pipeline.node(path="data.parquet")
             def read_data(): ...
         """
+
         def _register(f: Callable) -> Callable:
             sig = inspect.signature(f)
-            params = [
-                p for p in sig.parameters.values()
-                if p.name != "self"
-            ]
+            params = [p for p in sig.parameters.values() if p.name != "self"]
             is_source = len(params) == 0
 
             n = Node(
@@ -220,32 +215,38 @@ class Pipeline:
             else:
                 rf_type = "transform"
 
-            nodes.append({
-                "id": n.name,
-                "type": rf_type,
-                "position": {"x": i * x_spacing, "y": 0},
-                "data": {
-                    "label": n.name.replace("_", " ").title(),
-                    "description": n.description,
-                    "nodeType": rf_type,
-                    "config": n.config,
-                },
-            })
+            nodes.append(
+                {
+                    "id": n.name,
+                    "type": rf_type,
+                    "position": {"x": i * x_spacing, "y": 0},
+                    "data": {
+                        "label": n.name.replace("_", " ").title(),
+                        "description": n.description,
+                        "nodeType": rf_type,
+                        "config": n.config,
+                    },
+                }
+            )
 
         if self._edges:
             for src, tgt in self._edges:
-                rf_edges.append({
-                    "id": f"e_{src}_{tgt}",
-                    "source": src,
-                    "target": tgt,
-                })
+                rf_edges.append(
+                    {
+                        "id": f"e_{src}_{tgt}",
+                        "source": src,
+                        "target": tgt,
+                    }
+                )
         else:
             # No explicit edges - infer linear chain
             for i in range(1, len(self._nodes)):
-                rf_edges.append({
-                    "id": f"e_{self._nodes[i - 1].name}_{self._nodes[i].name}",
-                    "source": self._nodes[i - 1].name,
-                    "target": self._nodes[i].name,
-                })
+                rf_edges.append(
+                    {
+                        "id": f"e_{self._nodes[i - 1].name}_{self._nodes[i].name}",
+                        "source": self._nodes[i - 1].name,
+                        "target": self._nodes[i].name,
+                    }
+                )
 
         return {"nodes": nodes, "edges": rf_edges}

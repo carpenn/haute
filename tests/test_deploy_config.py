@@ -31,7 +31,7 @@ serving_workload_size = "Small"
 serving_scale_to_zero = true
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio.parquet"

@@ -49,7 +49,8 @@ def score_graph(
     remap = artifact_paths or {}
 
     def _build_scoring_fn(
-        node: dict, source_names: list[str] | None = None,
+        node: dict,
+        source_names: list[str] | None = None,
     ) -> tuple[str, Callable, bool]:
         """Modified _build_node_fn that intercepts deploy_input sources."""
         from haute.executor import _build_node_fn, _exec_user_code
@@ -66,8 +67,10 @@ def score_graph(
 
         # Intercept: deploy_input source → inject live DataFrame
         if node_type == "dataSource" and nid in input_set:
+
             def inject_input() -> _Frame:
                 return input_lf
+
             return func_name, inject_input, True
 
         # Intercept: externalFile with remapped artifact path
@@ -81,6 +84,7 @@ def score_graph(
                 _src_names = list(source_names)
 
                 if code:
+
                     def external_fn(
                         *dfs: _Frame,
                         _p: str = remapped_path,
@@ -91,10 +95,13 @@ def score_graph(
                     ) -> _Frame:
                         obj = load_external_object(_p, _ft, _mc)
                         return _exec_user_code(_code, _sn, dfs, extra_ns={"obj": obj})
+
                     return func_name, external_fn, False
                 else:
+
                     def external_passthrough(*dfs: _Frame) -> _Frame:
                         return dfs[0] if dfs else pl.LazyFrame()
+
                     return func_name, external_passthrough, False
 
         # Intercept: static dataSource with remapped artifact path
@@ -111,20 +118,22 @@ def score_graph(
                         return pl.read_json(_p).lazy()
                     else:
                         return pl.scan_parquet(_p)
+
                 return func_name, static_source, True
 
         # Default: use the standard executor's _build_node_fn
         return _build_node_fn(node, source_names=source_names)
 
     lazy_outputs, order, _parents, _names = _execute_lazy(
-        graph, _build_scoring_fn, target_node_id=output_node_id,
+        graph,
+        _build_scoring_fn,
+        target_node_id=output_node_id,
     )
 
     output_lf = lazy_outputs.get(output_node_id)
     if output_lf is None:
         raise RuntimeError(
-            f"Output node '{output_node_id}' produced no result. "
-            f"Executed nodes: {order}"
+            f"Output node '{output_node_id}' produced no result. Executed nodes: {order}"
         )
 
     if output_fields:

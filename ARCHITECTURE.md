@@ -101,8 +101,9 @@ my-pricing-project/
 │   ├── ci.yml              #   PR checks: lint, test, pipeline validation
 │   └── deploy.yml          #   Merge-to-main: staging → smoke → production
 ├── data/                   # Local data files (parquet, CSV)
-├── test_quotes/            # JSON test quotes for deploy validation
-│   └── example.json
+├── tests/                  # Tests + JSON test quotes for deploy validation
+│   ├── quotes/
+│   │   └── example.json
 ├── main.py                 # Pipeline definition (root-level)
 ├── haute.toml              # Project, deploy, safety & CI config
 ├── .env.example            # Template for secrets (DATABRICKS_HOST, etc.)
@@ -303,7 +304,7 @@ serving_workload_size = "Small"
 serving_scale_to_zero = true
 
 [test_quotes]
-dir = "test_quotes"
+dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"

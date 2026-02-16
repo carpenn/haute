@@ -60,10 +60,10 @@ def _exec_user_code(
         raise
     except Exception as exc:
         msg = str(exc)
-        if line_offset and re.search(r'line \d+', msg):
+        if line_offset and re.search(r"line \d+", msg):
             msg = re.sub(
-                r'line (\d+)',
-                lambda m: f'line {max(1, int(m.group(1)) - line_offset)}',
+                r"line (\d+)",
+                lambda m: f"line {max(1, int(m.group(1)) - line_offset)}",
                 msg,
             )
             raise type(exc)(msg) from None
@@ -95,8 +95,10 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         source_type = config.get("sourceType", "flat_file")
 
         if source_type == "databricks":
+
             def source_fn() -> _Frame:
                 raise NotImplementedError("Databricks source not yet implemented")
+
             return func_name, source_fn, True
 
         def source_fn() -> _Frame:
@@ -115,6 +117,7 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         # Actual writing happens via execute_sink() on explicit user action.
         def sink_passthrough(*dfs: _Frame) -> _Frame:
             return dfs[0] if dfs else pl.LazyFrame()
+
         return func_name, sink_passthrough, False
 
     elif node_type == "externalFile":
@@ -125,13 +128,17 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         _src_names = list(source_names)
 
         if code:
+
             def external_fn(*dfs: _Frame) -> _Frame:
                 obj = load_external_object(path, file_type, model_class)
                 return _exec_user_code(code, _src_names, dfs, extra_ns={"obj": obj})
+
             return func_name, external_fn, False
         else:
+
             def external_passthrough(*dfs: _Frame) -> _Frame:
                 return dfs[0] if dfs else pl.LazyFrame()
+
             return func_name, external_passthrough, False
 
     elif node_type == "output":
@@ -142,6 +149,7 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
             if fields:
                 lf = lf.select(fields)
             return lf
+
         return func_name, output_fn, False
 
     elif node_type in ("transform", "modelScore", "ratingStep"):
@@ -149,20 +157,24 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         _src_names = list(source_names)
 
         if code:
+
             def transform_fn(*dfs: _Frame) -> _Frame:
                 return _exec_user_code(code, _src_names, dfs)
+
             return func_name, transform_fn, False
         else:
+
             def passthrough(*dfs: _Frame) -> _Frame:
                 return dfs[0] if dfs else pl.LazyFrame()
+
             return func_name, passthrough, False
 
     else:
+
         def default_passthrough(*dfs: _Frame) -> _Frame:
             return dfs[0] if dfs else pl.LazyFrame()
+
         return func_name, default_passthrough, False
-
-
 
 
 def execute_graph(
@@ -193,7 +205,9 @@ def execute_graph(
         return {}
 
     lazy_outputs, order, _parents, _names = _execute_lazy(
-        graph, _build_node_fn, target_node_id,
+        graph,
+        _build_node_fn,
+        target_node_id,
     )
 
     results: dict[str, dict] = {}
@@ -201,8 +215,12 @@ def execute_graph(
         lf = lazy_outputs.get(nid)
         if lf is None:
             results[nid] = {
-                "status": "error", "row_count": 0, "column_count": 0,
-                "columns": [], "preview": [], "error": "No output",
+                "status": "error",
+                "row_count": 0,
+                "column_count": 0,
+                "columns": [],
+                "preview": [],
+                "error": "No output",
             }
             continue
         try:
@@ -218,8 +236,12 @@ def execute_graph(
             }
         except Exception as exc:
             results[nid] = {
-                "status": "error", "row_count": 0, "column_count": 0,
-                "columns": [], "preview": [], "error": str(exc),
+                "status": "error",
+                "row_count": 0,
+                "column_count": 0,
+                "columns": [],
+                "preview": [],
+                "error": str(exc),
             }
 
     return results
@@ -249,7 +271,9 @@ def execute_sink(graph: dict, sink_node_id: str) -> dict:
         raise ValueError("Sink node has no output path configured")
 
     lazy_outputs, _order, _parents, _names = _execute_lazy(
-        graph, _build_node_fn, target_node_id=sink_node_id,
+        graph,
+        _build_node_fn,
+        target_node_id=sink_node_id,
     )
 
     lf = lazy_outputs.get(sink_node_id)

@@ -145,6 +145,7 @@ def _parse_pipeline_to_graph(py_path: Path) -> dict:
 # API routes
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/pipelines", response_model=list[PipelineSummary])
 async def list_pipelines() -> list[PipelineSummary]:
     """List all discovered pipelines."""
@@ -155,16 +156,22 @@ async def list_pipelines() -> list[PipelineSummary]:
     for f in files:
         try:
             graph = parse_pipeline_file(f)
-            result.append(PipelineSummary(
-                name=graph.get("pipeline_name", f.stem),
-                description=graph.get("pipeline_description", ""),
-                file=str(f.relative_to(Path.cwd())),
-                node_count=len(graph.get("nodes", [])),
-            ))
+            result.append(
+                PipelineSummary(
+                    name=graph.get("pipeline_name", f.stem),
+                    description=graph.get("pipeline_description", ""),
+                    file=str(f.relative_to(Path.cwd())),
+                    node_count=len(graph.get("nodes", [])),
+                )
+            )
         except Exception as e:
-            result.append(PipelineSummary(
-                name=f.stem, file=str(f), error=str(e),
-            ))
+            result.append(
+                PipelineSummary(
+                    name=f.stem,
+                    file=str(f),
+                    error=str(e),
+                )
+            )
     return result
 
 
@@ -224,8 +231,10 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
         safe_name = body.name.lower().replace(" ", "_").replace("-", "_")
         py_path = cwd / f"{safe_name}.py"
     code = graph_to_code(
-        graph, pipeline_name=body.name,
-        description=body.description, preamble=body.preamble,
+        graph,
+        pipeline_name=body.name,
+        description=body.description,
+        preamble=body.preamble,
     )
     _mark_self_write()
     py_path.write_text(code)
@@ -272,7 +281,8 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
             column=body.column,
         )
         return TraceResponse(
-            status="ok", trace=trace_result_to_dict(result),
+            status="ok",
+            trace=trace_result_to_dict(result),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -293,7 +303,8 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
 
     try:
         results = execute_graph(
-            graph, target_node_id=body.nodeId,
+            graph,
+            target_node_id=body.nodeId,
             row_limit=body.rowLimit,
         )
         node_result = results.get(body.nodeId)
@@ -307,7 +318,9 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         raise
     except Exception as e:
         return PreviewNodeResponse(
-            nodeId=body.nodeId, status="error", error=str(e),
+            nodeId=body.nodeId,
+            status="error",
+            error=str(e),
         )
 
 
@@ -354,13 +367,18 @@ async def browse_files(
         if entry.is_dir():
             items.append(FileItem(name=entry.name, path=rel, type="directory"))
         elif any(entry.name.endswith(ext) for ext in ext_list):
-            items.append(FileItem(
-                name=entry.name, path=rel,
-                type="file", size=entry.stat().st_size,
-            ))
+            items.append(
+                FileItem(
+                    name=entry.name,
+                    path=rel,
+                    type="file",
+                    size=entry.stat().st_size,
+                )
+            )
 
     return BrowseFilesResponse(
-        dir=str(target.relative_to(base)), items=items,
+        dir=str(target.relative_to(base)),
+        items=items,
     )
 
 
@@ -390,10 +408,7 @@ async def get_schema(path: str) -> SchemaResponse:
                 detail=f"Unsupported file type: {target.suffix}",
             )
 
-        columns = [
-            {"name": col, "dtype": str(df[col].dtype)}
-            for col in df.columns
-        ]
+        columns = [{"name": col, "dtype": str(df[col].dtype)} for col in df.columns]
 
         return SchemaResponse(
             path=path,
@@ -411,6 +426,7 @@ async def get_schema(path: str) -> SchemaResponse:
 # ---------------------------------------------------------------------------
 # File watcher - live sync from .py edits to GUI
 # ---------------------------------------------------------------------------
+
 
 async def _file_watcher() -> None:
     """Watch pipeline directories for .py changes and broadcast to GUI."""
@@ -442,23 +458,28 @@ async def _file_watcher() -> None:
             logger.info("File changed: %s - re-parsing", p.name)
             try:
                 graph = _parse_pipeline_to_graph(p)
-                await _broadcast({
-                    "type": "graph_update",
-                    "graph": graph,
-                    "source_file": str(p),
-                })
+                await _broadcast(
+                    {
+                        "type": "graph_update",
+                        "graph": graph,
+                        "source_file": str(p),
+                    }
+                )
                 n_nodes = len(graph.get("nodes", []))
                 logger.info(
                     "Broadcast graph_update to %d clients (%d nodes)",
-                    len(_ws_clients), n_nodes,
+                    len(_ws_clients),
+                    n_nodes,
                 )
             except Exception as e:
                 logger.error("Parse error for %s: %s", p.name, e)
-                await _broadcast({
-                    "type": "parse_error",
-                    "error": str(e),
-                    "source_file": str(p),
-                })
+                await _broadcast(
+                    {
+                        "type": "parse_error",
+                        "error": str(e),
+                        "source_file": str(p),
+                    }
+                )
 
 
 # ---------------------------------------------------------------------------

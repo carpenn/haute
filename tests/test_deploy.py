@@ -264,7 +264,7 @@ class TestValidators:
         config = DeployConfig(
             pipeline_file=PIPELINE_FILE,
             model_name="test-model",
-            test_quotes_dir=Path("test_quotes"),
+            test_quotes_dir=Path("tests/quotes"),
         )
         resolved = ResolvedDeploy(
             config=config,

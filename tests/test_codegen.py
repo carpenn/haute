@@ -11,14 +11,14 @@ from haute.codegen import _build_params, _node_to_code, graph_to_code
 
 class TestBuildParams:
     def test_no_sources(self):
-        assert _build_params([]) == "df: pl.DataFrame"
+        assert _build_params([]) == "df: pl.LazyFrame"
 
     def test_single_source(self):
-        assert _build_params(["load_data"]) == "load_data: pl.DataFrame"
+        assert _build_params(["load_data"]) == "load_data: pl.LazyFrame"
 
     def test_multiple_sources(self):
         result = _build_params(["a", "b"])
-        assert result == "a: pl.DataFrame, b: pl.DataFrame"
+        assert result == "a: pl.LazyFrame, b: pl.LazyFrame"
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ class TestNodeToCode:
             },
         }
         code = _node_to_code(node, source_names=["load_data"])
-        assert "def Clean(load_data: pl.DataFrame)" in code
+        assert "def Clean(load_data: pl.LazyFrame)" in code
         assert "filter" in code
         assert "return df" in code
         _compile_node_code(code)
@@ -100,7 +100,7 @@ class TestNodeToCode:
             "data": {"label": "Pass", "nodeType": "transform", "config": {}},
         }
         code = _node_to_code(node, source_names=["upstream"])
-        assert "def Pass(upstream: pl.DataFrame)" in code
+        assert "def Pass(upstream: pl.LazyFrame)" in code
         assert "return upstream" in code
         _compile_node_code(code)
 
@@ -110,7 +110,7 @@ class TestNodeToCode:
             "data": {"label": "Pass", "nodeType": "transform", "config": {}},
         }
         code = _node_to_code(node, source_names=[])
-        assert "def Pass(df: pl.DataFrame)" in code
+        assert "def Pass(df: pl.LazyFrame)" in code
         assert "return df" in code
         _compile_node_code(code)
 
@@ -127,7 +127,7 @@ class TestNodeToCode:
         assert "output=True" in code
         assert 'fields=["a", "b"]' in code or "fields=['a', 'b']" in code
         assert "transform.select(" in code
-        assert "def Output(transform: pl.DataFrame)" in code
+        assert "def Output(transform: pl.LazyFrame)" in code
         _compile_node_code(code)
 
     def test_output_without_fields(self):
@@ -155,7 +155,7 @@ class TestNodeToCode:
         }
         code = _node_to_code(node, source_names=["transform"])
         assert 'write_parquet("out.parquet")' in code
-        assert "def Write(transform: pl.DataFrame)" in code
+        assert "def Write(transform: pl.LazyFrame)" in code
         _compile_node_code(code)
 
     def test_sink_csv(self):
@@ -182,7 +182,7 @@ class TestNodeToCode:
         }
         code = _node_to_code(node)
         assert 'model_uri="models:/my_model/1"' in code
-        assert "def Score(df: pl.DataFrame)" in code
+        assert "def Score(df: pl.LazyFrame)" in code
         _compile_node_code(code)
 
     def test_rating_step(self):
@@ -264,7 +264,7 @@ class TestGraphToCode:
         assert "import haute" in code
         assert 'Pipeline("test_pipe"' in code
         assert "def Source()" in code
-        assert "def Transform(Source: pl.DataFrame)" in code
+        assert "def Transform(Source: pl.LazyFrame)" in code
         assert 'pipeline.connect("Source", "Transform")' in code
         compile(code, "<test>", "exec")
 
