@@ -279,7 +279,7 @@ def execute_trace(
 
 
 # ---------------------------------------------------------------------------
-# Column filtering - keep only nodes that touch the target column
+# Column relevance tagging
 # ---------------------------------------------------------------------------
 
 

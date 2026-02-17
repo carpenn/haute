@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react"
 import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2 } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
+import { formatValue } from "../utils/formatValue"
 
 interface Column {
   name: string
@@ -25,15 +26,6 @@ interface DataPreviewProps {
   tracedCell?: { rowIndex: number; column: string } | null
 }
 
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "null"
-  if (typeof value === "number") {
-    if (Number.isInteger(value)) return value.toLocaleString()
-    return value.toLocaleString(undefined, { maximumFractionDigits: 4 })
-  }
-  return String(value)
-}
 
 export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
@@ -197,7 +189,7 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
                         onClick={() => onCellClick?.(i, col.name)}
                       >
                         <span style={row[col.name] === null ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined}>
-                          {formatCell(row[col.name])}
+                          {formatValue(row[col.name])}
                         </span>
                       </td>
                     )

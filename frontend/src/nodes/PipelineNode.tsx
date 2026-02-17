@@ -1,37 +1,9 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Radio } from "lucide-react"
+import { Radio } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
-
-const iconMap: Record<string, React.ElementType> = {
-  dataSource: Database,
-  transform: PolarsIcon,
-  modelScore: Brain,
-  ratingStep: TableProperties,
-  output: CircleDot,
-  dataSink: HardDriveDownload,
-  externalFile: FileArchive,
-}
-
-const accentMap: Record<string, string> = {
-  dataSource: "#3b82f6",
-  transform: "#06b6d4",
-  modelScore: "#8b5cf6",
-  ratingStep: "#10b981",
-  output: "#f43f5e",
-  dataSink: "#f59e0b",
-  externalFile: "#ec4899",
-}
-
-const labelMap: Record<string, string> = {
-  dataSource: "SOURCE",
-  transform: "POLARS",
-  modelScore: "MODEL",
-  ratingStep: "RATING",
-  output: "OUTPUT",
-  dataSink: "SINK",
-  externalFile: "EXTERNAL",
-}
+import { nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
+import { formatValueCompact } from "../utils/formatValue"
 
 const statusColors: Record<string, string> = {
   ok: "#22c55e",
@@ -50,22 +22,12 @@ export type PipelineNodeData = {
   _traceValue?: unknown
 }
 
-function formatTraceValue(v: unknown): string {
-  if (v === null || v === undefined) return "null"
-  if (typeof v === "number") {
-    if (Number.isInteger(v)) return v.toLocaleString()
-    return v.toLocaleString(undefined, { maximumFractionDigits: 4 })
-  }
-  const s = String(v)
-  return s.length > 20 ? s.slice(0, 18) + "…" : s
-}
-
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
   const nodeType = nodeData.nodeType || "transform"
-  const Icon = iconMap[nodeType] || PolarsIcon
-  const accent = accentMap[nodeType] || accentMap.transform
-  const typeLabel = labelMap[nodeType] || "NODE"
+  const Icon = nodeTypeIcons[nodeType] || PolarsIcon
+  const accent = nodeTypeColors[nodeType] || nodeTypeColors.transform
+  const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = !!(nodeData.config?.deploy_input)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
@@ -134,7 +96,7 @@ function PipelineNode({ data, selected }: NodeProps) {
               maxWidth: "100%",
             }}
           >
-            {formatTraceValue(traceValue)}
+            {formatValueCompact(traceValue)}
           </div>
         )}
       </div>

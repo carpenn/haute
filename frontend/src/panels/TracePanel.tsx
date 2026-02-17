@@ -1,35 +1,10 @@
 import { useState } from "react"
 import { X, ChevronDown, ChevronRight, Clock, Layers, Scan } from "lucide-react"
 import type { TraceResult, TraceStep } from "../App"
+import { nodeTypeLabels, nodeTypeColors } from "../utils/nodeTypes"
+import { formatValue as _formatValue } from "../utils/formatValue"
 
-const nodeTypeLabels: Record<string, string> = {
-  dataSource: "SOURCE",
-  transform: "POLARS",
-  modelScore: "MODEL",
-  ratingStep: "RATING",
-  output: "OUTPUT",
-  dataSink: "SINK",
-  externalFile: "EXTERNAL",
-}
-
-const nodeTypeColors: Record<string, string> = {
-  dataSource: "#3b82f6",
-  transform: "#06b6d4",
-  modelScore: "#8b5cf6",
-  ratingStep: "#10b981",
-  output: "#f43f5e",
-  dataSink: "#f59e0b",
-  externalFile: "#ec4899",
-}
-
-function formatValue(v: unknown): string {
-  if (v === null || v === undefined) return "null"
-  if (typeof v === "number") {
-    if (Number.isInteger(v)) return v.toLocaleString()
-    return v.toLocaleString(undefined, { maximumFractionDigits: 6 })
-  }
-  return String(v)
-}
+const formatValue = (v: unknown) => _formatValue(v, 6)
 
 function StepCard({ step, index, tracedColumn }: { step: TraceStep; index: number; tracedColumn: string | null }) {
   const [expanded, setExpanded] = useState(false)
