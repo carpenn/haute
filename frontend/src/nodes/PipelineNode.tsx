@@ -45,6 +45,19 @@ export type PipelineNodeData = {
   nodeType: string
   config?: Record<string, unknown>
   _status?: "ok" | "error" | "running"
+  _traceActive?: boolean
+  _traceDimmed?: boolean
+  _traceValue?: unknown
+}
+
+function formatTraceValue(v: unknown): string {
+  if (v === null || v === undefined) return "null"
+  if (typeof v === "number") {
+    if (Number.isInteger(v)) return v.toLocaleString()
+    return v.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  }
+  const s = String(v)
+  return s.length > 20 ? s.slice(0, 18) + "…" : s
 }
 
 function PipelineNode({ data, selected }: NodeProps) {
@@ -54,15 +67,25 @@ function PipelineNode({ data, selected }: NodeProps) {
   const accent = accentMap[nodeType] || accentMap.transform
   const typeLabel = labelMap[nodeType] || "NODE"
   const isDeployInput = !!(nodeData.config?.deploy_input)
+  const traceActive = !!nodeData._traceActive
+  const traceDimmed = !!nodeData._traceDimmed
+  const traceValue = nodeData._traceValue
 
   return (
     <div
       className="relative rounded-xl min-w-[180px] max-w-[260px] cursor-pointer"
       style={{
         background: "var(--bg-elevated)",
-        border: selected ? `1.5px solid ${accent}` : "1px solid var(--border-bright)",
-        boxShadow: "var(--node-shadow)",
-        transition: "border-color 0.15s ease",
+        border: traceActive
+          ? `1.5px solid ${accent}`
+          : selected
+            ? `1.5px solid ${accent}`
+            : "1px solid var(--border-bright)",
+        boxShadow: traceActive
+          ? `0 0 12px ${accent}40, var(--node-shadow)`
+          : "var(--node-shadow)",
+        opacity: traceDimmed ? 0.3 : 1,
+        transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
       }}
     >
       {/* Left accent stripe */}
@@ -101,6 +124,19 @@ function PipelineNode({ data, selected }: NodeProps) {
         <div className="font-semibold text-[13px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
           {nodeData.label}
         </div>
+        {traceActive && traceValue !== undefined && (
+          <div
+            className="mt-1 px-1.5 py-0.5 rounded text-[11px] font-mono truncate"
+            style={{
+              background: `${accent}18`,
+              color: accent,
+              border: `1px solid ${accent}30`,
+              maxWidth: "100%",
+            }}
+          >
+            {formatTraceValue(traceValue)}
+          </div>
+        )}
       </div>
 
       <Handle type="source" position={Position.Right} />

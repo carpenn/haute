@@ -1,0 +1,277 @@
+import { useState } from "react"
+import { X, ChevronDown, ChevronRight, Clock, Layers, Scan } from "lucide-react"
+import type { TraceResult, TraceStep } from "../App"
+
+const nodeTypeLabels: Record<string, string> = {
+  dataSource: "SOURCE",
+  transform: "POLARS",
+  modelScore: "MODEL",
+  ratingStep: "RATING",
+  output: "OUTPUT",
+  dataSink: "SINK",
+  externalFile: "EXTERNAL",
+}
+
+const nodeTypeColors: Record<string, string> = {
+  dataSource: "#3b82f6",
+  transform: "#06b6d4",
+  modelScore: "#8b5cf6",
+  ratingStep: "#10b981",
+  output: "#f43f5e",
+  dataSink: "#f59e0b",
+  externalFile: "#ec4899",
+}
+
+function formatValue(v: unknown): string {
+  if (v === null || v === undefined) return "null"
+  if (typeof v === "number") {
+    if (Number.isInteger(v)) return v.toLocaleString()
+    return v.toLocaleString(undefined, { maximumFractionDigits: 6 })
+  }
+  return String(v)
+}
+
+function StepCard({ step, index, tracedColumn }: { step: TraceStep; index: number; tracedColumn: string | null }) {
+  const [expanded, setExpanded] = useState(false)
+  const accent = nodeTypeColors[step.node_type] || "#06b6d4"
+  const typeLabel = nodeTypeLabels[step.node_type] || "NODE"
+  const relevant = step.column_relevant
+
+  const { columns_added, columns_modified, columns_removed } = step.schema_diff
+
+  // Key values to always show (collapsed): traced column or first added/modified
+  const keyEntries: { col: string; val: unknown; tag: "added" | "modified" | "value" }[] = []
+  if (tracedColumn && step.output_values[tracedColumn] !== undefined) {
+    const tag = columns_added.includes(tracedColumn)
+      ? "added"
+      : columns_modified.includes(tracedColumn)
+        ? "modified"
+        : "value"
+    keyEntries.push({ col: tracedColumn, val: step.output_values[tracedColumn], tag })
+  } else {
+    for (const col of columns_added.slice(0, 2)) {
+      keyEntries.push({ col, val: step.output_values[col], tag: "added" })
+    }
+    for (const col of columns_modified.slice(0, 2)) {
+      keyEntries.push({ col, val: step.output_values[col], tag: "modified" })
+    }
+  }
+
+  const tagColors = {
+    added: { bg: "rgba(34,197,94,.12)", color: "#4ade80", label: "+" },
+    modified: { bg: "rgba(251,191,36,.12)", color: "#fbbf24", label: "~" },
+    value: { bg: "rgba(255,255,255,.06)", color: "var(--text-secondary)", label: "=" },
+  }
+
+  // All output columns for expanded view
+  const allOutputCols = Object.keys(step.output_values)
+
+  return (
+    <div
+      className="rounded-lg overflow-hidden transition-opacity"
+      style={{
+        border: relevant ? `1px solid ${accent}40` : "1px solid var(--border)",
+        background: "var(--bg-elevated)",
+        opacity: relevant ? 1 : 0.55,
+      }}
+    >
+      {/* Collapsed header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
+        style={{ background: "transparent" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        {expanded ? (
+          <ChevronDown size={12} style={{ color: "var(--text-muted)" }} />
+        ) : (
+          <ChevronRight size={12} style={{ color: "var(--text-muted)" }} />
+        )}
+        <span
+          className="text-[11px] font-mono font-bold shrink-0"
+          style={{ color: "var(--text-muted)", minWidth: "1.2em" }}
+        >
+          {index + 1}
+        </span>
+        <span className="text-[13px] font-semibold truncate" style={{ color: "var(--text-primary)" }}>
+          {step.node_name}
+        </span>
+        <span
+          className="text-[9px] font-bold uppercase tracking-wider shrink-0 px-1.5 py-0.5 rounded"
+          style={{ color: accent, background: `${accent}15` }}
+        >
+          {typeLabel}
+        </span>
+        <span className="ml-auto text-[10px] font-mono shrink-0" style={{ color: "var(--text-muted)" }}>
+          {step.execution_ms.toFixed(1)}ms
+        </span>
+      </button>
+
+      {/* Key values (always visible when there are entries) */}
+      {keyEntries.length > 0 && !expanded && (
+        <div className="px-3 pb-2 flex flex-wrap gap-1.5" style={{ paddingLeft: "2.8rem" }}>
+          {keyEntries.map(({ col, val, tag }) => {
+            const tc = tagColors[tag]
+            return (
+              <span
+                key={col}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono"
+                style={{ background: tc.bg, color: tc.color }}
+              >
+                <span className="font-bold">{tc.label}</span>
+                {col}: {formatValue(val)}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Expanded: full column list */}
+      {expanded && (
+        <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--border)" }}>
+          {/* Schema changes summary */}
+          <div className="flex flex-wrap gap-2 py-2 text-[10px]">
+            {columns_added.length > 0 && (
+              <span style={{ color: "#4ade80" }}>+{columns_added.length} added</span>
+            )}
+            {columns_modified.length > 0 && (
+              <span style={{ color: "#fbbf24" }}>~{columns_modified.length} modified</span>
+            )}
+            {columns_removed.length > 0 && (
+              <span style={{ color: "#f87171" }}>-{columns_removed.length} removed</span>
+            )}
+            <span style={{ color: "var(--text-muted)" }}>
+              {step.schema_diff.columns_passed.length} passed through
+            </span>
+          </div>
+
+          {/* Column values table */}
+          <div className="space-y-0.5">
+            {allOutputCols.map((col) => {
+              const isAdded = columns_added.includes(col)
+              const isModified = columns_modified.includes(col)
+              const isRemoved = columns_removed.includes(col)
+              const inputVal = step.input_values[col]
+              const outputVal = step.output_values[col]
+              const isTraced = col === tracedColumn
+
+              let rowColor = "var(--text-secondary)"
+              let prefix = ""
+              if (isAdded) {
+                rowColor = "#4ade80"
+                prefix = "+"
+              } else if (isModified) {
+                rowColor = "#fbbf24"
+                prefix = "~"
+              } else if (isRemoved) {
+                rowColor = "#f87171"
+                prefix = "-"
+              }
+
+              return (
+                <div
+                  key={col}
+                  className="flex items-center gap-2 px-2 py-0.5 rounded text-[11px] font-mono"
+                  style={{
+                    background: isTraced ? "var(--accent-soft)" : "transparent",
+                    borderLeft: isTraced ? "2px solid var(--accent)" : "2px solid transparent",
+                  }}
+                >
+                  <span className="font-bold w-3" style={{ color: rowColor }}>
+                    {prefix}
+                  </span>
+                  <span className="truncate" style={{ color: rowColor, minWidth: "6em", maxWidth: "10em" }}>
+                    {col}
+                  </span>
+                  {isModified && inputVal !== undefined && (
+                    <>
+                      <span style={{ color: "var(--text-muted)" }}>{formatValue(inputVal)}</span>
+                      <span style={{ color: "var(--text-muted)" }}>&rarr;</span>
+                    </>
+                  )}
+                  <span style={{ color: isAdded || isModified ? rowColor : "var(--text-secondary)" }}>
+                    {formatValue(outputVal)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface TracePanelProps {
+  trace: TraceResult
+  onClose: () => void
+}
+
+export default function TracePanel({ trace, onClose }: TracePanelProps) {
+  return (
+    <div
+      className="shrink-0 flex flex-col overflow-hidden"
+      style={{
+        width: 320,
+        background: "var(--bg-panel)",
+        borderLeft: "1px solid var(--border)",
+      }}
+    >
+      {/* Header */}
+      <div
+        className="px-4 py-3 flex items-center gap-2 shrink-0"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <Scan size={14} style={{ color: "var(--accent)" }} />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>
+            Trace{trace.column ? `: ${trace.column}` : ""}
+          </div>
+          <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Row {trace.row_index} &middot; {trace.nodes_in_trace} of {trace.total_nodes_in_pipeline} nodes
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 rounded transition-colors"
+          style={{ color: "var(--text-muted)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Output value badge */}
+      <div className="px-4 py-2 shrink-0" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>Result</span>
+          <span
+            className="px-2 py-0.5 rounded text-[13px] font-mono font-bold"
+            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+          >
+            {formatValue(trace.output_value)}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 mt-1.5 text-[10px]" style={{ color: "var(--text-muted)" }}>
+          <span className="inline-flex items-center gap-1">
+            <Clock size={10} />
+            {trace.execution_ms.toFixed(1)}ms
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Layers size={10} />
+            {trace.steps.length} steps
+          </span>
+        </div>
+      </div>
+
+      {/* Steps list */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {trace.steps.map((step, i) => (
+          <StepCard key={step.node_id} step={step} index={i} tracedColumn={trace.column} />
+        ))}
+      </div>
+    </div>
+  )
+}

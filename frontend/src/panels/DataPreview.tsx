@@ -21,6 +21,8 @@ export interface PreviewData {
 interface DataPreviewProps {
   data: PreviewData | null
   onClose: () => void
+  onCellClick?: (rowIndex: number, column: string) => void
+  tracedCell?: { rowIndex: number; column: string } | null
 }
 
 
@@ -33,7 +35,7 @@ function formatCell(value: unknown): string {
   return String(value)
 }
 
-export default function DataPreview({ data, onClose }: DataPreviewProps) {
+export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [height, setHeight] = useState(256)
   const dragging = useRef(false)
@@ -179,17 +181,27 @@ export default function DataPreview({ data, onClose }: DataPreviewProps) {
                   <td className="px-3 py-1 font-mono" style={{ color: 'var(--text-muted)', borderRight: '1px solid var(--border)' }}>
                     {i + 1}
                   </td>
-                  {data.columns.map((col) => (
-                    <td
-                      key={col.name}
-                      className="px-3 py-1 font-mono whitespace-nowrap max-w-[200px] truncate"
-                      style={{ color: 'var(--text-secondary)' }}
-                    >
-                      <span style={row[col.name] === null ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined}>
-                        {formatCell(row[col.name])}
-                      </span>
-                    </td>
-                  ))}
+                  {data.columns.map((col) => {
+                    const isTraced = tracedCell?.rowIndex === i && tracedCell?.column === col.name
+                    return (
+                      <td
+                        key={col.name}
+                        className="px-3 py-1 font-mono whitespace-nowrap max-w-[200px] truncate transition-colors"
+                        style={{
+                          color: 'var(--text-secondary)',
+                          cursor: onCellClick ? 'pointer' : undefined,
+                          background: isTraced ? 'var(--accent-soft)' : undefined,
+                          boxShadow: isTraced ? 'inset 0 0 0 1.5px var(--accent)' : undefined,
+                          borderRadius: isTraced ? '3px' : undefined,
+                        }}
+                        onClick={() => onCellClick?.(i, col.name)}
+                      >
+                        <span style={row[col.name] === null ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined}>
+                          {formatCell(row[col.name])}
+                        </span>
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

@@ -133,6 +133,7 @@ class TraceStepResponse(BaseModel):
     schema_diff: SchemaDiffResponse
     input_values: dict[str, Any] = Field(default_factory=dict)
     output_values: dict[str, Any] = Field(default_factory=dict)
+    column_relevant: bool = True
     execution_ms: float = 0.0
 
 

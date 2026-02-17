@@ -20,11 +20,45 @@ import PipelineNode from "./nodes/PipelineNode"
 import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
+import TracePanel from "./panels/TracePanel"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import useUndoRedo from "./hooks/useUndoRedo"
 import { PanelLeftOpen, Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
+
+// ---------------------------------------------------------------------------
+// Trace types (mirrors backend TraceResult)
+// ---------------------------------------------------------------------------
+
+interface TraceSchemaDiff {
+  columns_added: string[]
+  columns_removed: string[]
+  columns_modified: string[]
+  columns_passed: string[]
+}
+
+export interface TraceStep {
+  node_id: string
+  node_name: string
+  node_type: string
+  schema_diff: TraceSchemaDiff
+  input_values: Record<string, unknown>
+  output_values: Record<string, unknown>
+  column_relevant: boolean
+  execution_ms: number
+}
+
+export interface TraceResult {
+  target_node_id: string
+  row_index: number
+  column: string | null
+  output_value: unknown
+  steps: TraceStep[]
+  total_nodes_in_pipeline: number
+  nodes_in_trace: number
+  execution_ms: number
+}
 
 const nodeTypes = {
   dataSource: PipelineNode,
@@ -123,6 +157,8 @@ function FlowEditor() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snapToGrid, setSnapToGrid] = useState(false)
+  const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
+  const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
@@ -299,6 +335,9 @@ function FlowEditor() {
       setSelectedNode((prev) => {
         if (prev?.id !== node.id) {
           fetchPreview(node)
+          // Clear trace when switching nodes
+          setTraceResult(null)
+          setTracedCell(null)
         }
         return node
       })
@@ -306,6 +345,8 @@ function FlowEditor() {
       // Multi-select or deselect — clear panel and don't fetch preview
       setSelectedNode(null)
       setPreviewData(null)
+      setTraceResult(null)
+      setTracedCell(null)
     }
   }, [fetchPreview])
 
@@ -397,6 +438,46 @@ function FlowEditor() {
   const handleDeleteEdge = useCallback((edgeId: string) => {
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))
   }, [setEdges])
+
+  // ---------------------------------------------------------------------------
+  // Trace: click a cell in DataPreview → fire trace API → highlight graph
+  // ---------------------------------------------------------------------------
+
+  const handleCellClick = useCallback((rowIndex: number, column: string) => {
+    if (!selectedNode) return
+    const { nodes: n, edges: e } = graphRef.current
+    setTracedCell({ rowIndex, column })
+    fetch("/api/pipeline/trace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        graph: { nodes: n, edges: e },
+        rowIndex: rowIndex,
+        targetNodeId: selectedNode.id,
+        column,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.status === "ok" && data.trace) {
+          setTraceResult(data.trace as TraceResult)
+        } else {
+          addToast("error", data.error || "Trace failed")
+          setTraceResult(null)
+          setTracedCell(null)
+        }
+      })
+      .catch((err) => {
+        addToast("error", `Trace error: ${err.message}`)
+        setTraceResult(null)
+        setTracedCell(null)
+      })
+  }, [selectedNode, addToast])
+
+  const clearTrace = useCallback(() => {
+    setTraceResult(null)
+    setTracedCell(null)
+  }, [])
 
   const toggleSnapToGrid = useCallback(() => {
     setSnapToGrid((prev) => {
@@ -495,6 +576,13 @@ function FlowEditor() {
         return
       }
 
+      // Escape → clear trace
+      if (e.key === "Escape") {
+        setTraceResult(null)
+        setTracedCell(null)
+        return
+      }
+
       // ? → toggle keyboard shortcuts help (unless typing)
       if (e.key === "?" && !isTyping) {
         e.preventDefault()
@@ -572,15 +660,70 @@ function FlowEditor() {
     addToast("info", "Auto-layout applied")
   }, [setNodes, fitView, addToast])
 
-  // Memoize nodes with status to avoid re-creating every node object on each render
+  // Build sets: column-relevant nodes (glow) vs all trace nodes (in panel)
+  const { relevantNodeIds, allTraceNodeIds } = useMemo(() => {
+    if (!traceResult) return { relevantNodeIds: new Set<string>(), allTraceNodeIds: new Set<string>() }
+    const all = new Set(traceResult.steps.map((s) => s.node_id))
+    const relevant = new Set(traceResult.steps.filter((s) => s.column_relevant).map((s) => s.node_id))
+    return { relevantNodeIds: relevant, allTraceNodeIds: all }
+  }, [traceResult])
+
+  const traceValueMap = useMemo(() => {
+    if (!traceResult) return new Map<string, unknown>()
+    const m = new Map<string, unknown>()
+    for (const s of traceResult.steps) {
+      if (!s.column_relevant) continue
+      // Show the traced column's value if available, otherwise first added/modified column
+      if (traceResult.column && s.output_values[traceResult.column] !== undefined) {
+        m.set(s.node_id, s.output_values[traceResult.column])
+      } else {
+        const key = s.schema_diff.columns_added[0] || s.schema_diff.columns_modified[0]
+        if (key) m.set(s.node_id, s.output_values[key])
+      }
+    }
+    return m
+  }, [traceResult])
+
+  // Memoize nodes with status + trace data
   const nodesWithStatus = useMemo(() => {
-    if (Object.keys(nodeStatuses).length === 0) return nodes
     return nodes.map((n) => {
       const status = nodeStatuses[n.id]
-      if (status === n.data._status) return n
-      return { ...n, data: { ...n.data, _status: status } }
+      const hasTrace = traceResult !== null
+      const isRelevant = relevantNodeIds.has(n.id)
+      const inTrace = allTraceNodeIds.has(n.id)
+      const traceValue = traceValueMap.get(n.id)
+      const newData = {
+        ...n.data,
+        _status: status,
+        _traceActive: hasTrace && isRelevant,
+        _traceDimmed: hasTrace && !inTrace,
+        _traceValue: traceValue,
+      }
+      return { ...n, data: newData }
     })
-  }, [nodes, nodeStatuses])
+  }, [nodes, nodeStatuses, traceResult, relevantNodeIds, allTraceNodeIds, traceValueMap])
+
+  // Edges styled for trace: bright between relevant nodes, dimmed otherwise
+  const edgesWithTrace = useMemo(() => {
+    if (!traceResult) return edges
+    return edges.map((e) => {
+      const srcRelevant = relevantNodeIds.has(e.source)
+      const tgtRelevant = relevantNodeIds.has(e.target)
+      if (srcRelevant && tgtRelevant) {
+        return {
+          ...e,
+          style: { stroke: 'var(--accent)', strokeWidth: 2.5, filter: 'drop-shadow(0 0 4px var(--accent))' },
+          markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'var(--accent)' },
+          animated: true,
+        }
+      }
+      return {
+        ...e,
+        style: { stroke: 'rgba(255,255,255,.05)', strokeWidth: 1 },
+        markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.05)' },
+      }
+    })
+  }, [edges, traceResult, relevantNodeIds])
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()
@@ -784,13 +927,13 @@ function FlowEditor() {
           <div className="flex-1 min-h-0">
             <ReactFlow
               nodes={nodesWithStatus}
-              edges={edges}
+              edges={edgesWithTrace}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               onSelectionChange={onSelectionChange}
               onNodeContextMenu={onNodeContextMenu}
-              onPaneClick={() => setContextMenu(null)}
+              onPaneClick={() => { setContextMenu(null); clearTrace() }}
               onDrop={onDrop}
               onDragOver={onDragOver}
               nodeTypes={nodeTypes}
@@ -813,17 +956,26 @@ function FlowEditor() {
             </ReactFlow>
           </div>
 
-          <DataPreview data={previewData} onClose={() => setPreviewData(null)} />
+          <DataPreview
+            data={previewData}
+            onClose={() => { setPreviewData(null); clearTrace() }}
+            onCellClick={handleCellClick}
+            tracedCell={tracedCell}
+          />
         </div>
 
-        <NodePanel
-          node={selectedNode as unknown as SimpleNode | null}
-          edges={edges as unknown as SimpleEdge[]}
-          allNodes={nodes as unknown as SimpleNode[]}
-          onClose={() => setSelectedNode(null)}
-          onUpdateNode={onUpdateNode}
-          onDeleteEdge={handleDeleteEdge}
-        />
+        {traceResult ? (
+          <TracePanel trace={traceResult} onClose={clearTrace} />
+        ) : (
+          <NodePanel
+            node={selectedNode as unknown as SimpleNode | null}
+            edges={edges as unknown as SimpleEdge[]}
+            allNodes={nodes as unknown as SimpleNode[]}
+            onClose={() => setSelectedNode(null)}
+            onUpdateNode={onUpdateNode}
+            onDeleteEdge={handleDeleteEdge}
+          />
+        )}
       </div>
 
       {contextMenu && (

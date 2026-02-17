@@ -57,6 +57,9 @@ class TraceStep:
     input_values: dict[str, Any]
     output_values: dict[str, Any]
 
+    # True if this node adds/modifies/passes the traced column
+    column_relevant: bool = True
+
     # Execution time for this node (ms)
     execution_ms: float = 0.0
 
@@ -253,9 +256,9 @@ def execute_trace(
             )
         )
 
-    # ---------- Column filter ----------
+    # ---------- Column relevance tagging (no filtering) ----------
     if column:
-        steps = _filter_steps_by_column(steps, column)
+        _tag_column_relevance(steps, column)
 
     # ---------- Output value ----------
     target_row = _collect_row(lazy_outputs[target_node_id], row_index)
@@ -280,19 +283,20 @@ def execute_trace(
 # ---------------------------------------------------------------------------
 
 
-def _filter_steps_by_column(steps: list[TraceStep], column: str) -> list[TraceStep]:
-    """Keep only trace steps where the column appears in the schema diff."""
-    filtered: list[TraceStep] = []
+def _tag_column_relevance(steps: list[TraceStep], column: str) -> None:
+    """Tag each step with whether it touches the target column.
+
+    All steps remain in the trace (so the full path lights up on the graph).
+    The frontend uses column_relevant to visually emphasise the key nodes.
+    """
     for step in steps:
         sd = step.schema_diff
-        if (
+        step.column_relevant = (
             column in sd.columns_added
             or column in sd.columns_modified
             or column in sd.columns_passed
             or column in step.output_values
-        ):
-            filtered.append(step)
-    return filtered
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +324,7 @@ def trace_result_to_dict(result: TraceResult) -> dict[str, Any]:
                 },
                 "input_values": s.input_values,
                 "output_values": s.output_values,
+                "column_relevant": s.column_relevant,
                 "execution_ms": s.execution_ms,
             }
             for s in result.steps
