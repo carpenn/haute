@@ -209,5 +209,8 @@ __marimo__/
 # Built frontend (included in wheel via pyproject.toml artifacts)
 src/haute/static/
 
+# Haute container build directory
+.haute_build/
+
 # Internal docs - not for public repos
 WTW_RADAR_REPORT.md

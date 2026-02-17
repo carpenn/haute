@@ -52,7 +52,11 @@ def _find_frontend_dir() -> Path | None:
 @cli.command()
 @click.option(
     "--target",
-    type=click.Choice(["databricks", "docker", "sagemaker", "azure-ml"]),
+    type=click.Choice([
+        "databricks", "container",
+        "azure-container-apps", "aws-ecs", "gcp-run",
+        "sagemaker", "azure-ml",
+    ]),
     default="databricks",
     help="Deploy target (default: databricks).",
 )
@@ -72,7 +76,7 @@ def init(target: str, ci: str) -> None:
     \b
     Examples:
       haute init                                  # databricks + github
-      haute init --target docker --ci none        # docker, no CI
+      haute init --target container --ci none      # container, no CI
       haute init --target sagemaker --ci github   # AWS + github
     """
     import tomllib
@@ -552,23 +556,26 @@ def deploy(
         click.echo("\n  Dry run complete - no model was deployed.")
         return
 
-    # 5. Deploy to MLflow
+    # 5. Deploy to target
     try:
-        from haute.deploy._mlflow import deploy_to_mlflow
+        from haute.deploy import deploy
 
-        result = deploy_to_mlflow(resolved, progress=lambda msg: click.echo(f"  … {msg}"))
-        click.echo(f"  ✓ Logged MLflow model: {result.model_name} v{result.model_version}")
-        click.echo(f"  ✓ Model URI: {result.model_uri}")
+        result = deploy(config)
+        click.echo(f"  ✓ Deployed: {result.model_name} v{result.model_version}")
         if result.endpoint_url:
             click.echo(f"\nEndpoint ready:\n  POST {result.endpoint_url}")
-        else:
+        elif result.model_uri:
             click.echo("\nDeploy complete. Serve locally with:")
             click.echo(f'  mlflow models serve -m "{result.model_uri}" -p 5001')
-    except ImportError:
+    except ImportError as e:
+        click.echo(f"\n  ✗ Missing dependency: {e}", err=True)
         click.echo(
-            "\n  ✗ mlflow is not installed. Install with: pip install haute[databricks]",
+            "  Install the right extras for your target, e.g.: uv add 'haute[databricks]'",
             err=True,
         )
+        raise SystemExit(1)
+    except NotImplementedError as e:
+        click.echo(f"\n  ✗ {e}", err=True)
         raise SystemExit(1)
     except Exception as e:
         click.echo(f"\n  ✗ Deployment failed: {e}", err=True)
@@ -714,7 +721,7 @@ def smoke(endpoint_suffix: str | None) -> None:
     verify the endpoint is functional.
     """
     from haute.deploy._config import DeployConfig
-    from haute.deploy._validators import load_test_quote_file
+    from haute.deploy._container import _CONTAINER_BASED_TARGETS
 
     toml_path = Path.cwd() / "haute.toml"
     if not toml_path.exists():
@@ -740,12 +747,38 @@ def smoke(endpoint_suffix: str | None) -> None:
     click.echo(f"Smoke testing endpoint: {endpoint_name}")
     click.echo(f"  Target: {config.target}")
 
-    if config.target != "databricks":
-        click.echo(f"  ⚠ Smoke test not yet implemented for target '{config.target}'.", err=True)
-        click.echo("  Skipping smoke test.")
+    all_ok = True
+
+    if config.target == "databricks":
+        all_ok = _smoke_databricks(endpoint_name, json_files)
+    elif config.target in _CONTAINER_BASED_TARGETS:
+        endpoint_url = config.ci.staging_endpoint_url
+        if not endpoint_url:
+            click.echo(
+                "Error: No staging endpoint URL configured.\n"
+                "  Set [ci.staging] endpoint_url in haute.toml.",
+                err=True,
+            )
+            raise SystemExit(1)
+        all_ok = _smoke_http(endpoint_url, json_files)
+    else:
+        click.echo(
+            f"  ⚠ Smoke test not yet implemented for target '{config.target}'.",
+            err=True,
+        )
         return
 
-    # Databricks endpoint scoring
+    if not all_ok:
+        click.echo("\n  ✗ Smoke test failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo("\n  ✓ All smoke tests passed.")
+
+
+def _smoke_databricks(endpoint_name: str, json_files: list[Path]) -> bool:
+    """Run smoke tests against a Databricks Model Serving endpoint."""
+    from haute.deploy._validators import load_test_quote_file
+
     try:
         from databricks.sdk import WorkspaceClient
     except ImportError:
@@ -813,11 +846,43 @@ def smoke(endpoint_suffix: str | None) -> None:
             click.echo(f"  ✗ {jf.name}: {exc}", err=True)
             all_ok = False
 
-    if not all_ok:
-        click.echo("\n  ✗ Smoke test failed.", err=True)
-        raise SystemExit(1)
+    return all_ok
 
-    click.echo("\n  ✓ All smoke tests passed.")
+
+def _smoke_http(endpoint_url: str, json_files: list[Path]) -> bool:
+    """Run smoke tests against an HTTP endpoint (container target)."""
+    import json
+    import urllib.request
+
+    from haute.deploy._impact import score_http_endpoint_batched
+    from haute.deploy._validators import load_test_quote_file
+
+    health_url = endpoint_url.rstrip("/") + "/health"
+
+    # Check health first
+    click.echo(f"  … Checking health: {health_url}")
+    try:
+        req = urllib.request.Request(health_url, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            health = json.loads(resp.read().decode("utf-8"))
+        click.echo(f"  ✓ Health: {health.get('status', 'ok')}")
+    except Exception as exc:
+        click.echo(f"  ✗ Health check failed: {exc}", err=True)
+        return False
+
+    all_ok = True
+
+    for jf in json_files:
+        try:
+            cleaned = load_test_quote_file(jf)
+            preds = score_http_endpoint_batched(endpoint_url, cleaned, batch_size=len(cleaned))
+            n_rows = len(preds) if isinstance(preds, list) else 1
+            click.echo(f"  ✓ {jf.name}: {n_rows} predictions returned")
+        except Exception as exc:
+            click.echo(f"  ✗ {jf.name}: {exc}", err=True)
+            all_ok = False
+
+    return all_ok
 
 
 @cli.command()
@@ -849,13 +914,13 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
     """
     import os
 
-    from haute.deploy._config import DeployConfig, _load_env
+    from haute.deploy._config import DeployConfig
+    from haute.deploy._container import _CONTAINER_BASED_TARGETS
     from haute.deploy._impact import (
         ImpactReport,
         build_report,
         format_markdown,
         format_terminal,
-        score_endpoint_batched,
     )
 
     toml_path = Path.cwd() / "haute.toml"
@@ -898,53 +963,30 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
     click.echo(f"Impact analysis: {staging_name} vs {prod_name}")
     click.echo(f"  Dataset: {impact_path} ({len(records):,} rows)")
 
-    # Connect to Databricks
-    if config.target != "databricks":
+    # Score via the appropriate transport
+    if config.target == "databricks":
+        staging_preds, prod_preds, prod_exists = _impact_databricks(
+            staging_name, prod_name, records, batch_size,
+        )
+    elif config.target in _CONTAINER_BASED_TARGETS:
+        staging_url = config.ci.staging_endpoint_url
+        prod_url = config.ci.production_endpoint_url
+        if not staging_url:
+            click.echo(
+                "Error: No staging endpoint URL configured.\n"
+                "  Set [ci.staging] endpoint_url in haute.toml.",
+                err=True,
+            )
+            raise SystemExit(1)
+        staging_preds, prod_preds, prod_exists = _impact_http(
+            staging_url, prod_url, records, batch_size,
+        )
+    else:
         click.echo(
             f"  ⚠ Impact analysis not yet implemented for target '{config.target}'.",
             err=True,
         )
         return
-
-    try:
-        from databricks.sdk import WorkspaceClient
-    except ImportError:
-        click.echo(
-            "Error: databricks-sdk not installed. Install with: uv add haute[databricks]",
-            err=True,
-        )
-        raise SystemExit(1)
-
-    _load_env(Path.cwd())
-    ws = WorkspaceClient()
-
-    # Check if prod endpoint exists
-    prod_exists = True
-    try:
-        ws.serving_endpoints.get(prod_name)
-    except Exception as exc:
-        # databricks.sdk.errors.NotFound is the expected error for missing
-        # endpoints, but we also tolerate network errors during the probe.
-        exc_name = type(exc).__name__
-        if exc_name in ("NotFound", "ResourceDoesNotExist"):
-            click.echo(
-                f"  First deployment — production endpoint '{prod_name}' not found"
-            )
-        else:
-            click.echo(
-                f"  ⚠ Could not reach production endpoint '{prod_name}': {exc}"
-            )
-        prod_exists = False
-
-    # Score staging
-    click.echo(f"  Scoring through staging ({staging_name})...")
-    staging_preds = score_endpoint_batched(ws, staging_name, records, batch_size, click.echo)
-
-    if prod_exists:
-        click.echo(f"  Scoring through production ({prod_name})...")
-        prod_preds = score_endpoint_batched(ws, prod_name, records, batch_size, click.echo)
-    else:
-        prod_preds = []
 
     # Build report
     if not prod_exists:
@@ -988,3 +1030,85 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
         with open(github_summary, "a") as f:
             f.write(md)
         click.echo("  → Report written to GitHub Step Summary")
+
+
+def _impact_databricks(
+    staging_name: str,
+    prod_name: str,
+    records: list[dict],
+    batch_size: int,
+) -> tuple[list, list, bool]:
+    """Score through Databricks endpoints for impact analysis."""
+    from haute.deploy._config import _load_env
+    from haute.deploy._impact import score_endpoint_batched
+
+    try:
+        from databricks.sdk import WorkspaceClient
+    except ImportError:
+        click.echo(
+            "Error: databricks-sdk not installed. Install with: uv add haute[databricks]",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    _load_env(Path.cwd())
+    ws = WorkspaceClient()
+
+    # Check if prod endpoint exists
+    prod_exists = True
+    try:
+        ws.serving_endpoints.get(prod_name)
+    except Exception as exc:
+        exc_name = type(exc).__name__
+        if exc_name in ("NotFound", "ResourceDoesNotExist"):
+            click.echo(
+                f"  First deployment — production endpoint '{prod_name}' not found"
+            )
+        else:
+            click.echo(
+                f"  ⚠ Could not reach production endpoint '{prod_name}': {exc}"
+            )
+        prod_exists = False
+
+    # Score staging
+    click.echo(f"  Scoring through staging ({staging_name})...")
+    staging_preds = score_endpoint_batched(ws, staging_name, records, batch_size, click.echo)
+
+    if prod_exists:
+        click.echo(f"  Scoring through production ({prod_name})...")
+        prod_preds = score_endpoint_batched(ws, prod_name, records, batch_size, click.echo)
+    else:
+        prod_preds = []
+
+    return staging_preds, prod_preds, prod_exists
+
+
+def _impact_http(
+    staging_url: str,
+    prod_url: str,
+    records: list[dict],
+    batch_size: int,
+) -> tuple[list, list, bool]:
+    """Score through HTTP endpoints (container target) for impact analysis."""
+    from haute.deploy._impact import score_http_endpoint_batched
+
+    # Score staging
+    click.echo(f"  Scoring through staging ({staging_url})...")
+    staging_preds = score_http_endpoint_batched(
+        staging_url, records, batch_size, click.echo,
+    )
+
+    # Score production (if URL is configured)
+    prod_exists = bool(prod_url)
+    prod_preds: list = []
+    if prod_exists:
+        click.echo(f"  Scoring through production ({prod_url})...")
+        try:
+            prod_preds = score_http_endpoint_batched(
+                prod_url, records, batch_size, click.echo,
+            )
+        except Exception as exc:
+            click.echo(f"  First deployment — production endpoint not reachable: {exc}")
+            prod_exists = False
+
+    return staging_preds, prod_preds, prod_exists

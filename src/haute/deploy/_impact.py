@@ -96,6 +96,54 @@ def score_endpoint_batched(
     return all_preds
 
 
+def score_http_endpoint_batched(
+    endpoint_url: str,
+    records: list[dict],
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+    progress: Callable[[str], None] | None = None,
+) -> list:
+    """Score records against an HTTP endpoint (container target) in batches.
+
+    Sends POST requests to ``{endpoint_url}/quote`` with JSON arrays.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    all_preds: list = []
+    n_batches = math.ceil(len(records) / batch_size)
+    quote_url = endpoint_url.rstrip("/") + "/quote"
+
+    for i in range(0, len(records), batch_size):
+        batch = records[i : i + batch_size]
+        num = i // batch_size + 1
+        if progress:
+            progress(f"    batch {num}/{n_batches}")
+
+        body = _json.dumps(batch).encode("utf-8")
+        req = urllib.request.Request(
+            quote_url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = _json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"HTTP {exc.code} from {quote_url}: {error_body}"
+            ) from exc
+
+        if isinstance(result, list):
+            all_preds.extend(result)
+        else:
+            all_preds.append(result)
+
+    return all_preds
+
+
 def _preds_to_df(preds: list) -> pl.DataFrame:
     """Normalise endpoint predictions into a Polars DataFrame."""
     if not preds:

@@ -28,6 +28,42 @@ class DatabricksConfig:
 
 
 @dataclass
+class ContainerConfig:
+    """Container-specific settings from [deploy.container] in haute.toml."""
+
+    registry: str = ""
+    port: int = 8080
+    base_image: str = "python:3.11-slim"
+
+
+@dataclass
+class AzureContainerAppsConfig:
+    """Azure Container Apps settings from [deploy.azure-container-apps]."""
+
+    resource_group: str = ""
+    container_app_name: str = ""
+    environment_name: str = ""
+
+
+@dataclass
+class AwsEcsConfig:
+    """AWS ECS settings from [deploy.aws-ecs]."""
+
+    region: str = "eu-west-1"
+    cluster: str = ""
+    service: str = ""
+
+
+@dataclass
+class GcpRunConfig:
+    """GCP Cloud Run settings from [deploy.gcp-run]."""
+
+    project: str = ""
+    region: str = "europe-west1"
+    service: str = ""
+
+
+@dataclass
 class SafetyConfig:
     """Safety settings from [safety] in haute.toml."""
 
@@ -41,6 +77,8 @@ class CIConfig:
 
     provider: str = "github"
     staging_endpoint_suffix: str = "-staging"
+    staging_endpoint_url: str = ""
+    production_endpoint_url: str = ""
 
 
 @dataclass
@@ -55,6 +93,12 @@ class DeployConfig:
     output_fields: list[str] | None = None
     test_quotes_dir: Path | None = None
     databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
+    container: ContainerConfig = field(default_factory=ContainerConfig)
+    azure_container_apps: AzureContainerAppsConfig = field(
+        default_factory=AzureContainerAppsConfig,
+    )
+    aws_ecs: AwsEcsConfig = field(default_factory=AwsEcsConfig)
+    gcp_run: GcpRunConfig = field(default_factory=GcpRunConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ci: CIConfig = field(default_factory=CIConfig)
 
@@ -83,6 +127,10 @@ class DeployConfig:
         project = data.get("project", {})
         deploy = data.get("deploy", {})
         db_raw = deploy.get("databricks", {})
+        ct_raw = deploy.get("container", {})
+        aca_raw = deploy.get("azure-container-apps", {})
+        ecs_raw = deploy.get("aws-ecs", {})
+        gcr_raw = deploy.get("gcp-run", {})
         tq = data.get("test_quotes", {})
         safety_raw = data.get("safety", {})
         approval_raw = safety_raw.get("approval", {})
@@ -106,6 +154,30 @@ class DeployConfig:
             serving_scale_to_zero=db_raw.get("serving_scale_to_zero", True),
         )
 
+        ct_config = ContainerConfig(
+            registry=ct_raw.get("registry", ""),
+            port=ct_raw.get("port", 8080),
+            base_image=ct_raw.get("base_image", "python:3.11-slim"),
+        )
+
+        aca_config = AzureContainerAppsConfig(
+            resource_group=aca_raw.get("resource_group", ""),
+            container_app_name=aca_raw.get("container_app_name", ""),
+            environment_name=aca_raw.get("environment_name", ""),
+        )
+
+        ecs_config = AwsEcsConfig(
+            region=ecs_raw.get("region", "eu-west-1"),
+            cluster=ecs_raw.get("cluster", ""),
+            service=ecs_raw.get("service", ""),
+        )
+
+        gcr_config = GcpRunConfig(
+            project=gcr_raw.get("project", ""),
+            region=gcr_raw.get("region", "europe-west1"),
+            service=gcr_raw.get("service", ""),
+        )
+
         safety_config = SafetyConfig(
             impact_dataset=safety_raw.get("impact_dataset", ""),
             min_approvers=approval_raw.get("min_approvers", 2),
@@ -114,6 +186,8 @@ class DeployConfig:
         ci_config = CIConfig(
             provider=ci_raw.get("provider", "github"),
             staging_endpoint_suffix=ci_staging.get("endpoint_suffix", "-staging"),
+            staging_endpoint_url=ci_staging.get("endpoint_url", ""),
+            production_endpoint_url=ci_raw.get("production", {}).get("endpoint_url", ""),
         )
 
         config = cls(
@@ -124,6 +198,10 @@ class DeployConfig:
             output_fields=output_fields,
             test_quotes_dir=tq_dir,
             databricks=db_config,
+            container=ct_config,
+            azure_container_apps=aca_config,
+            aws_ecs=ecs_config,
+            gcp_run=gcr_config,
             safety=safety_config,
             ci=ci_config,
         )

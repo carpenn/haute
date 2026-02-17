@@ -20,9 +20,9 @@ class TestHauteToml:
         assert "[deploy.sagemaker]" not in result
         assert "[deploy.azure-ml]" not in result
 
-    def test_docker_only_contains_docker_section(self) -> None:
-        result = haute_toml("motor", "docker", "github")
-        assert "[deploy.docker]" in result
+    def test_container_only_contains_container_section(self) -> None:
+        result = haute_toml("motor", "container", "github")
+        assert "[deploy.container]" in result
         assert "[deploy.databricks]" not in result
         assert "[deploy.sagemaker]" not in result
         assert "[deploy.azure-ml]" not in result
@@ -61,6 +61,24 @@ class TestHauteToml:
         assert "[ci.staging]" in result
         assert 'endpoint_suffix = "-staging"' in result
 
+    def test_azure_container_apps_contains_both_sections(self) -> None:
+        result = haute_toml("motor", "azure-container-apps", "github")
+        assert "[deploy.container]" in result
+        assert "[deploy.azure-container-apps]" in result
+        assert "[deploy.databricks]" not in result
+
+    def test_aws_ecs_contains_both_sections(self) -> None:
+        result = haute_toml("motor", "aws-ecs", "github")
+        assert "[deploy.container]" in result
+        assert "[deploy.aws-ecs]" in result
+        assert "[deploy.databricks]" not in result
+
+    def test_gcp_run_contains_both_sections(self) -> None:
+        result = haute_toml("motor", "gcp-run", "github")
+        assert "[deploy.container]" in result
+        assert "[deploy.gcp-run]" in result
+        assert "[deploy.databricks]" not in result
+
     def test_unknown_target_raises(self) -> None:
         import pytest
 
@@ -90,9 +108,27 @@ class TestEnvExample:
         assert "DATABRICKS_" not in result
         assert "AWS_" not in result
 
-    def test_docker_creds_only(self) -> None:
-        result = env_example("docker")
+    def test_container_creds_only(self) -> None:
+        result = env_example("container")
         assert "DOCKER_USERNAME" in result
+        assert "DATABRICKS_" not in result
+
+    def test_azure_container_apps_creds(self) -> None:
+        result = env_example("azure-container-apps")
+        assert "DOCKER_USERNAME" in result
+        assert "AZURE_SUBSCRIPTION_ID" in result
+        assert "DATABRICKS_" not in result
+
+    def test_aws_ecs_creds(self) -> None:
+        result = env_example("aws-ecs")
+        assert "DOCKER_USERNAME" in result
+        assert "AWS_ACCESS_KEY_ID" in result
+        assert "DATABRICKS_" not in result
+
+    def test_gcp_run_creds(self) -> None:
+        result = env_example("gcp-run")
+        assert "DOCKER_USERNAME" in result
+        assert "GCP_PROJECT_ID" in result
         assert "DATABRICKS_" not in result
 
     def test_unknown_target_raises(self) -> None:
@@ -307,12 +343,33 @@ class TestGitlabCiYml:
         assert "$DATABRICKS_HOST" in result
         assert "$DATABRICKS_TOKEN" in result
 
-    def test_docker_secrets(self) -> None:
+    def test_container_secrets(self) -> None:
         from haute._scaffold import gitlab_ci_yml
 
-        result = gitlab_ci_yml("docker")
+        result = gitlab_ci_yml("container")
         assert "$DOCKER_USERNAME" in result
         assert "$DOCKER_PASSWORD" in result
+
+    def test_azure_container_apps_secrets(self) -> None:
+        from haute._scaffold import gitlab_ci_yml
+
+        result = gitlab_ci_yml("azure-container-apps")
+        assert "$DOCKER_USERNAME" in result
+        assert "$AZURE_SUBSCRIPTION_ID" in result
+
+    def test_aws_ecs_secrets(self) -> None:
+        from haute._scaffold import gitlab_ci_yml
+
+        result = gitlab_ci_yml("aws-ecs")
+        assert "$DOCKER_USERNAME" in result
+        assert "$AWS_ACCESS_KEY_ID" in result
+
+    def test_gcp_run_secrets(self) -> None:
+        from haute._scaffold import gitlab_ci_yml
+
+        result = gitlab_ci_yml("gcp-run")
+        assert "$DOCKER_USERNAME" in result
+        assert "$GCP_PROJECT_ID" in result
 
 
 class TestAzureDevopsYml:

@@ -213,11 +213,11 @@ class TestInit:
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(cli, ["init", "--target", "docker"], catch_exceptions=False)
+        result = runner.invoke(cli, ["init", "--target", "container"], catch_exceptions=False)
         assert result.exit_code == 0, result.output
         toml_content = (tmp_path / "haute.toml").read_text()
-        assert 'target = "docker"' in toml_content
-        assert "[deploy.docker]" in toml_content
+        assert 'target = "container"' in toml_content
+        assert "[deploy.container]" in toml_content
         assert "[deploy.databricks]" not in toml_content
         env_content = (tmp_path / ".env.example").read_text()
         assert "DOCKER_" in env_content
@@ -257,7 +257,7 @@ class TestInit:
     ):
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(
-            cli, ["init", "--target", "docker", "--ci", "azure-devops"],
+            cli, ["init", "--target", "container", "--ci", "azure-devops"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output

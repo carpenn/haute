@@ -10,9 +10,13 @@ Public API::
 """
 
 from haute.deploy._config import (
+    AwsEcsConfig,
+    AzureContainerAppsConfig,
     CIConfig,
+    ContainerConfig,
     DatabricksConfig,
     DeployConfig,
+    GcpRunConfig,
     ResolvedDeploy,
     SafetyConfig,
     resolve_config,
@@ -20,10 +24,14 @@ from haute.deploy._config import (
 from haute.deploy._mlflow import DeployResult, deploy_to_mlflow, get_deploy_status
 
 __all__ = [
+    "AwsEcsConfig",
+    "AzureContainerAppsConfig",
     "CIConfig",
+    "ContainerConfig",
     "DatabricksConfig",
     "DeployConfig",
     "DeployResult",
+    "GcpRunConfig",
     "ResolvedDeploy",
     "SafetyConfig",
     "deploy",
@@ -33,10 +41,39 @@ __all__ = [
 ]
 
 
-def deploy(config: DeployConfig) -> DeployResult:
-    """Resolve config and deploy to the configured target.
+from haute.deploy._container import _CONTAINER_BASED_TARGETS
 
-    Currently only supports ``target="databricks"`` (MLflow-backed).
-    """
+_SUPPORTED_TARGETS = {"databricks", "container"}
+_CONTAINER_PLATFORM_TARGETS = _CONTAINER_BASED_TARGETS - {"container"}
+_PLANNED_TARGETS = {"sagemaker", "azure-ml"}
+
+
+def deploy(config: DeployConfig) -> DeployResult:
+    """Resolve config and deploy to the configured target."""
     resolved = resolve_config(config)
-    return deploy_to_mlflow(resolved)
+
+    if config.target == "databricks":
+        return deploy_to_mlflow(resolved)
+
+    if config.target == "container":
+        from haute.deploy._container import deploy_to_container
+
+        return deploy_to_container(resolved)
+
+    if config.target in _CONTAINER_PLATFORM_TARGETS:
+        from haute.deploy._container import deploy_to_platform_container
+
+        return deploy_to_platform_container(resolved)
+
+    if config.target in _PLANNED_TARGETS:
+        raise NotImplementedError(
+            f"Target '{config.target}' is planned but not yet implemented. "
+            f"Supported targets: "
+            f"{', '.join(sorted(_SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS))}."
+        )
+
+    all_known = _SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS | _PLANNED_TARGETS
+    raise ValueError(
+        f"Unknown deploy target '{config.target}'. "
+        f"Known targets: {', '.join(sorted(all_known))}."
+    )

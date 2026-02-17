@@ -131,9 +131,9 @@ class TestEnvOverrides:
     def test_haute_target_override(
         self, toml_file: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("HAUTE_TARGET", "docker")
+        monkeypatch.setenv("HAUTE_TARGET", "container")
         config = DeployConfig.from_toml(toml_file)
-        assert config.target == "docker"
+        assert config.target == "container"
 
     def test_haute_nested_override(
         self, toml_file: Path, monkeypatch: pytest.MonkeyPatch,

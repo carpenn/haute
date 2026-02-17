@@ -1,6 +1,6 @@
 # Haute Deploy — Design Document
 
-**Status:** Databricks target implemented (v0.1.24). Container (FastAPI) target designed, not yet implemented.  
+**Status:** Databricks and generic container targets implemented. Platform container targets (Azure Container Apps, AWS ECS, GCP Cloud Run) scaffolded — build+push works, service update pending.  
 **Scope:** Deploy targets, configuration, CI/CD, safety gates, technical design  
 
 ---
@@ -37,32 +37,73 @@ policies ──→ severity_model  ──┘                                    
 
 ---
 
-## 3. Deploy Targets
+## 3. Deploy Philosophy
 
-### 3.1 Supported Targets
+Haute owns the **full release cycle** — from `git push` to live production endpoint. The pricing team runs `haute deploy` (or merges to main) and Haute handles everything: build, push, service update, smoke test, impact analysis, promotion.
 
-| Target | `[deploy].target` | What it produces | Status |
-|---|---|---|---|
-| **Databricks** | `"databricks"` | MLflow model → Databricks Model Serving endpoint | ✅ Implemented |
-| **Container** | `"container"` | Docker image with FastAPI app, `/quote` + `/health` | **Next** |
-| **AWS SageMaker** | `"sagemaker"` | Container → ECR → SageMaker endpoint | Planned |
-| **Azure ML** | `"azure-ml"` | Container → ACR → Azure ML endpoint | Planned |
+**IT provisions infrastructure once.** The platform team creates the container app / ECS service / Cloud Run service, sets up networking, configures the registry. This is a one-time setup.
 
-The team picks the target that matches their infrastructure. `haute init --target <t>` generates the right config, credentials template, and CI/CD workflows for that target.
+**The pricing team owns every release from there.** Haute calls the platform SDK to update the running service with the new image. No tickets, no handoffs, no waiting for IT on every deploy.
 
-### 3.2 Databricks Target
+This mirrors the Databricks target where Haute calls the Databricks SDK to create/update the serving endpoint — the same pattern, different SDK.
+
+### 3.1 Target Architecture
+
+Targets fall into three categories:
+
+1. **Databricks** — MLflow/Databricks SDK. Fully implemented.
+2. **Container-based platforms** — share a common build+push step (FastAPI app + Docker image), then each calls its own platform SDK to update the running service.
+3. **ML platforms** — SageMaker, Azure ML. Different packaging approach. Planned.
+
+All container-based targets share:
+- The same `[deploy.container]` config (registry, port, base_image)
+- The same FastAPI app generation (`POST /quote`, `GET /health`)
+- The same `Dockerfile` and `docker build` + `docker push`
+- The same smoke test and impact analysis (HTTP-based)
+
+What differs per platform is the **service update** step after push.
+
+---
+
+## 4. Deploy Targets
+
+### 4.1 Target Table
+
+| Target | `[deploy].target` | Build | Service Update | Status |
+|---|---|---|---|---|
+| **Databricks** | `"databricks"` | MLflow pyfunc model | Databricks SDK | ✅ Implemented |
+| **Container** | `"container"` | Docker image (FastAPI) | None (local/manual) | ✅ Implemented |
+| **Azure Container Apps** | `"azure-container-apps"` | Docker image (FastAPI) | Azure SDK | Build+push ✅, update pending |
+| **AWS ECS** | `"aws-ecs"` | Docker image (FastAPI) | AWS SDK | Build+push ✅, update pending |
+| **GCP Cloud Run** | `"gcp-run"` | Docker image (FastAPI) | GCP SDK | Build+push ✅, update pending |
+| **AWS SageMaker** | `"sagemaker"` | — | — | Planned |
+| **Azure ML** | `"azure-ml"` | — | — | Planned |
+
+The team picks the target that matches their infrastructure. `haute init --target <t>` generates the right config, credentials template, and CI/CD workflows.
+
+### 4.2 Databricks Target
 
 For teams already on Databricks. Wraps the pipeline in an `mlflow.pyfunc.PythonModel` shim (Databricks Model Serving requires the MLflow protocol). Pandas bridge at the boundary only — all internal computation remains Polars.
 
-### 3.3 Container Target
+### 4.3 Container Target (Generic)
 
-For teams deploying to general-purpose hosting (ECS, Azure Container Apps, Cloud Run, Kubernetes, on-prem). Produces a self-contained Docker image with a FastAPI app wrapping `score_graph()` — `POST /quote`, `GET /health`, no MLflow, no pandas.
+For local testing, Kubernetes, or environments where IT manages the service externally. Produces a self-contained Docker image with a FastAPI app wrapping `score_graph()` — `POST /quote`, `GET /health`, no MLflow, no pandas. Build and push only — no service update.
 
-### 3.4 SageMaker / Azure ML Targets
+### 4.4 Platform Container Targets
 
-For teams on those platforms. Thin wrappers around the container target: build the same Docker image, push to ECR/ACR, create/update a managed endpoint via the platform SDK.
+Azure Container Apps, AWS ECS, and GCP Cloud Run are first-class targets. They share the container build+push step and then call the platform SDK to update the running service:
 
-### 3.5 Rigour Requirements (All Targets)
+- **Azure Container Apps** — creates a new revision via the Azure SDK
+- **AWS ECS** — calls `UpdateService` to deploy the new task definition
+- **GCP Cloud Run** — deploys the new image via the Cloud Run SDK
+
+The service update step is not yet implemented — Haute builds and pushes the image, then raises `NotImplementedError` with a message telling you the image tag so you can update manually until the SDK integration lands.
+
+### 4.5 SageMaker / Azure ML Targets
+
+Planned. Different packaging approach from container targets — these ML platforms have their own model packaging format and endpoint management.
+
+### 4.6 Rigour Requirements (All Targets)
 
 Every target must satisfy the same safety bar — these are **Haute's responsibility**, not the platform's:
 

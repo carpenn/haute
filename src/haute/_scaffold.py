@@ -55,12 +55,48 @@ schema = "pricing"
 serving_workload_size = "Small"
 serving_scale_to_zero = true
 """
-    if target == "docker":
+    if target == "container":
         return """\
-[deploy.docker]
+[deploy.container]
 registry = ""
 port = 8080
 base_image = "python:3.11-slim"
+"""
+    if target == "azure-container-apps":
+        return f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.azure-container-apps]
+resource_group = ""
+container_app_name = "{name}"
+environment_name = ""
+"""
+    if target == "aws-ecs":
+        return f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.aws-ecs]
+region = "eu-west-1"
+cluster = ""
+service = "{name}"
+"""
+    if target == "gcp-run":
+        return f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.gcp-run]
+project = ""
+region = "europe-west1"
+service = "{name}"
 """
     if target == "sagemaker":
         return """\
@@ -121,12 +157,45 @@ AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
 """
         )
-    if target == "docker":
+    if target == "container":
         return (
-            header.format(label="Docker registry (optional)")
+            header.format(label="Container registry")
             + """
 DOCKER_USERNAME=
 DOCKER_PASSWORD=
+"""
+        )
+    if target == "azure-container-apps":
+        return (
+            header.format(label="Azure Container Apps")
+            + """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+AZURE_SUBSCRIPTION_ID=
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+"""
+        )
+    if target == "aws-ecs":
+        return (
+            header.format(label="AWS ECS")
+            + """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=eu-west-1
+"""
+        )
+    if target == "gcp-run":
+        return (
+            header.format(label="GCP Cloud Run")
+            + """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+GCP_PROJECT_ID=
+GCP_SERVICE_ACCOUNT_KEY=
 """
         )
     msg = f"Unknown target: {target}"
@@ -411,10 +480,34 @@ def _github_secrets_env(target: str) -> str:
             f"{indent}AZURE_CLIENT_ID: ${{{{ secrets.AZURE_CLIENT_ID }}}}\n"
             f"{indent}AZURE_CLIENT_SECRET: ${{{{ secrets.AZURE_CLIENT_SECRET }}}}"
         )
-    if target == "docker":
+    if target == "container":
         return (
             f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
             f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}"
+        )
+    if target == "azure-container-apps":
+        return (
+            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
+            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
+            f"{indent}AZURE_SUBSCRIPTION_ID: ${{{{ secrets.AZURE_SUBSCRIPTION_ID }}}}\n"
+            f"{indent}AZURE_TENANT_ID: ${{{{ secrets.AZURE_TENANT_ID }}}}\n"
+            f"{indent}AZURE_CLIENT_ID: ${{{{ secrets.AZURE_CLIENT_ID }}}}\n"
+            f"{indent}AZURE_CLIENT_SECRET: ${{{{ secrets.AZURE_CLIENT_SECRET }}}}"
+        )
+    if target == "aws-ecs":
+        return (
+            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
+            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
+            f"{indent}AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}\n"
+            f"{indent}AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}\n"
+            f"{indent}AWS_DEFAULT_REGION: ${{{{ secrets.AWS_DEFAULT_REGION }}}}"
+        )
+    if target == "gcp-run":
+        return (
+            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
+            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
+            f"{indent}GCP_PROJECT_ID: ${{{{ secrets.GCP_PROJECT_ID }}}}\n"
+            f"{indent}GCP_SERVICE_ACCOUNT_KEY: ${{{{ secrets.GCP_SERVICE_ACCOUNT_KEY }}}}"
         )
     msg = f"Unknown target: {target}"
     raise ValueError(msg)
@@ -546,10 +639,34 @@ def _gitlab_secrets_env(target: str) -> str:
             f"{indent}AZURE_CLIENT_ID: $AZURE_CLIENT_ID\n"
             f"{indent}AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET"
         )
-    if target == "docker":
+    if target == "container":
         return (
             f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
             f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD"
+        )
+    if target == "azure-container-apps":
+        return (
+            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
+            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
+            f"{indent}AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID\n"
+            f"{indent}AZURE_TENANT_ID: $AZURE_TENANT_ID\n"
+            f"{indent}AZURE_CLIENT_ID: $AZURE_CLIENT_ID\n"
+            f"{indent}AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET"
+        )
+    if target == "aws-ecs":
+        return (
+            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
+            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
+            f"{indent}AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID\n"
+            f"{indent}AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY\n"
+            f"{indent}AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
+        )
+    if target == "gcp-run":
+        return (
+            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
+            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
+            f"{indent}GCP_PROJECT_ID: $GCP_PROJECT_ID\n"
+            f"{indent}GCP_SERVICE_ACCOUNT_KEY: $GCP_SERVICE_ACCOUNT_KEY"
         )
     msg = f"Unknown target: {target}"
     raise ValueError(msg)
@@ -792,10 +909,34 @@ def _azure_devops_secrets_env(target: str) -> str:
             f"{indent}AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)\n"
             f"{indent}AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)"
         )
-    if target == "docker":
+    if target == "container":
         return (
             f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
             f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)"
+        )
+    if target == "azure-container-apps":
+        return (
+            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
+            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
+            f"{indent}AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)\n"
+            f"{indent}AZURE_TENANT_ID: $(AZURE_TENANT_ID)\n"
+            f"{indent}AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)\n"
+            f"{indent}AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)"
+        )
+    if target == "aws-ecs":
+        return (
+            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
+            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
+            f"{indent}AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)\n"
+            f"{indent}AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)\n"
+            f"{indent}AWS_DEFAULT_REGION: $(AWS_DEFAULT_REGION)"
+        )
+    if target == "gcp-run":
+        return (
+            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
+            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
+            f"{indent}GCP_PROJECT_ID: $(GCP_PROJECT_ID)\n"
+            f"{indent}GCP_SERVICE_ACCOUNT_KEY: $(GCP_SERVICE_ACCOUNT_KEY)"
         )
     msg = f"Unknown target: {target}"
     raise ValueError(msg)
