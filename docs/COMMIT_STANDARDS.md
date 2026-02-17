@@ -91,6 +91,8 @@ Every output value must be traceable back through the graph to its inputs, showi
 ## 7. No Stale Documentation
 
 - If you change behaviour, update the relevant doc in `docs/`.
+- If you add, remove, or rename a deploy target, CLI command, or user-facing feature, update both `README.md` and `docs/index.md` to match.
+- `README.md` is the first thing people read. Deploy target tables, architecture tables, and the "what runs where" summary must reflect the current code.
 - Status tables in design docs must reflect reality (no "❌ Missing" for things that exist).
 - README examples must actually run.
 
@@ -273,7 +275,7 @@ Engineering Standards
 - [ ] API endpoints use Pydantic request/response models
 - [ ] `ruff check src/haute/` passes with zero errors
 - [ ] No unused imports, variables, or dead code
-- [ ] Docs updated if behaviour changed
+- [ ] Docs updated if behaviour changed (including `README.md` and `docs/index.md`)
 - [ ] No new heavy dependencies in core
 - [ ] No resource leaks (file handles, async tasks, sockets)
 - [ ] Error cases return structured responses, not bare strings

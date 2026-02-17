@@ -9,15 +9,16 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Elastic License 2.0](https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square)](LICENSE)
 [![Databricks](https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white)](https://databricks.com)
-[![AWS](https://img.shields.io/badge/deploy-SageMaker-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
-[![Azure](https://img.shields.io/badge/deploy-Azure_ML-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/machine-learning)
+[![Azure Container Apps](https://img.shields.io/badge/deploy-Azure_Container_Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/container-apps)
+[![AWS ECS](https://img.shields.io/badge/deploy-AWS_ECS-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/ecs/)
+[![GCP Cloud Run](https://img.shields.io/badge/deploy-Cloud_Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
 [![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 
 </div>
 
 ---
 
-Haute is a free pricing engine that lets insurance teams build rating pipelines in a visual editor, keep everything as version-controlled Python, and deploy to a live scoring API - on Databricks, AWS, Azure, or a plain Docker container.
+Haute is a free pricing engine that lets insurance teams build rating pipelines in a visual editor, keep everything as version-controlled Python, and deploy to a live scoring API - on Databricks, Azure Container Apps, AWS ECS, GCP Cloud Run, or a plain Docker container.
 
 It's aimed at the gap between enterprise platforms like Radar that cost six or seven figures a year, and the in-house Python notebooks that never quite make it to production.
 
@@ -53,16 +54,33 @@ This means analysts can work visually while everything stays in version control.
 
 ## Deployment
 
-Haute deploys pipelines as live scoring APIs. You set the target once in a config file, and the deployment handles pruning the pipeline to the scoring path, bundling model files, running validation, and pushing to the endpoint.
+Haute deploys pipelines as live scoring APIs. You set the target once in a config file, and from there every release is handled by CI - build, push, smoke test, impact analysis, production promotion. Analysts never need Docker, cloud CLIs, or DevOps tooling installed locally.
 
-| Target | What gets deployed |
-|---|---|
-| **Databricks** | MLflow model on Databricks Model Serving |
-| **AWS SageMaker** | MLflow model on a SageMaker real-time endpoint |
-| **Azure ML** | MLflow model on an Azure ML managed endpoint |
-| **Docker** | Self-contained container with a FastAPI server - runs anywhere |
+| Target | What gets deployed | Status |
+|---|---|---|
+| **Databricks** | MLflow model on Databricks Model Serving | Implemented |
+| **Container** | Docker image with a FastAPI server - runs anywhere | Implemented |
+| **Azure Container Apps** | Same image, deployed as an ACA revision | Build+push implemented |
+| **AWS ECS** | Same image, deployed as an ECS task | Build+push implemented |
+| **GCP Cloud Run** | Same image, deployed as a Cloud Run service | Build+push implemented |
 
-The Docker target is worth calling out specifically. It has zero cloud dependencies. If you can run a container - on Kubernetes, ECS, on-prem, a laptop - you can deploy a Haute pipeline. It's there as a universal option for teams that don't want to be tied to any managed ML platform.
+All container-based targets share the same build: a FastAPI app wrapping `score_graph()` with `POST /quote` and `GET /health`, packaged into a Docker image, pushed to a registry. What differs per platform is only the service update step after push.
+
+The generic container target is there for teams who manage their own infrastructure - Kubernetes, on-prem, or local testing. The platform targets let Haute handle the full lifecycle: build, push, and update the running service.
+
+### What runs where
+
+Analysts only need Python installed. Everything else happens in CI.
+
+| Command | Where it runs | What it needs |
+|---|---|---|
+| `haute init` | Local | Python |
+| `haute serve` | Local | Python |
+| `haute deploy` | CI only | Docker + cloud creds (CI runner has both) |
+| `haute smoke` | CI only | Cloud creds |
+| `haute impact` | CI only | Cloud creds |
+
+The workflow is: edit your pipeline, open `haute serve` to preview, push to Git, and CI does the rest. Deployments can only happen through this process - nobody can push a model to production from their laptop.
 
 ---
 
@@ -142,7 +160,7 @@ Radar and Earnix are mature products with decades of development and large teams
 | **Visual Editor** | React, TypeScript, React Flow |
 | **Backend** | Python, FastAPI, Polars, WebSocket sync |
 | **Models** | MLflow (registry, tracking, serving) |
-| **Deploy Targets** | Databricks · AWS SageMaker · Azure ML · Docker |
+| **Deploy Targets** | Databricks · Container · Azure Container Apps · AWS ECS · GCP Cloud Run |
 | **CI/CD** | GitHub Actions · GitLab CI · Azure DevOps |
 
 ---

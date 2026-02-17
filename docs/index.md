@@ -70,16 +70,17 @@ Every release records what changed, who approved it, the impact report, and what
 
 ### Deploy anywhere
 
-You pick the target that matches your infrastructure. Haute handles the rest.
+You pick the target that matches your infrastructure. Haute handles the rest - and analysts never need Docker, cloud CLIs, or DevOps tooling installed. CI builds and deploys everything.
 
 | Target | What gets deployed |
 |---|---|
 | **Databricks** | MLflow model on Databricks Model Serving |
-| **Docker** | Self-contained container with a FastAPI server - runs anywhere |
-| **AWS SageMaker** | MLflow model on a SageMaker real-time endpoint |
-| **Azure ML** | MLflow model on an Azure ML managed endpoint |
+| **Container** | Docker image with a FastAPI server - runs anywhere |
+| **Azure Container Apps** | Same image, deployed as an ACA revision |
+| **AWS ECS** | Same image, deployed as an ECS task |
+| **GCP Cloud Run** | Same image, deployed as a Cloud Run service |
 
-The Docker target is worth calling out - it has zero cloud dependencies. If you can run a container, you can deploy a Haute pipeline. It's there as a universal option for teams that don't want to be tied to any platform.
+All container-based targets produce the same thing: a FastAPI app with `POST /quote` and `GET /health`, packaged into a Docker image. The generic container target is for teams who manage their own infrastructure. The platform targets let Haute handle the full lifecycle.
 
 ### One pipeline, many uses
 
