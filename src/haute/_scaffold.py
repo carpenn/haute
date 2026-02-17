@@ -29,6 +29,7 @@ pipeline = "main.py"
 target = "{target}"
 model_name = "{name}"
 endpoint_name = "{name}"
+ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 """,
         _target_section(name, target),
         f"""\
@@ -216,34 +217,11 @@ jobs:
 def github_deploy_yml(target: str) -> str:
     """Merge-to-main deploy workflow for GitHub Actions.
 
-    The production job uses a GitHub environment called ``production``.
-    Approval gates are configured in GitHub repo settings, not in this YAML.
-    Solo users simply don't add protection rules to the ``production`` environment.
+    Runs automatically: validate → staging → smoke test → impact analysis.
+    Production is a separate manual workflow (``deploy-production.yml``)
+    so it works on GitHub Free without environment protection rules.
     """
     secrets_env = _github_secrets_env(target)
-
-    prod_section = f"""\
-  deploy-production:
-    name: Deploy → Production
-    needs: smoke-test
-    runs-on: ubuntu-latest
-    environment:
-      name: production    # Add approval rules in GitHub repo settings
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-      - run: uv sync --frozen
-      - name: Deploy to production
-        env:
-{secrets_env}
-        run: uv run haute deploy
-      - name: Tag release
-        run: |
-          VERSION=$(uv run haute status --version-only 2>/dev/null || echo "unknown")
-          git tag "deploy/v$VERSION"
-          git push origin "deploy/v$VERSION" || true"""
 
     return f"""\
 name: Deploy
@@ -262,9 +240,6 @@ on:
 concurrency:
   group: deploy
   cancel-in-progress: false
-
-permissions:
-  contents: write
 
 jobs:
   validate:
@@ -291,7 +266,6 @@ jobs:
     name: Deploy → Staging
     needs: validate
     runs-on: ubuntu-latest
-    environment: staging
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -318,7 +292,64 @@ jobs:
 {secrets_env}
         run: uv run haute smoke --endpoint-suffix "-staging"
 
-{prod_section}
+  impact-analysis:
+    name: Impact Analysis
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Compare staging vs production predictions
+        env:
+{secrets_env}
+        run: uv run haute impact --endpoint-suffix "-staging"
+"""
+
+
+def github_deploy_prod_yml(target: str) -> str:
+    """Manual production deploy workflow for GitHub Actions.
+
+    Triggered via the GitHub Actions UI (workflow_dispatch) after
+    reviewing the impact report from the deploy workflow.
+    Works on GitHub Free — no environment protection rules needed.
+    """
+    secrets_env = _github_secrets_env(target)
+
+    return f"""\
+name: Deploy → Production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-production:
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Deploy to production
+        env:
+{secrets_env}
+        run: uv run haute deploy
+      - name: Tag release
+        run: |
+          VERSION=$(uv run haute status --version-only 2>/dev/null || echo "unknown")
+          git tag "deploy/v$VERSION"
+          git push origin "deploy/v$VERSION" || true
 """
 
 
@@ -348,6 +379,125 @@ def _github_secrets_env(target: str) -> str:
         return (
             f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
             f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}"
+        )
+    msg = f"Unknown target: {target}"
+    raise ValueError(msg)
+
+
+# ── GitLab CI ────────────────────────────────────────────────────────
+
+
+def gitlab_ci_yml(target: str) -> str:
+    """Combined CI + deploy pipeline for GitLab CI/CD.
+
+    Uses GitLab stages to enforce ordering.  The ``deploy-production``
+    job uses ``when: manual`` so a reviewer must click to approve.
+    """
+    secrets_env = _gitlab_secrets_env(target)
+
+    return f"""\
+stages:
+  - validate
+  - deploy-staging
+  - smoke-test
+  - impact-analysis
+  - deploy-production
+
+variables:
+{secrets_env}
+
+# ── Validate ──────────────────────────────────────────────────
+lint:
+  stage: validate
+  image: python:3.11
+  before_script:
+    - pip install uv && uv sync --frozen
+  script:
+    - uv run ruff check .
+    - uv run mypy .
+    - uv run pytest -v
+    - uv run haute lint
+    - uv run haute deploy --dry-run
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── Staging ───────────────────────────────────────────────────
+deploy-staging:
+  stage: deploy-staging
+  image: python:3.11
+  before_script:
+    - pip install uv && uv sync --frozen
+  script:
+    - uv run haute deploy --endpoint-suffix "-staging"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── Smoke test ────────────────────────────────────────────────
+smoke-test:
+  stage: smoke-test
+  image: python:3.11
+  before_script:
+    - pip install uv && uv sync --frozen
+  script:
+    - uv run haute smoke --endpoint-suffix "-staging"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── Impact analysis ──────────────────────────────────────────
+impact-analysis:
+  stage: impact-analysis
+  image: python:3.11
+  before_script:
+    - pip install uv && uv sync --frozen
+  script:
+    - uv run haute impact --endpoint-suffix "-staging"
+  artifacts:
+    paths:
+      - impact_report.md
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── Production (manual approval) ─────────────────────────────
+deploy-production:
+  stage: deploy-production
+  image: python:3.11
+  before_script:
+    - pip install uv && uv sync --frozen
+  script:
+    - uv run haute deploy
+  when: manual
+  allow_failure: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+"""
+
+
+def _gitlab_secrets_env(target: str) -> str:
+    """Return the variables: block for GitLab CI, indented for YAML."""
+    indent = "  "
+    if target == "databricks":
+        return (
+            f"{indent}DATABRICKS_HOST: $DATABRICKS_HOST\n"
+            f"{indent}DATABRICKS_TOKEN: $DATABRICKS_TOKEN"
+        )
+    if target == "sagemaker":
+        return (
+            f"{indent}AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID\n"
+            f"{indent}AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY\n"
+            f"{indent}AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION\n"
+            f"{indent}SAGEMAKER_ROLE_ARN: $SAGEMAKER_ROLE_ARN"
+        )
+    if target == "azure-ml":
+        return (
+            f"{indent}AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID\n"
+            f"{indent}AZURE_TENANT_ID: $AZURE_TENANT_ID\n"
+            f"{indent}AZURE_CLIENT_ID: $AZURE_CLIENT_ID\n"
+            f"{indent}AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET"
+        )
+    if target == "docker":
+        return (
+            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD"
         )
     msg = f"Unknown target: {target}"
     raise ValueError(msg)

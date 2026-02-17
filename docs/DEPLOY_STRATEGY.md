@@ -1,6 +1,6 @@
 # Haute - Deployment Strategy
 
-**Status:** Draft - refining before implementation  
+**Status:** Partially implemented (P1–P3 done, P4–P9 pending)  
 **Scope:** Config design, CI/CD, deploy targets, safety gates  
 
 ---
@@ -43,14 +43,14 @@ my-pricing-project/
 │   │   └── example.json
 ├── .github/                     # CI/CD workflows (if provider=github)
 │   └── workflows/
-│       ├── ci.yml               # PR checks: lint, test, validate, impact
-│       └── deploy.yml           # Merge-to-main: validate → deploy → smoke test
+│       ├── ci.yml               # PR checks: lint, test, validate
+│       └── deploy.yml           # Merge-to-main: validate → staging → smoke → impact → production
 ├── .gitignore
 └── pyproject.toml               # Dependencies (haute added automatically)
 ```
 
-For Azure DevOps users, `.github/workflows/` is replaced with `azure-pipelines.yml`.  
-For GitLab users, `.gitlab-ci.yml`.
+For GitLab users (`--ci gitlab`), `.github/workflows/` is replaced with `.gitlab-ci.yml`.  
+For Azure DevOps users, `azure-pipelines.yml` (planned).
 
 ---
 
@@ -71,6 +71,7 @@ pipeline = "main.py"
 target = "databricks"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
+ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.databricks]
 experiment_name = "/Shared/haute/motor-pricing"
@@ -113,6 +114,7 @@ pipeline = "main.py"
 target = "docker"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
+ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.docker]
 registry = ""                         # e.g. "ghcr.io/myorg", "123456.dkr.ecr.eu-west-1.amazonaws.com"
@@ -153,6 +155,7 @@ pipeline = "main.py"
 target = "sagemaker"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
+ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.sagemaker]
 region = "eu-west-1"
@@ -371,10 +374,10 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
   haute test       mypy .              │
   haute run        pytest              ├─→ deploy staging (auto)
                    haute lint          │     smoke test
-                   haute deploy        │
+                   haute deploy        │     impact analysis
                      --dry-run         ├─→ [approval gate]
-                   haute impact        │
-                     (PR comment)      └─→ deploy production
+                                       │     (reviewer checks impact report)
+                                       └─→ deploy production
 ```
 
 ### 6.2 CI Provider Support
@@ -383,7 +386,7 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
 |---|---|---|---|
 | **GitHub Actions** | `provider = "github"` | `.github/workflows/ci.yml`, `.github/workflows/deploy.yml` | v1 |
 | **Azure DevOps** | `provider = "azure-devops"` | `azure-pipelines.yml` | v2 |
-| **GitLab CI** | `provider = "gitlab"` | `.gitlab-ci.yml` | v2 |
+| **GitLab CI** | `provider = "gitlab"` | `.gitlab-ci.yml` | v1 |
 | **None** | `provider = "none"` | No CI files generated | v1 |
 
 All providers run the same logical steps - only the YAML syntax differs.
@@ -398,7 +401,6 @@ Runs on every PR to `main`:
 | **typecheck** | `mypy .` | Yes |
 | **test** | `pytest -v` | Yes |
 | **pipeline-validate** | `haute lint` + `haute deploy --dry-run` | Yes |
-| **impact** | `haute impact --base origin/main` → PR comment | Configurable (default: warning only) |
 
 ### 6.4 GitHub Actions - Deploy Workflow (`deploy.yml`)
 
@@ -407,8 +409,9 @@ Runs on push to `main` (i.e. after PR merge):
 | Step | What it does | Environment |
 |---|---|---|
 | **validate** | Re-runs lint, typecheck, test, pipeline validation on merge commit | - |
-| **deploy-staging** | `haute deploy` with `--endpoint-suffix "-staging"` | `staging` (GitHub environment) |
+| **deploy-staging** | `haute deploy --endpoint-suffix "-staging"` | `staging` (GitHub environment) |
 | **smoke-test** | Score test quotes against the live staging endpoint | - |
+| **impact-analysis** | `haute impact --endpoint-suffix "-staging"` — compares staging vs production predictions, writes `impact_report.md` + GitHub Step Summary | - |
 | **deploy-production** | `haute deploy` | `production` (GitHub environment, requires approval) |
 | **tag** | Git tag with version: `deploy/v{model_version}` | - |
 
@@ -450,12 +453,12 @@ Credentials use Azure DevOps **variable groups** or **service connections** inst
 Insurance pricing carries risk regardless of team size. A solo actuary mispricing a book is just as dangerous as a large team doing it. Every `haute init` project gets the full pipeline:
 
 ```
-merge to main → validate → deploy staging → smoke test → [approval gate] → deploy production
+merge to main → validate → deploy staging → smoke test → impact analysis → [approval gate] → deploy production
 ```
 
-There is no "simplified flow". The staging environment exists to catch issues in a production-like setting before real money is at stake. The approval gate exists because deploying rates should always require a second pair of eyes.
+There is no "simplified flow". The staging environment exists to catch issues in a production-like setting before real money is at stake. The impact analysis compares pricing changes between the new model (staging) and the current model (production) so reviewers see exactly what's changing. The approval gate exists because deploying rates should always require a second pair of eyes.
 
-Teams can adjust the `min_approvers` count in `haute.toml`, but the staging→approval→production structure is non-negotiable.
+Teams can adjust the `min_approvers` count in `haute.toml`, but the staging→impact→approval→production structure is non-negotiable. The workflow enforces ordering (production depends on impact-analysis), and the manual approval gate on the `production` environment gives reviewers control.
 
 ---
 
@@ -481,31 +484,50 @@ If the output drifts beyond `tolerance_pct`, the deploy is blocked with a diff s
 
 ### 7.2 Impact Report - `haute impact`
 
-The headline safety feature. Scores a portfolio sample through both the current branch and the base branch, then produces a comparison:
+The headline safety feature. Scores the impact dataset through both the staging endpoint (new model) and the production endpoint (current model), then compares predictions:
 
 ```
-╔══════════════════════════════════════════════════╗
-║  IMPACT REPORT - motor-pricing                   ║
-║  Compared: feature/area-factors → main            ║
-║  Dataset: 50,000 policies                         ║
-╠══════════════════════════════════════════════════╣
-║  Quotes changed:     12,847 (25.7%)               ║
-║  Average change:     +2.3%                         ║
-║  Max increase:       +18.7% (postcode SW1A)        ║
-║  Max decrease:       -4.2% (postcode EH1)          ║
-║  Premium impact:     +£1.2M annual (+1.8%)         ║
-║                                                    ║
-║  ⚠ 847 quotes changed by >10%                     ║
-║  ⚠ Segment "young_drivers" avg change +8.1%       ║
-╚══════════════════════════════════════════════════╝
+================================================================
+  IMPACT REPORT
+  Pipeline:    motor-pricing
+  Staging:     motor-pricing-staging  →  Production: motor-pricing
+  Dataset:     data/portfolio_sample.parquet (10,000 of 678,013 sampled)
+================================================================
+
+  Output: technical_price
+  ────────────────────────────────────────────────────────────
+  Staging mean:      548.57     Production mean:   536.12
+  Rows changed:        8,421 / 10,000 (84.2%)
+  Mean change:          +2.3%
+  Median change:        +1.8%
+  Premium impact:       +2.3%
+  Max increase:        +18.7%
+  Max decrease:         -4.2%
+
+  Distribution:  P5=-2.1%  P25=+0.5%  P50=+1.8%  P75=+3.4%  P95=+7.2%
+
+  ⚠ 147 quotes changed by more than ±25.0%
+  ✓ Average change (+2.3%) within ±10.0% threshold
+
+  Segment: Region
+  Value                   Rows    Avg Change   Stg Mean   Prod Mean
+  Ile-de-France           2,341       +4.1%     572.34       549.87
+  Picardie                  423       -0.3%     501.23       502.78
 ```
 
-In CI, this is posted as a PR comment. Reviewers see the pricing impact before approving.
+The report is:
+- **Always** written to `impact_report.md` (portable artifact for any CI platform)
+- **GitHub Actions**: additionally written to `$GITHUB_STEP_SUMMARY` for inline rendering on the workflow run page
+- **GitLab CI**: `impact_report.md` is collected as a pipeline artifact
 
-Threshold enforcement comes from `haute.toml [safety]`:
-- `max_single_quote_change_pct` - any individual quote
-- `max_avg_change_pct` - portfolio average
-- `block_on_threshold_breach` - hard block vs. warning
+Reviewers check the impact report before approving the production deployment. The report is informational — it does not block the pipeline, but the manual approval gate gives reviewers full control.
+
+For first-time deployments (no production endpoint exists yet), the report notes this and skips comparison.
+
+Threshold flags come from `haute.toml [safety]`:
+- `max_single_quote_change_pct` — flags quotes exceeding this individual change
+- `max_avg_change_pct` — flags when the portfolio average exceeds this
+- Segment breakdown auto-detects categorical input columns (2–50 unique values) and reports top segments by absolute average change
 
 ### 7.3 Approval Gates
 
@@ -577,7 +599,7 @@ haute init --target docker --ci none          # Docker, no CI (manual deploy onl
 No simplified flow. Insurance pricing carries risk regardless of team size. The full pipeline is non-negotiable:
 
 ```
-merge to main → validate → deploy staging → smoke test → [approval gate] → deploy production
+merge to main → validate → deploy staging → smoke test → impact analysis → [approval gate] → deploy production
 ```
 
 ### D3: `HAUTE_` env var overrides for environment-specific config
@@ -616,6 +638,7 @@ This keeps the deployment pipeline simple and ensures staging is a true replica 
 target = "databricks"          # one target, used for both staging and production
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
+ci_only_deploy = true             # blocks local deploys; only CI can deploy
 
 [ci.staging]
 endpoint_suffix = "-staging"   # deploys to "motor-pricing-staging"
@@ -640,7 +663,7 @@ min_approvers = 0
 
 And skips adding protection rules to the `production` GitHub environment.
 
-The full pipeline still runs identically - validate → staging → smoke test → production. The only difference is there's no pause for human approval. When the team grows, bump the values back up and add environment protection rules. No workflow regeneration needed.
+The full pipeline still runs identically - validate → staging → smoke test → impact analysis → production. The only difference is there's no pause for human approval. The impact report is still generated so the developer can review changes. When the team grows, bump the values back up and add environment protection rules. No workflow regeneration needed.
 
 ### D9: `pyproject.toml` extras
 
@@ -665,16 +688,15 @@ All design questions have been resolved. See §8 Decisions Made.
 
 | Phase | What | Depends on |
 |---|---|---|
-| **Now** | Finalise this design doc, resolve open questions | - |
-| **P1** | Expand `haute.toml` schema with `[safety]` and `[ci]` sections | Design finalised |
-| **P2** | `haute init` generates CI/CD workflow files based on `[ci].provider` | P1 |
-| **P3** | `haute impact` command + PR comment integration | P1 |
+| **P1** | Expand `haute.toml` schema with `[safety]` and `[ci]` sections | ✅ Done |
+| **P2** | `haute init` generates CI/CD workflow files based on `[ci].provider` | ✅ Done (GitHub + GitLab) |
+| **P3** | `haute impact` command + endpoint comparison + Step Summary | ✅ Done |
 | **P4** | Golden file test quotes (expected outputs with tolerance) | Existing tests/quotes infra |
 | **P5** | Docker deploy target (`_docker.py`) | Existing `ResolvedDeploy` |
 | **P6** | AWS SageMaker deploy target (`_sagemaker.py`) | P5 pattern |
 | **P7** | Azure ML deploy target (`_azure_ml.py`) | P5 pattern |
 | **P8** | `haute rollback` command | Deploy targets implemented |
-| **P9** | Azure DevOps + GitLab CI templates | P2 pattern |
+| **P9** | Azure DevOps CI template | P2 pattern |
 
 ---
 
@@ -686,4 +708,5 @@ All design questions have been resolved. See §8 Decisions Made.
 - **Docker is the universal target** - zero cloud dependencies, runs anywhere
 - **Merge to main = deploy** - every change is tested, reviewed, and impact-analysed before production
 - **`haute init --target <t> --ci <p>` scaffolds everything** - only the relevant config, credentials, and CI/CD workflows for the chosen target and provider
-- **No shortcuts** - every team gets staging → approval gate → production, regardless of size
+- **No shortcuts** - every team gets staging → impact analysis → approval gate → production, regardless of size
+- **`ci_only_deploy`** - optionally blocks all local deploys, ensuring pricing changes only go through CI/CD

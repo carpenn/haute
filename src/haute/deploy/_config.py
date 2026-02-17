@@ -62,6 +62,7 @@ class DeployConfig:
     databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ci: CIConfig = field(default_factory=CIConfig)
+    ci_only_deploy: bool = False
 
     @property
     def effective_endpoint_name(self) -> str | None:
@@ -99,6 +100,7 @@ class DeployConfig:
         model_name = deploy.get("model_name", project.get("name", pipeline_file.stem))
         endpoint_name = deploy.get("endpoint_name")
         target = deploy.get("target", "databricks")
+        ci_only_deploy = deploy.get("ci_only_deploy", False)
 
         output_fields_raw = deploy.get("output_fields")
         output_fields = list(output_fields_raw) if output_fields_raw else None
@@ -138,6 +140,7 @@ class DeployConfig:
             databricks=db_config,
             safety=safety_config,
             ci=ci_config,
+            ci_only_deploy=ci_only_deploy,
         )
 
         return _apply_env_overrides(config)

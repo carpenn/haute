@@ -1,0 +1,478 @@
+"""Impact analysis — compare staging vs production endpoint predictions."""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import polars as pl
+
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ColumnStats:
+    """Impact statistics for a single numeric output column."""
+
+    name: str
+    n_rows: int
+    n_changed: int
+    mean_change_pct: float
+    median_change_pct: float
+    max_increase_pct: float
+    max_decrease_pct: float
+    p5: float
+    p25: float
+    p75: float
+    p95: float
+    staging_mean: float
+    prod_mean: float
+    total_premium_change_pct: float
+
+
+@dataclass
+class SegmentRow:
+    """One row in a segment breakdown table."""
+
+    value: str
+    n_rows: int
+    mean_change_pct: float
+    staging_mean: float
+    prod_mean: float
+
+
+@dataclass
+class ImpactReport:
+    """Complete impact analysis result."""
+
+    pipeline_name: str
+    staging_endpoint: str
+    prod_endpoint: str
+    dataset_path: str
+    total_rows: int
+    sampled_rows: int
+    scored_rows: int
+    failed_rows: int
+    column_stats: list[ColumnStats]
+    segments: dict[str, list[SegmentRow]]
+    max_single_threshold: float
+    avg_threshold: float
+    n_above_single_threshold: int
+    is_first_deploy: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+_DEFAULT_BATCH_SIZE = 500
+
+
+def score_endpoint_batched(
+    ws: WorkspaceClient,
+    endpoint_name: str,
+    records: list[dict],
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+    progress: Callable[[str], None] | None = None,
+) -> list:
+    """Score records against a serving endpoint in batches."""
+    all_preds: list = []
+    n_batches = math.ceil(len(records) / batch_size)
+    for i in range(0, len(records), batch_size):
+        batch = records[i : i + batch_size]
+        num = i // batch_size + 1
+        if progress:
+            progress(f"    batch {num}/{n_batches}")
+        resp = ws.serving_endpoints.query(name=endpoint_name, dataframe_records=batch)
+        preds = resp.predictions
+        if isinstance(preds, list):
+            all_preds.extend(preds)
+        else:
+            all_preds.append(preds)
+    return all_preds
+
+
+def _preds_to_df(preds: list) -> pl.DataFrame:
+    """Normalise endpoint predictions into a Polars DataFrame."""
+    if not preds:
+        return pl.DataFrame()
+    first = preds[0]
+    if isinstance(first, dict):
+        return pl.DataFrame(preds)
+    if isinstance(first, (list, tuple)):
+        cols = [f"output_{i}" for i in range(len(first))]
+        return pl.DataFrame(preds, schema=cols, orient="row")
+    return pl.DataFrame({"prediction": preds})
+
+
+# ---------------------------------------------------------------------------
+# Analysis
+# ---------------------------------------------------------------------------
+
+_CHANGE_EPSILON = 1e-6
+
+
+def _column_stats(stg: pl.Series, prd: pl.Series, name: str) -> ColumnStats:
+    """Compute change statistics for one numeric output column."""
+    denom = prd.abs().clip(lower_bound=1e-12)
+    change = (stg - prd) / denom * 100
+    n = len(change)
+
+    s_sum = float(stg.sum())
+    p_sum = float(prd.sum())
+    total_pct = (s_sum - p_sum) / max(abs(p_sum), 1e-12) * 100
+
+    return ColumnStats(
+        name=name,
+        n_rows=n,
+        n_changed=int((change.abs() > _CHANGE_EPSILON).sum()) if n else 0,
+        mean_change_pct=float(change.mean()) if n else 0.0,
+        median_change_pct=float(change.median()) if n else 0.0,
+        max_increase_pct=float(change.max()) if n else 0.0,
+        max_decrease_pct=float(change.min()) if n else 0.0,
+        p5=float(change.quantile(0.05)) if n else 0.0,
+        p25=float(change.quantile(0.25)) if n else 0.0,
+        p75=float(change.quantile(0.75)) if n else 0.0,
+        p95=float(change.quantile(0.95)) if n else 0.0,
+        staging_mean=float(stg.mean()) if n else 0.0,
+        prod_mean=float(prd.mean()) if n else 0.0,
+        total_premium_change_pct=total_pct,
+    )
+
+
+def _segment_breakdown(
+    stg_df: pl.DataFrame,
+    prd_df: pl.DataFrame,
+    input_df: pl.DataFrame,
+    output_col: str,
+    top_n: int = 10,
+) -> dict[str, list[SegmentRow]]:
+    """Compute segment breakdown by categorical input columns."""
+    cat_cols = [
+        c
+        for c in input_df.columns
+        if input_df[c].dtype == pl.Utf8 and 2 <= input_df[c].n_unique() <= 50
+    ]
+    if not cat_cols or output_col not in stg_df.columns:
+        return {}
+
+    stg_vals = stg_df[output_col]
+    prd_vals = prd_df[output_col]
+    denom = prd_vals.abs().clip(lower_bound=1e-12)
+    change = (stg_vals - prd_vals) / denom * 100
+
+    result: dict[str, list[SegmentRow]] = {}
+    for col in cat_cols:
+        tmp = pl.DataFrame({"seg": input_df[col], "chg": change, "stg": stg_vals, "prd": prd_vals})
+        grp = (
+            tmp.group_by("seg")
+            .agg(
+                pl.col("chg").mean().alias("mean_chg"),
+                pl.col("stg").mean().alias("stg_mean"),
+                pl.col("prd").mean().alias("prd_mean"),
+                pl.len().alias("n"),
+            )
+            .filter(pl.col("n") >= 10)
+            .sort(pl.col("mean_chg").abs(), descending=True)
+            .head(top_n)
+        )
+        rows = [
+            SegmentRow(
+                value=str(r["seg"]),
+                n_rows=int(r["n"]),
+                mean_change_pct=float(r["mean_chg"]),
+                staging_mean=float(r["stg_mean"]),
+                prod_mean=float(r["prd_mean"]),
+            )
+            for r in grp.iter_rows(named=True)
+        ]
+        if rows:
+            result[col] = rows
+    return result
+
+
+_NUMERIC_DTYPES = frozenset(
+    {
+        pl.Float64,
+        pl.Float32,
+        pl.Int64,
+        pl.Int32,
+        pl.Int16,
+        pl.Int8,
+        pl.UInt64,
+        pl.UInt32,
+        pl.UInt16,
+        pl.UInt8,
+    }
+)
+
+
+def build_report(
+    staging_preds: list,
+    prod_preds: list,
+    input_df: pl.DataFrame,
+    *,
+    pipeline_name: str,
+    staging_endpoint: str,
+    prod_endpoint: str,
+    dataset_path: str,
+    total_rows: int,
+    max_single_pct: float,
+    avg_pct: float,
+) -> ImpactReport:
+    """Compare staging and production predictions and build an impact report."""
+    stg_df = _preds_to_df(staging_preds)
+    prd_df = _preds_to_df(prod_preds)
+
+    scored = min(len(stg_df), len(prd_df))
+    failed = len(input_df) - scored
+
+    if len(stg_df) != len(prd_df):
+        m = min(len(stg_df), len(prd_df))
+        stg_df = stg_df.head(m)
+        prd_df = prd_df.head(m)
+        input_df = input_df.head(m)
+
+    num_cols = [
+        c for c in stg_df.columns if stg_df[c].dtype in _NUMERIC_DTYPES and c in prd_df.columns
+    ]
+
+    stats = [_column_stats(stg_df[c], prd_df[c], c) for c in num_cols]
+
+    n_above = 0
+    for c in num_cols:
+        denom = prd_df[c].abs().clip(lower_bound=1e-12)
+        chg_abs = ((stg_df[c] - prd_df[c]) / denom * 100).abs()
+        n_above += int((chg_abs > max_single_pct).sum())
+
+    primary = num_cols[0] if num_cols else None
+    segments = (
+        _segment_breakdown(stg_df, prd_df, input_df, primary) if primary and scored > 0 else {}
+    )
+
+    return ImpactReport(
+        pipeline_name=pipeline_name,
+        staging_endpoint=staging_endpoint,
+        prod_endpoint=prod_endpoint,
+        dataset_path=dataset_path,
+        total_rows=total_rows,
+        sampled_rows=len(input_df),
+        scored_rows=scored,
+        failed_rows=failed,
+        column_stats=stats,
+        segments=segments,
+        max_single_threshold=max_single_pct,
+        avg_threshold=avg_pct,
+        n_above_single_threshold=n_above,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Formatters
+# ---------------------------------------------------------------------------
+
+
+def _fmt_pct(v: float) -> str:
+    sign = "+" if v > 0 else ""
+    return f"{sign}{v:.1f}%"
+
+
+def _fmt_num(v: float) -> str:
+    return f"{v:,.2f}"
+
+
+def _fmt_int(v: int) -> str:
+    return f"{v:,}"
+
+
+def format_terminal(report: ImpactReport) -> str:
+    """Produce a human-readable terminal report."""
+    w = 64
+    lines: list[str] = []
+    lines.append("=" * w)
+    lines.append("  IMPACT REPORT")
+    lines.append(f"  Pipeline:    {report.pipeline_name}")
+    lines.append(f"  Staging:     {report.staging_endpoint}  →  Production: {report.prod_endpoint}")
+    sample = ""
+    if report.sampled_rows < report.total_rows:
+        sample = f" ({_fmt_int(report.sampled_rows)} of {_fmt_int(report.total_rows)} sampled)"
+    lines.append(f"  Dataset:     {report.dataset_path}{sample}")
+    if report.failed_rows > 0:
+        lines.append(f"  ⚠ {_fmt_int(report.failed_rows)} rows failed to score")
+    lines.append("=" * w)
+
+    if report.is_first_deploy:
+        lines.append("")
+        lines.append("  First deployment — no production endpoint to compare.")
+        lines.append("  Staging predictions scored successfully.")
+        lines.append("")
+        return "\n".join(lines)
+
+    for cs in report.column_stats:
+        lines.append("")
+        lines.append(f"  Output: {cs.name}")
+        lines.append("  " + "─" * (w - 4))
+        lines.append(
+            f"  Staging mean:    {_fmt_num(cs.staging_mean):>12}"
+            f"     Production mean: {_fmt_num(cs.prod_mean)}"
+        )
+        pct_changed = cs.n_changed / max(cs.n_rows, 1) * 100
+        lines.append(
+            f"  Rows changed:    {_fmt_int(cs.n_changed):>12}"
+            f" / {_fmt_int(cs.n_rows)} ({pct_changed:.1f}%)"
+        )
+        lines.append(f"  Mean change:     {_fmt_pct(cs.mean_change_pct):>12}")
+        lines.append(f"  Median change:   {_fmt_pct(cs.median_change_pct):>12}")
+        lines.append(f"  Premium impact:  {_fmt_pct(cs.total_premium_change_pct):>12}")
+        lines.append(f"  Max increase:    {_fmt_pct(cs.max_increase_pct):>12}")
+        lines.append(f"  Max decrease:    {_fmt_pct(cs.max_decrease_pct):>12}")
+        lines.append("")
+        lines.append(
+            f"  Distribution:  P5={_fmt_pct(cs.p5)}  P25={_fmt_pct(cs.p25)}"
+            f"  P50={_fmt_pct(cs.median_change_pct)}"
+            f"  P75={_fmt_pct(cs.p75)}  P95={_fmt_pct(cs.p95)}"
+        )
+
+    lines.append("")
+    # Threshold flags
+    if report.n_above_single_threshold > 0:
+        lines.append(
+            f"  ⚠ {_fmt_int(report.n_above_single_threshold)} quotes changed"
+            f" by more than ±{report.max_single_threshold:.1f}%"
+        )
+    else:
+        lines.append(f"  ✓ No quotes changed by more than ±{report.max_single_threshold:.1f}%")
+    for cs in report.column_stats:
+        avg = abs(cs.mean_change_pct)
+        if avg > report.avg_threshold:
+            lines.append(
+                f"  ⚠ Average change for '{cs.name}'"
+                f" ({_fmt_pct(cs.mean_change_pct)}) exceeds"
+                f" ±{report.avg_threshold:.1f}% threshold"
+            )
+        else:
+            lines.append(
+                f"  ✓ Average change for '{cs.name}'"
+                f" ({_fmt_pct(cs.mean_change_pct)}) within"
+                f" ±{report.avg_threshold:.1f}% threshold"
+            )
+
+    for col_name, seg_rows in report.segments.items():
+        lines.append("")
+        lines.append(f"  Segment: {col_name}")
+        hdr = (
+            f"  {'Value':<20} {'Rows':>8}  {'Avg Change':>12}  {'Stg Mean':>12}  {'Prod Mean':>12}"
+        )
+        lines.append(hdr)
+        lines.append(f"  {'─' * 20} {'─' * 8}  {'─' * 12}  {'─' * 12}  {'─' * 12}")
+        for sr in seg_rows:
+            lines.append(
+                f"  {sr.value:<20} {_fmt_int(sr.n_rows):>8}"
+                f"  {_fmt_pct(sr.mean_change_pct):>12}"
+                f"  {_fmt_num(sr.staging_mean):>12}"
+                f"  {_fmt_num(sr.prod_mean):>12}"
+            )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_markdown(report: ImpactReport) -> str:
+    """Produce a Markdown report suitable for GitHub Step Summary."""
+    lines: list[str] = []
+    lines.append("# Impact Report")
+    lines.append("")
+    lines.append(f"**Pipeline:** {report.pipeline_name}  ")
+    lines.append(
+        f"**Staging:** `{report.staging_endpoint}` → **Production:** `{report.prod_endpoint}`  "
+    )
+    sample = ""
+    if report.sampled_rows < report.total_rows:
+        sample = f" ({report.sampled_rows:,} of {report.total_rows:,} sampled)"
+    lines.append(f"**Dataset:** `{report.dataset_path}`{sample}  ")
+    if report.failed_rows > 0:
+        lines.append(f"⚠️ **{report.failed_rows:,} rows** failed to score  ")
+
+    if report.is_first_deploy:
+        lines.append("")
+        lines.append(
+            "> First deployment — no production endpoint to compare."
+            " Staging predictions scored successfully."
+        )
+        lines.append("")
+        return "\n".join(lines)
+
+    for cs in report.column_stats:
+        pct_changed = cs.n_changed / max(cs.n_rows, 1) * 100
+        lines.append("")
+        lines.append(f"## Output: `{cs.name}`")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|------:|")
+        lines.append(f"| Staging mean | {_fmt_num(cs.staging_mean)} |")
+        lines.append(f"| Production mean | {_fmt_num(cs.prod_mean)} |")
+        lines.append(f"| Rows changed | {cs.n_changed:,} / {cs.n_rows:,} ({pct_changed:.1f}%) |")
+        lines.append(f"| Mean change | {_fmt_pct(cs.mean_change_pct)} |")
+        lines.append(f"| Median change | {_fmt_pct(cs.median_change_pct)} |")
+        lines.append(f"| Total premium impact | {_fmt_pct(cs.total_premium_change_pct)} |")
+        lines.append(f"| Max increase | {_fmt_pct(cs.max_increase_pct)} |")
+        lines.append(f"| Max decrease | {_fmt_pct(cs.max_decrease_pct)} |")
+        lines.append("")
+        lines.append("**Distribution:**")
+        lines.append("")
+        lines.append("| P5 | P25 | P50 | P75 | P95 |")
+        lines.append("|---:|----:|----:|----:|----:|")
+        lines.append(
+            f"| {_fmt_pct(cs.p5)} | {_fmt_pct(cs.p25)}"
+            f" | {_fmt_pct(cs.median_change_pct)}"
+            f" | {_fmt_pct(cs.p75)} | {_fmt_pct(cs.p95)} |"
+        )
+
+    lines.append("")
+    lines.append("## Threshold Check")
+    lines.append("")
+    if report.n_above_single_threshold > 0:
+        lines.append(
+            f"- ⚠️ **{report.n_above_single_threshold:,} quotes** changed"
+            f" by more than ±{report.max_single_threshold:.1f}%"
+        )
+    else:
+        lines.append(f"- ✅ No quotes changed by more than ±{report.max_single_threshold:.1f}%")
+    for cs in report.column_stats:
+        avg = abs(cs.mean_change_pct)
+        if avg > report.avg_threshold:
+            lines.append(
+                f"- ⚠️ Average change for `{cs.name}`"
+                f" ({_fmt_pct(cs.mean_change_pct)}) exceeds"
+                f" ±{report.avg_threshold:.1f}% threshold"
+            )
+        else:
+            lines.append(
+                f"- ✅ Average change for `{cs.name}`"
+                f" ({_fmt_pct(cs.mean_change_pct)}) within"
+                f" ±{report.avg_threshold:.1f}% threshold"
+            )
+
+    for col_name, seg_rows in report.segments.items():
+        lines.append("")
+        lines.append(f"### Segment: {col_name}")
+        lines.append("")
+        lines.append("| Segment | Rows | Avg Change | Staging Mean | Prod Mean |")
+        lines.append("|---------|-----:|-----------:|-------------:|----------:|")
+        for sr in seg_rows:
+            lines.append(
+                f"| {sr.value} | {sr.n_rows:,}"
+                f" | {_fmt_pct(sr.mean_change_pct)}"
+                f" | {_fmt_num(sr.staging_mean)}"
+                f" | {_fmt_num(sr.prod_mean)} |"
+            )
+
+    lines.append("")
+    return "\n".join(lines)

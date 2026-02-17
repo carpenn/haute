@@ -142,15 +142,26 @@ class TestGithubDeployYml:
         assert "secrets.SAGEMAKER_ROLE_ARN" in result
         assert "secrets.DATABRICKS_HOST" not in result
 
-    def test_contains_staging_and_production(self) -> None:
+    def test_contains_staging_and_impact(self) -> None:
         result = github_deploy_yml("databricks")
         assert "deploy-staging:" in result
-        assert "deploy-production:" in result
         assert "smoke-test:" in result
+        assert "impact-analysis:" in result
+        assert "deploy-production:" not in result
 
-    def test_production_uses_environment(self) -> None:
-        result = github_deploy_yml("databricks")
-        assert "name: production" in result
+    def test_deploy_prod_yml_contains_production(self) -> None:
+        from haute._scaffold import github_deploy_prod_yml
+
+        result = github_deploy_prod_yml("databricks")
+        assert "deploy-production:" in result
+        assert "workflow_dispatch" in result
+        assert "secrets.DATABRICKS_HOST" in result
+
+    def test_deploy_prod_yml_tags_release(self) -> None:
+        from haute._scaffold import github_deploy_prod_yml
+
+        result = github_deploy_prod_yml("databricks")
+        assert "Tag release" in result
 
     def test_triggers_on_push_to_main(self) -> None:
         result = github_deploy_yml("databricks")

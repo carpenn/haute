@@ -58,7 +58,7 @@ def _find_frontend_dir() -> Path | None:
 )
 @click.option(
     "--ci",
-    type=click.Choice(["github", "none"]),
+    type=click.Choice(["github", "gitlab", "none"]),
     default="github",
     help="CI/CD provider (default: github).",
 )
@@ -80,7 +80,9 @@ def init(target: str, ci: str) -> None:
     from haute._scaffold import (
         env_example,
         github_ci_yml,
+        github_deploy_prod_yml,
         github_deploy_yml,
+        gitlab_ci_yml,
         haute_toml,
         pre_commit_hook,
         starter_pipeline,
@@ -145,11 +147,25 @@ def init(target: str, ci: str) -> None:
         workflows_dir = project_dir / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
         (workflows_dir / "ci.yml").write_text(github_ci_yml(), encoding="utf-8")
-        (workflows_dir / "deploy.yml").write_text(
+        (workflows_dir / "deploy-staging.yml").write_text(
             github_deploy_yml(target),
             encoding="utf-8",
         )
-        ci_files = [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]
+        (workflows_dir / "deploy-production.yml").write_text(
+            github_deploy_prod_yml(target),
+            encoding="utf-8",
+        )
+        ci_files = [
+            ".github/workflows/ci.yml",
+            ".github/workflows/deploy-staging.yml",
+            ".github/workflows/deploy-production.yml",
+        ]
+    elif ci == "gitlab":
+        (project_dir / ".gitlab-ci.yml").write_text(
+            gitlab_ci_yml(target),
+            encoding="utf-8",
+        )
+        ci_files = [".gitlab-ci.yml"]
 
     # ── Pre-commit hook ───────────────────────────────────────────
     hooks_dir = project_dir / ".githooks"
@@ -167,7 +183,7 @@ def init(target: str, ci: str) -> None:
 
     # ── .gitignore - append if exists, create if not ──────────────
     gitignore_path = project_dir / ".gitignore"
-    haute_entries = ".env\n*.haute.json\n"
+    haute_entries = ".env\n*.haute.json\nimpact_report.md\n"
     if gitignore_path.exists():
         existing = gitignore_path.read_text()
         missing = [line for line in haute_entries.splitlines() if line and line not in existing]
@@ -425,6 +441,8 @@ def deploy(
     Pipeline file, model name, and target are all optional -
     defaults come from [project] and [deploy] in haute.toml.
     """
+    import os
+
     from haute.deploy._config import DeployConfig, resolve_config
     from haute.deploy._validators import score_test_quotes, validate_deploy
 
@@ -441,6 +459,18 @@ def deploy(
     else:
         click.echo(
             "Error: No haute.toml found and no pipeline file specified.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    # Block local deploys when ci_only_deploy is enabled
+    if config.ci_only_deploy and not dry_run and not os.environ.get("CI"):
+        click.echo(
+            "Error: Deploys are restricted to CI/CD (ci_only_deploy = true in haute.toml).",
+            err=True,
+        )
+        click.echo(
+            "  Use --dry-run to validate locally without deploying.",
             err=True,
         )
         raise SystemExit(1)
@@ -780,3 +810,178 @@ def smoke(endpoint_suffix: str | None) -> None:
         raise SystemExit(1)
 
     click.echo("\n  ✓ All smoke tests passed.")
+
+
+@cli.command()
+@click.option(
+    "--endpoint-suffix",
+    default=None,
+    help='Suffix identifying the staging endpoint (e.g. "-staging").',
+)
+@click.option(
+    "--sample",
+    default=10000,
+    type=int,
+    help="Max rows to score (0 = all). Default: 10000.",
+)
+@click.option(
+    "--batch-size",
+    default=500,
+    type=int,
+    help="Rows per endpoint request. Default: 500.",
+)
+def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
+    """Compare staging vs production endpoint predictions.
+
+    Scores the safety impact dataset through both the staging and production
+    endpoints, computes pricing change metrics, and writes a report.
+    Output goes to stdout (terminal) and to $GITHUB_STEP_SUMMARY when
+    running in GitHub Actions so reviewers can inspect before approving
+    the production deployment.
+    """
+    import os
+
+    from haute.deploy._config import DeployConfig, _load_env
+    from haute.deploy._impact import (
+        ImpactReport,
+        build_report,
+        format_markdown,
+        format_terminal,
+        score_endpoint_batched,
+    )
+
+    toml_path = Path.cwd() / "haute.toml"
+    if not toml_path.exists():
+        click.echo("Error: No haute.toml found.", err=True)
+        raise SystemExit(1)
+
+    config = DeployConfig.from_toml(toml_path)
+
+    # Determine endpoint names
+    staging_suffix = endpoint_suffix or config.ci.staging_endpoint_suffix
+    base_name = config.endpoint_name or config.model_name
+    staging_name = base_name + staging_suffix
+    prod_name = base_name
+
+    # Load impact dataset
+    impact_path = config.safety.impact_dataset
+    if not impact_path:
+        click.echo(
+            "Error: No impact_dataset configured in [safety] section of haute.toml.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    import polars as pl
+
+    dataset_file = (toml_path.parent / impact_path).resolve()
+    if not dataset_file.exists():
+        click.echo(f"Error: Impact dataset not found: {dataset_file}", err=True)
+        raise SystemExit(1)
+
+    df = pl.read_parquet(dataset_file)
+    total_rows = len(df)
+
+    if sample > 0 and total_rows > sample:
+        df = df.sample(n=sample, seed=42)
+
+    records = df.to_dicts()
+
+    click.echo(f"Impact analysis: {staging_name} vs {prod_name}")
+    click.echo(f"  Dataset: {impact_path} ({len(records):,} rows)")
+
+    # Connect to Databricks
+    if config.target != "databricks":
+        click.echo(
+            f"  ⚠ Impact analysis not yet implemented for target '{config.target}'.",
+            err=True,
+        )
+        return
+
+    try:
+        from databricks.sdk import WorkspaceClient
+    except ImportError:
+        click.echo(
+            "Error: databricks-sdk not installed. Install with: uv add haute[databricks]",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    _load_env(Path.cwd())
+    ws = WorkspaceClient()
+
+    # Check if prod endpoint exists
+    prod_exists = True
+    try:
+        ws.serving_endpoints.get(prod_name)
+    except Exception as exc:
+        # databricks.sdk.errors.NotFound is the expected error for missing
+        # endpoints, but we also tolerate network errors during the probe.
+        exc_name = type(exc).__name__
+        if exc_name in ("NotFound", "ResourceDoesNotExist"):
+            click.echo(
+                f"  First deployment — production endpoint '{prod_name}' not found"
+            )
+        else:
+            click.echo(
+                f"  ⚠ Could not reach production endpoint '{prod_name}': {exc}"
+            )
+        prod_exists = False
+
+    # Score staging
+    click.echo(f"  Scoring through staging ({staging_name})...")
+    staging_preds = score_endpoint_batched(ws, staging_name, records, batch_size, click.echo)
+
+    if prod_exists:
+        click.echo(f"  Scoring through production ({prod_name})...")
+        prod_preds = score_endpoint_batched(ws, prod_name, records, batch_size, click.echo)
+    else:
+        prod_preds = []
+
+    # Build report
+    if not prod_exists:
+        report = ImpactReport(
+            pipeline_name=config.model_name,
+            staging_endpoint=staging_name,
+            prod_endpoint=prod_name,
+            dataset_path=impact_path,
+            total_rows=total_rows,
+            sampled_rows=len(records),
+            scored_rows=len(staging_preds),
+            failed_rows=len(records) - len(staging_preds),
+            column_stats=[],
+            segments={},
+            max_single_threshold=config.safety.max_single_quote_change_pct,
+            avg_threshold=config.safety.max_avg_change_pct,
+            n_above_single_threshold=0,
+            is_first_deploy=True,
+        )
+    else:
+        report = build_report(
+            staging_preds=staging_preds,
+            prod_preds=prod_preds,
+            input_df=df,
+            pipeline_name=config.model_name,
+            staging_endpoint=staging_name,
+            prod_endpoint=prod_name,
+            dataset_path=impact_path,
+            total_rows=total_rows,
+            max_single_pct=config.safety.max_single_quote_change_pct,
+            avg_pct=config.safety.max_avg_change_pct,
+        )
+
+    # Print terminal report
+    click.echo(format_terminal(report))
+
+    # Always write portable markdown artifact (works on any CI platform)
+    md = format_markdown(report)
+    report_path = Path.cwd() / "impact_report.md"
+    report_path.write_text(md, encoding="utf-8")
+    click.echo(f"  → Report written to {report_path}")
+
+    # Platform-specific CI summary integration
+    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_summary:
+        with open(github_summary, "a") as f:
+            f.write(md)
+        click.echo("  → Report written to GitHub Step Summary")

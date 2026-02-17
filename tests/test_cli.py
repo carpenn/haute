@@ -230,7 +230,8 @@ class TestInit:
         result = runner.invoke(cli, ["init", "--ci", "github"], catch_exceptions=False)
         assert result.exit_code == 0, result.output
         assert (tmp_path / ".github" / "workflows" / "ci.yml").exists()
-        assert (tmp_path / ".github" / "workflows" / "deploy.yml").exists()
+        assert (tmp_path / ".github" / "workflows" / "deploy-staging.yml").exists()
+        assert (tmp_path / ".github" / "workflows" / "deploy-production.yml").exists()
 
     def test_ci_none_skips_workflows(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
