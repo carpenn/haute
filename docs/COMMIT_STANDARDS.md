@@ -36,6 +36,16 @@ The parser accepts messy, hand-edited Python - regex fallback, partial decorator
 
 Haute is a client library that leans on Databricks, MLflow, and Polars. It does not reimplement model training, data storage, or serving infrastructure. New integrations should wrap existing tools, not replace them.
 
+### Performance is non-negotiable
+
+The GUI must feel instant. Every change — adding nodes, dragging, connecting edges, undo/redo — must complete without perceptible lag, even with large pipelines. Backend calls (preview, run) are inherently async, but the UI thread must never block on them. Specific rules:
+
+- **No unnecessary re-renders.** Memoize components, callbacks, and derived data (`memo`, `useMemo`, `useCallback`). Never create new objects/arrays in render that could be stable references.
+- **No unnecessary network calls.** Don't fetch preview data on multi-select, drag, or any interaction where the user isn't asking for data. Batch where possible.
+- **Keep the history stack cheap.** Undo/redo snapshots are plain JSON references, not deep clones. Position-only drags batch into a single snapshot, not one per pixel.
+- **Lazy by default.** Polars `LazyFrame` stays lazy until the last moment. Preview limits rows. Large datasets never load fully into the frontend.
+- **Profile before optimising.** Don't add complexity for hypothetical performance. But if a real interaction feels slow, fix it before shipping.
+
 ### Low floor, high ceiling
 
 A pricing analyst with no engineering background can drag nodes and connect them in the GUI. A senior engineer can write raw Polars expressions, custom decorators, and deploy via CI/CD. Both use the same tool. Features should serve the analyst by default and get out of the engineer's way.
@@ -268,6 +278,7 @@ Design Philosophy
 - [ ] Generated code is clean, idiomatic, ruff-passing Python
 - [ ] No unnecessary abstraction layers or platform reimplementation
 - [ ] All outputs are traceable back through the graph
+- [ ] GUI interactions feel instant - no unnecessary re-renders, network calls, or blocking
 
 Engineering Standards
 - [ ] No duplicated logic

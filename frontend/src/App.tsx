@@ -3,9 +3,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
+  SelectionMode,
   type Node,
   type Edge,
   type OnConnect,
@@ -23,7 +22,9 @@ import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
-import { PanelLeftOpen, Settings } from "lucide-react"
+import KeyboardShortcuts from "./components/KeyboardShortcuts"
+import useUndoRedo from "./hooks/useUndoRedo"
+import { PanelLeftOpen, Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
 
 const nodeTypes = {
   dataSource: PipelineNode,
@@ -100,8 +101,13 @@ async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise<Node[]
 }
 
 function FlowEditor() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const {
+    nodes, edges,
+    setNodes, setEdges,
+    setNodesRaw, setEdgesRaw,
+    onNodesChange, onEdgesChange,
+    undo, redo, canUndo, canRedo,
+  } = useUndoRedo()
   const [loading, setLoading] = useState(true)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
@@ -115,6 +121,9 @@ function FlowEditor() {
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [preamble, setPreamble] = useState("")
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [snapToGrid, setSnapToGrid] = useState(false)
+  const clipboard = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const lastSavedRef = useRef<string>("")
   const preambleRef = useRef("")
@@ -169,12 +178,12 @@ function FlowEditor() {
             )
 
             if (hasPositions) {
-              setNodes(newNodes)
+              setNodesRaw(newNodes)
             } else {
               const layouted = await getLayoutedElements(newNodes, newEdges)
-              setNodes(layouted)
+              setNodesRaw(layouted)
             }
-            setEdges(newEdges)
+            setEdgesRaw(newEdges)
             if (g.preamble !== undefined) {
               setPreamble(g.preamble || "")
               preambleRef.current = g.preamble || ""
@@ -208,7 +217,7 @@ function FlowEditor() {
       if (reconnectTimer) clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [setNodes, setEdges, fitView, addToast])
+  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
 
   useEffect(() => {
     fetch("/api/pipeline")
@@ -218,8 +227,8 @@ function FlowEditor() {
         return res.json()
       })
       .then((data) => {
-        setNodes(data.nodes || [])
-        setEdges((data.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        setNodesRaw(data.nodes || [])
+        setEdgesRaw((data.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
         if (data.preamble !== undefined) {
           setPreamble(data.preamble || "")
           preambleRef.current = data.preamble || ""
@@ -239,7 +248,7 @@ function FlowEditor() {
         // Start with blank canvas even on error
         setLoading(false)
       })
-  }, [setNodes, setEdges])
+  }, [setNodesRaw, setEdgesRaw])
 
   const onConnect: OnConnect = useCallback(
     (params) => {
@@ -293,8 +302,10 @@ function FlowEditor() {
         }
         return node
       })
-    } else if (selectedNodes.length === 0) {
+    } else {
+      // Multi-select or deselect — clear panel and don't fetch preview
       setSelectedNode(null)
+      setPreviewData(null)
     }
   }, [fetchPreview])
 
@@ -387,16 +398,113 @@ function FlowEditor() {
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))
   }, [setEdges])
 
+  const toggleSnapToGrid = useCallback(() => {
+    setSnapToGrid((prev) => {
+      addToast("info", !prev ? "Snap to grid ON" : "Snap to grid OFF")
+      return !prev
+    })
+  }, [addToast])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const isTyping = tag === "INPUT" || tag === "TEXTAREA"
+      const mod = e.ctrlKey || e.metaKey
 
       // Ctrl+S / Cmd+S → save
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      if (mod && e.key === "s") {
         e.preventDefault()
         handleSave()
+        return
+      }
+
+      // Ctrl+Z → undo, Ctrl+Shift+Z → redo
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if (mod && e.key === "z" && e.shiftKey) {
+        e.preventDefault()
+        redo()
+        return
+      }
+      // Ctrl+Y → redo (Windows convention)
+      if (mod && e.key === "y") {
+        e.preventDefault()
+        redo()
+        return
+      }
+
+      // Ctrl+C → copy selected nodes
+      if (mod && e.key === "c" && !isTyping) {
+        const { nodes: currentNodes, edges: currentEdges } = graphRef.current
+        const selected = currentNodes.filter((n) => n.selected)
+        if (selected.length === 0) return
+        const selectedIds = new Set(selected.map((n) => n.id))
+        const internalEdges = currentEdges.filter(
+          (ed) => selectedIds.has(ed.source) && selectedIds.has(ed.target)
+        )
+        clipboard.current = { nodes: selected, edges: internalEdges }
+        addToast("info", `Copied ${selected.length} node${selected.length > 1 ? "s" : ""}`)
+        return
+      }
+
+      // Ctrl+V → paste copied nodes
+      if (mod && e.key === "v" && !isTyping) {
+        const { nodes: copiedNodes, edges: copiedEdges } = clipboard.current
+        if (copiedNodes.length === 0) return
+        e.preventDefault()
+        const idMap = new Map<string, string>()
+        const newNodes: Node[] = copiedNodes.map((n) => {
+          nodeIdCounter.current += 1
+          const newId = `${n.type}_${nodeIdCounter.current}`
+          idMap.set(n.id, newId)
+          return {
+            ...n,
+            id: newId,
+            position: { x: n.position.x + 60, y: n.position.y + 60 },
+            selected: true,
+            data: { ...n.data, label: `${n.data.label} copy` },
+          }
+        })
+        const newEdges: Edge[] = copiedEdges.flatMap((ed) => {
+          const newSource = idMap.get(ed.source)
+          const newTarget = idMap.get(ed.target)
+          if (!newSource || !newTarget) return []
+          return [{ ...ed, id: `e-${newSource}-${newTarget}`, source: newSource, target: newTarget }]
+        })
+        setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
+        setEdges((eds) => [...eds, ...newEdges])
+        addToast("info", `Pasted ${newNodes.length} node${newNodes.length > 1 ? "s" : ""}`)
+        return
+      }
+
+      // Ctrl+A → select all nodes
+      if (mod && e.key === "a" && !isTyping) {
+        e.preventDefault()
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
+        return
+      }
+
+      // Ctrl+1 → fit view
+      if (mod && e.key === "1") {
+        e.preventDefault()
+        fitView({ padding: 0.8 })
+        return
+      }
+
+      // ? → toggle keyboard shortcuts help (unless typing)
+      if (e.key === "?" && !isTyping) {
+        e.preventDefault()
+        setShortcutsOpen((prev) => !prev)
+        return
+      }
+
+      // G → toggle snap-to-grid (unless typing)
+      if (e.key === "g" && !isTyping && !mod) {
+        toggleSnapToGrid()
         return
       }
 
@@ -418,7 +526,7 @@ function FlowEditor() {
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [handleSave, setNodes, setEdges])
+  }, [handleSave, setNodes, setEdges, undo, redo, fitView, addToast])
 
   const handleDeleteNode = useCallback((id: string) => {
     const { nodes: n, edges: e } = graphRef.current
@@ -545,6 +653,53 @@ function FlowEditor() {
           <span className="text-[12px] mr-2" style={{ color: 'var(--text-muted)' }}>
             {nodes.length} nodes · {edges.length} edges
           </span>
+          {/* Undo / Redo */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className="p-1.5 rounded-md transition-colors disabled:opacity-20"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 size={14} />
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className="p-1.5 rounded-md transition-colors disabled:opacity-20"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+            title="Redo (Ctrl+Shift+Z)"
+          >
+            <Redo2 size={14} />
+          </button>
+          <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
+          {/* Snap to grid */}
+          <button
+            onClick={toggleSnapToGrid}
+            className="p-1.5 rounded-md transition-colors"
+            style={{ color: snapToGrid ? 'var(--accent)' : 'var(--text-secondary)', background: snapToGrid ? 'var(--accent-soft)' : 'transparent' }}
+            onMouseEnter={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
+            onMouseLeave={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
+            title="Toggle snap-to-grid (G)"
+          >
+            <Grid3X3 size={14} />
+          </button>
+          {/* Keyboard shortcuts */}
+          <button
+            onClick={() => setShortcutsOpen(true)}
+            className="p-1.5 rounded-md transition-colors"
+            style={{ color: 'var(--text-secondary)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard size={14} />
+          </button>
+          <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
           <div className="flex items-center gap-1 mr-1" title="Row limit for preview (0 = no limit)">
             <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
             <input
@@ -640,6 +795,10 @@ function FlowEditor() {
               onDragOver={onDragOver}
               nodeTypes={nodeTypes}
               selectNodesOnDrag={false}
+              selectionMode={SelectionMode.Partial}
+              selectionKeyCode={"Shift"}
+              snapToGrid={snapToGrid}
+              snapGrid={[20, 20]}
               fitView
               fitViewOptions={{ padding: 0.8 }}
               proOptions={{ hideAttribution: true }}
@@ -650,7 +809,7 @@ function FlowEditor() {
                 markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.15)' },
               }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="rgba(255,255,255,.06)" />
+              <Background variant={BackgroundVariant.Dots} gap={snapToGrid ? 20 : 24} size={1} color={snapToGrid ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.06)"} />
             </ReactFlow>
           </div>
 
@@ -743,6 +902,8 @@ function FlowEditor() {
           </div>
         </div>
       )}
+
+      {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)} />}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

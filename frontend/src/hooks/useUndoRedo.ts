@@ -1,0 +1,146 @@
+import { useCallback, useRef } from "react"
+import {
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+  type NodeChange,
+  type EdgeChange,
+} from "@xyflow/react"
+
+export interface UndoRedoState {
+  nodes: Node[]
+  edges: Edge[]
+}
+
+const MAX_HISTORY = 100
+
+/**
+ * Drop-in replacement for useNodesState + useEdgesState that adds undo/redo.
+ *
+ * Records a snapshot whenever nodes or edges change via a "structural" action
+ * (add, remove, connect, data update) but NOT for position-only drags —
+ * those are batched: a snapshot is only pushed when dragging ends.
+ */
+export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edge[] = []) {
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>(initialNodes)
+  const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>(initialEdges)
+
+  const past = useRef<UndoRedoState[]>([])
+  const future = useRef<UndoRedoState[]>([])
+
+  // Keep a live ref so we can read current state without re-renders
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  nodesRef.current = nodes
+  edgesRef.current = edges
+
+  const pushSnapshot = useCallback(() => {
+    past.current = [
+      ...past.current.slice(-(MAX_HISTORY - 1)),
+      { nodes: nodesRef.current, edges: edgesRef.current },
+    ]
+    future.current = []
+  }, [])
+
+  // Wrap onNodesChange to detect structural changes vs drag
+  const isDragging = useRef(false)
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const hasStructural = changes.some(
+        (c) => c.type === "add" || c.type === "remove" || c.type === "replace"
+      )
+      const hasDragStart = changes.some(
+        (c) => c.type === "position" && c.dragging === true
+      )
+      const hasDragEnd = changes.some(
+        (c) => c.type === "position" && c.dragging === false
+      )
+
+      // Push snapshot before a structural change
+      if (hasStructural) {
+        pushSnapshot()
+      }
+
+      // Push snapshot at drag start (so we can undo back to pre-drag position)
+      if (hasDragStart && !isDragging.current) {
+        isDragging.current = true
+        pushSnapshot()
+      }
+
+      if (hasDragEnd) {
+        isDragging.current = false
+      }
+
+      onNodesChangeBase(changes)
+    },
+    [onNodesChangeBase, pushSnapshot],
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const hasStructural = changes.some(
+        (c) => c.type === "add" || c.type === "remove" || c.type === "replace"
+      )
+      if (hasStructural) {
+        pushSnapshot()
+      }
+      onEdgesChangeBase(changes)
+    },
+    [onEdgesChangeBase, pushSnapshot],
+  )
+
+  // Wrapped setNodes/setEdges that push snapshots
+  const setNodesWithHistory = useCallback(
+    (updater: Node[] | ((nds: Node[]) => Node[])) => {
+      pushSnapshot()
+      setNodes(updater)
+    },
+    [setNodes, pushSnapshot],
+  )
+
+  const setEdgesWithHistory = useCallback(
+    (updater: Edge[] | ((eds: Edge[]) => Edge[])) => {
+      pushSnapshot()
+      setEdges(updater)
+    },
+    [setEdges, pushSnapshot],
+  )
+
+  const undo = useCallback(() => {
+    const prev = past.current.pop()
+    if (!prev) return
+    future.current.push({ nodes: nodesRef.current, edges: edgesRef.current })
+    setNodes(prev.nodes)
+    setEdges(prev.edges)
+  }, [setNodes, setEdges])
+
+  const redo = useCallback(() => {
+    const next = future.current.pop()
+    if (!next) return
+    past.current.push({ nodes: nodesRef.current, edges: edgesRef.current })
+    setNodes(next.nodes)
+    setEdges(next.edges)
+  }, [setNodes, setEdges])
+
+  const canUndo = past.current.length > 0
+  const canRedo = future.current.length > 0
+
+  return {
+    nodes,
+    edges,
+    setNodes: setNodesWithHistory,
+    setEdges: setEdgesWithHistory,
+    // Raw setters that bypass history (for loading / external sync)
+    setNodesRaw: setNodes,
+    setEdgesRaw: setEdges,
+    onNodesChange,
+    onEdgesChange,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    pushSnapshot,
+  }
+}

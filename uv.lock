@@ -783,6 +783,7 @@ name = "haute"
 version = "0.1.24"
 source = { editable = "." }
 dependencies = [
+    { name = "catboost" },
     { name = "click" },
     { name = "fastapi" },
     { name = "libcst" },
@@ -816,6 +817,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "catboost", specifier = ">=1.2.8" },
     { name = "catboost", marker = "extra == 'catboost'", specifier = ">=1.2.8" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },

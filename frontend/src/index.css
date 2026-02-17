@@ -81,6 +81,15 @@ html, body, #root {
 .react-flow__edge-path {
   stroke-width: 1.5 !important;
 }
+/* Hide the blue selection rectangle - selected nodes show via their own borders */
+.react-flow__selection {
+  background: transparent !important;
+  border: 1px dashed rgba(255,255,255,.15) !important;
+}
+.react-flow__nodesselection-rect {
+  background: transparent !important;
+  border: none !important;
+}
 .react-flow__background {
   background: var(--bg-canvas) !important;
 }
