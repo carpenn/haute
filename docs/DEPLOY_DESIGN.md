@@ -1,88 +1,103 @@
-# Haute Deploy - Design & Implementation Plan
+# Haute Deploy — Design Document
 
-**Status:** Implemented (v0.1.24)  
-**Scope:** Phase 3 - Deploy & Score  
+**Status:** Databricks target implemented (v0.1.24). Container (FastAPI) target designed, not yet implemented.  
+**Scope:** Deploy targets, configuration, CI/CD, safety gates, technical design  
 
 ---
 
-## 1. Problem Statement
+## 1. Problem
 
-A pricing analyst has built a pipeline in Haute (e.g. `my_pipeline.py`). They need to deploy it as a **live API** so that policy admin systems can send a JSON quote request and receive a priced response - with one command, no DevOps, no manual packaging.
+A pricing team builds a pipeline in Haute. They need to deploy it as a **live scoring API** so policy admin systems can send a JSON quote and receive a premium — with one command, no DevOps.
 
-The full pipeline typically contains branches that are irrelevant for live scoring (training data joins, data exports, exploratory sinks). The deployment must **prune** to only the scoring path: input → models → premium → output.
+Haute deploys a **pricing API**, not an ML model in the MLOps sense. The pipeline takes quote data in, runs it through a graph of transforms and models, and returns a premium. Models (CatBoost, GLMs) are internal nodes — the deployed artefact is the entire pipeline.
 
-### Current pipeline example
+The insurance industry adds a hard constraint: **a single wrong factor can misprice millions of pounds of premium before anyone notices**. The release process must catch bugs, unintended impact, and compliance violations.
+
+The full pipeline contains branches irrelevant for live scoring (training data joins, exports). Deployment **prunes** to the scoring path only:
 
 ```
 claims ──→ claims_aggregate ─┐
-                              ├─→ frequency_set → frequency_write   (data prep - NOT deployed)
+                              ├─→ frequency_set → frequency_write   (NOT deployed)
 exposure ─────────────────────┘
-                              ┌─→ severity_set  → severity_write    (data prep - NOT deployed)
-exposure ─────────────────────┘
-claims ───────────────────────┘
 
 policies ──→ frequency_model ──→ calculate_premium ──→ output       ← DEPLOYED
 policies ──→ severity_model  ──┘                                    ← DEPLOYED
 ```
 
-Only the **ancestors of the output node** are deployed. The `policies` source node becomes the live JSON input.
+---
+
+## 2. Design Principles
+
+1. **`haute.toml` is the single source of truth** — what gets deployed, where, and with what safety checks
+2. **Secrets never go in config** — credentials live in `.env` (local) or CI secrets (remote)
+3. **Deploy targets and CI providers are independent choices** — Databricks + GitLab, Container + GitHub, any combination
+4. **Convention over configuration** — sensible defaults; most teams only fill in credentials
+5. **Merge to main = deploy** — production deployments triggered by merging, never by manual command
+6. **Any target, same rigour** — Databricks, container, SageMaker, or Azure ML — the safety pipeline is identical
 
 ---
 
-## 2. Competitive Advantages Over WTW Radar
+## 3. Deploy Targets
 
-Radar's deployment weaknesses (from research report §7):
+### 3.1 Supported Targets
 
-| Radar Weakness | Haute Advantage |
+| Target | `[deploy].target` | What it produces | Status |
+|---|---|---|---|
+| **Databricks** | `"databricks"` | MLflow model → Databricks Model Serving endpoint | ✅ Implemented |
+| **Container** | `"container"` | Docker image with FastAPI app, `/quote` + `/health` | **Next** |
+| **AWS SageMaker** | `"sagemaker"` | Container → ECR → SageMaker endpoint | Planned |
+| **Azure ML** | `"azure-ml"` | Container → ACR → Azure ML endpoint | Planned |
+
+The team picks the target that matches their infrastructure. `haute init --target <t>` generates the right config, credentials template, and CI/CD workflows for that target.
+
+### 3.2 Databricks Target
+
+For teams already on Databricks. Wraps the pipeline in an `mlflow.pyfunc.PythonModel` shim (Databricks Model Serving requires the MLflow protocol). Pandas bridge at the boundary only — all internal computation remains Polars.
+
+### 3.3 Container Target
+
+For teams deploying to general-purpose hosting (ECS, Azure Container Apps, Cloud Run, Kubernetes, on-prem). Produces a self-contained Docker image with a FastAPI app wrapping `score_graph()` — `POST /quote`, `GET /health`, no MLflow, no pandas.
+
+### 3.4 SageMaker / Azure ML Targets
+
+For teams on those platforms. Thin wrappers around the container target: build the same Docker image, push to ECR/ACR, create/update a managed endpoint via the platform SDK.
+
+### 3.5 Rigour Requirements (All Targets)
+
+Every target must satisfy the same safety bar — these are **Haute's responsibility**, not the platform's:
+
+| Requirement | Provided by |
 |---|---|
-| **Vendor lock-in** - models not portable, proprietary format | Pipeline is a `.py` file. Deployment is an MLflow model. Both are open standards. Zero lock-in. |
-| **Opaque pricing** - $100K–$1M+/year, no public pricing | Free and open source. MLflow Model Serving cost = cloud compute only. |
-| **Azure-only** - SaaS locked to Microsoft Azure | MLflow runs on Databricks (any cloud), local, or self-hosted. Future targets: SageMaker, GCP Vertex, Docker. |
-| **Proprietary tooling** - Radar-specific skills not transferable | Pure Python + Polars. Skills are portable to any data science role. |
-| **No public docs** - no Stack Overflow, no GitHub, no community | Open-source, public docs, community contributions. |
-| **Implementation complexity** - requires WTW consulting engagement | `haute deploy` - one command. No consultants required. |
-| **Learning curve** - Radar's own modelling language | Standard `@pipeline.node` decorated Python functions. |
-| **No version control native** - audit trail is platform-managed | Git-native. Every deploy is a git commit + MLflow model version. Full diff, rollback, PR review. |
+| **Staging environment** | Haute CI pipeline |
+| **Impact analysis** (new vs old premiums) | `haute impact` |
+| **Smoke test** (known quotes against staging) | `haute smoke` |
+| **Rollback** (revert within minutes) | Container tags / model versions |
+| **Versioned deployments** (audit trail) | Git tags + image/model tags |
+| **Reproducibility** | Pinned deps + deterministic build |
+| **Health check** | `/health` endpoint |
+| **No secrets in artefact** | Env vars at deploy time |
 
-### Haute-specific advantages
+### 3.6 Install Extras
 
-1. **Identical code for dev and prod** - `pipeline.score(df)` locally is the same code path as the live API. No "export to ONNX/PMML" lossy translation.
-2. **Pre-deploy dry-run** - score a sample row locally before deploying. Catch errors before they reach production.
-3. **Auto-generated input/output schema** - MLflow model signature derived from the pipeline's actual data. No manual schema definition.
-4. **Graph pruning** - only the scoring path is deployed. No dead code in production.
-5. **Artifact auto-bundling** - model files (`.cbm`, `.pkl`, etc.) discovered and packaged automatically from the graph.
-6. **Deployment manifest** - machine-readable JSON describing exactly what was deployed, when, by whom, and what the input/output contract is.
-7. **Local-first** - works without Databricks. Deploy to local MLflow for testing, Databricks for production. Same command.
+```bash
+uv add haute                       # container target (no extras needed)
+uv add "haute[catboost]"           # catboost (if pipeline uses CatBoost models)
+uv add "haute[databricks]"         # mlflow, databricks-sdk
+uv add "haute[aws]"                # boto3, sagemaker (planned)
+uv add "haute[azure]"              # azure-ai-ml, azure-identity (planned)
+```
 
 ---
 
-## 3. User Experience
+## 4. Configuration
 
-### 3.1 Project setup (`haute init`)
+### 4.1 `haute.toml`
 
-`haute init` scaffolds everything needed for deployment:
-
-```
-my_project/
-  haute.toml              ← project & deploy config (committed to git)
-  .env.example           ← Databricks credentials template (committed)
-  .env                   ← actual secrets (gitignored)
-  main.py               ← starter pipeline
-  data/                  ← input data files
-  tests/                 ← Tests + JSON payloads for pre-deploy testing
-    quotes/
-      example.json
-  .gitignore             ← includes .env
-```
-
-### 3.2 Configuration: `haute.toml` (implemented)
-
-All deploy settings live in a single TOML file at the project root.
-Created by `haute init`, committed to git, shared by the team.
+All deploy settings live in a single TOML file. Created by `haute init`, committed to git.
 
 ```toml
 [project]
-name = "my_pipeline"
+name = "motor-pricing"
 pipeline = "main.py"
 
 [deploy]
@@ -91,7 +106,7 @@ model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
 
 [deploy.databricks]
-experiment_name = "/Shared/hauteay/motor-pricing"
+experiment_name = "/Shared/haute/motor-pricing"
 catalog = "main"
 schema = "pricing"
 serving_workload_size = "Small"
@@ -103,6 +118,9 @@ dir = "tests/quotes"
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
 
+[safety.approval]
+min_approvers = 2
+
 [ci]
 provider = "github"
 
@@ -110,778 +128,334 @@ provider = "github"
 endpoint_suffix = "-staging"
 ```
 
-**What lives where:**
+### 4.2 Target-Specific Sections (reference)
+
+Only the one matching `--target` is generated — never in the same file:
+
+```toml
+# ── Container ────────────────────────────────────────────────
+[deploy.container]
+registry = ""                         # e.g. "ghcr.io/myorg"
+port = 8080
+base_image = "python:3.11-slim"
+
+# ── Databricks ───────────────────────────────────────────────
+[deploy.databricks]
+experiment_name = "/Shared/haute/motor-pricing"
+catalog = "main"
+schema = "pricing"
+serving_workload_size = "Small"
+serving_scale_to_zero = true
+
+# ── AWS SageMaker ────────────────────────────────────────────
+[deploy.sagemaker]
+region = "eu-west-1"
+instance_type = "ml.m5.large"
+initial_instance_count = 1
+
+# ── Azure ML ─────────────────────────────────────────────────
+[deploy.azure-ml]
+resource_group = ""
+workspace_name = ""
+instance_type = "Standard_DS3_v2"
+instance_count = 1
+```
+
+### 4.3 What Lives Where
 
 | Setting | Location | Committed? |
 |---|---|---|
-| Pipeline file, model name, endpoint | `haute.toml` | Yes |
-| Databricks experiment, catalog, schema | `haute.toml` | Yes |
-| Serving size, scale-to-zero | `haute.toml` | Yes |
+| Deploy target, model name, endpoint | `haute.toml [deploy]` | Yes |
+| Target-specific infra config | `haute.toml [deploy.<target>]` | Yes |
 | Safety config + impact dataset | `haute.toml [safety]` | Yes |
-| CI provider + staging/prod config | `haute.toml [ci]` | Yes |
-| `DATABRICKS_HOST`, `DATABRICKS_TOKEN` | `.env` | **No** (gitignored) |
+| CI provider + staging config | `haute.toml [ci]` | Yes |
+| Credentials | `.env` (local) or CI secrets | **No** |
 | Test quote JSON payloads | `tests/quotes/` | Yes |
-| Impact comparison dataset | `data/` | Yes |
 
-### 3.3 Secrets: `.env` (implemented)
-
-Databricks credentials are loaded from `.env` at deploy time.
-A `.env.example` template is created by `haute init`:
-
-```bash
-# .env.example - copy to .env and fill in
-DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
-DATABRICKS_TOKEN=your_databricks_token_here
-```
-
-Setup is one command:
-```bash
-cp .env.example .env
-# edit .env with your actual credentials
-```
-
-### 3.4 Test quotes (implemented)
-
-The `tests/quotes/` directory contains JSON files that are run through the
-pipeline during pre-deploy validation. Each file is a JSON array of quote
-objects matching the input schema:
+### 4.4 Resolution Order
 
 ```
-tests/quotes/
-  single_policy.json     ← 1 quote, quick smoke test
-  batch_policies.json    ← 5 quotes, variety of risk profiles
-  edge_cases.json        ← extreme values (young driver, old vehicle, etc.)
+1. CLI flags          --model-name foo          (highest)
+2. Environment vars   HAUTE_MODEL_NAME=foo
+3. haute.toml         model_name = "foo"
+4. Auto-detection     pipeline file stem        (lowest)
 ```
 
-Example `single_policy.json`:
-```json
-[
-  {
-    "IDpol": 99001,
-    "VehPower": 7,
-    "VehAge": 3,
-    "DrivAge": 42,
-    "BonusMalus": 50,
-    "VehBrand": "B12",
-    "VehGas": "Diesel",
-    "Area": "C",
-    "Density": 850,
-    "Region": "Ile-de-France"
-  }
-]
-```
+### 4.5 Credentials by Target
 
-During `haute deploy`, **every** JSON file in `tests/quotes/` is scored
-through the pruned pipeline. If any file fails, deployment is blocked
-with a clear error. This catches:
-- Schema mismatches (missing/wrong columns)
-- Runtime errors in transform code
-- Model loading failures
-- Edge case crashes (nulls, extreme values)
-
-### 3.5 One-command deploy
-
-```bash
-# Reads everything from haute.toml + .env
-haute deploy
-
-# Or override specific settings
-haute deploy --model-name motor-pricing-v2 --dry-run
-```
-
-Output:
-```
-Deploying pipeline: my_pipeline
-  ✓ Loaded config from haute.toml
-  ✓ Loaded credentials from .env
-  ✓ Parsed pipeline (12 nodes, 14 edges)
-  ✓ Pruned to output ancestors (5 nodes)
-  ✓ Collected 2 artifacts (freq.cbm, sev.cbm)
-  ✓ Inferred input schema (10 columns from policies)
-  ✓ Test quotes: single_policy.json ............ 1 row   ✓  (18ms)
-  ✓ Test quotes: batch_policies.json ........... 5 rows  ✓  (24ms)
-  ✓ Test quotes: edge_cases.json ............... 3 rows  ✓  (19ms)
-  ✓ Logged MLflow model: motor-pricing v3
-  ✓ Deployed to endpoint: motor-pricing (Databricks)
-
-Endpoint ready:
-  POST https://adb-xxxxx.azuredatabricks.net/serving-endpoints/motor-pricing/invocations
-```
-
-### 3.6 Marking the live API input (implemented)
-
-The `deploy_input=True` decorator flag marks which data source receives live JSON requests.
-This is now built into the core pipeline structure and works across the full stack:
-
-```python
-# In the pipeline code - policies is the live API input
-@pipeline.node(path="data/policies.parquet", deploy_input=True)
-def policies() -> pl.DataFrame:
-    return pl.scan_parquet("data/policies.parquet")
-
-# Other sources (claims, exposure) are NOT deploy inputs -
-# they either get pruned or bundled as static artifacts.
-
-@pipeline.node(output=True)
-def output(calculate_premium: pl.DataFrame) -> pl.DataFrame:
-    return calculate_premium
-```
-
-**How it flows through the system:**
-
-| Layer | What happens |
+| Target | Env vars |
 |---|---|
-| **Decorator** | `deploy_input=True` stored in `Node.config` |
-| **Parser** | AST extraction preserves the kwarg in `config` |
-| **Codegen** | Templates emit `deploy_input=True` when present (round-trip safe) |
-| **Pipeline.score()** | Only seeds `deploy_input` sources with the live DataFrame; other sources run their own load logic |
-| **GUI (node)** | Green "API" badge on the node card |
-| **GUI (panel)** | Toggle button in DataSource config panel |
-| **Deploy** | Auto-detects input node from `deploy_input=True`; no CLI flag needed |
-
-**Fallback:** If no source is marked `deploy_input`, `Pipeline.score()` seeds
-all sources (backward-compatible). Deploy auto-detection falls back to the
-single source node in the pruned graph.
-
-### 3.7 Live scoring after deployment
-
-```bash
-# Via MLflow serving
-curl -X POST http://localhost:5001/invocations \
-  -H "Content-Type: application/json" \
-  -d '{"dataframe_records": [{"Area": "A", "VehPower": 5, "VehAge": 3}]}'
-# → [{"freq_preds": 0.12, "sev_preds": 3200.0, "technical_price": 384.0, "premium": 548.57}]
-
-# Via Databricks Model Serving
-curl -X POST https://<workspace>.databricks.net/serving-endpoints/motor-pricing/invocations \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"dataframe_records": [{"Area": "A", "VehPower": 5, "VehAge": 3}]}'
-```
+| `container` | `DOCKER_USERNAME`, `DOCKER_PASSWORD` (optional) |
+| `databricks` | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` |
+| `sagemaker` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`, `SAGEMAKER_ROLE_ARN` |
+| `azure-ml` | `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` |
 
 ---
 
-## 4. Technical Design
+## 5. Technical Architecture
 
-### 4.1 Module structure
+### 5.1 Module Structure
 
 ```
-src/haute/
-  deploy/
-    __init__.py             # Public API: deploy(), DeployConfig, HauteModel
-    _config.py              # DeployConfig dataclass, auto-detection, haute.toml loading
-    _pruner.py              # Graph pruning to output ancestors
-    _bundler.py             # Artifact discovery and collection
-    _scorer.py              # score_graph() - the runtime scoring engine for deployed models
-    _model.py               # HauteModel(mlflow.pyfunc.PythonModel)
-    _schema.py              # Input/output schema inference
-    _validators.py          # Pre-deploy validation (dry-run, artifact checks)
-    _mlflow.py              # deploy_to_mlflow(), DeployResult, get_deploy_status()
-    _impact.py              # Impact analysis: score staging vs production, build comparison report
+src/haute/deploy/
+  __init__.py             # Public API: deploy(), DeployConfig, dispatch by target
+  _config.py              # DeployConfig, ResolvedDeploy, haute.toml loading
+  _pruner.py              # Graph pruning to output ancestors
+  _bundler.py             # Artifact discovery and collection
+  _scorer.py              # score_graph() — runtime scoring engine (shared by all targets)
+  _schema.py              # Input/output schema inference
+  _validators.py          # Pre-deploy validation (dry-run, artifact checks)
+  _impact.py              # Impact analysis: staging vs production comparison
+
+  # ── Target-specific (only the final "package + push" step differs) ──
+  _mlflow.py              # Databricks: deploy_to_mlflow(), HauteModel shim
+  _model_code.py          # Databricks: models-from-code script for MLflow
+  _container.py           # Container: generate Dockerfile + FastAPI app (planned)
 ```
 
-### 4.2 Graph pruning (`_pruner.py`)
+### 5.2 Target-Agnostic Pipeline
 
-Reuses the existing `ancestors()` function from `graph_utils.py`.
+```
+                      target-agnostic
+                ┌─────────────────────────┐
+haute.toml ──→ DeployConfig ──→ resolve_config()
+                                    │
+                  _pruner.py       prune graph
+                  _bundler.py      collect artifacts
+                  _schema.py       infer schemas
+                  _validators.py   run test quotes
+                  _scorer.py       dry-run scoring
+                  _impact.py       staging vs prod
+                                    │
+                                    ▼
+                            ResolvedDeploy
+                └─────────────────────────┘
+                                    │
+                      target-specific
+                ┌─────────────────────────┐
+                │  "databricks" → _mlflow  │
+                │  "container"  → _container│
+                └─────────────────────────┘
+```
+
+`ResolvedDeploy` is the clean handoff point. A new target only consumes it and does its own packaging.
+
+### 5.3 Key Data Structures
 
 ```python
-def prune_for_deploy(
-    graph: dict,
-    output_node_id: str,
-) -> tuple[dict, list[str], list[str]]:
-    """Prune a graph to only the ancestors of the output node.
-
-    Returns:
-        (pruned_graph, source_node_ids, removed_node_ids)
-    """
-```
-
-**Logic:**
-1. Compute `ancestors(output_node_id, edges, all_ids)` - already exists
-2. Filter nodes and edges to only the ancestor set
-3. Identify source nodes (nodes with no incoming edges in the pruned graph)
-4. Return the pruned graph + metadata
-
-### 4.3 Deploy configuration (`_config.py`)
-
-User-provided config (from `haute.toml` + CLI overrides) is strictly separated
-from computed state (pruned graph, schemas, artifacts). This avoids mixing
-input and output in the same dataclass (commit standards §3 Single Responsibility).
-
-```python
-@dataclass
-class DatabricksConfig:
-    """Typed Databricks-specific settings from [deploy.databricks] in haute.toml."""
-    experiment_name: str = "/Shared/hauteay/default"
-    catalog: str = "main"
-    schema: str = "pricing"
-    serving_workload_size: str = "Small"
-    serving_scale_to_zero: bool = True
-
-
 @dataclass
 class DeployConfig:
-    """User-provided deployment configuration (from haute.toml + CLI)."""
+    """User-provided config (from haute.toml + CLI)."""
     pipeline_file: Path
-    model_name: str                                   # MLflow registered model name
-    endpoint_name: str | None = None                  # Databricks serving endpoint
-    output_fields: list[str] | None = None            # Limit output columns
-    test_quotes_dir: Path | None = None               # Directory of test JSON files
+    model_name: str
+    endpoint_name: str | None = None
+    output_fields: list[str] | None = None
+    test_quotes_dir: Path | None = None
     databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
-
-    @classmethod
-    def from_toml(cls, path: Path) -> DeployConfig:
-        """Load from haute.toml, merging [project] and [deploy] sections."""
-
-    def override(self, **cli_kwargs: str | None) -> DeployConfig:
-        """Return a copy with non-None CLI flags applied over TOML values."""
-
 
 @dataclass
 class ResolvedDeploy:
-    """Computed state after resolving a DeployConfig against a parsed pipeline.
-
-    Created by resolve_config() - never constructed directly.
-    """
+    """Computed state after resolving config against a parsed pipeline."""
     config: DeployConfig
-    pruned_graph: dict[str, list[dict[str, str]]]     # React Flow graph JSON
-    input_node_ids: list[str]                          # deploy_input=True sources
-    output_node_id: str                                # output=True node
-    artifacts: dict[str, Path]                         # artifact_name → absolute_path
-    input_schema: dict[str, str]                       # column_name → polars dtype
-    output_schema: dict[str, str]                      # column_name → polars dtype
-
-
-def resolve_config(config: DeployConfig) -> ResolvedDeploy:
-    """Parse pipeline, prune graph, detect I/O nodes, collect artifacts, infer schemas."""
+    pruned_graph: dict
+    input_node_ids: list[str]
+    output_node_id: str
+    artifacts: dict[str, Path]
+    input_schema: dict[str, str]
+    output_schema: dict[str, str]
 ```
 
-**Auto-detection rules:**
-- **`output_node`**: Find the node with `config.output=True` or `nodeType="output"`. If exactly one exists, use it. Otherwise, error with a clear message.
-- **`input_node`**: After pruning, find source nodes with `config.deploy_input=True`. If none are marked, fall back to the single source node in the pruned graph. If multiple unmarked sources exist, error.
-- **`model_name`**: From `haute.toml [deploy].model_name`, falling back to `pipeline.name` (sanitized for MLflow).
-
-### 4.4 Artifact bundling (`_bundler.py`)
-
-Walks the pruned graph and collects files that need to be packaged:
+### 5.4 Dispatch
 
 ```python
-def collect_artifacts(
-    pruned_graph: dict,
-    input_node_id: str,
-    pipeline_dir: Path,
-) -> dict[str, Path]:
-    """Discover and collect all artifacts needed for deployment.
-
-    Returns:
-        Dict of artifact_name → absolute_path for:
-        - externalFile nodes: model files (.cbm, .pkl, .joblib, etc.)
-        - dataSource nodes (non-input): static data files bundled as artifacts
-    """
+def deploy(config: DeployConfig) -> DeployResult:
+    resolved = resolve_config(config)
+    if config.target == "databricks":
+        return deploy_to_mlflow(resolved)
+    if config.target == "container":
+        return deploy_to_container(resolved)
+    raise NotImplementedError(f"Target '{config.target}' is not yet implemented")
 ```
 
-**What gets bundled:**
-| Node type | Condition | Artifact |
-|---|---|---|
-| `externalFile` | Always | The model file (`config.path`) |
-| `dataSource` | NOT the input node | The data file (`config.path`) - becomes a static lookup table |
-| `dataSource` | IS the input node | **Not bundled** - replaced by live JSON input |
+No `Protocol` or base class until three targets exist.
 
-### 4.5 Schema inference (`_schema.py`)
+### 5.5 Data Flow — Container Target
 
-```python
-def infer_input_schema(
-    graph: dict,
-    input_node_id: str,
-) -> dict[str, str]:
-    """Infer the input schema by executing the input source node and reading its columns.
-
-    Returns:
-        Dict of column_name → polars_dtype_string
-    """
-
-def infer_output_schema(
-    graph: dict,
-    output_node_id: str,
-    sample_input: pl.DataFrame,
-) -> dict[str, str]:
-    """Infer the output schema by running a sample row through the pruned graph.
-
-    Returns:
-        Dict of column_name → polars_dtype_string
-    """
+```
+POST /quote  →  JSON → pl.DataFrame → score_graph() → result.to_dicts() → JSON
 ```
 
-The input schema is read from the actual data file that the input source node points to. This becomes the MLflow model signature - callers know exactly what fields to send.
+No pandas. JSON in, Polars throughout, JSON out.
 
-### 4.6 Scoring engine (`_scorer.py`)
+### 5.6 Data Flow — Databricks Target
 
-This is the **runtime** scoring function that executes inside the deployed model. It must be self-contained and have no dependency on the filesystem layout of the development environment.
-
-```python
-def score_graph(
-    graph: dict,
-    input_df: pl.DataFrame,
-    input_node_ids: list[str],
-    output_node_id: str,
-    artifact_paths: dict[str, str] | None = None,
-    output_fields: list[str] | None = None,
-) -> pl.DataFrame:
-    """Execute a pruned pipeline graph with injected input data.
-
-    Instead of loading from files, input source nodes receive the provided
-    DataFrame. Artifact paths are remapped to the MLflow artifact directory.
-
-    Args:
-        graph: Pruned React Flow graph JSON.
-        input_df: The live input data (1 or N rows).
-        input_node_ids: Source node IDs that receive the live input.
-        output_node_id: The node whose output is the API response.
-        artifact_paths: Remapped artifact paths (artifact_name → local_path).
-        output_fields: Optional list of columns to select from output.
-
-    Returns:
-        Output DataFrame (1 or N rows).
-    """
+```
+POST /invocations  →  pd.DataFrame → pl.from_pandas() → score_graph() → .to_pandas()
 ```
 
-**Key difference from `execute_graph()`:**
-- Source nodes marked as `input_node` inject the provided DataFrame instead of reading from disk
-- Artifact paths in `externalFile` and static `dataSource` nodes are remapped to MLflow artifact locations
-- Only executes up to `output_node_id` (graph is already pruned, but we pass `target_node_id` anyway)
-- Returns a single collected DataFrame, not per-node preview dicts
+Pandas bridge at the boundary only (MLflow contract). Documented exception to "Polars-native" rule.
 
-**Implementation approach:**
-Uses a modified `_build_node_fn` that intercepts source/external nodes and redirects their paths. The existing `_execute_lazy()` infrastructure handles the rest.
+### 5.7 Pre-Deploy Validation
 
-### 4.7 MLflow PythonModel (`_model.py`)
+| Check | Description |
+|---|---|
+| Pipeline parseable | File parses without syntax errors |
+| Output node exists | Declared output node is in the graph |
+| Input node exists | Input node is in the pruned graph |
+| All artifacts exist | Every model/data file is on disk |
+| Dry-run passes | Score 1 sample row, confirm no runtime errors |
+| Output has rows | Dry-run produces at least 1 output row |
 
-```python
-class HauteModel(mlflow.pyfunc.PythonModel):
-    """MLflow PythonModel wrapper for a deployed haute pipeline.
+### 5.8 Deployment Manifest
 
-    Artifacts:
-        - deploy_manifest.json: Deployment manifest with graph, config, schemas
-        - [model files]: .cbm, .pkl, .joblib, etc.
-        - [static data]: .parquet, .csv for non-input data sources
-    """
-
-    def load_context(self, context: mlflow.pyfunc.PythonModelContext) -> None:
-        """Called once when the model is loaded for serving.
-
-        Loads the deployment manifest and resolves artifact paths.
-        """
-        manifest_path = Path(context.artifacts["deploy_manifest"])
-        self._manifest = json.loads(manifest_path.read_text())
-        self._graph = self._manifest["graph"]
-        self._input_node_ids = self._manifest["input_nodes"]
-        self._output_node_id = self._manifest["output_node"]
-        self._output_fields = self._manifest.get("output_fields")
-
-        # Remap artifact paths to MLflow artifact directory
-        self._artifact_paths = {}
-        for name, _original_path in self._manifest["artifacts"].items():
-            self._artifact_paths[name] = context.artifacts[name]
-
-        # Rewrite graph node configs to point to resolved artifact paths
-        self._rewrite_artifact_paths()
-
-    def predict(
-        self,
-        context: mlflow.pyfunc.PythonModelContext,
-        model_input: pd.DataFrame,
-        params: dict | None = None,
-    ) -> pd.DataFrame:
-        """Score one or more rows through the pipeline.
-
-        Input: pandas DataFrame (MLflow convention)
-        Output: pandas DataFrame
-        """
-        import polars as pl
-        from haute.deploy._scorer import score_graph
-
-        input_df = pl.from_pandas(model_input)
-
-        result = score_graph(
-            graph=self._graph,
-            input_df=input_df,
-            input_node_ids=self._input_node_ids,
-            output_node_id=self._output_node_id,
-            output_fields=self._output_fields,
-        )
-
-        return result.to_pandas()
-```
-
-### 4.8 Deployment manifest (`deploy_manifest.json`)
-
-Written at deploy time, bundled as an MLflow artifact:
+Every deploy produces `deploy_manifest.json` — the single source of truth for a deployed pipeline:
 
 ```json
 {
     "haute_version": "0.1.0",
     "pipeline_name": "my_pipeline",
-    "pipeline_file": "main.py",
     "created_at": "2026-02-15T16:06:00Z",
     "created_by": "ralph",
-
     "input_nodes": ["policies"],
     "output_node": "output",
-    "output_fields": null,
-
-    "input_schema": {
-        "IDpol": "Int64",
-        "Area": "String",
-        "VehPower": "Int64",
-        "VehAge": "Int64",
-        "DrivAge": "Int64",
-        "BonusMalus": "Int64",
-        "VehBrand": "String",
-        "VehGas": "String",
-        "Density": "Int64",
-        "Region": "String"
-    },
-    "output_schema": {
-        "IDpol": "Int64",
-        "freq_preds": "Float64",
-        "sev_preds": "Float64",
-        "technical_price": "Float64",
-        "premium": "Float64"
-    },
-
-    "artifacts": {
-        "freq_model": "models/freq.cbm",
-        "sev_model": "models/sev.cbm"
-    },
-
-    "graph": { "...pruned graph JSON..." },
-
+    "input_schema": {"Area": "String", "VehPower": "Int64", "...": "..."},
+    "output_schema": {"technical_price": "Float64", "premium": "Float64"},
+    "artifacts": {"freq_model": "models/freq.cbm", "sev_model": "models/sev.cbm"},
     "nodes_deployed": 5,
-    "nodes_skipped": 7,
-    "nodes_skipped_names": [
-        "claims", "exposure", "claims_aggregate",
-        "frequency_set", "severity_set",
-        "frequency_write", "severity_write"
-    ]
+    "nodes_skipped": 7
 }
 ```
 
-### 4.9 MLflow deploy (`_mlflow.py`)
-
-v1 has exactly one deployment target: MLflow (Databricks-backed). Per commit
-standards §"Over-abstraction": no `Protocol`, no base class, no factory - just
-a plain function. When a second target is needed, *that's* when we extract the
-common interface.
-
-```python
-@dataclass
-class DeployResult:
-    """Returned by deploy_to_mlflow()."""
-    model_name: str
-    model_version: int
-    model_uri: str               # e.g. "models:/main.pricing.motor-pricing/3"
-    endpoint_url: str | None     # Databricks serving URL, if created
-    manifest_path: Path
-
-def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
-    """Deploy a resolved pipeline to MLflow + Databricks Model Serving.
-
-    Steps:
-        1. Set tracking URI (``databricks``) and registry URI (``databricks-uc``)
-        2. Build Unity Catalog model name (``catalog.schema.model_name``)
-        3. Ensure experiment parent directories exist in the workspace
-        4. Build deployment manifest JSON
-        5. Log HauteModel via models-from-code (file path, not CloudPickle) with artifacts + signature
-        6. Register model version in MLflow Model Registry
-        7. Create or update Databricks Model Serving endpoint (if endpoint_name is set)
-        8. Return DeployResult with model URI and endpoint URL
-    """
-
-def get_deploy_status(
-    model_name: str, catalog: str = "main", schema: str = "default"
-) -> dict[str, str | int]:
-    """Query MLflow Model Registry for current model versions and serving status.
-
-    Sets tracking/registry URIs and constructs the UC three-level model name.
-    """
-```
-
-**Why no abstraction layer:** The pruner, bundler, schema inference, scorer,
-validator, and manifest are all target-agnostic already. Only the final
-"log model + create endpoint" step is MLflow-specific. When a second target
-arrives (e.g. Docker, SageMaker), the refactor is small: extract that one
-function into a dispatch, not rebuild a class hierarchy. See §8 for the
-extensibility plan.
-
-### 4.10 Validation (`_validators.py`)
-
-Pre-deploy checks run before any MLflow logging:
-
-```python
-def validate_deploy(config: DeployConfig) -> list[str]:
-    """Run all pre-deploy validations. Returns list of errors (empty = ok)."""
-```
-
-| Check | Description |
-|---|---|
-| **Pipeline parseable** | File parses without syntax errors |
-| **Output node exists** | The declared output node is in the graph |
-| **Input node exists** | The declared input node is in the pruned graph |
-| **Input node is a source** | It has no incoming edges |
-| **All artifacts exist** | Every model file / static data file is on disk |
-| **No unresolved nodes** | No `NotImplementedError` (e.g. Databricks source) in the pruned graph |
-| **Dry-run passes** | Score 1 sample row through the pruned graph and confirm no runtime errors |
-| **Output has rows** | The dry-run produces at least 1 output row |
-
-### 4.11 CLI integration
-
-```python
-@cli.command()
-@click.argument("pipeline_file", required=False)
-@click.option("--model-name", default=None, help="Override model name from haute.toml")
-@click.option("--endpoint-suffix", default=None, help='Suffix appended to endpoint name (e.g. "-staging")')
-@click.option("--dry-run", is_flag=True, help="Validate and score test quotes without deploying")
-def deploy(pipeline_file, model_name, endpoint_suffix, dry_run): ...
-
-@cli.command()
-@click.option("--endpoint-suffix", default=None)
-def smoke(endpoint_suffix): ...
-
-@cli.command()
-@click.option("--endpoint-suffix", default=None)
-@click.option("--sample", default=10000, type=int)
-@click.option("--batch-size", default=500, type=int)
-def impact(endpoint_suffix, sample, batch_size): ...
-```
-
-`haute deploy` always requires the `CI` environment variable to be set. Local deploys are blocked — use `--dry-run` to validate locally.
-
-**Resolution order for settings:**
-1. CLI flags (highest priority)
-2. `haute.toml` `[deploy]` section
-3. Auto-detection from the pipeline (input/output nodes)
-
 ---
 
-## 5. Data Flow (Runtime)
+## 6. CI/CD
+
+### 6.1 Release Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  API Request                                                    │
-│  POST /invocations                                              │
-│  {"dataframe_records": [{"Area":"A","VehPower":5,"VehAge":3}]}  │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  MLflow Model Serving / Databricks Endpoint                      │
-│                                                                  │
-│  HauteModel.predict(model_input: pd.DataFrame)                  │
-│  │                                                               │
-│  │  1. pl.from_pandas(model_input)          → 1-row Polars DF   │
-│  │  2. score_graph(graph, input_df, ...)    → pipeline exec      │
-│  │     │                                                         │
-│  │     │  policies (INPUT) ─→ inject live DataFrame              │
-│  │     │  frequency_model  ─→ load freq.cbm from artifacts       │
-│  │     │  severity_model   ─→ load sev.cbm from artifacts        │
-│  │     │  calculate_premium ─→ execute transform code             │
-│  │     │  output           ─→ select output fields               │
-│  │     │                                                         │
-│  │  3. result.to_pandas()                   → response DF        │
-│  │                                                               │
-└──┼───────────────────────────────────────────────────────────────┘
-   │
-   ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  API Response                                                    │
-│  {"predictions": [{"technical_price":384.0,"premium":548.57}]}   │
-└──────────────────────────────────────────────────────────────────┘
+feature branch ──→ PR ──→ merge to main ──→ deploy
+       │              │              │
+    local dev      CI gate      CD pipeline
+       │              │              │
+  haute lint       ruff, mypy      validate
+  haute run        pytest              │
+  --dry-run        haute lint          ├─→ deploy staging (auto)
+                   --dry-run           │     smoke test
+                                       │     impact analysis
+                                       ├─→ [approval gate]
+                                       └─→ deploy production
 ```
 
----
+### 6.2 CI Provider Support
 
-## 6. Implementation Order
-
-All steps are implemented and tested (323 tests passing as of v0.1.24).
-
-| Step | Module | Status |
-|---|---|---|
-| 1 | `_pruner.py` — Graph pruning | ✅ Done |
-| 2 | `_config.py` — Deploy configuration + `haute.toml` loading | ✅ Done |
-| 3 | `_bundler.py` — Artifact collection | ✅ Done |
-| 4 | `_schema.py` — Schema inference | ✅ Done |
-| 5 | `_scorer.py` — Runtime scoring engine | ✅ Done |
-| 6 | `_model.py` — MLflow PythonModel | ✅ Done |
-| 7 | `_validators.py` — Pre-deploy validation | ✅ Done |
-| 8 | `_mlflow.py` — MLflow deploy function | ✅ Done |
-| 9 | CLI: `haute deploy`, `haute smoke`, `haute impact`, `haute status` | ✅ Done |
-| 10 | `_impact.py` — Impact analysis (staging vs production comparison) | ✅ Done |
-| 11 | CI/CD scaffolds — GitHub Actions (`deploy-staging.yml` + `deploy-production.yml`) + GitLab CI | ✅ Done |
-| 12 | CI-only deploys — local deploys always blocked | ✅ Done |
-
----
-
-## 7. Key Design Decisions
-
-### 7.1 Graph JSON as the deployment unit (not the .py file)
-
-The pruned graph JSON is what gets bundled and executed at serving time, not the `.py` source file. Reasons:
-- The graph is already the execution format (`_execute_lazy()` operates on graph JSON)
-- Graph is self-contained (no import resolution, no `sys.path` issues)
-- Can be pruned, validated, and inspected as data
-- The `.py` file is recorded in the manifest for provenance, but not executed at serving time
-
-### 7.2 Modified `_build_node_fn` for scoring (not a new executor)
-
-Rather than building a separate execution engine for deployment, we use the existing `_build_node_fn` / `_execute_lazy` infrastructure with a thin wrapper that:
-- Intercepts `dataSource` nodes for the input node → returns the live DataFrame
-- Rewrites `config.path` for `externalFile` and static `dataSource` nodes → points to artifact dir
-
-This means **dev and prod run the exact same code**. The only difference is where data comes from.
-
-### 7.3 pandas bridge for MLflow compatibility
-
-> **Documented exception to "Polars-native, never convert to pandas"**
-> (commit standards - Design Philosophy §"Polars-native, lazy by default")
-
-MLflow's `PythonModel.predict()` contract **requires** pandas DataFrames for
-input and output. This is not optional - it's the MLflow serving protocol.
-
-We convert at the outermost boundary only:
-- `pd.DataFrame → pl.from_pandas() → score_graph() → result.to_pandas()`
-- All internal computation remains Polars `LazyFrame` throughout
-- The conversion happens in exactly one place: `HauteModel.predict()`
-- No pandas is used inside the pipeline graph execution
-
-If MLflow adds native Polars support in the future, this bridge is a
-single-line removal.
-
-### 7.4 Manifest-driven (not code-driven) deployment
-
-The deployment manifest (`deploy_manifest.json`) is the single source of truth for a deployed model. It contains:
-- The full pruned graph
-- All configuration
-- Input/output schemas
-- Artifact paths
-- Provenance metadata
-
-This makes deployments **inspectable, reproducible, and debuggable**. You can look at the manifest and understand exactly what a deployed model does.
-
----
-
-## 8. Extensibility - Adding Future Deploy Targets
-
-### 8.1 What's already target-agnostic
-
-The deploy pipeline is deliberately layered so that most modules don't know
-or care where the model ends up:
-
-```
-                          target-agnostic
-                    ┌─────────────────────────┐
-  haute.toml ──→ DeployConfig ──→ resolve_config()
-                                      │
-                    _pruner.py        prune graph
-                    _bundler.py       collect artifacts
-                    _schema.py        infer schemas
-                    _validators.py    run test quotes
-                    _scorer.py        dry-run scoring
-                                      │
-                                      ▼
-                              ResolvedDeploy
-                    └─────────────────────────┘
-                                      │
-                          target-specific (v1: MLflow only)
-                    ┌─────────────────────────┐
-                    _mlflow.py        deploy_to_mlflow()
-                    _model.py         HauteModel (PythonModel)
-                    └─────────────────────────┘
-```
-
-The `ResolvedDeploy` dataclass is the clean handoff point. A new target only
-needs to consume `ResolvedDeploy` and do its own packaging.
-
-### 8.2 How to add a second target (when needed)
-
-When a second target arrives, the refactor is:
-
-1. **Add `[deploy] target = "docker"` to `haute.toml`** - the config already
-   has a `target` field
-2. **Write `_docker.py`** with a `deploy_to_docker(resolved: ResolvedDeploy) -> DeployResult` function
-3. **Add dispatch in `deploy/__init__.py`:**
-   ```python
-   def deploy(config: DeployConfig) -> DeployResult:
-       resolved = resolve_config(config)
-       if config.target == "databricks":
-           return deploy_to_mlflow(resolved)
-       elif config.target == "docker":
-           return deploy_to_docker(resolved)
-       raise ValueError(f"Unknown target: {config.target}")
-   ```
-4. **Extract a `DeployTarget` Protocol *only if* three targets exist** - at that
-   point the pattern is proven and the interface is obvious from the concrete
-   implementations
-
-This is a small, safe refactor because the target-agnostic layers don't change.
-
-### 8.3 Planned future targets
-
-| Target | `[deploy] target =` | What it produces | Status |
+| Provider | Config key | Generated file(s) | Status |
 |---|---|---|---|
-| **Databricks MLflow** | `"databricks"` | MLflow model + serving endpoint | ✅ Implemented |
-| **Docker** | `"docker"` | Dockerfile + FastAPI app + `docker-compose.yml` | Planned |
-| **Databricks batch job** | `"databricks-batch"` | Databricks Job running `score_graph()` on a schedule | Planned |
-| **AWS SageMaker** | `"sagemaker"` | SageMaker endpoint via `sagemaker-sdk` | Planned |
-| **GCP Vertex AI** | `"vertex"` | Vertex endpoint | Planned |
-| **Standalone FastAPI** | `"fastapi"` | Self-contained Python package with FastAPI server | Planned |
+| **GitHub Actions** | `"github"` | `ci.yml`, `deploy-staging.yml`, `deploy-production.yml` | ✅ |
+| **GitLab CI** | `"gitlab"` | `.gitlab-ci.yml` | ✅ |
+| **Azure DevOps** | `"azure-devops"` | `azure-pipelines.yml` | ✅ |
+| **None** | `"none"` | No CI files | ✅ |
 
-### 8.4 Other features
+All providers run the same logical steps — only the YAML syntax differs.
 
-| Feature | Description | Status |
-|---|---|---|
-| **Impact analysis** | `haute impact` — compare staging vs production predictions, report pricing changes | ✅ Implemented |
-| **Smoke testing** | `haute smoke` — score test quotes against a live endpoint | ✅ Implemented |
-| **CI/CD scaffolds** | `haute init --ci github\|gitlab\|azure-devops` generates workflow files with staging → impact → production flow | ✅ Implemented |
-| **CI-only deploy** | `haute deploy` only runs in CI environments; local deploys always blocked | ✅ Implemented |
-| **Deploy from GUI** | "Deploy" button in the React Flow UI | Planned |
-| **Deploy diff** | Compare two deployed model versions | Planned |
-| **Canary/shadow deploy** | Route % of traffic to new model version | Planned |
-| **A/B testing** | Traffic splitting between model versions with metric tracking | Planned |
-| **Rollback** | `haute rollback motor-pricing` → revert to previous model version | Planned |
-| **Deploy hooks** | Pre/post-deploy scripts (e.g., notify Slack, run integration tests) | Planned |
-| **Input validation** | Runtime schema validation with clear error messages for missing/wrong-type fields | Planned |
-| **Response caching** | LRU cache for repeated identical inputs | Planned |
-| **Monitoring** | Log predictions to MLflow for drift detection | Planned |
+### 6.3 No Shortcuts
+
+Every `haute init` project gets the full pipeline regardless of team size:
+
+```
+merge to main → validate → deploy staging → smoke test → impact analysis → [approval gate] → deploy production
+```
+
+Solo developers set `min_approvers = 0` in `haute.toml` — the pipeline still runs identically, just without requiring sign-off.
 
 ---
 
-## 9. Dependencies
+## 7. Safety Gates
 
-### New (added to `[project.optional-dependencies].databricks`)
-- `mlflow >= 2.15.0` (already listed)
-- `databricks-sdk >= 0.30.0` (already listed)
+### 7.1 Test Quotes
 
-### No new core dependencies
-The deploy module uses only:
-- `polars` (already core)
-- `mlflow` (already optional)
-- Standard library: `json`, `pathlib`, `dataclasses`, `datetime`, `getpass`
+Every deploy scores `tests/quotes/*.json` through the pruned pipeline. If any file fails, deployment is blocked. Catches schema mismatches, runtime errors, model loading failures, and edge case crashes.
+
+**Planned:** Golden file pattern — expected outputs with tolerance:
+
+```json
+[{"input": {"VehPower": 7, "Area": "C"}, "expected": {"premium": 548.57}, "tolerance_pct": 0.01}]
+```
+
+### 7.2 Impact Report
+
+`haute impact` scores a portfolio sample through both staging (new) and production (current), then compares:
+
+```
+Output: technical_price
+  Staging mean:     548.57     Production mean:   536.12
+  Mean change:       +2.3%    Rows changed:      84.2%
+  Max increase:     +18.7%    Max decrease:       -4.2%
+
+  ⚠ 147 quotes changed by more than ±25.0%
+  ✓ Average change (+2.3%) within ±10.0% threshold
+```
+
+Written to `impact_report.md` (all providers) + `$GITHUB_STEP_SUMMARY` (GitHub) + pipeline artifact (GitLab).
+
+### 7.3 Approval Gates
+
+| Provider | Mechanism |
+|---|---|
+| **GitHub** | `workflow_dispatch` manual trigger (Free) or environment protection rules (Team/Enterprise) |
+| **Azure DevOps** | Environment approval checks |
+| **GitLab** | `when: manual` on production job |
+
+### 7.4 Rollback
+
+```bash
+haute rollback motor-pricing           # revert to previous version
+haute rollback motor-pricing --to 3    # revert to specific version
+```
+
+Databricks: updates serving endpoint to previous model version. Container: re-tags previous image and redeploys.
+
+### 7.5 Audit Trail
+
+Every deployment records: pipeline name, version, git SHA, deployer, timestamp, impact report hash, test quote pass/fail, PR approvers, previous version, target, endpoint.
 
 ---
 
-## 10. File-by-File Summary
+## 8. Design Decisions
 
-| File | Lines (est.) | Purpose |
+**D1: `haute init` generates only relevant files** — only the chosen target's config, credentials, and CI workflows. No commented-out blocks.
+
+**D2: Graph JSON is the deployment unit** — not the `.py` file. The pruned graph is self-contained, inspectable, and requires no import resolution.
+
+**D3: Same scoring engine for dev and prod** — `_build_node_fn` with a thin wrapper that intercepts source nodes and redirects artifact paths. No separate execution engine.
+
+**D4: Manifest-driven deployment** — `deploy_manifest.json` is the single source of truth. Inspectable, reproducible, debuggable.
+
+**D5: Same target for staging and production** — no mixing container staging with Databricks production. Only differences: endpoint suffix, infra overrides via `HAUTE_` env vars, approval gate.
+
+**D6: `haute.toml` says *what*, workflow file says *how`** — `haute init` generates the workflow once, teams own it from there. No re-generation.
+
+**D7: No abstraction until three targets** — no `Protocol`, no base class. When a third target arrives, the interface is obvious from the concrete implementations.
+
+**D8: pandas bridge is Databricks-only** — container target uses JSON → Polars → JSON directly. The MLflow bridge is a documented exception.
+
+---
+
+## 9. Implementation Status
+
+| Phase | What | Status |
 |---|---|---|
-| `deploy/__init__.py` | ~30 | Public exports: `deploy()`, `DeployConfig`, `HauteModel` |
-| `deploy/_pruner.py` | ~60 | `prune_for_deploy()` - graph pruning |
-| `deploy/_config.py` | ~150 | `DeployConfig`, `DatabricksConfig`, `SafetyConfig`, `ResolvedDeploy`, `resolve_config()` |
-| `deploy/_bundler.py` | ~80 | `collect_artifacts()` - discover and collect model/data files |
-| `deploy/_schema.py` | ~80 | `infer_input_schema()`, `infer_output_schema()`, MLflow signature |
-| `deploy/_scorer.py` | ~100 | `score_graph()` - runtime scoring with input injection |
-| `deploy/_model.py` | ~90 | `HauteModel(PythonModel)` - MLflow wrapper |
-| `deploy/_validators.py` | ~100 | `validate_deploy()` - pre-deploy checks |
-| `deploy/_mlflow.py` | ~120 | `deploy_to_mlflow()`, `DeployResult`, `get_deploy_status()` |
-| `deploy/_impact.py` | ~475 | Impact analysis: `score_endpoint_batched()`, `build_report()`, `format_terminal()`, `format_markdown()` |
-| `cli.py` (additions) | ~200 | `haute deploy`, `haute smoke`, `haute impact`, `haute status` commands |
-| `_scaffold.py` (additions) | ~250 | GitHub + GitLab CI/CD workflow generation |
-| **Total** | **~1735** | |
+| **P1** | `haute.toml` schema: `[safety]`, `[ci]` sections | ✅ Done |
+| **P2** | `haute init` generates CI/CD workflows (GitHub + GitLab + Azure DevOps) | ✅ Done |
+| **P3** | `haute impact` + endpoint comparison + Step Summary | ✅ Done |
+| **P4** | Golden file test quotes (expected outputs with tolerance) | Pending |
+| **P5** | Container target (`_container.py`) — FastAPI + Dockerfile | **Next** |
+| **P5a** | Target dispatch + `NotImplementedError` for unimplemented targets | **Next** |
+| **P6** | SageMaker target — thin wrapper: push to ECR + create endpoint | Planned |
+| **P7** | Azure ML target — thin wrapper: push to ACR + create endpoint | Planned |
+| **P8** | `haute rollback` command | Planned |
+
+### Module-level status (Databricks target)
+
+All implemented and tested (323 tests as of v0.1.24):
+
+`_pruner.py`, `_config.py`, `_bundler.py`, `_schema.py`, `_scorer.py`, `_model_code.py`, `_validators.py`, `_mlflow.py`, `_impact.py`, CLI commands (`deploy`, `smoke`, `impact`, `status`), CI/CD scaffolds.

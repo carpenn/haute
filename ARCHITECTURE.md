@@ -1,6 +1,6 @@
 # Haute - Architecture & Plan
 
-**Open-source pricing engine for insurance teams on Databricks**
+**Open-source pricing engine for insurance teams**
 
 ---
 
@@ -13,7 +13,7 @@ Haute is an open-source Python library that gives insurance pricing teams a **co
 
 The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one - the other stays in sync.
 
-Haute leans heavily into the **Databricks/MLflow ecosystem** rather than reinventing model training, registry, or serving.
+Haute deploys pipelines as **live pricing APIs**. The team picks the target that matches their infrastructure — Databricks, a Docker container, SageMaker, or Azure ML. Every target gets the same safety pipeline: staging, impact analysis, smoke test, approval gate, production. See `docs/DEPLOY_DESIGN.md` for the full design.
 
 ---
 
@@ -22,13 +22,13 @@ Haute leans heavily into the **Databricks/MLflow ecosystem** rather than reinven
 ### Haute IS:
 - A Python DSL for defining pricing pipelines as code
 - A browser-based React Flow UI for visualising and editing those pipelines
-- A thin orchestration layer over MLflow (experiment tracking, model registry) and Databricks (model serving, data)
+- A deployment tool that packages pipelines as live pricing APIs (Databricks, container, SageMaker, Azure ML)
 - A CLI that scaffolds projects with CI/CD, linting, tests, and deployment config out of the box
 - An opinionated framework that makes it hard to do the wrong thing
 
 ### Haute IS NOT:
 - A model training framework (use MLflow, scikit-learn, XGBoost, LightGBM, etc.)
-- A replacement for Databricks (it's a client, not a platform)
+- An ML platform (it deploys pricing APIs, not ML models in the MLOps sense)
 - A proprietary black box - everything is `.py` files on disk
 
 ---
@@ -114,7 +114,7 @@ Pipeline files live in the **project root** (e.g. `main.py`), not in a subdirect
 
 For multi-pipeline projects, users can organise pipelines into a `pipelines/` directory and update `haute.toml` accordingly - but the default is root-level.
 
-CI/CD workflows are optional - pass `--ci github` to generate them, or `--ci none` to skip. The deploy target is selected with `--target` (databricks, docker, sagemaker, azure-ml).
+CI/CD workflows are optional - pass `--ci github` to generate them, or `--ci none` to skip. The deploy target is selected with `--target` (databricks, container, sagemaker, azure-ml). See `docs/DEPLOY_DESIGN.md` for full details.
 
 ---
 
@@ -154,11 +154,10 @@ uv add haute
 │  │  - Validate pipelines               │ │
 │  └─────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────┐ │
-│  │  MLflow / Databricks Client         │ │
-│  │  - Model registry queries           │ │
-│  │  - Model serving deployment         │ │
-│  │  - Batch scoring (local or remote)  │ │
-│  │  - Experiment tracking              │ │
+│  │  Deploy Targets                     │ │
+│  │  - Container: FastAPI + Docker      │ │
+│  │  - Databricks: MLflow + serving     │ │
+│  │  - SageMaker / Azure ML (planned)   │ │
 │  └─────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────┐ │
 │  │  File Watcher                       │ │
@@ -169,11 +168,10 @@ uv add haute
 └──────────────────────────────────────────┘
                │
 ┌──────────────┴───────────────────────────┐
-│  Databricks / MLflow (remote)            │
-│  - Unity Catalog (data)                  │
-│  - MLflow Model Registry                 │
-│  - Model Serving endpoints               │
-│  - Spark (batch scoring)                 │
+│  Deploy target (remote)                  │
+│  - Container host (ECS, Cloud Run, etc.) │
+│  - OR: Databricks Model Serving          │
+│  - OR: SageMaker / Azure ML endpoints    │
 └──────────────────────────────────────────┘
 ```
 
@@ -251,15 +249,17 @@ price = pipeline.score(single)
 
 ### 5.2 Live Scoring (API)
 
-When deployed to Databricks Model Serving, the pipeline receives a JSON request, converts it to a 1-row Polars DataFrame internally, runs the pipeline, and returns JSON:
+When deployed, the pipeline receives a JSON request, converts it to a 1-row Polars DataFrame internally, runs the pipeline, and returns JSON:
 
 ```
-POST /serving-endpoints/motor-pricing/invocations
+POST /quote
 {"vehicle_age": 3, "postcode": "SW1A", "driver_age": 35}
 → {"technical_price": 412.50}
 ```
 
-### 5.3 Real-time API (via Databricks Model Serving)
+### 5.3 Deploy Targets
+
+Haute deploys a **pricing API**, not an ML model. The default target packages the pipeline as a **FastAPI app in a Docker container**. Teams on Databricks can deploy via MLflow instead.
 
 ```bash
 # Deploy to production (reads config from haute.toml + credentials from .env)
@@ -275,12 +275,16 @@ haute deploy --dry-run
 This:
 1. Parses the pipeline and prunes to the scoring path
 2. Validates structure and scores test quotes locally
-3. Packages the pipeline as an MLflow pyfunc model
-4. Registers it in MLflow Model Registry
-5. Creates/updates a Databricks Model Serving endpoint
-6. Returns the endpoint URL
+3. Packages the pipeline (container: FastAPI + Docker image; databricks: MLflow model)
+4. Pushes to the configured target
+5. Returns the endpoint URL
 
-The pricing pipeline itself becomes the MLflow model - it wraps model lookups, rating steps, and business logic into a single deployable unit.
+| Target | `[deploy].target` | What it produces | Status |
+|---|---|---|---|
+| **Container** | `"container"` | FastAPI Docker image, `/quote` + `/health` | Next |
+| **Databricks** | `"databricks"` | MLflow model → serving endpoint | ✅ Implemented |
+| **SageMaker** | `"sagemaker"` | Container → ECR → SageMaker endpoint | Planned |
+| **Azure ML** | `"azure-ml"` | Container → ACR → Azure ML endpoint | Planned |
 
 ### 5.4 Deployment Configuration
 
@@ -568,10 +572,11 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 ### Phase 5 - Engineering Practices (partially complete)
 - [x] `haute init` scaffolds a new pricing project (`--target`, `--ci` flags)
 - [x] GitHub Actions CI template (lint → type check → test → pipeline validation)
-- [x] GitHub Actions deploy template (staging → smoke test → production with approval)
+- [x] GitHub Actions deploy template (staging → smoke test → impact → production with approval)
+- [x] GitLab CI + Azure DevOps pipeline templates
 - [x] `haute lint` pipeline-specific validation
-- [x] Target-aware scaffolding (databricks, docker, sagemaker, azure-ml)
-- [ ] Pre-commit hooks (ruff, mypy, haute lint)
+- [x] Target-aware scaffolding (databricks, container, sagemaker, azure-ml)
+- [x] Pre-commit hooks (ruff auto-format on commit)
 - [ ] Auto-generated test stubs + `haute test`
 - [ ] Pipeline visual diff (`haute diff HEAD~1`)
 
