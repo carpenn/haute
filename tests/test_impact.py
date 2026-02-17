@@ -125,8 +125,6 @@ class TestBuildReport:
             prod_endpoint="test",
             dataset_path="data/policies.parquet",
             total_rows=1000,
-            max_single_pct=25.0,
-            avg_pct=10.0,
         )
         assert report.scored_rows == 2
         assert len(report.column_stats) == 1
@@ -147,12 +145,10 @@ class TestBuildReport:
             prod_endpoint="p",
             dataset_path="d",
             total_rows=3,
-            max_single_pct=25.0,
-            avg_pct=10.0,
         )
         assert report.scored_rows == 2
 
-    def test_threshold_counting(self) -> None:
+    def test_mixed_changes_captured(self) -> None:
         prd = [{"price": 100.0}, {"price": 100.0}]
         stg = [{"price": 130.0}, {"price": 105.0}]  # +30%, +5%
         inp = pl.DataFrame({"x": ["a", "b"]})
@@ -165,10 +161,8 @@ class TestBuildReport:
             prod_endpoint="p",
             dataset_path="d",
             total_rows=2,
-            max_single_pct=25.0,
-            avg_pct=10.0,
         )
-        assert report.n_above_single_threshold == 1  # only the +30%
+        assert report.column_stats[0].max_increase_pct == pytest.approx(30.0, abs=0.1)
 
 
 class TestScoreEndpointBatched:
@@ -227,9 +221,6 @@ class TestFormatTerminal:
                     SegmentRow("Picardie", 423, -0.3, 501.23, 502.78),
                 ]
             },
-            max_single_threshold=25.0,
-            avg_threshold=10.0,
-            n_above_single_threshold=147,
             is_first_deploy=False,
         )
         defaults.update(overrides)
@@ -243,24 +234,12 @@ class TestFormatTerminal:
         assert "+2.3%" in text
         assert "+18.7%" in text
         assert "-4.2%" in text
-        assert "147" in text
         assert "Ile-de-France" in text
 
     def test_first_deploy(self) -> None:
         report = self._make_report(is_first_deploy=True, column_stats=[], segments={})
         text = format_terminal(report)
         assert "First deployment" in text
-
-    def test_threshold_warning(self) -> None:
-        report = self._make_report(n_above_single_threshold=50)
-        text = format_terminal(report)
-        assert "50 quotes changed" in text
-
-    def test_no_threshold_breach(self) -> None:
-        report = self._make_report(n_above_single_threshold=0)
-        text = format_terminal(report)
-        assert "No quotes changed" in text
-
 
 class TestFormatMarkdown:
     """Markdown report formatting (GitHub Step Summary)."""
@@ -294,9 +273,6 @@ class TestFormatMarkdown:
                 )
             ],
             segments={},
-            max_single_threshold=25.0,
-            avg_threshold=10.0,
-            n_above_single_threshold=0,
             is_first_deploy=False,
         )
         defaults.update(overrides)
@@ -308,19 +284,12 @@ class TestFormatMarkdown:
         assert "# Impact Report" in md
         assert "| Metric | Value |" in md
         assert "| P5 | P25 | P50 | P75 | P95 |" in md
-        assert "## Threshold Check" in md
 
     def test_first_deploy_markdown(self) -> None:
         report = self._make_report(is_first_deploy=True, column_stats=[], segments={})
         md = format_markdown(report)
         assert "First deployment" in md
         assert "| Metric" not in md
-
-    def test_threshold_breach_emoji(self) -> None:
-        report = self._make_report(n_above_single_threshold=42)
-        md = format_markdown(report)
-        assert "⚠️" in md
-        assert "42 quotes" in md
 
     def test_segment_table(self) -> None:
         report = self._make_report(

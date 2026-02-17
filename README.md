@@ -70,13 +70,13 @@ The Docker target is worth calling out specifically. It has zero cloud dependenc
 
 This is where Haute is most opinionated. A pricing engine without safety rails is dangerous - one wrong factor can misprice an entire book before anyone notices. So deployment safety isn't optional, it's baked into how the tool works.
 
-**Test quotes** - Before any deployment, Haute scores example requests through the pipeline. If anything breaks, the deploy is blocked. You can also set expected outputs with tolerances, so you're testing not just "does it run" but "does it produce the right prices".
+Before any model reaches production, Haute scores a set of example quotes through the pipeline. If anything breaks - a missing column, a model that won't load, a transform that errors on edge cases - the deployment is blocked. You can also set expected outputs with tolerances, so you're testing not just "does it run" but "does it produce the right prices".
 
-**Impact analysis** - When you propose a pricing change, Haute scores a portfolio sample through both the current and proposed pipeline and produces a comparison. How many quotes changed, by how much, which segments moved, what the premium impact looks like. This gets posted to the pull request so reviewers see the financial effect before they approve anything.
+When a new model is ready, it gets deployed to a staging environment first. Haute then scores a portfolio sample through both the new model and the one currently in production, and produces a comparison report: how many quotes changed, by how much, which segments moved, what the overall premium impact looks like. The people who need to approve the change see the financial effect before it goes live. Nobody has to ask "what will this do to the book" - the answer is already there.
 
-**Staging gates** - Every deployment goes through staging first, then a smoke test against the live staging endpoint, then an approval gate, then production. This isn't configurable away. A solo actuary gets the same pipeline as a large team. You can adjust the number of required approvers, but the staging-then-production structure is fixed.
+The path to production is always the same: deploy to staging, verify it works, review the impact, then manually promote. A solo actuary gets the same process as a large team. You can adjust how many people need to sign off, but the structure itself is fixed. There are no shortcuts because there shouldn't be.
 
-**Audit trail** - Every deployment records the git commit, the PR, who approved it, the impact report, and what version it replaced. Solvency II, IFRS 17, FCA pricing practices - the traceability requirements are real, and this covers them without you having to build anything.
+Every deployment records what changed, who approved it, the impact report, and what version it replaced. Solvency II, IFRS 17, FCA pricing practices - the traceability requirements are real, and this covers them without you having to build anything.
 
 ---
 
@@ -108,7 +108,9 @@ This is genuinely useful for regulatory explainability, but it's also just a goo
 
 Pipelines are plain `.py` files in Git. This gives you branching (work on a new rating structure without touching production), pull requests (every change is reviewed and discussed before it goes live), full history, and the ability to roll back to any previous version.
 
-Haute generates CI/CD workflows when you set up a project. You pick your provider - GitHub Actions, Azure DevOps, or GitLab CI - and it creates the workflow files. Pull requests run linting, validation, test quote scoring, and impact analysis automatically. Merges to main deploy to staging, run smoke tests, wait for approval, then deploy to production.
+Haute generates the automation around this when you set up a project. You tell it which CI provider your team uses and it creates the configuration files that wire everything together. Proposed changes get validated, tested, and scored automatically before anyone reviews them. Once a change is approved and merged, the new model goes to staging, gets verified, and an impact report is produced. Promoting to production is always a separate, deliberate act.
+
+You can also lock things down so that deployments can only happen through this process - nobody can push a model to production from their laptop. The only path to live is through the review pipeline.
 
 The intent is that pricing teams get the same release discipline that software engineering teams use, without having to build it themselves.
 
@@ -141,7 +143,7 @@ Radar and Earnix are mature products with decades of development and large teams
 | **Backend** | Python, FastAPI, Polars, WebSocket sync |
 | **Models** | MLflow (registry, tracking, serving) |
 | **Deploy Targets** | Databricks · AWS SageMaker · Azure ML · Docker |
-| **CI/CD** | GitHub Actions · Azure DevOps · GitLab CI |
+| **CI/CD** | GitHub Actions · GitLab CI (Azure DevOps planned) |
 
 ---
 

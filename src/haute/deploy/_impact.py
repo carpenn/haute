@@ -62,9 +62,6 @@ class ImpactReport:
     failed_rows: int
     column_stats: list[ColumnStats]
     segments: dict[str, list[SegmentRow]]
-    max_single_threshold: float
-    avg_threshold: float
-    n_above_single_threshold: int
     is_first_deploy: bool = False
 
 
@@ -224,8 +221,6 @@ def build_report(
     prod_endpoint: str,
     dataset_path: str,
     total_rows: int,
-    max_single_pct: float,
-    avg_pct: float,
 ) -> ImpactReport:
     """Compare staging and production predictions and build an impact report."""
     stg_df = _preds_to_df(staging_preds)
@@ -246,12 +241,6 @@ def build_report(
 
     stats = [_column_stats(stg_df[c], prd_df[c], c) for c in num_cols]
 
-    n_above = 0
-    for c in num_cols:
-        denom = prd_df[c].abs().clip(lower_bound=1e-12)
-        chg_abs = ((stg_df[c] - prd_df[c]) / denom * 100).abs()
-        n_above += int((chg_abs > max_single_pct).sum())
-
     primary = num_cols[0] if num_cols else None
     segments = (
         _segment_breakdown(stg_df, prd_df, input_df, primary) if primary and scored > 0 else {}
@@ -268,9 +257,6 @@ def build_report(
         failed_rows=failed,
         column_stats=stats,
         segments=segments,
-        max_single_threshold=max_single_pct,
-        avg_threshold=avg_pct,
-        n_above_single_threshold=n_above,
     )
 
 
@@ -339,30 +325,6 @@ def format_terminal(report: ImpactReport) -> str:
             f"  P50={_fmt_pct(cs.median_change_pct)}"
             f"  P75={_fmt_pct(cs.p75)}  P95={_fmt_pct(cs.p95)}"
         )
-
-    lines.append("")
-    # Threshold flags
-    if report.n_above_single_threshold > 0:
-        lines.append(
-            f"  ⚠ {_fmt_int(report.n_above_single_threshold)} quotes changed"
-            f" by more than ±{report.max_single_threshold:.1f}%"
-        )
-    else:
-        lines.append(f"  ✓ No quotes changed by more than ±{report.max_single_threshold:.1f}%")
-    for cs in report.column_stats:
-        avg = abs(cs.mean_change_pct)
-        if avg > report.avg_threshold:
-            lines.append(
-                f"  ⚠ Average change for '{cs.name}'"
-                f" ({_fmt_pct(cs.mean_change_pct)}) exceeds"
-                f" ±{report.avg_threshold:.1f}% threshold"
-            )
-        else:
-            lines.append(
-                f"  ✓ Average change for '{cs.name}'"
-                f" ({_fmt_pct(cs.mean_change_pct)}) within"
-                f" ±{report.avg_threshold:.1f}% threshold"
-            )
 
     for col_name, seg_rows in report.segments.items():
         lines.append("")
@@ -434,31 +396,6 @@ def format_markdown(report: ImpactReport) -> str:
             f" | {_fmt_pct(cs.median_change_pct)}"
             f" | {_fmt_pct(cs.p75)} | {_fmt_pct(cs.p95)} |"
         )
-
-    lines.append("")
-    lines.append("## Threshold Check")
-    lines.append("")
-    if report.n_above_single_threshold > 0:
-        lines.append(
-            f"- ⚠️ **{report.n_above_single_threshold:,} quotes** changed"
-            f" by more than ±{report.max_single_threshold:.1f}%"
-        )
-    else:
-        lines.append(f"- ✅ No quotes changed by more than ±{report.max_single_threshold:.1f}%")
-    for cs in report.column_stats:
-        avg = abs(cs.mean_change_pct)
-        if avg > report.avg_threshold:
-            lines.append(
-                f"- ⚠️ Average change for `{cs.name}`"
-                f" ({_fmt_pct(cs.mean_change_pct)}) exceeds"
-                f" ±{report.avg_threshold:.1f}% threshold"
-            )
-        else:
-            lines.append(
-                f"- ✅ Average change for `{cs.name}`"
-                f" ({_fmt_pct(cs.mean_change_pct)}) within"
-                f" ±{report.avg_threshold:.1f}% threshold"
-            )
 
     for col_name, seg_rows in report.segments.items():
         lines.append("")

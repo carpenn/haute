@@ -50,19 +50,15 @@ class TestHauteToml:
     def test_team_defaults(self) -> None:
         result = haute_toml("motor", "databricks", "github")
         assert "min_approvers = 2" in result
-        assert "require_approval = true" in result
 
     def test_safety_section_present(self) -> None:
         result = haute_toml("motor", "databricks", "github")
         assert "[safety]" in result
-        assert "max_single_quote_change_pct" in result
-        assert "max_avg_change_pct" in result
-        assert "block_on_threshold_breach" in result
+        assert "impact_dataset" in result
 
-    def test_staging_and_production_sections(self) -> None:
+    def test_staging_section(self) -> None:
         result = haute_toml("motor", "databricks", "github")
         assert "[ci.staging]" in result
-        assert "[ci.production]" in result
         assert 'endpoint_suffix = "-staging"' in result
 
     def test_unknown_target_raises(self) -> None:

@@ -251,7 +251,6 @@ class TestInit:
         assert "[safety]" in toml_content
         assert "[ci]" in toml_content
         assert "[ci.staging]" in toml_content
-        assert "[ci.production]" in toml_content
 
 
 # ---------------------------------------------------------------------------

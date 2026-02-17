@@ -10,14 +10,8 @@ from __future__ import annotations
 
 
 def haute_toml(name: str, target: str, ci: str) -> str:
-    """Generate ``haute.toml`` with only the relevant target section.
-
-    Defaults to team mode (min_approvers=2, require_approval=true).
-    Solo users set min_approvers=0 and require_approval=false in the
-    generated file - no separate CLI flag needed.
-    """
+    """Generate ``haute.toml`` with only the relevant target section."""
     min_approvers = 2
-    require_approval = "true"
 
     sections = [
         f"""\
@@ -29,7 +23,6 @@ pipeline = "main.py"
 target = "{target}"
 model_name = "{name}"
 endpoint_name = "{name}"
-ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 """,
         _target_section(name, target),
         f"""\
@@ -38,9 +31,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
-max_single_quote_change_pct = 25.0
-max_avg_change_pct = 10.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = {min_approvers}
@@ -50,10 +40,6 @@ provider = "{ci}"
 
 [ci.staging]
 endpoint_suffix = "-staging"
-
-[ci.production]
-require_approval = {require_approval}
-min_approvers = {min_approvers}
 """,
     ]
     return "\n".join(sections)

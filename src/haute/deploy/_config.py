@@ -29,12 +29,9 @@ class DatabricksConfig:
 
 @dataclass
 class SafetyConfig:
-    """Thresholds and gates from [safety] in haute.toml."""
+    """Safety settings from [safety] in haute.toml."""
 
     impact_dataset: str = ""
-    max_single_quote_change_pct: float = 25.0
-    max_avg_change_pct: float = 10.0
-    block_on_threshold_breach: bool = True
     min_approvers: int = 2
 
 
@@ -44,8 +41,6 @@ class CIConfig:
 
     provider: str = "github"
     staging_endpoint_suffix: str = "-staging"
-    production_require_approval: bool = True
-    production_min_approvers: int = 2
 
 
 @dataclass
@@ -62,7 +57,6 @@ class DeployConfig:
     databricks: DatabricksConfig = field(default_factory=DatabricksConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ci: CIConfig = field(default_factory=CIConfig)
-    ci_only_deploy: bool = False
 
     @property
     def effective_endpoint_name(self) -> str | None:
@@ -94,14 +88,11 @@ class DeployConfig:
         approval_raw = safety_raw.get("approval", {})
         ci_raw = data.get("ci", {})
         ci_staging = ci_raw.get("staging", {})
-        ci_prod = ci_raw.get("production", {})
 
         pipeline_file = Path(project.get("pipeline", "main.py"))
         model_name = deploy.get("model_name", project.get("name", pipeline_file.stem))
         endpoint_name = deploy.get("endpoint_name")
         target = deploy.get("target", "databricks")
-        ci_only_deploy = deploy.get("ci_only_deploy", False)
-
         output_fields_raw = deploy.get("output_fields")
         output_fields = list(output_fields_raw) if output_fields_raw else None
 
@@ -117,17 +108,12 @@ class DeployConfig:
 
         safety_config = SafetyConfig(
             impact_dataset=safety_raw.get("impact_dataset", ""),
-            max_single_quote_change_pct=safety_raw.get("max_single_quote_change_pct", 25.0),
-            max_avg_change_pct=safety_raw.get("max_avg_change_pct", 10.0),
-            block_on_threshold_breach=safety_raw.get("block_on_threshold_breach", True),
             min_approvers=approval_raw.get("min_approvers", 2),
         )
 
         ci_config = CIConfig(
             provider=ci_raw.get("provider", "github"),
             staging_endpoint_suffix=ci_staging.get("endpoint_suffix", "-staging"),
-            production_require_approval=ci_prod.get("require_approval", True),
-            production_min_approvers=ci_prod.get("min_approvers", 2),
         )
 
         config = cls(
@@ -140,7 +126,6 @@ class DeployConfig:
             databricks=db_config,
             safety=safety_config,
             ci=ci_config,
-            ci_only_deploy=ci_only_deploy,
         )
 
         return _apply_env_overrides(config)

@@ -44,7 +44,8 @@ my-pricing-project/
 ├── .github/                     # CI/CD workflows (if provider=github)
 │   └── workflows/
 │       ├── ci.yml               # PR checks: lint, test, validate
-│       └── deploy.yml           # Merge-to-main: validate → staging → smoke → impact → production
+│       ├── deploy-staging.yml   # Merge-to-main: validate → staging → smoke → impact
+│       └── deploy-production.yml  # Manual trigger: deploy to production
 ├── .gitignore
 └── pyproject.toml               # Dependencies (haute added automatically)
 ```
@@ -71,7 +72,6 @@ pipeline = "main.py"
 target = "databricks"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
-ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.databricks]
 experiment_name = "/Shared/haute/motor-pricing"
@@ -85,9 +85,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
-max_single_quote_change_pct = 25.0
-max_avg_change_pct = 10.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = 2
@@ -97,10 +94,6 @@ provider = "github"
 
 [ci.staging]
 endpoint_suffix = "-staging"
-
-[ci.production]
-require_approval = true
-min_approvers = 2
 ```
 
 #### Example: `haute init --target docker --ci azure-devops`
@@ -114,7 +107,6 @@ pipeline = "main.py"
 target = "docker"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
-ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.docker]
 registry = ""                         # e.g. "ghcr.io/myorg", "123456.dkr.ecr.eu-west-1.amazonaws.com"
@@ -126,9 +118,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
-max_single_quote_change_pct = 25.0
-max_avg_change_pct = 10.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = 2
@@ -138,10 +127,6 @@ provider = "azure-devops"
 
 [ci.staging]
 endpoint_suffix = "-staging"
-
-[ci.production]
-require_approval = true
-min_approvers = 2
 ```
 
 #### Example: `haute init --target sagemaker --ci gitlab`
@@ -155,7 +140,6 @@ pipeline = "main.py"
 target = "sagemaker"
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
-ci_only_deploy = false  # set to true once CI/CD is working to block local deploys
 
 [deploy.sagemaker]
 region = "eu-west-1"
@@ -167,9 +151,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
-max_single_quote_change_pct = 25.0
-max_avg_change_pct = 10.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = 2
@@ -179,10 +160,6 @@ provider = "gitlab"
 
 [ci.staging]
 endpoint_suffix = "-staging"
-
-[ci.production]
-require_approval = true
-min_approvers = 2
 ```
 
 ### 4.2 All Target-Specific Sections (reference)
@@ -224,9 +201,9 @@ instance_count = 1
 |---|---|---|---|
 | Deploy target, model name, endpoint | `haute.toml [deploy]` | ✅ Yes | `target = "databricks"` |
 | Target-specific infra config | `haute.toml [deploy.<target>]` | ✅ Yes | `catalog = "main"`, `instance_type = "ml.m5.large"` |
-| Safety thresholds | `haute.toml [safety]` | ✅ Yes | `max_avg_change_pct = 10.0` |
+| Safety config | `haute.toml [safety]` | ✅ Yes | `impact_dataset = "data/portfolio.parquet"` |
 | CI provider and pipeline shape | `haute.toml [ci]` | ✅ Yes | `provider = "github"` |
-| CI workflow files | `.github/workflows/` etc. | ✅ Yes | `ci.yml`, `deploy.yml` |
+| CI workflow files | `.github/workflows/` etc. | ✅ Yes | `ci.yml`, `deploy-staging.yml`, `deploy-production.yml` |
 | Workspace credentials | `.env` (local) | ❌ No | `DATABRICKS_TOKEN=dapi...` |
 | Workspace credentials (CI) | CI secrets | ❌ No | GitHub repo secrets |
 | Test quote payloads | `tests/quotes/*.json` | ✅ Yes | `single_policy.json` |
@@ -384,7 +361,7 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
 
 | Provider | Config key | Generated file(s) | Status |
 |---|---|---|---|
-| **GitHub Actions** | `provider = "github"` | `.github/workflows/ci.yml`, `.github/workflows/deploy.yml` | v1 |
+| **GitHub Actions** | `provider = "github"` | `.github/workflows/ci.yml`, `deploy-staging.yml`, `deploy-production.yml` | v1 |
 | **Azure DevOps** | `provider = "azure-devops"` | `azure-pipelines.yml` | v2 |
 | **GitLab CI** | `provider = "gitlab"` | `.gitlab-ci.yml` | v1 |
 | **None** | `provider = "none"` | No CI files generated | v1 |
@@ -402,24 +379,29 @@ Runs on every PR to `main`:
 | **test** | `pytest -v` | Yes |
 | **pipeline-validate** | `haute lint` + `haute deploy --dry-run` | Yes |
 
-### 6.4 GitHub Actions - Deploy Workflow (`deploy.yml`)
+### 6.4 GitHub Actions - Staging Workflow (`deploy-staging.yml`)
 
-Runs on push to `main` (i.e. after PR merge):
+Runs automatically on push to `main` (i.e. after PR merge):
 
-| Step | What it does | Environment |
-|---|---|---|
-| **validate** | Re-runs lint, typecheck, test, pipeline validation on merge commit | - |
-| **deploy-staging** | `haute deploy --endpoint-suffix "-staging"` | `staging` (GitHub environment) |
-| **smoke-test** | Score test quotes against the live staging endpoint | - |
-| **impact-analysis** | `haute impact --endpoint-suffix "-staging"` — compares staging vs production predictions, writes `impact_report.md` + GitHub Step Summary | - |
-| **deploy-production** | `haute deploy` | `production` (GitHub environment, requires approval) |
-| **tag** | Git tag with version: `deploy/v{model_version}` | - |
+| Job | What it does |
+|---|---|
+| **validate** | Re-runs lint, typecheck, test, pipeline validation on merge commit |
+| **deploy-staging** | `haute deploy --endpoint-suffix "-staging"` |
+| **smoke-test** | Score test quotes against the live staging endpoint |
+| **impact-analysis** | `haute impact --endpoint-suffix "-staging"` — compares staging vs production predictions, writes `impact_report.md` + GitHub Step Summary |
 
-The staging→production promotion uses **GitHub environment protection rules**:
-- `staging`: no protection (auto-deploys)
-- `production`: requires N approvers (configurable in `haute.toml [ci.production]`)
+### 6.5 GitHub Actions - Production Workflow (`deploy-production.yml`)
 
-### 6.5 Azure DevOps - Pipeline (`azure-pipelines.yml`)
+Triggered manually via the GitHub Actions UI (`workflow_dispatch`) after reviewing the impact report:
+
+| Job | What it does |
+|---|---|
+| **deploy-production** | `haute deploy` — deploys the current main branch to the production endpoint |
+| **tag** | Git tag with version: `deploy/v{model_version}` |
+
+This split works on **GitHub Free** — no environment protection rules needed. The manual trigger is the approval gate. On GitHub Team/Enterprise, teams can optionally merge these into a single workflow with environment protection rules on `production`.
+
+### 6.6 Azure DevOps - Pipeline (`azure-pipelines.yml`)
 
 Same logical flow, Azure syntax:
 
@@ -448,7 +430,7 @@ stages:
 
 Credentials use Azure DevOps **variable groups** or **service connections** instead of GitHub secrets - but the env var names are identical (`DATABRICKS_HOST`, etc.).
 
-### 6.6 No Shortcuts - Every Team Gets the Full Pipeline
+### 6.7 No Shortcuts - Every Team Gets the Full Pipeline
 
 Insurance pricing carries risk regardless of team size. A solo actuary mispricing a book is just as dangerous as a large team doing it. Every `haute init` project gets the full pipeline:
 
@@ -524,10 +506,7 @@ Reviewers check the impact report before approving the production deployment. Th
 
 For first-time deployments (no production endpoint exists yet), the report notes this and skips comparison.
 
-Threshold flags come from `haute.toml [safety]`:
-- `max_single_quote_change_pct` — flags quotes exceeding this individual change
-- `max_avg_change_pct` — flags when the portfolio average exceeds this
-- Segment breakdown auto-detects categorical input columns (2–50 unique values) and reports top segments by absolute average change
+The segment breakdown auto-detects categorical input columns (2–50 unique values) and reports top segments by absolute average change.
 
 ### 7.3 Approval Gates
 
@@ -638,32 +617,21 @@ This keeps the deployment pipeline simple and ensures staging is a true replica 
 target = "databricks"          # one target, used for both staging and production
 model_name = "motor-pricing"
 endpoint_name = "motor-pricing"
-ci_only_deploy = true             # blocks local deploys; only CI can deploy
 
 [ci.staging]
 endpoint_suffix = "-staging"   # deploys to "motor-pricing-staging"
-
-[ci.production]
-require_approval = true
-min_approvers = 2              # deploys to "motor-pricing"
 ```
 
 ### D8: Solo mode is a config change, not a CLI flag
 
-`haute init` always generates team defaults (`min_approvers = 2`). A solo developer edits two values in `haute.toml`:
+`haute init` always generates team defaults (`min_approvers = 2`). A solo developer edits one value in `haute.toml`:
 
 ```toml
 [safety.approval]
 min_approvers = 0
-
-[ci.production]
-require_approval = false
-min_approvers = 0
 ```
 
-And skips adding protection rules to the `production` GitHub environment.
-
-The full pipeline still runs identically - validate → staging → smoke test → impact analysis → production. The only difference is there's no pause for human approval. The impact report is still generated so the developer can review changes. When the team grows, bump the values back up and add environment protection rules. No workflow regeneration needed.
+The full pipeline still runs identically - validate → staging → smoke test → impact analysis → production. The only difference is the team doesn't require multiple sign-offs. The impact report is still generated so the developer can review changes. When the team grows, bump the values back up. No workflow regeneration needed.
 
 ### D9: `pyproject.toml` extras
 
@@ -709,4 +677,4 @@ All design questions have been resolved. See §8 Decisions Made.
 - **Merge to main = deploy** - every change is tested, reviewed, and impact-analysed before production
 - **`haute init --target <t> --ci <p>` scaffolds everything** - only the relevant config, credentials, and CI/CD workflows for the chosen target and provider
 - **No shortcuts** - every team gets staging → impact analysis → approval gate → production, regardless of size
-- **`ci_only_deploy`** - optionally blocks all local deploys, ensuring pricing changes only go through CI/CD
+- **CI-only deploys** - `haute deploy` only runs in CI/CD environments; local deploys are always blocked (use `--dry-run` to validate locally)

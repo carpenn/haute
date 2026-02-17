@@ -308,9 +308,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio_sample.parquet"
-max_single_quote_change_pct = 25.0
-max_avg_change_pct = 10.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = 2
@@ -320,10 +317,6 @@ provider = "github"
 
 [ci.staging]
 endpoint_suffix = "-staging"
-
-[ci.production]
-require_approval = true
-min_approvers = 2
 ```
 
 Credentials are read from `.env` (loaded automatically, gitignored). TOML values can be overridden by `HAUTE_` prefixed environment variables (e.g. `HAUTE_MODEL_NAME`, `HAUTE_TARGET`), which are in turn overridden by CLI flags.

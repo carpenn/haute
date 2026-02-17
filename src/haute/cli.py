@@ -463,10 +463,10 @@ def deploy(
         )
         raise SystemExit(1)
 
-    # Block local deploys when ci_only_deploy is enabled
-    if config.ci_only_deploy and not dry_run and not os.environ.get("CI"):
+    # Block local deploys — production changes must go through CI/CD
+    if not dry_run and not os.environ.get("CI"):
         click.echo(
-            "Error: Deploys are restricted to CI/CD (ci_only_deploy = true in haute.toml).",
+            "Error: Deploys must go through CI/CD.",
             err=True,
         )
         click.echo(
@@ -951,9 +951,6 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
             failed_rows=len(records) - len(staging_preds),
             column_stats=[],
             segments={},
-            max_single_threshold=config.safety.max_single_quote_change_pct,
-            avg_threshold=config.safety.max_avg_change_pct,
-            n_above_single_threshold=0,
             is_first_deploy=True,
         )
     else:
@@ -966,8 +963,6 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
             prod_endpoint=prod_name,
             dataset_path=impact_path,
             total_rows=total_rows,
-            max_single_pct=config.safety.max_single_quote_change_pct,
-            avg_pct=config.safety.max_avg_change_pct,
         )
 
     # Print terminal report

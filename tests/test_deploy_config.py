@@ -35,9 +35,6 @@ dir = "tests/quotes"
 
 [safety]
 impact_dataset = "data/portfolio.parquet"
-max_single_quote_change_pct = 20.0
-max_avg_change_pct = 5.0
-block_on_threshold_breach = true
 
 [safety.approval]
 min_approvers = 3
@@ -48,9 +45,6 @@ provider = "github"
 [ci.staging]
 endpoint_suffix = "-stg"
 
-[ci.production]
-require_approval = true
-min_approvers = 4
 """
     p = tmp_path / "haute.toml"
     p.write_text(content)
@@ -61,17 +55,12 @@ class TestFromToml:
     def test_loads_safety_section(self, toml_file: Path) -> None:
         config = DeployConfig.from_toml(toml_file)
         assert config.safety.impact_dataset == "data/portfolio.parquet"
-        assert config.safety.max_single_quote_change_pct == 20.0
-        assert config.safety.max_avg_change_pct == 5.0
-        assert config.safety.block_on_threshold_breach is True
         assert config.safety.min_approvers == 3
 
     def test_loads_ci_section(self, toml_file: Path) -> None:
         config = DeployConfig.from_toml(toml_file)
         assert config.ci.provider == "github"
         assert config.ci.staging_endpoint_suffix == "-stg"
-        assert config.ci.production_require_approval is True
-        assert config.ci.production_min_approvers == 4
 
     def test_loads_target(self, toml_file: Path) -> None:
         config = DeployConfig.from_toml(toml_file)
