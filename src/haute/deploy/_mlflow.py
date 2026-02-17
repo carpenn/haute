@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import getpass
 import importlib.resources
 import json
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -184,26 +182,9 @@ def get_deploy_status(
 
 def _build_manifest(resolved: ResolvedDeploy) -> dict:
     """Build the deployment manifest dict."""
-    import haute
+    from haute.deploy._utils import build_manifest
 
-    config = resolved.config
-    return {
-        "haute_version": haute.__version__,
-        "pipeline_name": resolved.pruned_graph.get("pipeline_name", config.model_name),
-        "pipeline_file": str(config.pipeline_file),
-        "created_at": datetime.now(UTC).isoformat(),
-        "created_by": _get_user(),
-        "input_nodes": resolved.input_node_ids,
-        "output_node": resolved.output_node_id,
-        "output_fields": config.output_fields,
-        "input_schema": resolved.input_schema,
-        "output_schema": resolved.output_schema,
-        "artifacts": {name: str(path) for name, path in resolved.artifacts.items()},
-        "graph": resolved.pruned_graph,
-        "nodes_deployed": len(resolved.pruned_graph.get("nodes", [])),
-        "nodes_skipped": len(resolved.removed_node_ids),
-        "nodes_skipped_names": resolved.removed_node_ids,
-    }
+    return build_manifest(resolved)
 
 
 def _build_signature(resolved: ResolvedDeploy) -> object:
@@ -396,7 +377,6 @@ def _check_databricks_connectivity(
 
 def _get_user() -> str:
     """Get the current user's name."""
-    try:
-        return getpass.getuser()
-    except (KeyError, OSError):
-        return "unknown"
+    from haute.deploy._utils import get_user
+
+    return get_user()

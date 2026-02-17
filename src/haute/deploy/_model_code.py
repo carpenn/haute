@@ -21,9 +21,9 @@ class HauteModel(mlflow.pyfunc.PythonModel):
         """Called once when the model is loaded for serving."""
         manifest_path = Path(context.artifacts["deploy_manifest"])
         self._manifest = json.loads(manifest_path.read_text())
-        self._graph = self._manifest["graph"]
-        self._input_node_ids = self._manifest["input_nodes"]
-        self._output_node_id = self._manifest["output_node"]
+        self._graph = self._manifest["pruned_graph"]
+        self._input_node_ids = self._manifest["input_node_ids"]
+        self._output_node_id = self._manifest["output_node_id"]
         self._output_fields = self._manifest.get("output_fields")
 
         self._artifact_paths = {}

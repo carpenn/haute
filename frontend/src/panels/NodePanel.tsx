@@ -29,7 +29,7 @@ type SchemaInfo = {
   preview: Record<string, unknown>[]
 } | null
 
-type SimpleNode = {
+export type SimpleNode = {
   id: string
   type?: string
   data: {
@@ -37,10 +37,11 @@ type SimpleNode = {
     description: string
     nodeType: string
     config?: Record<string, unknown>
+    [key: string]: unknown
   }
 }
 
-type SimpleEdge = {
+export type SimpleEdge = {
   id: string
   source: string
   target: string

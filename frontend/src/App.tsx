@@ -19,7 +19,7 @@ import ELK from "elkjs/lib/elk.bundled.js"
 
 import PipelineNode from "./nodes/PipelineNode"
 import NodePalette from "./panels/NodePalette"
-import NodePanel from "./panels/NodePanel"
+import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
@@ -315,7 +315,7 @@ function FlowEditor() {
       .then((data) => {
         const statuses: Record<string, "ok" | "error"> = {}
         const results = data.results || {}
-        for (const [nodeId, result] of Object.entries(results) as [string, any][]) {
+        for (const [nodeId, result] of Object.entries(results) as [string, { status: string }][]) {
           statuses[nodeId] = result.status === "ok" ? "ok" : "error"
         }
         setNodeStatuses(statuses)
@@ -658,9 +658,9 @@ function FlowEditor() {
         </div>
 
         <NodePanel
-          node={selectedNode as any}
-          edges={edges as any}
-          allNodes={nodes as any}
+          node={selectedNode as unknown as SimpleNode | null}
+          edges={edges as unknown as SimpleEdge[]}
+          allNodes={nodes as unknown as SimpleNode[]}
           onClose={() => setSelectedNode(null)}
           onUpdateNode={onUpdateNode}
           onDeleteEdge={handleDeleteEdge}

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -389,23 +387,9 @@ def _docker_push(image_tag: str) -> None:
 
 def _build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
     """Build the deployment manifest dict."""
-    config = resolved.config
-    return {
-        "haute_version": _get_haute_version(),
-        "pipeline_name": config.model_name,
-        "target": config.target,
-        "created_at": datetime.now(UTC).isoformat(),
-        "created_by": _safe_user(),
-        "input_node_ids": resolved.input_node_ids,
-        "output_node_id": resolved.output_node_id,
-        "input_schema": resolved.input_schema,
-        "output_schema": resolved.output_schema,
-        "output_fields": config.output_fields,
-        "artifacts": {name: str(path) for name, path in resolved.artifacts.items()},
-        "pruned_graph": resolved.pruned_graph,
-        "nodes_deployed": len(resolved.pruned_graph.get("nodes", [])),
-        "nodes_skipped": len(resolved.removed_node_ids),
-    }
+    from haute.deploy._utils import build_manifest
+
+    return build_manifest(resolved)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -413,20 +397,16 @@ def _build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
 
 def _get_haute_version() -> str:
     """Get the installed haute version."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
+    from haute.deploy._utils import get_haute_version
 
-        return version("haute")
-    except PackageNotFoundError:
-        return "0.0.0-dev"
+    return get_haute_version()
 
 
 def _safe_user() -> str:
     """Get username without raising."""
-    try:
-        return getpass.getuser()
-    except (KeyError, OSError):
-        return "unknown"
+    from haute.deploy._utils import get_user
+
+    return get_user()
 
 
 def _git_sha_short() -> str:
