@@ -1,14 +1,49 @@
 /* ── Haute docs theme ────────────────────────────────────────
-   Light content, black header, Haute brand accents
+   Light + dark mode, Haute brand accents, visual polish
    ──────────────────────────────────────────────────────────── */
 
 :root {
-  --haute-pink:   #ec4899;
-  --haute-purple: #8b5cf6;
-  --haute-dark:   #0d1117;
+  --haute-pink:    #ec4899;
+  --haute-purple:  #8b5cf6;
+  --haute-cyan:    #22d3ee;
+  --haute-dark:    #0d1117;
+}
+
+/* ── Light mode tokens ──────────────────────────────────── */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #0d1117;
+  --haute-card-bg: #ffffff;
+  --haute-card-border: #e5e7eb;
+  --haute-card-hover-shadow: rgba(236, 72, 153, 0.1);
+  --haute-table-header-bg: #f9fafb;
+  --haute-table-hover-bg: #f9fafb;
+  --haute-inline-code-bg: #f3f4f6;
+  --haute-inline-code-color: #be185d;
+  --haute-heading-color: #0d1117;
+  --haute-subheading-color: #1a1a2e;
+  --haute-text-muted: #57606a;
+}
+
+/* ── Dark mode tokens ───────────────────────────────────── */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #0d1117;
+  --haute-card-bg: #161b22;
+  --haute-card-border: #30363d;
+  --haute-card-hover-shadow: rgba(236, 72, 153, 0.15);
+  --haute-table-header-bg: #161b22;
+  --haute-table-hover-bg: #1c2128;
+  --haute-inline-code-bg: #1c2128;
+  --haute-inline-code-color: #f472b6;
+  --haute-heading-color: #e6edf3;
+  --haute-subheading-color: #c9d1d9;
+  --haute-text-muted: #8b949e;
 }
 
 /* ── Header ──────────────────────────────────────────────── */
+
+.md-header {
+  background: var(--haute-dark);
+}
 
 .md-header__title {
   font-weight: 700;
@@ -20,33 +55,32 @@
 .md-typeset h1 {
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: var(--haute-dark);
+  color: var(--haute-heading-color);
 }
 
 .md-typeset h2 {
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #1a1a2e;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--haute-subheading-color);
+  border-bottom: 1px solid var(--haute-card-border);
   padding-bottom: 0.4em;
 }
 
 .md-typeset h3 {
   font-weight: 600;
-  color: #1f2937;
 }
 
 /* ── Inline code ─────────────────────────────────────────── */
 
 .md-typeset code {
-  background: #f3f4f6;
-  color: #be185d;
+  background: var(--haute-inline-code-bg);
+  color: var(--haute-inline-code-color);
   border-radius: 4px;
   padding: 0.1em 0.4em;
   font-size: 0.85em;
 }
 
-/* ── Code blocks (dark) ──────────────────────────────────── */
+/* ── Code blocks ─────────────────────────────────────────── */
 
 .md-typeset pre > code {
   background: var(--haute-dark);
@@ -58,14 +92,13 @@
 /* ── Tables ──────────────────────────────────────────────── */
 
 .md-typeset table:not([class]) {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--haute-card-border);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .md-typeset table:not([class]) th {
-  background: #f9fafb;
-  color: var(--haute-dark);
+  background: var(--haute-table-header-bg);
   font-weight: 600;
   text-transform: uppercase;
   font-size: 0.75em;
@@ -73,31 +106,65 @@
 }
 
 .md-typeset table:not([class]) tr:hover td {
-  background: #f9fafb;
+  background: var(--haute-table-hover-bg);
 }
 
-/* ── Grid cards (homepage) ───────────────────────────────── */
+/* ── Grid cards ──────────────────────────────────────────── */
 
 .md-typeset .grid.cards > ul > li {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  background: var(--haute-card-bg);
+  border: 1px solid var(--haute-card-border);
+  border-radius: 12px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .md-typeset .grid.cards > ul > li:hover {
   border-color: var(--haute-pink);
-  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.1);
-  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--haute-card-hover-shadow);
+  transform: translateY(-3px);
+}
+
+/* Card icon accent */
+.md-typeset .grid.cards .twemoji,
+.md-typeset .grid.cards .emojione {
+  color: var(--haute-pink);
 }
 
 /* ── Links ───────────────────────────────────────────────── */
 
 .md-typeset a {
   color: var(--haute-purple);
+  transition: color 0.15s ease;
 }
 
 .md-typeset a:hover {
   color: var(--haute-pink);
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+
+.md-typeset .md-button--primary {
+  background: var(--haute-pink);
+  border-color: var(--haute-pink);
+  color: #fff;
+  transition: all 0.2s ease;
+}
+
+.md-typeset .md-button--primary:hover {
+  background: #db2777;
+  border-color: #db2777;
+  box-shadow: 0 4px 16px rgba(236, 72, 153, 0.35);
+  transform: translateY(-1px);
+}
+
+.md-typeset .md-button:not(.md-button--primary) {
+  transition: all 0.2s ease;
+}
+
+.md-typeset .md-button:not(.md-button--primary):hover {
+  border-color: var(--haute-purple);
+  color: var(--haute-purple);
+  transform: translateY(-1px);
 }
 
 /* ── Admonitions ─────────────────────────────────────────── */
@@ -105,6 +172,24 @@
 .md-typeset .admonition,
 .md-typeset details {
   border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* ── Tabs ────────────────────────────────────────────────── */
+
+.md-typeset .tabbed-labels > label {
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+
+.md-typeset .tabbed-labels > label:hover {
+  color: var(--haute-pink);
+}
+
+/* ── Content tabs active indicator ───────────────────────── */
+
+.md-typeset .tabbed-labels > label.tabbed-alternate--active {
+  color: var(--haute-pink);
 }
 
 /* ── Footer ──────────────────────────────────────────────── */
@@ -123,11 +208,35 @@
 /* ── Content width ───────────────────────────────────────── */
 
 .md-grid {
-  max-width: 1100px;
+  max-width: 1440px;
 }
 
 /* ── Smooth scrolling ────────────────────────────────────── */
 
 html {
   scroll-behavior: smooth;
+}
+
+/* ── Back-to-top button ──────────────────────────────────── */
+
+.md-top {
+  background: var(--haute-pink);
+  color: #fff;
+}
+
+.md-top:hover {
+  background: #db2777;
+}
+
+/* ── Search highlight ────────────────────────────────────── */
+
+.md-search-result mark {
+  background: rgba(236, 72, 153, 0.2);
+  color: inherit;
+}
+
+/* ── Navigation progress bar ─────────────────────────────── */
+
+.md-progress {
+  background: linear-gradient(90deg, var(--haute-pink), var(--haute-purple));
 }

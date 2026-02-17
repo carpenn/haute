@@ -152,18 +152,22 @@
       border: 1px solid #e5e7eb;
       border-radius: 12px;
       padding: 1.5rem;
-      transition: all 0.2s ease;
+      transition: all 0.25s ease;
     }
 
     .feature-card:hover {
       border-color: #ec4899;
-      box-shadow: 0 4px 16px rgba(236, 72, 153, 0.08);
-      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(236, 72, 153, 0.12);
+      transform: translateY(-3px);
     }
 
     .feature-card__icon {
-      font-size: 1.5rem;
+      font-size: 1.75rem;
       margin-bottom: 0.75rem;
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
     .feature-card__title {
@@ -179,6 +183,37 @@
       line-height: 1.5;
       margin: 0;
     }
+
+    /* ── Dark mode for feature cards ──────────────────────── */
+    [data-md-color-scheme="slate"] .feature-card {
+      background: #161b22;
+      border-color: #30363d;
+    }
+
+    [data-md-color-scheme="slate"] .feature-card:hover {
+      border-color: #ec4899;
+      box-shadow: 0 8px 24px rgba(236, 72, 153, 0.15);
+    }
+
+    [data-md-color-scheme="slate"] .feature-card__title {
+      color: #e6edf3;
+    }
+
+    [data-md-color-scheme="slate"] .feature-card__desc {
+      color: #8b949e;
+    }
+
+    /* ── Hero fade-in animation ──────────────────────────── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .hero__title      { animation: fadeInUp 0.6s ease both; }
+    .hero__subtitle   { animation: fadeInUp 0.6s ease 0.1s both; }
+    .hero__badges     { animation: fadeInUp 0.6s ease 0.2s both; }
+    .hero__buttons    { animation: fadeInUp 0.6s ease 0.3s both; }
+    .hero__terminal   { animation: fadeInUp 0.6s ease 0.4s both; }
 
     @media (max-width: 768px) {
       .hero__title { font-size: 2.5rem; }
@@ -198,6 +233,9 @@
       <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
       <img src="https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square" alt="License">
       <img src="https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white" alt="Databricks">
+      <img src="https://img.shields.io/badge/deploy-Azure_Container_Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white" alt="Azure Container Apps">
+      <img src="https://img.shields.io/badge/deploy-AWS_ECS-FF9900?style=flat-square&logo=amazonaws&logoColor=white" alt="AWS ECS">
+      <img src="https://img.shields.io/badge/deploy-Cloud_Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="GCP Cloud Run">
       <img src="https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     </div>
 
@@ -217,10 +255,9 @@
         <div class="hero__terminal-dot hero__terminal-dot--green"></div>
       </div>
       <div class="hero__terminal-code">
-        <span class="prompt">$</span> <span class="cmd">pip install haute</span><br>
-        <span class="prompt">$</span> <span class="cmd">haute init</span> <span class="comment">--target databricks --ci github</span><br>
-        <span class="prompt">$</span> <span class="cmd">haute serve</span> <span class="comment"># open the visual editor</span><br>
-        <span class="prompt">$</span> <span class="cmd">haute deploy</span> <span class="comment"># push to production</span>
+        <span class="prompt">$</span> <span class="cmd">uv add haute</span><br>
+        <span class="prompt">$</span> <span class="cmd">haute init</span><br>
+        <span class="prompt">$</span> <span class="cmd">haute serve</span>
       </div>
     </div>
   </section>
@@ -239,7 +276,7 @@
     <div class="feature-card">
       <div class="feature-card__icon">&#9889;</div>
       <div class="feature-card__title">One-command deploy</div>
-      <p class="feature-card__desc">Deploy to Databricks, Docker, AWS, or Azure as a live scoring API.</p>
+      <p class="feature-card__desc">Databricks, Azure Container Apps, AWS ECS, GCP Cloud Run, or Docker. CI handles it all.</p>
     </div>
     <div class="feature-card">
       <div class="feature-card__icon">&#9711;</div>
