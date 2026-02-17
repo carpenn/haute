@@ -1,15 +1,15 @@
-# Haute Deploy — Design Document
+# Haute Deploy - Design Document
 
-**Status:** Databricks and generic container targets implemented. Platform container targets (Azure Container Apps, AWS ECS, GCP Cloud Run) scaffolded — build+push works, service update pending.  
+**Status:** Databricks and generic container targets implemented. Platform container targets (Azure Container Apps, AWS ECS, GCP Cloud Run) scaffolded - build+push works, service update pending.  
 **Scope:** Deploy targets, configuration, CI/CD, safety gates, technical design  
 
 ---
 
 ## 1. Problem
 
-A pricing team builds a pipeline in Haute. They need to deploy it as a **live scoring API** so policy admin systems can send a JSON quote and receive a premium — with one command, no DevOps.
+A pricing team builds a pipeline in Haute. They need to deploy it as a **live scoring API** so policy admin systems can send a JSON quote and receive a premium - with one command, no DevOps.
 
-Haute deploys a **pricing API**, not an ML model in the MLOps sense. The pipeline takes quote data in, runs it through a graph of transforms and models, and returns a premium. Models (CatBoost, GLMs) are internal nodes — the deployed artefact is the entire pipeline.
+Haute deploys a **pricing API**, not an ML model in the MLOps sense. The pipeline takes quote data in, runs it through a graph of transforms and models, and returns a premium. Models (CatBoost, GLMs) are internal nodes - the deployed artefact is the entire pipeline.
 
 The insurance industry adds a hard constraint: **a single wrong factor can misprice millions of pounds of premium before anyone notices**. The release process must catch bugs, unintended impact, and compliance violations.
 
@@ -28,32 +28,46 @@ policies ──→ severity_model  ──┘                                    
 
 ## 2. Design Principles
 
-1. **`haute.toml` is the single source of truth** — what gets deployed, where, and with what safety checks
-2. **Secrets never go in config** — credentials live in `.env` (local) or CI secrets (remote)
-3. **Deploy targets and CI providers are independent choices** — Databricks + GitLab, Container + GitHub, any combination
-4. **Convention over configuration** — sensible defaults; most teams only fill in credentials
-5. **Merge to main = deploy** — production deployments triggered by merging, never by manual command
-6. **Any target, same rigour** — Databricks, container, SageMaker, or Azure ML — the safety pipeline is identical
+1. **`haute.toml` is the single source of truth** - what gets deployed, where, and with what safety checks
+2. **Secrets never go in config** - credentials live in `.env` (local) or CI secrets (remote)
+3. **Deploy targets and CI providers are independent choices** - Databricks + GitLab, Container + GitHub, any combination
+4. **Convention over configuration** - sensible defaults; most teams only fill in credentials
+5. **Merge to main = deploy** - production deployments triggered by merging, never by manual command
+6. **Any target, same rigour** - Databricks, container, SageMaker, or Azure ML - the safety pipeline is identical
 
 ---
 
 ## 3. Deploy Philosophy
 
-Haute owns the **full release cycle** — from `git push` to live production endpoint. The pricing team runs `haute deploy` (or merges to main) and Haute handles everything: build, push, service update, smoke test, impact analysis, promotion.
+Haute owns the **full release cycle** - from `git push` to live production endpoint. The analyst merges to main and Haute's CI pipeline handles everything: build, push, service update, smoke test, impact analysis, promotion.
 
 **IT provisions infrastructure once.** The platform team creates the container app / ECS service / Cloud Run service, sets up networking, configures the registry. This is a one-time setup.
 
 **The pricing team owns every release from there.** Haute calls the platform SDK to update the running service with the new image. No tickets, no handoffs, no waiting for IT on every deploy.
 
-This mirrors the Databricks target where Haute calls the Databricks SDK to create/update the serving endpoint — the same pattern, different SDK.
+This mirrors the Databricks target where Haute calls the Databricks SDK to create/update the serving endpoint - the same pattern, different SDK.
+
+### 3.0 Local vs CI Commands
+
+Haute is designed so analysts never need Docker, cloud CLIs, or DevOps tooling installed locally. The split:
+
+| Command | Where it runs | Needs Docker? | Needs cloud creds? |
+|---|---|---|---|
+| `haute init` | Local | No | No |
+| `haute serve` | Local | No | No |
+| `haute deploy` | **CI only** | Yes (CI runner has it) | Yes (CI secrets) |
+| `haute smoke` | **CI only** | No | Yes (CI secrets) |
+| `haute impact` | **CI only** | No | Yes (CI secrets) |
+
+The analyst's workflow is: edit pipeline → `haute serve` to preview → `git push` → CI does the rest. If an analyst runs `haute deploy` locally for a container target, they'll get a clear error pointing them to CI.
 
 ### 3.1 Target Architecture
 
 Targets fall into three categories:
 
-1. **Databricks** — MLflow/Databricks SDK. Fully implemented.
-2. **Container-based platforms** — share a common build+push step (FastAPI app + Docker image), then each calls its own platform SDK to update the running service.
-3. **ML platforms** — SageMaker, Azure ML. Different packaging approach. Planned.
+1. **Databricks** - MLflow/Databricks SDK. Fully implemented.
+2. **Container-based platforms** - share a common build+push step (FastAPI app + Docker image), then each calls its own platform SDK to update the running service.
+3. **ML platforms** - SageMaker, Azure ML. Different packaging approach. Planned.
 
 All container-based targets share:
 - The same `[deploy.container]` config (registry, port, base_image)
@@ -76,36 +90,36 @@ What differs per platform is the **service update** step after push.
 | **Azure Container Apps** | `"azure-container-apps"` | Docker image (FastAPI) | Azure SDK | Build+push ✅, update pending |
 | **AWS ECS** | `"aws-ecs"` | Docker image (FastAPI) | AWS SDK | Build+push ✅, update pending |
 | **GCP Cloud Run** | `"gcp-run"` | Docker image (FastAPI) | GCP SDK | Build+push ✅, update pending |
-| **AWS SageMaker** | `"sagemaker"` | — | — | Planned |
-| **Azure ML** | `"azure-ml"` | — | — | Planned |
+| **AWS SageMaker** | `"sagemaker"` | - | - | Planned |
+| **Azure ML** | `"azure-ml"` | - | - | Planned |
 
 The team picks the target that matches their infrastructure. `haute init --target <t>` generates the right config, credentials template, and CI/CD workflows.
 
 ### 4.2 Databricks Target
 
-For teams already on Databricks. Wraps the pipeline in an `mlflow.pyfunc.PythonModel` shim (Databricks Model Serving requires the MLflow protocol). Pandas bridge at the boundary only — all internal computation remains Polars.
+For teams already on Databricks. Wraps the pipeline in an `mlflow.pyfunc.PythonModel` shim (Databricks Model Serving requires the MLflow protocol). Pandas bridge at the boundary only - all internal computation remains Polars.
 
 ### 4.3 Container Target (Generic)
 
-For local testing, Kubernetes, or environments where IT manages the service externally. Produces a self-contained Docker image with a FastAPI app wrapping `score_graph()` — `POST /quote`, `GET /health`, no MLflow, no pandas. Build and push only — no service update.
+For local testing, Kubernetes, or environments where IT manages the service externally. Produces a self-contained Docker image with a FastAPI app wrapping `score_graph()` - `POST /quote`, `GET /health`, no MLflow, no pandas. Build and push only - no service update.
 
 ### 4.4 Platform Container Targets
 
 Azure Container Apps, AWS ECS, and GCP Cloud Run are first-class targets. They share the container build+push step and then call the platform SDK to update the running service:
 
-- **Azure Container Apps** — creates a new revision via the Azure SDK
-- **AWS ECS** — calls `UpdateService` to deploy the new task definition
-- **GCP Cloud Run** — deploys the new image via the Cloud Run SDK
+- **Azure Container Apps** - creates a new revision via the Azure SDK
+- **AWS ECS** - calls `UpdateService` to deploy the new task definition
+- **GCP Cloud Run** - deploys the new image via the Cloud Run SDK
 
-The service update step is not yet implemented — Haute builds and pushes the image, then raises `NotImplementedError` with a message telling you the image tag so you can update manually until the SDK integration lands.
+The service update step is not yet implemented - Haute builds and pushes the image, then raises `NotImplementedError` with a message telling you the image tag so you can update manually until the SDK integration lands.
 
 ### 4.5 SageMaker / Azure ML Targets
 
-Planned. Different packaging approach from container targets — these ML platforms have their own model packaging format and endpoint management.
+Planned. Different packaging approach from container targets - these ML platforms have their own model packaging format and endpoint management.
 
 ### 4.6 Rigour Requirements (All Targets)
 
-Every target must satisfy the same safety bar — these are **Haute's responsibility**, not the platform's:
+Every target must satisfy the same safety bar - these are **Haute's responsibility**, not the platform's:
 
 | Requirement | Provided by |
 |---|---|
@@ -171,7 +185,7 @@ endpoint_suffix = "-staging"
 
 ### 4.2 Target-Specific Sections (reference)
 
-Only the one matching `--target` is generated — never in the same file:
+Only the one matching `--target` is generated - never in the same file:
 
 ```toml
 # ── Container ────────────────────────────────────────────────
@@ -243,7 +257,7 @@ src/haute/deploy/
   _config.py              # DeployConfig, ResolvedDeploy, haute.toml loading
   _pruner.py              # Graph pruning to output ancestors
   _bundler.py             # Artifact discovery and collection
-  _scorer.py              # score_graph() — runtime scoring engine (shared by all targets)
+  _scorer.py              # score_graph() - runtime scoring engine (shared by all targets)
   _schema.py              # Input/output schema inference
   _validators.py          # Pre-deploy validation (dry-run, artifact checks)
   _impact.py              # Impact analysis: staging vs production comparison
@@ -320,7 +334,7 @@ def deploy(config: DeployConfig) -> DeployResult:
 
 No `Protocol` or base class until three targets exist.
 
-### 5.5 Data Flow — Container Target
+### 5.5 Data Flow - Container Target
 
 ```
 POST /quote  →  JSON → pl.DataFrame → score_graph() → result.to_dicts() → JSON
@@ -328,7 +342,7 @@ POST /quote  →  JSON → pl.DataFrame → score_graph() → result.to_dicts() 
 
 No pandas. JSON in, Polars throughout, JSON out.
 
-### 5.6 Data Flow — Databricks Target
+### 5.6 Data Flow - Databricks Target
 
 ```
 POST /invocations  →  pd.DataFrame → pl.from_pandas() → score_graph() → .to_pandas()
@@ -349,7 +363,7 @@ Pandas bridge at the boundary only (MLflow contract). Documented exception to "P
 
 ### 5.8 Deployment Manifest
 
-Every deploy produces `deploy_manifest.json` — the single source of truth for a deployed pipeline:
+Every deploy produces `deploy_manifest.json` - the single source of truth for a deployed pipeline:
 
 ```json
 {
@@ -396,7 +410,7 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
 | **Azure DevOps** | `"azure-devops"` | `azure-pipelines.yml` | ✅ |
 | **None** | `"none"` | No CI files | ✅ |
 
-All providers run the same logical steps — only the YAML syntax differs.
+All providers run the same logical steps - only the YAML syntax differs.
 
 ### 6.3 No Shortcuts
 
@@ -406,7 +420,7 @@ Every `haute init` project gets the full pipeline regardless of team size:
 merge to main → validate → deploy staging → smoke test → impact analysis → [approval gate] → deploy production
 ```
 
-Solo developers set `min_approvers = 0` in `haute.toml` — the pipeline still runs identically, just without requiring sign-off.
+Solo developers set `min_approvers = 0` in `haute.toml` - the pipeline still runs identically, just without requiring sign-off.
 
 ---
 
@@ -416,7 +430,7 @@ Solo developers set `min_approvers = 0` in `haute.toml` — the pipeline still r
 
 Every deploy scores `tests/quotes/*.json` through the pruned pipeline. If any file fails, deployment is blocked. Catches schema mismatches, runtime errors, model loading failures, and edge case crashes.
 
-**Planned:** Golden file pattern — expected outputs with tolerance:
+**Planned:** Golden file pattern - expected outputs with tolerance:
 
 ```json
 [{"input": {"VehPower": 7, "Area": "C"}, "expected": {"premium": 548.57}, "tolerance_pct": 0.01}]
@@ -463,21 +477,21 @@ Every deployment records: pipeline name, version, git SHA, deployer, timestamp, 
 
 ## 8. Design Decisions
 
-**D1: `haute init` generates only relevant files** — only the chosen target's config, credentials, and CI workflows. No commented-out blocks.
+**D1: `haute init` generates only relevant files** - only the chosen target's config, credentials, and CI workflows. No commented-out blocks.
 
-**D2: Graph JSON is the deployment unit** — not the `.py` file. The pruned graph is self-contained, inspectable, and requires no import resolution.
+**D2: Graph JSON is the deployment unit** - not the `.py` file. The pruned graph is self-contained, inspectable, and requires no import resolution.
 
-**D3: Same scoring engine for dev and prod** — `_build_node_fn` with a thin wrapper that intercepts source nodes and redirects artifact paths. No separate execution engine.
+**D3: Same scoring engine for dev and prod** - `_build_node_fn` with a thin wrapper that intercepts source nodes and redirects artifact paths. No separate execution engine.
 
-**D4: Manifest-driven deployment** — `deploy_manifest.json` is the single source of truth. Inspectable, reproducible, debuggable.
+**D4: Manifest-driven deployment** - `deploy_manifest.json` is the single source of truth. Inspectable, reproducible, debuggable.
 
-**D5: Same target for staging and production** — no mixing container staging with Databricks production. Only differences: endpoint suffix, infra overrides via `HAUTE_` env vars, approval gate.
+**D5: Same target for staging and production** - no mixing container staging with Databricks production. Only differences: endpoint suffix, infra overrides via `HAUTE_` env vars, approval gate.
 
-**D6: `haute.toml` says *what*, workflow file says *how`** — `haute init` generates the workflow once, teams own it from there. No re-generation.
+**D6: `haute.toml` says *what*, workflow file says *how`** - `haute init` generates the workflow once, teams own it from there. No re-generation.
 
-**D7: No abstraction until three targets** — no `Protocol`, no base class. When a third target arrives, the interface is obvious from the concrete implementations.
+**D7: No abstraction until three targets** - no `Protocol`, no base class. When a third target arrives, the interface is obvious from the concrete implementations.
 
-**D8: pandas bridge is Databricks-only** — container target uses JSON → Polars → JSON directly. The MLflow bridge is a documented exception.
+**D8: pandas bridge is Databricks-only** - container target uses JSON → Polars → JSON directly. The MLflow bridge is a documented exception.
 
 ---
 
@@ -489,10 +503,10 @@ Every deployment records: pipeline name, version, git SHA, deployer, timestamp, 
 | **P2** | `haute init` generates CI/CD workflows (GitHub + GitLab + Azure DevOps) | ✅ Done |
 | **P3** | `haute impact` + endpoint comparison + Step Summary | ✅ Done |
 | **P4** | Golden file test quotes (expected outputs with tolerance) | Pending |
-| **P5** | Container target (`_container.py`) — FastAPI + Dockerfile | **Next** |
+| **P5** | Container target (`_container.py`) - FastAPI + Dockerfile | **Next** |
 | **P5a** | Target dispatch + `NotImplementedError` for unimplemented targets | **Next** |
-| **P6** | SageMaker target — thin wrapper: push to ECR + create endpoint | Planned |
-| **P7** | Azure ML target — thin wrapper: push to ACR + create endpoint | Planned |
+| **P6** | SageMaker target - thin wrapper: push to ECR + create endpoint | Planned |
+| **P7** | Azure ML target - thin wrapper: push to ACR + create endpoint | Planned |
 | **P8** | `haute rollback` command | Planned |
 
 ### Module-level status (Databricks target)

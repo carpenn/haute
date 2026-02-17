@@ -1,4 +1,4 @@
-"""Tests for haute.deploy._impact — impact analysis logic."""
+"""Tests for haute.deploy._impact - impact analysis logic."""
 
 from __future__ import annotations
 
@@ -88,14 +88,14 @@ class TestSegmentBreakdown:
         segs = _segment_breakdown(stg_df, prd_df, input_df, "price")
         assert "region" in segs
         assert len(segs["region"]) == 2
-        # A has +10% avg, B has +5% avg — A should be first (sorted by abs)
+        # A has +10% avg, B has +5% avg - A should be first (sorted by abs)
         assert segs["region"][0].value == "A"
         assert segs["region"][0].mean_change_pct == pytest.approx(10.0, abs=0.5)
 
     def test_skips_high_cardinality(self) -> None:
         stg_df = pl.DataFrame({"price": list(range(100))})
         prd_df = pl.DataFrame({"price": list(range(100))})
-        # 100 unique values — too high cardinality for a segment
+        # 100 unique values - too high cardinality for a segment
         input_df = pl.DataFrame({"id": [str(i) for i in range(100)]})
         segs = _segment_breakdown(stg_df, prd_df, input_df, "price")
         assert "id" not in segs

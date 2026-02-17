@@ -396,7 +396,7 @@ def github_deploy_prod_yml(target: str) -> str:
 
     Triggered via the GitHub Actions UI (workflow_dispatch) after
     reviewing the impact report from the deploy workflow.
-    Works on GitHub Free — no environment protection rules needed.
+    Works on GitHub Free - no environment protection rules needed.
 
     Accepts a ``sha`` input so the deployer can pin the exact commit
     that was staged and impact-analysed.  The workflow verifies that the
@@ -683,7 +683,7 @@ def azure_devops_yml(target: str) -> str:
     before production deployment proceeds.
 
     Credentials are read from an Azure DevOps variable group named
-    ``haute-credentials`` — the env var names are identical to other
+    ``haute-credentials`` - the env var names are identical to other
     CI providers.
     """
     secrets_env = _azure_devops_secrets_env(target)

@@ -1,0 +1,287 @@
+# GitHub Actions
+
+This guide explains how to set up **automatic deployments** using GitHub Actions - so that every time you merge a change to your main branch, your pricing pipeline is tested, deployed to staging, validated, and (with your approval) promoted to production.
+
+!!! tip "New to Git, pull requests, or CI/CD?"
+    This page assumes you understand basic Git concepts like branches, commits, and pull requests. If these are unfamiliar, read [Before You Start](../before-you-start.md) first - it explains everything in plain English.
+
+!!! tip "Not sure if this is the right page?"
+    If you access your project on **github.com**, this is the right page. If it's on **gitlab.com** (or a company GitLab server), go to [GitLab CI/CD](gitlab.md). If it's on **dev.azure.com**, go to [Azure DevOps](azure-devops.md). If you're not sure, ask your IT team or tech lead: *"Where is our code repository hosted?"* They'll tell you GitHub, GitLab, or Azure DevOps.
+
+!!! info "What is CI/CD?"
+    **CI** (Continuous Integration) means your code is automatically tested every time you propose a change. **CD** (Continuous Deployment) means your code is automatically deployed when those tests pass. Together, they replace the "click Deploy and hope for the best" workflow with an automated safety process. See [full explanation](../before-you-start.md#what-is-cicd).
+
+!!! info "What is GitHub Actions?"
+    GitHub Actions is GitHub's built-in automation tool. It runs scripts (called **workflows**) in response to events in your [repository](../before-you-start.md#getting-your-project-ready-for-deployment) - like opening a pull request or merging to the main branch. It's free for public repositories and has a generous free tier for private ones.
+
+!!! note "Who does what on this page?"
+    This page has **two parts**. As a pricing analyst, you only need to do **Step 2** (commit the workflow files) and **Step 3** (test it). **Step 1** (adding secrets) is usually done by your IT team or tech lead - they have the credentials and know the GitHub UI. If you're setting this up yourself, Step 1 walks you through it, but it's perfectly fine to hand it to IT and say: *"Can you add these secrets to our GitHub repository? Here's the `.env.example` file listing what's needed."*
+
+---
+
+## What Haute generates
+
+When you run `haute init --ci github`, Haute creates three workflow files in `.github/workflows/`:
+
+| File | When it runs | What it does |
+|---|---|---|
+| `ci.yml` | On every pull request | Lints, type-checks, runs tests, validates your pipeline |
+| `deploy.yml` | When you merge to main | Deploys to staging, runs smoke tests, generates an impact report |
+| `deploy-production.yml` | When you click "Run workflow" manually | Deploys to production after you've reviewed the impact report |
+
+This gives you a complete release pipeline:
+
+```
+Pull request → CI checks → Merge → Staging deploy → Smoke test → Impact analysis → [You review] → Production deploy
+```
+
+---
+
+## How it works, step by step
+
+### 1. You make a change and open a pull request
+
+You edit your pipeline, update a model, or change a configuration. You push your changes to a [branch](../before-you-start.md#1-create-a-branch) and open a [pull request](../before-you-start.md#4-ask-for-a-review-pull-request) (PR) on GitHub - which is a way of asking your teammate to review your changes before they go live.
+
+### 2. CI runs automatically
+
+The `ci.yml` workflow runs immediately:
+
+- **Lint & format** - checks your code style with `ruff`
+- **Type check** - runs `mypy` to catch type errors
+- **Tests** - runs `pytest`
+- **Pipeline validation** - runs `haute lint` and `haute deploy --dry-run` to check your pipeline parses correctly and test quotes pass
+
+If any of these fail, the PR gets a red ❌ and you can see what went wrong.
+
+### 3. You merge to main
+
+Once CI passes and your teammate has reviewed the PR, you [merge](../before-you-start.md#5-accept-the-changes-merge) it - which applies your changes to the main version of the project. This triggers the `deploy.yml` workflow.
+
+### 4. Staging deployment (automatic)
+
+The deploy workflow:
+
+1. **Validates** again (same checks as CI)
+2. **Deploys to staging** - runs `haute deploy --endpoint-suffix "-staging"`, which creates a separate endpoint just for testing (e.g. `motor-pricing-staging`)
+3. **Smoke tests staging** - runs `haute smoke --endpoint-suffix "-staging"`, which scores your test quotes against the live staging endpoint
+4. **Runs impact analysis** - runs `haute impact --endpoint-suffix "-staging"`, which compares premiums from the new staging endpoint against the current production endpoint
+
+The impact report is uploaded as an artifact you can download, and a summary is posted to the workflow run.
+
+### 5. You review the impact report
+
+The impact report shows you exactly what changed:
+
+```
+Output: technical_price
+  Staging mean:     548.57     Production mean:   536.12
+  Mean change:       +2.3%    Rows changed:      84.2%
+  Max increase:     +18.7%    Max decrease:       -4.2%
+
+  ⚠ 147 quotes changed by more than ±25.0%
+  ✓ Average change (+2.3%) within ±10.0% threshold
+```
+
+This is where you decide: does this change make sense? Is the impact expected?
+
+### 6. You promote to production (manual)
+
+If you're happy with the impact report, go to the **Actions** tab in GitHub, find the `Deploy → Production` workflow, and click **Run workflow**.
+
+You can optionally paste the git SHA from the staging deploy to make sure you're deploying exactly what was tested - not something that was merged since.
+
+The production workflow deploys to the real endpoint and tags the release in Git.
+
+---
+
+## Setup
+
+### Step 1: Add your credentials as GitHub Secrets
+
+!!! tip "This step is usually done by IT"
+    If you're not comfortable navigating GitHub's settings, ask your IT team or tech lead to do this. Give them the `.env.example` file from your project - it lists exactly which secrets are needed.
+
+Your CI/CD workflows need credentials stored securely in GitHub.
+
+1. Go to your repository page on GitHub (e.g. `github.com/yourcompany/motor-pricing`)
+2. Click the **⚙️ Settings** tab (near the top of the page, next to "Insights")
+3. In the left sidebar, click **Secrets and variables** → **Actions**
+4. Click the green **New repository secret** button
+5. For each credential below, enter the **Name** and **Secret** value, then click **Add secret**:
+
+**For Databricks:**
+
+| Secret name | Value |
+|---|---|
+| `DATABRICKS_HOST` | Your workspace URL (e.g. `https://adb-xxx.12.azuredatabricks.net`) |
+| `DATABRICKS_TOKEN` | Your personal access token (starts with `dapi`) |
+
+**For Docker/Container targets:**
+
+| Secret name | Value |
+|---|---|
+| `DOCKER_USERNAME` | Your registry username |
+| `DOCKER_PASSWORD` | Your registry password or access token |
+
+**For AWS ECS:**
+
+| Secret name | Value |
+|---|---|
+| `DOCKER_USERNAME` | `AWS` |
+| `DOCKER_PASSWORD` | ECR auth token |
+| `AWS_ACCESS_KEY_ID` | Your AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key |
+| `AWS_DEFAULT_REGION` | e.g. `eu-west-1` |
+
+**For Azure Container Apps:**
+
+| Secret name | Value |
+|---|---|
+| `DOCKER_USERNAME` | Your ACR name or service principal app ID |
+| `DOCKER_PASSWORD` | Your ACR password or service principal secret |
+| `AZURE_SUBSCRIPTION_ID` | Your Azure subscription ID |
+| `AZURE_TENANT_ID` | Your Azure tenant ID |
+| `AZURE_CLIENT_ID` | Your service principal app ID |
+| `AZURE_CLIENT_SECRET` | Your service principal password |
+
+!!! tip "How to find these values"
+    These are listed in the `.env.example` file that `haute init` generated in your project. Your target's setup page explains where each value comes from.
+
+### Step 2: Commit the workflow files
+
+The workflow files were created by `haute init` in `.github/workflows/`. Make sure they're committed to your [repository](../before-you-start.md#getting-your-project-ready-for-deployment):
+
+```powershell
+git add .github/
+git commit -m "Add CI/CD workflows"
+git push
+```
+
+!!! note "What do these commands mean?"
+    - `git add` - tells Git to include these files in your next save
+    - `git commit -m "..."` - saves a checkpoint with a description
+    - `git push` - uploads the changes to the shared copy (GitHub)
+
+    See [Git workflow](../before-you-start.md#git-workflow-branches-pull-requests-and-merging) for a full explanation.
+
+### Step 3: Test it
+
+1. Create a [branch](../before-you-start.md#1-create-a-branch), make a small change, and open a [pull request](../before-you-start.md#4-ask-for-a-review-pull-request)
+2. Watch the **Actions** tab - the CI workflow should start automatically
+3. If it passes, [merge](../before-you-start.md#5-accept-the-changes-merge) the PR
+4. Watch the deploy workflow run - it should deploy to staging and generate an impact report
+
+---
+
+## The generated workflows in detail
+
+!!! note "You don't need to read or understand the YAML below"
+    The workflow files were generated by `haute init` and work out of the box. The sections below are **reference only** - for troubleshooting or if your IT team wants to understand what’s happening.
+
+??? info "`ci.yml` - Pull request checks"
+
+    ```yaml
+    name: CI
+
+    on:
+      pull_request:
+        branches: [main]
+
+    jobs:
+      lint:
+        # Runs ruff check and ruff format --check
+      typecheck:
+        # Runs mypy
+      test:
+        # Runs pytest
+      pipeline-validate:
+        # Runs haute lint and haute deploy --dry-run
+    ```
+
+    This runs on every pull request targeting `main`. All four jobs run in parallel for speed.
+
+??? info "`deploy.yml` - Merge to main"
+
+    ```yaml
+    name: Deploy
+
+    on:
+      push:
+        branches: [main]
+        paths:
+          - "*.py"
+          - "haute.toml"
+          - "data/**"
+          - "models/**"
+          - "tests/quotes/**"
+
+    jobs:
+      validate:     # Same checks as CI
+      deploy-staging:  # haute deploy --endpoint-suffix "-staging"
+      smoke-test:      # haute smoke --endpoint-suffix "-staging"
+      impact-analysis: # haute impact --endpoint-suffix "-staging"
+    ```
+
+    This only triggers when relevant files change (Python files, config, data, models, test quotes). Jobs run in sequence - if staging fails, smoke test doesn’t run.
+
+??? info "`deploy-production.yml` - Manual production deploy"
+
+    ```yaml
+    name: Deploy → Production
+
+    on:
+      workflow_dispatch:
+        inputs:
+          sha:
+            description: Git SHA that was staged & impact-analysed
+            required: false
+
+    jobs:
+      deploy-production:
+        # Verifies SHA matches (if provided)
+        # Runs haute deploy (no suffix = production)
+        # Tags the release in Git
+    ```
+
+    This is triggered manually from the GitHub Actions UI. The optional SHA input lets you pin the exact commit that was tested.
+
+---
+
+## Working solo?
+
+If you're the only person on the team, the process is the same but simpler:
+
+1. Set `min_approvers = 0` in `haute.toml` under `[safety.approval]` - this removes the requirement for someone else to approve
+2. You still get the full pipeline: CI → staging → smoke test → impact analysis → manual production deploy
+3. The impact report is still generated so you can review it yourself before promoting
+
+---
+
+## Troubleshooting
+
+### Workflow doesn't trigger
+
+- **On PR:** Make sure the PR targets the `main` branch (not another branch)
+- **On merge:** Make sure the `deploy.yml` paths filter matches your changed files. If you only changed a markdown file, it won't trigger (by design)
+- **Check the Actions tab:** Go to your repo → **Actions** → look for the workflow run
+
+### "Credentials not found" or "Authentication failed"
+
+Your GitHub Secrets are missing or misnamed. Double-check:
+
+1. Go to **Settings** → **Secrets and variables** → **Actions**
+2. Verify the secret names match exactly (they're case-sensitive)
+3. Verify the values are correct (no trailing spaces or newlines)
+
+### Deploy workflow succeeds but endpoint isn't updated
+
+Check the deploy step logs in the Actions run. If you see the message about the image being pushed but service update not implemented, you need to update the service manually (see your target's documentation).
+
+### Impact analysis shows unexpected results
+
+The impact analysis compares staging vs production. If this is your first deploy, there's no production endpoint to compare against, so the impact step may fail or show unexpected output. This is normal - it will work correctly from the second deploy onwards.
+
+### "Staged SHA does not match"
+
+This error in the production workflow means someone merged another PR between your staging deploy and your production deploy. The production workflow is protecting you from deploying untested code. Run the staging deploy again (push to main or re-run the deploy workflow) and then try production again.

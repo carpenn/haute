@@ -383,7 +383,7 @@ def _check_databricks_connectivity(
                 f"Check that your DATABRICKS_TOKEN is valid and has workspace access. "
                 f"Host: {host}"
             ) from exc
-        # Other HTTP errors (e.g. 404) are fine — it means the host is reachable
+        # Other HTTP errors (e.g. 404) are fine - it means the host is reachable
         _log("Databricks workspace reachable")
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(

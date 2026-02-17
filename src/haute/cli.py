@@ -474,7 +474,7 @@ def deploy(
         )
         raise SystemExit(1)
 
-    # Block local deploys — production changes must go through CI/CD
+    # Block local deploys - production changes must go through CI/CD
     is_ci = os.environ.get("CI") or os.environ.get("TF_BUILD") or os.environ.get("GITLAB_CI")
     if not dry_run and not is_ci:
         click.echo(
@@ -1062,7 +1062,7 @@ def _impact_databricks(
         exc_name = type(exc).__name__
         if exc_name in ("NotFound", "ResourceDoesNotExist"):
             click.echo(
-                f"  First deployment — production endpoint '{prod_name}' not found"
+                f"  First deployment - production endpoint '{prod_name}' not found"
             )
         else:
             click.echo(
@@ -1108,7 +1108,7 @@ def _impact_http(
                 prod_url, records, batch_size, click.echo,
             )
         except Exception as exc:
-            click.echo(f"  First deployment — production endpoint not reachable: {exc}")
+            click.echo(f"  First deployment - production endpoint not reachable: {exc}")
             prod_exists = False
 
     return staging_preds, prod_preds, prod_exists

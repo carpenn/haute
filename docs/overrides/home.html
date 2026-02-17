@@ -1,0 +1,254 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+  {{ super() }}
+
+  <style>
+    /* ── Hero section ──────────────────────────────────────── */
+    .hero {
+      padding: 4rem 1rem 3rem;
+      background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1025 100%);
+      color: #fff;
+      text-align: center;
+    }
+
+    .hero__title {
+      font-size: 3.5rem;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin: 0 0 0.5rem;
+      line-height: 1.1;
+    }
+
+    .hero__title span {
+      background: linear-gradient(135deg, #ec4899, #8b5cf6, #22d3ee);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero__subtitle {
+      font-size: 1.25rem;
+      color: #8b949e;
+      margin: 0 auto 2rem;
+      max-width: 600px;
+      line-height: 1.6;
+    }
+
+    .hero__buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2.5rem;
+    }
+
+    .hero__button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.75rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .hero__button--primary {
+      background: #ec4899;
+      color: #fff;
+    }
+
+    .hero__button--primary:hover {
+      background: #db2777;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(236, 72, 153, 0.4);
+    }
+
+    .hero__button--secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #e6edf3;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .hero__button--secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .hero__badges {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2.5rem;
+    }
+
+    .hero__terminal {
+      max-width: 500px;
+      margin: 0 auto;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+      text-align: left;
+    }
+
+    .hero__terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      background: #0d1117;
+      border-bottom: 1px solid #30363d;
+    }
+
+    .hero__terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .hero__terminal-dot--red { background: #ff5f57; }
+    .hero__terminal-dot--yellow { background: #febc2e; }
+    .hero__terminal-dot--green { background: #28c840; }
+
+    .hero__terminal-code {
+      padding: 1rem 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: #e6edf3;
+    }
+
+    .hero__terminal-code .prompt {
+      color: #8b949e;
+    }
+
+    .hero__terminal-code .cmd {
+      color: #22d3ee;
+    }
+
+    .hero__terminal-code .comment {
+      color: #6e7681;
+    }
+
+    /* ── Features strip ────────────────────────────────────── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+      max-width: 1100px;
+      margin: -2rem auto 0;
+      padding: 0 1rem 3rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .feature-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 1.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .feature-card:hover {
+      border-color: #ec4899;
+      box-shadow: 0 4px 16px rgba(236, 72, 153, 0.08);
+      transform: translateY(-2px);
+    }
+
+    .feature-card__icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .feature-card__title {
+      font-weight: 700;
+      font-size: 1rem;
+      color: #0d1117;
+      margin-bottom: 0.4rem;
+    }
+
+    .feature-card__desc {
+      font-size: 0.875rem;
+      color: #57606a;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    @media (max-width: 768px) {
+      .hero__title { font-size: 2.5rem; }
+      .hero__subtitle { font-size: 1.1rem; }
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <section class="hero">
+    <h1 class="hero__title"><span>Haute</span></h1>
+    <p class="hero__subtitle">
+      The open-source pricing engine for insurance teams.
+      Build visually. Deploy instantly. Own your code.
+    </p>
+
+    <div class="hero__badges">
+      <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+      <img src="https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square" alt="License">
+      <img src="https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white" alt="Databricks">
+      <img src="https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+    </div>
+
+    <div class="hero__buttons">
+      <a href="#quick-start" class="hero__button hero__button--primary">
+        Get started
+      </a>
+      <a href="https://github.com/pricingfrontier/haute" class="hero__button hero__button--secondary">
+        View on GitHub
+      </a>
+    </div>
+
+    <div class="hero__terminal">
+      <div class="hero__terminal-bar">
+        <div class="hero__terminal-dot hero__terminal-dot--red"></div>
+        <div class="hero__terminal-dot hero__terminal-dot--yellow"></div>
+        <div class="hero__terminal-dot hero__terminal-dot--green"></div>
+      </div>
+      <div class="hero__terminal-code">
+        <span class="prompt">$</span> <span class="cmd">pip install haute</span><br>
+        <span class="prompt">$</span> <span class="cmd">haute init</span> <span class="comment">--target databricks --ci github</span><br>
+        <span class="prompt">$</span> <span class="cmd">haute serve</span> <span class="comment"># open the visual editor</span><br>
+        <span class="prompt">$</span> <span class="cmd">haute deploy</span> <span class="comment"># push to production</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="feature-card">
+      <div class="feature-card__icon">{ }</div>
+      <div class="feature-card__title">Code-native</div>
+      <p class="feature-card__desc">Standard Python + Polars. No proprietary DSL. Works with any model framework.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-card__icon">&#9671;</div>
+      <div class="feature-card__title">Visual editor</div>
+      <p class="feature-card__desc">Drag-and-drop flow editor. Edit visually or in code - they stay in sync.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-card__icon">&#9889;</div>
+      <div class="feature-card__title">One-command deploy</div>
+      <p class="feature-card__desc">Deploy to Databricks, Docker, AWS, or Azure as a live scoring API.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-card__icon">&#9711;</div>
+      <div class="feature-card__title">Safety built in</div>
+      <p class="feature-card__desc">Staging, impact analysis, smoke tests, and approval gates on every release.</p>
+    </div>
+  </section>
+{% endblock %}
+
+{% block content %}
+  {{ super() }}
+{% endblock %}

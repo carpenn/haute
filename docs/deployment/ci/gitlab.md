@@ -1,0 +1,269 @@
+# GitLab CI/CD
+
+This guide explains how to set up **automatic deployments** using GitLab CI/CD - so that every time you merge a change to your main branch, your pricing pipeline is tested, deployed to staging, validated, and (with your approval) promoted to production.
+
+!!! tip "New to Git, merge requests, or CI/CD?"
+    This page assumes you understand basic Git concepts like branches, commits, and merge requests. If these are unfamiliar, read [Before You Start](../before-you-start.md) first - it explains everything in plain English.
+
+!!! tip "Not sure if this is the right page?"
+    If you access your project on **gitlab.com** (or a company GitLab server), this is the right page. If it's on **github.com**, go to [GitHub Actions](github-actions.md). If it's on **dev.azure.com**, go to [Azure DevOps](azure-devops.md). If you're not sure, ask your IT team or tech lead: *"Where is our code repository hosted?"* They'll tell you GitHub, GitLab, or Azure DevOps.
+
+!!! info "What is GitLab CI/CD?"
+    GitLab CI/CD is GitLab's built-in automation tool. It runs scripts (called **pipelines**) in response to events in your [repository](../before-you-start.md#getting-your-project-ready-for-deployment) - like opening a merge request or pushing to the main branch. If your team uses GitLab instead of GitHub, this is your [CI/CD](../before-you-start.md#what-is-cicd) provider.
+
+!!! note "Who does what on this page?"
+    This page has **two parts**. As a pricing analyst, you only need to do **Step 2** (commit the pipeline file) and **Step 3** (test it). **Step 1** (adding CI/CD variables) is usually done by your IT team or tech lead - they have the credentials and know the GitLab UI. If you're setting this up yourself, Step 1 walks you through it, but it's perfectly fine to hand it to IT and say: *"Can you add these CI/CD variables to our GitLab project? Here's the `.env.example` file listing what's needed."*
+
+---
+
+## What Haute generates
+
+When you run `haute init --ci gitlab`, Haute creates a single `.gitlab-ci.yml` file in the root of your repository. This file defines a pipeline with five **stages** that run in order:
+
+| Stage | When it runs | What it does |
+|---|---|---|
+| `validate` | On merge requests and pushes to main | Lints, type-checks, tests, validates pipeline, dry-run deploy |
+| `deploy-staging` | On push to main only | Deploys to a staging endpoint |
+| `smoke-test` | After staging deploy | Scores test quotes against the live staging endpoint |
+| `impact-analysis` | After smoke test | Compares new staging premiums vs current production |
+| `deploy-production` | **Manual click** | Deploys to production after you've reviewed the impact report |
+
+This gives you the same safe release pipeline as GitHub Actions:
+
+```
+Merge request → Validation → Merge → Staging → Smoke test → Impact analysis → [You review] → Production
+```
+
+---
+
+## How it works, step by step
+
+### 1. You make a change and open a merge request
+
+You edit your pipeline, update a model, or change a configuration. You push your changes to a [branch](../before-you-start.md#1-create-a-branch) and open a **merge request** (MR) - GitLab's equivalent of a [pull request](../before-you-start.md#4-ask-for-a-review-pull-request). It's a way of asking your teammate to review your changes before they go live.
+
+### 2. Validation runs automatically
+
+The `validate` stage runs immediately on your merge request:
+
+- **Lint & format** - checks your code style with `ruff`
+- **Type check** - runs `mypy` to catch type errors
+- **Tests** - runs `pytest`
+- **Pipeline validation** - runs `haute lint` and `haute deploy --dry-run` to check your pipeline parses correctly and test quotes pass
+
+If any of these fail, the MR gets a red ❌ and you can see what went wrong in the pipeline logs.
+
+### 3. You merge to main
+
+Once validation passes and your teammate has reviewed the MR, you [merge](../before-you-start.md#5-accept-the-changes-merge) it - which applies your changes to the main version of the project. This triggers the remaining stages.
+
+### 4. Staging deployment (automatic)
+
+The `deploy-staging` stage runs `haute deploy --endpoint-suffix "-staging"`, which creates a separate endpoint just for testing (e.g. `motor-pricing-staging`).
+
+### 5. Smoke test (automatic)
+
+The `smoke-test` stage runs `haute smoke --endpoint-suffix "-staging"`, scoring your test quotes against the live staging endpoint to make sure it's working.
+
+### 6. Impact analysis (automatic)
+
+The `impact-analysis` stage runs `haute impact --endpoint-suffix "-staging"`, comparing premiums from the new staging endpoint against the current production endpoint. The impact report is saved as a **pipeline artifact** you can download.
+
+### 7. You review the impact report
+
+Download the `impact_report.md` artifact from the pipeline. It shows you exactly what changed:
+
+```
+Output: technical_price
+  Staging mean:     548.57     Production mean:   536.12
+  Mean change:       +2.3%    Rows changed:      84.2%
+  Max increase:     +18.7%    Max decrease:       -4.2%
+
+  ⚠ 147 quotes changed by more than ±25.0%
+  ✓ Average change (+2.3%) within ±10.0% threshold
+```
+
+### 8. You promote to production (manual)
+
+If you're happy with the impact report, go to the pipeline in GitLab and click the **play button** ▶ on the `deploy-production` job. This is a **manual action** - it won't run until you explicitly click it.
+
+The production job deploys to the real endpoint and tags the release in Git.
+
+---
+
+## Setup
+
+### Step 1: Add your credentials as CI/CD Variables
+
+!!! tip "This step is usually done by IT"
+    If you're not comfortable navigating GitLab's settings, ask your IT team or tech lead to do this. Give them the `.env.example` file from your project - it lists exactly which variables are needed.
+
+Your pipeline needs credentials to deploy. In GitLab, these are stored as **CI/CD Variables**.
+
+1. Go to your project page in GitLab (e.g. `gitlab.com/yourcompany/motor-pricing`)
+2. In the left sidebar, click **Settings** (the ⚙️ gear icon near the bottom) → **CI/CD**
+3. Scroll down to the **Variables** section and click **Expand**
+4. Click **Add variable** for each credential below:
+
+**For Databricks:**
+
+| Variable | Value | Options |
+|---|---|---|
+| `DATABRICKS_HOST` | Your workspace URL | Mask variable ✓ |
+| `DATABRICKS_TOKEN` | Your personal access token | Mask variable ✓ |
+
+**For Docker/Container targets:**
+
+| Variable | Value | Options |
+|---|---|---|
+| `DOCKER_USERNAME` | Your registry username | Mask variable ✓ |
+| `DOCKER_PASSWORD` | Your registry password | Mask variable ✓ |
+
+**For AWS ECS:**
+
+| Variable | Value | Options |
+|---|---|---|
+| `DOCKER_USERNAME` | `AWS` | Mask variable ✓ |
+| `DOCKER_PASSWORD` | ECR auth token | Mask variable ✓ |
+| `AWS_ACCESS_KEY_ID` | Your AWS access key | Mask variable ✓ |
+| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key | Mask variable ✓ |
+| `AWS_DEFAULT_REGION` | e.g. `eu-west-1` | - |
+
+**For Azure Container Apps:**
+
+| Variable | Value | Options |
+|---|---|---|
+| `DOCKER_USERNAME` | Your ACR name | Mask variable ✓ |
+| `DOCKER_PASSWORD` | Your ACR password | Mask variable ✓ |
+| `AZURE_SUBSCRIPTION_ID` | Your subscription ID | Mask variable ✓ |
+| `AZURE_TENANT_ID` | Your tenant ID | Mask variable ✓ |
+| `AZURE_CLIENT_ID` | Your service principal app ID | Mask variable ✓ |
+| `AZURE_CLIENT_SECRET` | Your service principal secret | Mask variable ✓ |
+
+!!! tip "Mask variable"
+    Always tick **Mask variable** for secrets - this prevents them from appearing in pipeline logs.
+
+!!! tip "Protect variable"
+    Optionally tick **Protect variable** to restrict secrets to protected branches (like `main`). This means merge request pipelines can't access them, which is more secure.
+
+### Step 2: Commit the pipeline file
+
+The `.gitlab-ci.yml` file was created by `haute init` in the root of your project. Make sure it's committed:
+
+```powershell
+git add .gitlab-ci.yml
+git commit -m "Add GitLab CI/CD pipeline"
+git push
+```
+
+### Step 3: Test it
+
+1. Create a branch, make a small change, and open a merge request
+2. Go to **Build** → **Pipelines** - the validation stage should start automatically
+3. If it passes, merge the MR
+4. Watch the full pipeline run - staging, smoke test, impact analysis
+5. Click the ▶ play button on `deploy-production` when you're ready
+
+---
+
+## The generated pipeline in detail
+
+!!! note "You don't need to read or understand the YAML below"
+    The pipeline file was generated by `haute init` and works out of the box. The sections below are **reference only** - for troubleshooting or if your IT team wants to understand what’s happening.
+
+??? info "`.gitlab-ci.yml` structure"
+
+    ```yaml
+    stages:
+      - validate
+      - deploy-staging
+      - smoke-test
+      - impact-analysis
+      - deploy-production
+
+    default:
+      image: python:3.11
+      cache:
+        key: uv-$CI_COMMIT_REF_SLUG
+        paths:
+          - .cache/uv
+      before_script:
+        - pip install "uv>=0.5,<1" && uv sync --frozen
+    ```
+
+??? info "Key features"
+
+    - **Caching** - `uv` packages are cached between runs so installs are fast after the first time
+    - **`resource_group: deploy`** - staging, smoke, impact, and production jobs use the same resource group, which prevents two deploys from running at the same time
+    - **`when: manual`** - the production job requires a manual click, so you always review before going live
+    - **`allow_failure: false`** - the manual production job blocks the pipeline from showing as “passed” until you run it (so you don’t forget)
+    - **Artifacts** - the impact report is uploaded as a pipeline artifact you can download from the GitLab UI
+
+??? info "Stage details"
+
+    | Stage | Command | Timeout |
+    |---|---|---|
+    | validate | `ruff check .`, `mypy .`, `pytest -v`, `haute lint`, `haute deploy --dry-run` | 10 min |
+    | deploy-staging | `haute deploy --endpoint-suffix "-staging"` | 15 min |
+    | smoke-test | `haute smoke --endpoint-suffix "-staging"` | 10 min |
+    | impact-analysis | `haute impact --endpoint-suffix "-staging"` | 10 min |
+    | deploy-production | `haute deploy` + git tag | 15 min |
+
+---
+
+## GitLab vs GitHub - key differences
+
+If you're used to the GitHub Actions setup, here's how GitLab differs:
+
+| Concept | GitHub | GitLab |
+|---|---|---|
+| Config file | `.github/workflows/*.yml` (multiple files) | `.gitlab-ci.yml` (single file) |
+| Credentials | Repository Secrets | CI/CD Variables |
+| Pull request | Pull request | Merge request |
+| Manual approval | Separate workflow + "Run workflow" button | `when: manual` on a job + ▶ play button |
+| Artifacts | Upload/download actions | Built-in `artifacts:` keyword |
+| Parallel jobs | Separate `jobs:` in a workflow | Separate jobs in the same `stage:` |
+
+---
+
+## Working solo?
+
+If you're the only person on the team:
+
+1. Set `min_approvers = 0` in `haute.toml` under `[safety.approval]`
+2. You still get the full pipeline - validation → staging → smoke test → impact analysis
+3. Click the ▶ play button yourself after reviewing the impact report
+
+---
+
+## Troubleshooting
+
+### Pipeline doesn't trigger
+
+- **On MR:** Make sure the MR targets the `main` branch
+- **On merge:** Check the pipeline ran - go to **Build** → **Pipelines**
+- **Pending:** If the pipeline is stuck on "pending", your GitLab instance may not have available runners. Check **Settings** → **CI/CD** → **Runners**
+
+### "Variable is not set" or "Authentication failed"
+
+Your CI/CD variables are missing or misnamed:
+
+1. Go to **Settings** → **CI/CD** → **Variables**
+2. Check variable names match exactly (case-sensitive)
+3. If you ticked "Protect variable", make sure the job runs on a protected branch
+
+### Deploy job can't access credentials
+
+If validation passes but deploy-staging fails with auth errors, your variables might be **protected**. Protected variables are only available on protected branches (like `main`). Since the deploy stages only run on `main`, this should work - but double-check your branch is protected in **Settings** → **Repository** → **Protected branches**.
+
+### "No runners available"
+
+Your GitLab instance needs **runners** - machines that execute the pipeline. If you're on GitLab.com, shared runners are available by default. For self-hosted GitLab, ask your IT team to set up a runner or enable shared runners.
+
+### Impact report not appearing
+
+The impact report is saved as a pipeline artifact. To download it:
+
+1. Go to the pipeline → click the `impact-analysis` job
+2. On the right side, click **Browse** under **Job artifacts**
+3. Download `impact_report.md`

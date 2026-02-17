@@ -7,36 +7,27 @@ repo_name: pricingfrontier/haute
 theme:
   name: material
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: deep purple
-      accent: amber
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: deep purple
-      accent: amber
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-  font:
-    text: Inter
-    code: JetBrains Mono
+    scheme: default
+    primary: black
   features:
-    - navigation.instant
-    - navigation.tracking
-    - navigation.sections
-    - navigation.expand
-    - navigation.top
+    - content.tabs.link
+    - content.tabs
     - content.code.copy
-    - content.code.annotate
-    - toc.follow
-    - search.suggest
-    - search.highlight
+    - navigation.footer
+    - navigation.indexes
+    - navigation.tabs
+    - navigation.expand
   icon:
     repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/pricingfrontier/haute
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/pricingfrontier
+
+copyright: Copyright &copy; Pricing Frontier
 
 markdown_extensions:
   - admonition
@@ -50,6 +41,7 @@ markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
   - attr_list
   - md_in_html
   - tables
@@ -67,4 +59,21 @@ plugins:
             show_root_heading: true
 
 nav:
-  - Home: index.md
+  - Haute: index.md
+  - Getting Started:
+    - getting-started/index.md
+    - Setting Up Your Environment: getting-started/environment.md
+    - Installing Haute: getting-started/installing-haute.md
+  - Deployment:
+    - Overview: deployment/index.md
+    - Before You Start: deployment/before-you-start.md
+    - Targets:
+      - Databricks: deployment/targets/databricks.md
+      - Docker: deployment/targets/docker.md
+      - AWS ECS: deployment/targets/aws.md
+      - Azure Container Apps: deployment/targets/azure.md
+    - CI/CD:
+      - GitHub Actions: deployment/ci/github-actions.md
+      - GitLab CI/CD: deployment/ci/gitlab.md
+      - Azure DevOps: deployment/ci/azure-devops.md
+  - Building Models: building-models/index.md

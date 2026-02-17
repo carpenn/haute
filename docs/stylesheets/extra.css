@@ -1,0 +1,133 @@
+/* ── Haute docs theme ────────────────────────────────────────
+   Light content, black header, Haute brand accents
+   ──────────────────────────────────────────────────────────── */
+
+:root {
+  --haute-pink:   #ec4899;
+  --haute-purple: #8b5cf6;
+  --haute-dark:   #0d1117;
+}
+
+/* ── Header ──────────────────────────────────────────────── */
+
+.md-header__title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ── Headings ────────────────────────────────────────────── */
+
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--haute-dark);
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1a1a2e;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.4em;
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+/* ── Inline code ─────────────────────────────────────────── */
+
+.md-typeset code {
+  background: #f3f4f6;
+  color: #be185d;
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.85em;
+}
+
+/* ── Code blocks (dark) ──────────────────────────────────── */
+
+.md-typeset pre > code {
+  background: var(--haute-dark);
+  color: #e6edf3;
+  border-radius: 8px;
+  padding: 1em;
+}
+
+/* ── Tables ──────────────────────────────────────────────── */
+
+.md-typeset table:not([class]) {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background: #f9fafb;
+  color: var(--haute-dark);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75em;
+  letter-spacing: 0.05em;
+}
+
+.md-typeset table:not([class]) tr:hover td {
+  background: #f9fafb;
+}
+
+/* ── Grid cards (homepage) ───────────────────────────────── */
+
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--haute-pink);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.1);
+  transform: translateY(-2px);
+}
+
+/* ── Links ───────────────────────────────────────────────── */
+
+.md-typeset a {
+  color: var(--haute-purple);
+}
+
+.md-typeset a:hover {
+  color: var(--haute-pink);
+}
+
+/* ── Admonitions ─────────────────────────────────────────── */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 8px;
+}
+
+/* ── Footer ──────────────────────────────────────────────── */
+
+.md-footer {
+  background: var(--haute-dark);
+}
+
+/* ── Badges ──────────────────────────────────────────────── */
+
+.md-typeset img[src*="shields.io"] {
+  vertical-align: middle;
+  margin: 0 2px;
+}
+
+/* ── Content width ───────────────────────────────────────── */
+
+.md-grid {
+  max-width: 1100px;
+}
+
+/* ── Smooth scrolling ────────────────────────────────────── */
+
+html {
+  scroll-behavior: smooth;
+}

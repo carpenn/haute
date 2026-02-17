@@ -13,7 +13,7 @@ Haute is an open-source Python library that gives insurance pricing teams a **co
 
 The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one - the other stays in sync.
 
-Haute deploys pipelines as **live pricing APIs**. The team picks the target that matches their infrastructure — Databricks, a Docker container, SageMaker, or Azure ML. Every target gets the same safety pipeline: staging, impact analysis, smoke test, approval gate, production. See `docs/DEPLOY_DESIGN.md` for the full design.
+Haute deploys pipelines as **live pricing APIs**. The team picks the target that matches their infrastructure - Databricks, a Docker container, SageMaker, or Azure ML. Every target gets the same safety pipeline: staging, impact analysis, smoke test, approval gate, production. See `docs/DEPLOY_DESIGN.md` for the full design.
 
 ---
 

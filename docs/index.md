@@ -1,80 +1,28 @@
 ---
 hide:
   - navigation
+  - toc
 ---
 
-<div align="center" markdown>
+## What is Haute?
 
-# Haute
+Haute is a free, open-source pricing engine for insurance teams. It lets you build rating pipelines in a visual editor, keep everything as standard Python, and deploy to a live scoring API with a single command.
 
-### Open-source pricing engine for insurance.
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Elastic License 2.0](https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square)](LICENSE)
-[![Databricks](https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white)](https://databricks.com)
-[![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
-
-</div>
+It's designed for pricing teams who want to move faster without giving up control - of their code, their infrastructure, or their deployment process.
 
 ---
 
-Haute is a free pricing engine that lets insurance teams **build rating pipelines in a visual editor**, keep everything as **version-controlled Python**, and **deploy to a live scoring API** — on Databricks, AWS, Azure, or a plain Docker container.
+## The problem it solves
 
-It bridges the gap between enterprise platforms like WTW Radar (six- or seven-figure annual licences, proprietary formats, vendor lock-in) and in-house Python notebooks that never quite make it to production.
+Getting a pricing model from someone's laptop into a live system that can serve real quotes is hard. The typical path involves weeks of handoff between actuaries and engineering, deployment scripts that only one person understands, and no easy way to see what a change will actually do to the book before it goes live.
 
----
-
-## Why Haute?
-
-<div class="grid cards" markdown>
-
--   :material-code-braces:{ .lg .middle } **Code-native**
-
-    ---
-
-    Pipelines are standard Python + Polars. No proprietary DSL, no black boxes. Works with any model framework.
-
--   :material-graph:{ .lg .middle } **Visual editor**
-
-    ---
-
-    Browser-based drag-and-drop flow editor powered by React Flow. Edit visually or in code — they stay in sync.
-
--   :material-rocket-launch:{ .lg .middle } **One-command deploy**
-
-    ---
-
-    `haute deploy` packages your pipeline and pushes it to Databricks, Docker, AWS, or Azure as a live scoring API.
-
--   :material-shield-check:{ .lg .middle } **Safety built in**
-
-    ---
-
-    Staging environments, impact analysis, smoke tests, and approval gates — baked into every deployment.
-
--   :material-git:{ .lg .middle } **Git-native**
-
-    ---
-
-    Branching, pull requests, full history, rollback. Every change is reviewed before it goes live.
-
--   :material-currency-usd-off:{ .lg .middle } **Free**
-
-    ---
-
-    Elastic License 2.0. No per-user fees, no seat limits. The only restriction is you can't resell Haute as a hosted service.
-
-</div>
+Haute handles that entire path. You build a pipeline, Haute packages it, tests it, deploys it to a staging environment, shows you the impact, and promotes it to production when you're ready. The whole process runs automatically every time you make a change.
 
 ---
 
 ## How it works
 
-A pricing pipeline in Haute is a Python file — standard Python, using Polars DataFrames. It lives in Git and is testable with pytest.
-
-But it's also a visual graph. Haute runs a browser-based editor where the pipeline is rendered as a drag-and-drop flow diagram. You can click into any node and see its output data.
-
-**These are the same thing.** The visual editor reads from and writes to the Python file. Change a node in the GUI and the `.py` file updates on disk. Edit the `.py` file and the graph updates in the browser. No import/export step, no translation layer.
+A pricing pipeline in Haute is a Python file. Standard Python, using [Polars](https://pola.rs/) DataFrames. Each step in your pipeline is a function - load data, apply a model, calculate a premium.
 
 ```python
 import haute
@@ -98,26 +46,57 @@ def calculate_premium(frequency_model: pl.DataFrame) -> pl.DataFrame:
     )
 ```
 
+That same file is also a visual graph. Haute runs a browser-based editor where your pipeline appears as a drag-and-drop flow diagram - nodes for data sources, models, transforms, and outputs, connected by edges that show how data moves through the rating structure.
+
+**The key bit: these are the same thing.** Edit the code and the graph updates. Edit the graph and the code updates. There's no import/export step, no "generate code" button. They're always in sync.
+
+This means the people who prefer working visually can do that, and the people who prefer working in code can do that, and nobody has to choose.
+
 ---
 
-## Deploy targets
+## What makes it different
+
+### Your code, not ours
+
+Pipelines are plain `.py` files. Not a proprietary format, not a visual-only diagram, not a config language that looks like code but isn't. You can read it, test it, version-control it, and take it with you if you ever stop using Haute. Any model that runs in Python works here - scikit-learn, CatBoost, LightGBM, XGBoost, whatever comes next.
+
+### Safety is not optional
+
+One wrong factor can misprice an entire book before anyone notices. So Haute doesn't let you skip the safety steps.
+
+Every deployment follows the same path: deploy to a private staging copy, score a portfolio sample through both the new and current models, produce an impact report showing what changed and by how much, and wait for a human to approve before going live. There are no shortcuts because there shouldn't be.
+
+Every release records what changed, who approved it, the impact report, and what version it replaced - covering the traceability requirements that regulators expect.
+
+### Deploy anywhere
+
+You pick the target that matches your infrastructure. Haute handles the rest.
 
 | Target | What gets deployed |
 |---|---|
 | **Databricks** | MLflow model on Databricks Model Serving |
-| **Docker** | Self-contained container with a FastAPI server — runs anywhere |
+| **Docker** | Self-contained container with a FastAPI server - runs anywhere |
 | **AWS SageMaker** | MLflow model on a SageMaker real-time endpoint |
 | **Azure ML** | MLflow model on an Azure ML managed endpoint |
+
+The Docker target is worth calling out - it has zero cloud dependencies. If you can run a container, you can deploy a Haute pipeline. It's there as a universal option for teams that don't want to be tied to any platform.
+
+### One pipeline, many uses
+
+The same pipeline file works for live quoting (a single request, sub-second response), batch scoring (millions of rows), what-if analysis (drag sliders to see how price changes through each step), and execution tracing (click any output price and see the path through every node that produced it).
+
+### Version control and CI/CD come free
+
+Because pipelines are files in Git, you get branching, pull requests, code review, full history, and rollback for free. When you set up a project, Haute generates the CI/CD configuration for your team's platform - GitHub Actions, GitLab CI, or Azure DevOps. Every proposed change gets tested and validated automatically before anyone reviews it.
 
 ---
 
 ## Quick start
 
-```bash
-pip install haute
+```
+uv add haute
 haute init --target databricks --ci github
-# edit your pipeline...
-haute serve    # open the visual editor
-haute deploy   # push to production
+haute serve
 ```
 
+Three commands to go from nothing to a working project open in the visual editor. See the **[Getting Started](getting-started/index.md)** guide for the full walkthrough.

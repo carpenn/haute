@@ -1,4 +1,4 @@
-"""Impact analysis — compare staging vs production endpoint predictions."""
+"""Impact analysis - compare staging vs production endpoint predictions."""
 
 from __future__ import annotations
 
@@ -344,7 +344,7 @@ def format_terminal(report: ImpactReport) -> str:
 
     if report.is_first_deploy:
         lines.append("")
-        lines.append("  First deployment — no production endpoint to compare.")
+        lines.append("  First deployment - no production endpoint to compare.")
         lines.append("  Staging predictions scored successfully.")
         lines.append("")
         return "\n".join(lines)
@@ -413,7 +413,7 @@ def format_markdown(report: ImpactReport) -> str:
     if report.is_first_deploy:
         lines.append("")
         lines.append(
-            "> First deployment — no production endpoint to compare."
+            "> First deployment - no production endpoint to compare."
             " Staging predictions scored successfully."
         )
         lines.append("")
