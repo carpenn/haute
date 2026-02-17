@@ -41,8 +41,6 @@ Depending on your deploy target, you may need additional packages:
 
 ```powershell
 uv add "haute[databricks]"         # Adds mlflow + databricks-sdk (for Databricks target)
-uv add "haute[catboost]"           # Adds the catboost library (if your pipeline uses CatBoost)
-uv add "haute[databricks,catboost]" # Combine them
 ```
 
 ---

@@ -136,7 +136,6 @@ Every target must satisfy the same safety bar - these are **Haute's responsibili
 
 ```bash
 uv add haute                       # container target (no extras needed)
-uv add "haute[catboost]"           # catboost (if pipeline uses CatBoost models)
 uv add "haute[databricks]"         # mlflow, databricks-sdk
 uv add "haute[aws]"                # boto3, sagemaker (planned)
 uv add "haute[azure]"              # azure-ai-ml, azure-identity (planned)

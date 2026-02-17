@@ -1,4 +1,4 @@
-"""Pipeline: main"""
+"""Pipeline: my_pipeline"""
 
 import polars as pl
 import haute

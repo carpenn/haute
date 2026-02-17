@@ -23,9 +23,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-catboost = [
-    "catboost>=1.2.8",
-]
 databricks = [
     "mlflow>=2.15.0",
     "databricks-sdk>=0.30.0",

@@ -681,7 +681,6 @@ The full pipeline still runs identically - validate → staging → smoke test �
 
 ```
 haute[databricks]   → mlflow, databricks-sdk      (existing, keep as-is)
-haute[catboost]     → catboost                     (existing, keep as-is)
 haute[aws]          → boto3, sagemaker             (planned)
 haute[azure]        → azure-ai-ml, azure-identity  (planned)
 ```
