@@ -103,7 +103,7 @@ class DeployConfig:
         output_fields_raw = deploy.get("output_fields")
         output_fields = list(output_fields_raw) if output_fields_raw else None
 
-        tq_dir = Path(tq["dir"]) if tq.get("dir") else None
+        tq_dir = (path.parent / tq["dir"]).resolve() if tq.get("dir") else None
 
         db_config = DatabricksConfig(
             experiment_name=db_raw.get("experiment_name", "/Shared/haute/default"),

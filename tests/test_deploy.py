@@ -81,9 +81,11 @@ class TestPruner:
     def test_find_output_no_output_raises(self) -> None:
         from haute.deploy._pruner import find_output_node
 
-        graph = {"nodes": [
-            {"id": "a", "data": {"nodeType": "dataSource", "config": {}}},
-        ]}
+        graph = {
+            "nodes": [
+                {"id": "a", "data": {"nodeType": "dataSource", "config": {}}},
+            ]
+        }
         with pytest.raises(ValueError, match="No output node"):
             find_output_node(graph)
 
@@ -119,15 +121,17 @@ class TestBundler:
     def test_missing_artifact_raises(self) -> None:
         from haute.deploy._bundler import collect_artifacts
 
-        graph = {"nodes": [
-            {
-                "id": "ext1",
-                "data": {
-                    "nodeType": "externalFile",
-                    "config": {"path": "nonexistent/model.pkl"},
+        graph = {
+            "nodes": [
+                {
+                    "id": "ext1",
+                    "data": {
+                        "nodeType": "externalFile",
+                        "config": {"path": "nonexistent/model.pkl"},
+                    },
                 },
-            },
-        ]}
+            ]
+        }
 
         with pytest.raises(FileNotFoundError, match="Artifact not found"):
             collect_artifacts(graph, [], Path("."))
@@ -352,16 +356,18 @@ class TestDatabricksTracking:
             output_schema={"col": "Int64"},
         )
 
-        with patch("mlflow.set_tracking_uri") as mock_set_tracking, \
-             patch("mlflow.set_registry_uri") as mock_set_registry, \
-             patch("mlflow.set_experiment"), \
-             patch("mlflow.start_run") as mock_run, \
-             patch("mlflow.log_dict"), \
-             patch("mlflow.pyfunc.log_model"), \
-             patch("mlflow.tracking.MlflowClient") as mock_client, \
-             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
-             patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
+        with (
+            patch("mlflow.set_tracking_uri") as mock_set_tracking,
+            patch("mlflow.set_registry_uri") as mock_set_registry,
+            patch("mlflow.set_experiment"),
+            patch("mlflow.start_run") as mock_run,
+            patch("mlflow.log_dict"),
+            patch("mlflow.pyfunc.log_model"),
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute.deploy._mlflow._check_databricks_connectivity"),
+            patch("haute.deploy._mlflow._build_signature"),
+            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
+        ):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -394,16 +400,18 @@ class TestDatabricksTracking:
             output_schema={"col": "Int64"},
         )
 
-        with patch("mlflow.set_tracking_uri"), \
-             patch("mlflow.set_registry_uri"), \
-             patch("mlflow.set_experiment"), \
-             patch("mlflow.start_run") as mock_run, \
-             patch("mlflow.log_dict"), \
-             patch("mlflow.pyfunc.log_model") as mock_log_model, \
-             patch("mlflow.tracking.MlflowClient") as mock_client, \
-             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
-             patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
+        with (
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.set_registry_uri"),
+            patch("mlflow.set_experiment"),
+            patch("mlflow.start_run") as mock_run,
+            patch("mlflow.log_dict"),
+            patch("mlflow.pyfunc.log_model") as mock_log_model,
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute.deploy._mlflow._check_databricks_connectivity"),
+            patch("haute.deploy._mlflow._build_signature"),
+            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
+        ):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -417,8 +425,8 @@ class TestDatabricksTracking:
             # Verify the model URI uses the UC name
             assert "workspace.default.my-model" in result.model_uri
 
-    def test_ensure_experiment_directory_called(self) -> None:
-        """Experiment parent directories must be created before set_experiment."""
+    def test_experiment_name_includes_suffix_for_staging(self) -> None:
+        """Staging deploys must use a suffixed experiment and model name."""
         from unittest.mock import MagicMock, patch
 
         from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
@@ -427,7 +435,12 @@ class TestDatabricksTracking:
         config = DeployConfig(
             pipeline_file=PIPELINE_FILE,
             model_name="test-model",
-            databricks=DatabricksConfig(experiment_name="/Shared/haute/test"),
+            endpoint_suffix="-staging",
+            databricks=DatabricksConfig(
+                experiment_name="/Shared/haute/test",
+                catalog="workspace",
+                schema="default",
+            ),
         )
         resolved = ResolvedDeploy(
             config=config,
@@ -440,45 +453,28 @@ class TestDatabricksTracking:
             output_schema={"col": "Int64"},
         )
 
-        with patch("mlflow.set_tracking_uri"), \
-             patch("mlflow.set_registry_uri"), \
-             patch("mlflow.set_experiment"), \
-             patch("mlflow.start_run") as mock_run, \
-             patch("mlflow.log_dict"), \
-             patch("mlflow.pyfunc.log_model"), \
-             patch("mlflow.tracking.MlflowClient") as mock_client, \
-             patch("haute.deploy._mlflow._ensure_experiment_directory") as mock_ensure, \
-             patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
+        with (
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.set_registry_uri"),
+            patch("mlflow.set_experiment") as mock_set_exp,
+            patch("mlflow.start_run") as mock_run,
+            patch("mlflow.log_dict"),
+            patch("mlflow.pyfunc.log_model") as mock_log_model,
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute.deploy._mlflow._check_databricks_connectivity"),
+            patch("haute.deploy._mlflow._build_signature"),
+            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
+        ):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
 
             deploy_to_mlflow(resolved)
 
-            mock_ensure.assert_called_once_with("/Shared/haute/test")
-
-    def test_ensure_experiment_directory_skips_top_level(self) -> None:
-        """Top-level experiment paths (parent is '/') should not trigger mkdirs."""
-        from unittest.mock import patch
-
-        from haute.deploy._mlflow import _ensure_experiment_directory
-
-        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls:
-            _ensure_experiment_directory("/top_level_experiment")
-            mock_ws_cls.return_value.workspace.mkdirs.assert_not_called()
-
-    def test_ensure_experiment_directory_creates_parent(self) -> None:
-        """Nested experiment paths should trigger mkdirs on the parent."""
-        from unittest.mock import patch
-
-        from haute.deploy._mlflow import _ensure_experiment_directory
-
-        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls:
-            _ensure_experiment_directory("/Shared/haute/my-experiment")
-            mock_ws_cls.return_value.workspace.mkdirs.assert_called_once_with(
-                "/Shared/haute"
-            )
+            mock_set_exp.assert_called_once_with("/Shared/haute/test-staging")
+            # Model must also be registered with the suffix
+            log_call = mock_log_model.call_args
+            assert log_call.kwargs["registered_model_name"] == "workspace.default.test-model-staging"
 
 
 class TestServingEndpoint:
@@ -508,16 +504,18 @@ class TestServingEndpoint:
             output_schema={"col": "Int64"},
         )
 
-        with patch("mlflow.set_tracking_uri"), \
-             patch("mlflow.set_registry_uri"), \
-             patch("mlflow.set_experiment"), \
-             patch("mlflow.start_run") as mock_run, \
-             patch("mlflow.log_dict"), \
-             patch("mlflow.pyfunc.log_model"), \
-             patch("mlflow.tracking.MlflowClient") as mock_client, \
-             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
-             patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as mock_ep:
+        with (
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.set_registry_uri"),
+            patch("mlflow.set_experiment"),
+            patch("mlflow.start_run") as mock_run,
+            patch("mlflow.log_dict"),
+            patch("mlflow.pyfunc.log_model"),
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute.deploy._mlflow._check_databricks_connectivity"),
+            patch("haute.deploy._mlflow._build_signature"),
+            patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as mock_ep,
+        ):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -530,9 +528,7 @@ class TestServingEndpoint:
                 uc_model_name="ws.default.my-model",
                 model_version=1,
             )
-            assert result.endpoint_url == (
-                "https://host/serving-endpoints/my-endpoint/invocations"
-            )
+            assert result.endpoint_url == ("https://host/serving-endpoints/my-endpoint/invocations")
 
     def test_endpoint_returns_none_when_no_endpoint_name(self) -> None:
         """If endpoint_name is not set, _create_or_update_serving_endpoint returns None."""
@@ -566,10 +562,13 @@ class TestServingEndpoint:
             ),
         )
 
-        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls, \
-             patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}):
+        with (
+            patch("databricks.sdk.WorkspaceClient") as mock_ws_cls,
+            patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}),
+        ):
             mock_ws = mock_ws_cls.return_value
             from databricks.sdk.errors import NotFound
+
             mock_ws.serving_endpoints.get.side_effect = NotFound("not found")
 
             url = _create_or_update_serving_endpoint(
@@ -598,8 +597,10 @@ class TestServingEndpoint:
             ),
         )
 
-        with patch("databricks.sdk.WorkspaceClient") as mock_ws_cls, \
-             patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}):
+        with (
+            patch("databricks.sdk.WorkspaceClient") as mock_ws_cls,
+            patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}),
+        ):
             mock_ws = mock_ws_cls.return_value
             mock_ws.serving_endpoints.get.return_value = MagicMock()
 
@@ -663,16 +664,18 @@ class TestModelsFromCode:
             output_schema={"col": "Int64"},
         )
 
-        with patch("mlflow.set_tracking_uri"), \
-             patch("mlflow.set_registry_uri"), \
-             patch("mlflow.set_experiment"), \
-             patch("mlflow.start_run") as mock_run, \
-             patch("mlflow.log_dict"), \
-             patch("mlflow.pyfunc.log_model") as mock_log, \
-             patch("mlflow.tracking.MlflowClient") as mock_client, \
-             patch("haute.deploy._mlflow._ensure_experiment_directory"), \
-             patch("haute.deploy._mlflow._build_signature"), \
-             patch("haute.deploy._mlflow._create_or_update_serving_endpoint"):
+        with (
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.set_registry_uri"),
+            patch("mlflow.set_experiment"),
+            patch("mlflow.start_run") as mock_run,
+            patch("mlflow.log_dict"),
+            patch("mlflow.pyfunc.log_model") as mock_log,
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute.deploy._mlflow._check_databricks_connectivity"),
+            patch("haute.deploy._mlflow._build_signature"),
+            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
+        ):
             mock_client.return_value.search_model_versions.return_value = []
             mock_run.return_value.__enter__ = MagicMock()
             mock_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -709,6 +712,4 @@ class TestParserDeployInput:
 
         assert policies_node is not None, "policies node not found"
         config = policies_node["data"]["config"]
-        assert config.get("deploy_input") is True, (
-            f"deploy_input not in config: {config}"
-        )
+        assert config.get("deploy_input") is True, f"deploy_input not in config: {config}"

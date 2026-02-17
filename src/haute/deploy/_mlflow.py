@@ -6,6 +6,7 @@ import getpass
 import importlib.resources
 import json
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,7 +32,10 @@ class DeployResult:
     manifest_path: Path
 
 
-def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
+def deploy_to_mlflow(
+    resolved: ResolvedDeploy,
+    progress: Callable[[str], None] | None = None,
+) -> DeployResult:
     """Deploy a resolved pipeline to MLflow + Databricks Model Serving.
 
     Steps:
@@ -42,21 +46,31 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
     Args:
         resolved: Fully resolved deployment config (from ``resolve_config()``).
+        progress: Optional callback for step-by-step progress messages.
 
     Returns:
         DeployResult with model URI, version, and endpoint URL.
     """
+
+    def _log(msg: str) -> None:
+        if progress:
+            progress(msg)
+
     import mlflow
 
     config = resolved.config
     model_name = config.model_name
 
     # Point MLflow at the Databricks workspace (uses DATABRICKS_HOST/TOKEN env vars)
+    _log("Connecting to Databricks MLflow...")
+    _check_databricks_connectivity(_log)
     mlflow.set_tracking_uri("databricks")
     mlflow.set_registry_uri("databricks-uc")
 
     # Use Unity Catalog three-level namespace: catalog.schema.model_name
-    uc_model_name = f"{config.databricks.catalog}.{config.databricks.schema}.{model_name}"
+    # Append endpoint suffix so staging and prod are separate registered models
+    effective_model_name = model_name + (config.endpoint_suffix or "")
+    uc_model_name = f"{config.databricks.catalog}.{config.databricks.schema}.{effective_model_name}"
 
     # 1. Build deployment manifest
     manifest = _build_manifest(resolved)
@@ -76,12 +90,15 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
         # 4. Build MLflow model signature
         signature = _build_signature(resolved)
 
-        # 5. Set experiment if configured
+        # 5. Set experiment - append endpoint suffix for staging isolation
         experiment_name = config.databricks.experiment_name
-        _ensure_experiment_directory(experiment_name)
+        if config.endpoint_suffix:
+            experiment_name = experiment_name + config.endpoint_suffix
+        _log(f"Setting experiment: {experiment_name}")
         mlflow.set_experiment(experiment_name)
 
         # 6. Log the model
+        _log("Logging model to MLflow (this may take a minute)...")
         with mlflow.start_run(run_name=f"deploy-{model_name}"):
             mlflow.log_dict(manifest, "deploy_manifest.json")
 
@@ -90,10 +107,11 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
                 python_model=_MODEL_CODE_PATH,
                 artifacts=artifacts,
                 signature=signature,
-                pip_requirements=_pip_requirements(resolved),
+                conda_env=_conda_env(resolved),
                 registered_model_name=uc_model_name,
             )
 
+        _log(f"Model logged. Fetching registered version for {uc_model_name}...")
         # 7. Get the registered model version
         client = mlflow.tracking.MlflowClient()
         versions = client.search_model_versions(f"name='{uc_model_name}'")
@@ -104,7 +122,10 @@ def deploy_to_mlflow(resolved: ResolvedDeploy) -> DeployResult:
 
         model_uri = f"models:/{uc_model_name}/{latest_version}"
 
+    _log(f"Model URI: {model_uri}")
+
     # 8. Create or update the serving endpoint
+    _log(f"Creating/updating serving endpoint: {config.effective_endpoint_name}...")
     endpoint_url = _create_or_update_serving_endpoint(
         config=config,
         uc_model_name=uc_model_name,
@@ -241,6 +262,30 @@ def _pip_requirements(resolved: ResolvedDeploy) -> list[str]:
     return reqs
 
 
+# Databricks Model Serving uses conda to build the container.
+# Pin Python to 3.11 which is widely available on Databricks' internal
+# conda channel, regardless of which Python the CI runner uses.
+_SERVING_PYTHON_VERSION = "3.11.11"
+
+
+def _conda_env(resolved: ResolvedDeploy) -> dict:
+    """Build a conda environment dict for Databricks Model Serving.
+
+    Pins Python to a version available on Databricks' internal conda
+    channel instead of letting MLflow auto-detect the host Python
+    (which may be 3.13+ and unavailable on Databricks).
+    """
+    return {
+        "channels": ["conda-forge"],
+        "dependencies": [
+            f"python={_SERVING_PYTHON_VERSION}",
+            "pip",
+            {"pip": _pip_requirements(resolved)},
+        ],
+        "name": "mlflow-env",
+    }
+
+
 def _create_or_update_serving_endpoint(
     config: DeployConfig,
     uc_model_name: str,
@@ -306,27 +351,47 @@ def _create_or_update_serving_endpoint(
     return f"{host}/serving-endpoints/{endpoint_name}/invocations"
 
 
-def _ensure_experiment_directory(experiment_name: str) -> None:
-    """Create parent directories for the experiment path in the Databricks workspace.
+def _check_databricks_connectivity(
+    _log: Callable[[str], None],
+    timeout: int = 10,
+) -> None:
+    """Verify the Databricks workspace is reachable before slow MLflow calls.
 
-    Uses the Databricks SDK workspace client, which is already available
-    via the ``haute[databricks]`` optional dependency.  The ``mkdirs``
-    call is idempotent - it creates all missing ancestors and no-ops if
-    the directory already exists.
-
-    Requires ``DATABRICKS_HOST`` and ``DATABRICKS_TOKEN`` in the
-    environment (already loaded from ``.env`` by ``_load_env()``).
+    Makes a lightweight HTTP GET to DATABRICKS_HOST with a short timeout so CI
+    fails fast with a clear error instead of hanging forever.
     """
-    from pathlib import PurePosixPath
+    import os
+    import urllib.request
 
-    from databricks.sdk import WorkspaceClient
+    host = os.environ.get("DATABRICKS_HOST", "")
+    token = os.environ.get("DATABRICKS_TOKEN", "")
 
-    parent_dir = str(PurePosixPath(experiment_name).parent)
-    if parent_dir in ("/", "."):
-        return
+    if not host:
+        raise RuntimeError("DATABRICKS_HOST is not set. Add it to .env or set it as a CI secret.")
+    if not token:
+        raise RuntimeError("DATABRICKS_TOKEN is not set. Add it to .env or set it as a CI secret.")
 
-    ws = WorkspaceClient()
-    ws.workspace.mkdirs(parent_dir)
+    url = f"{host.rstrip('/')}/api/2.0/clusters/list-zones"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
+        _log("Databricks workspace reachable")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise RuntimeError(
+                f"Databricks returned 403 Forbidden. "
+                f"Check that your DATABRICKS_TOKEN is valid and has workspace access. "
+                f"Host: {host}"
+            ) from exc
+        # Other HTTP errors (e.g. 404) are fine — it means the host is reachable
+        _log("Databricks workspace reachable")
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(
+            f"Cannot reach Databricks workspace at {host} "
+            f"(timed out after {timeout}s). Check DATABRICKS_HOST is correct "
+            f"and that the workspace allows connections from this network "
+            f"(e.g. GitHub Actions IP ranges may need allowlisting)."
+        ) from exc
 
 
 def _get_user() -> str:

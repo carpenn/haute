@@ -3,6 +3,7 @@
 import signal
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -517,7 +518,7 @@ def deploy(
     try:
         from haute.deploy._mlflow import deploy_to_mlflow
 
-        result = deploy_to_mlflow(resolved)
+        result = deploy_to_mlflow(resolved, progress=lambda msg: click.echo(f"  … {msg}"))
         click.echo(f"  ✓ Logged MLflow model: {result.model_name} v{result.model_version}")
         click.echo(f"  ✓ Model URI: {result.model_uri}")
         if result.endpoint_url:
@@ -690,7 +691,7 @@ def smoke(endpoint_suffix: str | None) -> None:
     tq_dir = config.test_quotes_dir
 
     if tq_dir is None or not tq_dir.is_dir():
-        click.echo("Error: No test quotes directory found (expected tests/quotes/).", err=True)
+        click.echo(f"Error: No test quotes directory found (resolved: {tq_dir}).", err=True)
         raise SystemExit(1)
 
     json_files = sorted(tq_dir.glob("*.json"))
@@ -721,6 +722,38 @@ def smoke(endpoint_suffix: str | None) -> None:
     _load_env(Path.cwd())
 
     ws = WorkspaceClient()
+
+    # Wait for endpoint to be ready (provisioning can take 10-15 min)
+    max_wait = 30 * 60  # 30 minutes
+    poll_interval = 30  # seconds
+    click.echo(f"  … Waiting for endpoint '{endpoint_name}' to be ready...")
+    waited = 0
+    while waited < max_wait:
+        try:
+            ep = ws.serving_endpoints.get(endpoint_name)
+            state = ep.state
+            ready = getattr(state, "ready", None) if state else None
+            config_update = getattr(state, "config_update", None) if state else None
+            ready_str = str(ready).rsplit(".", 1)[-1] if ready else ""
+            update_str = str(config_update).rsplit(".", 1)[-1] if config_update else ""
+            if ready_str == "READY" and update_str in ("", "NOT_UPDATING"):
+                click.echo(f"  ✓ Endpoint ready (waited {waited}s)")
+                break
+            status_msg = f"ready={ready}"
+            if config_update and config_update != "NOT_UPDATING":
+                status_msg += f", config_update={config_update}"
+            click.echo(f"  … Endpoint not ready ({status_msg}), polling in {poll_interval}s...")
+        except Exception as exc:
+            click.echo(f"  … Endpoint not found or error ({exc}), retrying in {poll_interval}s...")
+        time.sleep(poll_interval)
+        waited += poll_interval
+    else:
+        click.echo(
+            f"  ✗ Endpoint '{endpoint_name}' not ready after {max_wait // 60} minutes.",
+            err=True,
+        )
+        raise SystemExit(1)
+
     all_ok = True
 
     for jf in json_files:
