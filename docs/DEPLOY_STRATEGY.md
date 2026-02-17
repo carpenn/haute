@@ -1,6 +1,6 @@
 # Haute - Deployment Strategy
 
-**Status:** Partially implemented (P1–P3 done, P4–P9 pending)  
+**Status:** Partially implemented (P1–P3 + P9 done, P4–P8 pending)  
 **Scope:** Config design, CI/CD, deploy targets, safety gates  
 
 ---
@@ -51,7 +51,7 @@ my-pricing-project/
 ```
 
 For GitLab users (`--ci gitlab`), `.github/workflows/` is replaced with `.gitlab-ci.yml`.  
-For Azure DevOps users, `azure-pipelines.yml` (planned).
+For Azure DevOps users (`--ci azure-devops`), `azure-pipelines.yml`.
 
 ---
 
@@ -362,7 +362,7 @@ feature branch ──→ PR ──→ merge to main ──→ deploy
 | Provider | Config key | Generated file(s) | Status |
 |---|---|---|---|
 | **GitHub Actions** | `provider = "github"` | `.github/workflows/ci.yml`, `deploy-staging.yml`, `deploy-production.yml` | v1 |
-| **Azure DevOps** | `provider = "azure-devops"` | `azure-pipelines.yml` | v2 |
+| **Azure DevOps** | `provider = "azure-devops"` | `azure-pipelines.yml` | v1 |
 | **GitLab CI** | `provider = "gitlab"` | `.gitlab-ci.yml` | v1 |
 | **None** | `provider = "none"` | No CI files generated | v1 |
 
@@ -664,7 +664,7 @@ All design questions have been resolved. See §8 Decisions Made.
 | **P6** | AWS SageMaker deploy target (`_sagemaker.py`) | P5 pattern |
 | **P7** | Azure ML deploy target (`_azure_ml.py`) | P5 pattern |
 | **P8** | `haute rollback` command | Deploy targets implemented |
-| **P9** | Azure DevOps CI template | P2 pattern |
+| **P9** | Azure DevOps CI template | ✅ Done |
 
 ---
 

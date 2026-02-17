@@ -840,7 +840,7 @@ This is a small, safe refactor because the target-agnostic layers don't change.
 |---|---|---|
 | **Impact analysis** | `haute impact` — compare staging vs production predictions, report pricing changes | ✅ Implemented |
 | **Smoke testing** | `haute smoke` — score test quotes against a live endpoint | ✅ Implemented |
-| **CI/CD scaffolds** | `haute init --ci github\|gitlab` generates workflow files with staging → impact → production flow | ✅ Implemented |
+| **CI/CD scaffolds** | `haute init --ci github\|gitlab\|azure-devops` generates workflow files with staging → impact → production flow | ✅ Implemented |
 | **CI-only deploy** | `haute deploy` only runs in CI environments; local deploys always blocked | ✅ Implemented |
 | **Deploy from GUI** | "Deploy" button in the React Flow UI | Planned |
 | **Deploy diff** | Compare two deployed model versions | Planned |

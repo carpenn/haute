@@ -143,7 +143,7 @@ Radar and Earnix are mature products with decades of development and large teams
 | **Backend** | Python, FastAPI, Polars, WebSocket sync |
 | **Models** | MLflow (registry, tracking, serving) |
 | **Deploy Targets** | Databricks · AWS SageMaker · Azure ML · Docker |
-| **CI/CD** | GitHub Actions · GitLab CI (Azure DevOps planned) |
+| **CI/CD** | GitHub Actions · GitLab CI · Azure DevOps |
 
 ---
 

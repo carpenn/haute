@@ -233,6 +233,40 @@ class TestInit:
         assert (tmp_path / ".github" / "workflows" / "deploy-staging.yml").exists()
         assert (tmp_path / ".github" / "workflows" / "deploy-production.yml").exists()
 
+    def test_ci_azure_devops_generates_pipeline(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(cli, ["init", "--ci", "azure-devops"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        pipeline_file = tmp_path / "azure-pipelines.yml"
+        assert pipeline_file.exists()
+        content = pipeline_file.read_text()
+        assert "trigger:" in content
+        assert "Validate" in content
+        assert "DeployStaging" in content
+        assert "DeployProduction" in content
+        assert "haute deploy" in content
+        assert "haute-credentials" in content
+        # Should NOT generate GitHub or GitLab CI files
+        assert not (tmp_path / ".github").exists()
+        assert not (tmp_path / ".gitlab-ci.yml").exists()
+
+    def test_ci_azure_devops_with_docker_target(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            cli, ["init", "--target", "docker", "--ci", "azure-devops"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        content = (tmp_path / "azure-pipelines.yml").read_text()
+        assert "DOCKER_USERNAME" in content
+        assert "DOCKER_PASSWORD" in content
+        toml_content = (tmp_path / "haute.toml").read_text()
+        assert 'provider = "azure-devops"' in toml_content
+
     def test_ci_none_skips_workflows(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ):

@@ -58,7 +58,7 @@ def _find_frontend_dir() -> Path | None:
 )
 @click.option(
     "--ci",
-    type=click.Choice(["github", "gitlab", "none"]),
+    type=click.Choice(["github", "gitlab", "azure-devops", "none"]),
     default="github",
     help="CI/CD provider (default: github).",
 )
@@ -78,6 +78,7 @@ def init(target: str, ci: str) -> None:
     import tomllib
 
     from haute._scaffold import (
+        azure_devops_yml,
         env_example,
         github_ci_yml,
         github_deploy_prod_yml,
@@ -166,6 +167,12 @@ def init(target: str, ci: str) -> None:
             encoding="utf-8",
         )
         ci_files = [".gitlab-ci.yml"]
+    elif ci == "azure-devops":
+        (project_dir / "azure-pipelines.yml").write_text(
+            azure_devops_yml(target),
+            encoding="utf-8",
+        )
+        ci_files = ["azure-pipelines.yml"]
 
     # ── Pre-commit hook ───────────────────────────────────────────
     hooks_dir = project_dir / ".githooks"
@@ -464,7 +471,8 @@ def deploy(
         raise SystemExit(1)
 
     # Block local deploys — production changes must go through CI/CD
-    if not dry_run and not os.environ.get("CI"):
+    is_ci = os.environ.get("CI") or os.environ.get("TF_BUILD") or os.environ.get("GITLAB_CI")
+    if not dry_run and not is_ci:
         click.echo(
             "Error: Deploys must go through CI/CD.",
             err=True,
