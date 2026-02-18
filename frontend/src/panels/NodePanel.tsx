@@ -554,6 +554,7 @@ function DatabricksFetchButton({
 }) {
   const [cache, setCache] = useState<CacheStatus | null>(null)
   const [fetching, setFetching] = useState(false)
+  const [progress, setProgress] = useState<{ rows: number; elapsed: number } | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -566,6 +567,17 @@ function DatabricksFetchButton({
       })
       .catch(() => setCache(null))
   }, [table])
+
+  useEffect(() => {
+    if (!fetching || !table) return
+    const id = setInterval(() => {
+      fetch(`/api/databricks/fetch/progress?table=${encodeURIComponent(table)}`)
+        .then((r) => r.json())
+        .then((data) => { if (data.active) setProgress({ rows: data.rows, elapsed: data.elapsed }) })
+        .catch(() => {})
+    }, 1000)
+    return () => { clearInterval(id); setProgress(null) }
+  }, [fetching, table])
 
   const doFetch = () => {
     if (!table) return
@@ -618,7 +630,7 @@ function DatabricksFetchButton({
         }}
       >
         {fetching ? (
-          <><Loader2 size={14} className="animate-spin" /> Fetching...</>
+          <><Loader2 size={14} className="animate-spin" /> {progress ? `${progress.rows.toLocaleString()} rows · ${progress.elapsed}s` : "Connecting..."}</>
         ) : cache?.cached ? (
           <><HardDriveDownload size={14} /> Refresh Data</>
         ) : (

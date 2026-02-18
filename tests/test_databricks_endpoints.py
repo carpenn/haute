@@ -205,6 +205,35 @@ class TestCacheStatus:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/databricks/fetch/progress
+# ---------------------------------------------------------------------------
+
+
+class TestFetchProgress:
+    def test_no_active_fetch(self, client: TestClient) -> None:
+        resp = client.get("/api/databricks/fetch/progress", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        assert resp.json()["active"] is False
+
+    def test_active_fetch(self, client: TestClient) -> None:
+        from haute._databricks_io import _fetch_lock, _fetch_progress
+
+        with _fetch_lock:
+            _fetch_progress["cat.sch.tbl"] = {"rows": 200_000, "batches": 2, "elapsed": 3.5}
+        try:
+            resp = client.get("/api/databricks/fetch/progress", params={"table": "cat.sch.tbl"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["active"] is True
+            assert data["rows"] == 200_000
+            assert data["batches"] == 2
+            assert data["elapsed"] == 3.5
+        finally:
+            with _fetch_lock:
+                _fetch_progress.pop("cat.sch.tbl", None)
+
+
+# ---------------------------------------------------------------------------
 # POST /api/databricks/fetch
 # ---------------------------------------------------------------------------
 

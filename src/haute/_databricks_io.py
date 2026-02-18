@@ -14,6 +14,7 @@ Secrets are resolved from the environment with fallback:
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -21,6 +22,10 @@ from typing import TypedDict
 import polars as pl
 
 CACHE_DIR = ".haute_cache"
+
+# Thread-safe progress tracking for active fetches, keyed by table name.
+_fetch_progress: dict[str, dict[str, object]] = {}
+_fetch_lock = threading.Lock()
 
 
 class DatabricksConfigError(Exception):
@@ -115,19 +120,21 @@ def cache_info(
     table: str, project_root: Path | None = None,
 ) -> CacheInfoDict | None:
     """Return metadata about a cached table, or ``None`` if not cached."""
+    import pyarrow.parquet as pq
+
     p = cached_path(table, project_root)
     if p is None:
         return None
     stat = p.stat()
-    lf = pl.scan_parquet(p)
-    schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
-    row_count = pl.scan_parquet(p).select(pl.len()).collect().item()
+    meta = pq.read_metadata(str(p))
+    arrow_schema = pq.read_schema(str(p))
+    columns = {name: str(arrow_schema.field(name).type) for name in arrow_schema.names}
     return {
         "path": str(p),
         "table": table,
-        "row_count": row_count,
-        "column_count": len(schema),
-        "columns": schema,
+        "row_count": meta.num_rows,
+        "column_count": meta.num_columns,
+        "columns": columns,
         "size_bytes": stat.st_size,
         "fetched_at": stat.st_mtime,
     }
@@ -145,6 +152,12 @@ class FetchResultDict(CacheInfoDict):
     fetch_seconds: float
 
 
+def fetch_progress(table: str) -> dict[str, object] | None:
+    """Return current fetch progress for *table*, or ``None`` if not active."""
+    with _fetch_lock:
+        return _fetch_progress.get(table)
+
+
 def fetch_and_cache(
     table: str,
     http_path: str | None = None,
@@ -155,8 +168,12 @@ def fetch_and_cache(
     """Fetch a table from Databricks and cache it as a local parquet file.
 
     Data is streamed in Arrow batches of *batch_size* rows and written
-    incrementally to parquet via :class:`pyarrow.parquet.ParquetWriter`,
-    so memory usage stays bounded regardless of table size.
+    incrementally to parquet via :class:`pyarrow.parquet.ParquetWriter`
+    with zstd compression, so memory usage stays bounded regardless of
+    table size.
+
+    Writes to a temporary file first and atomically renames on success,
+    so a failed fetch never leaves a corrupt cache file behind.
 
     Returns metadata dict with row_count, column_count, path, etc.
     """
@@ -170,11 +187,14 @@ def fetch_and_cache(
 
     out_path = _cache_path_for(table, project_root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(".parquet.tmp")
 
     row_count = 0
     writer: pq.ParquetWriter | None = None
 
     t0 = time.monotonic()
+    with _fetch_lock:
+        _fetch_progress[table] = {"rows": 0, "batches": 0, "elapsed": 0.0}
     try:
         with dbsql.connect(
             server_hostname=host,
@@ -183,22 +203,41 @@ def fetch_and_cache(
         ) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql_query)
+                batch_count = 0
                 while True:
                     batch = cursor.fetchmany_arrow(batch_size)
                     if batch.num_rows == 0:
                         break
                     if writer is None:
-                        writer = pq.ParquetWriter(str(out_path), batch.schema)
+                        writer = pq.ParquetWriter(
+                            str(tmp_path), batch.schema, compression="zstd",
+                        )
                     writer.write_table(batch)
                     row_count += batch.num_rows
-    finally:
+                    batch_count += 1
+                    with _fetch_lock:
+                        _fetch_progress[table] = {
+                            "rows": row_count,
+                            "batches": batch_count,
+                            "elapsed": round(time.monotonic() - t0, 1),
+                        }
         if writer is not None:
             writer.close()
+            writer = None
+        tmp_path.rename(out_path)
+    except BaseException:
+        if writer is not None:
+            writer.close()
+        tmp_path.unlink(missing_ok=True)
+        raise
+    finally:
+        with _fetch_lock:
+            _fetch_progress.pop(table, None)
     elapsed = time.monotonic() - t0
 
     # Read back lightweight schema info from the written file
-    meta = pq.read_schema(str(out_path))
-    schema = {name: str(meta.field(name).type) for name in meta.names}
+    arrow_schema = pq.read_schema(str(out_path))
+    schema = {name: str(arrow_schema.field(name).type) for name in arrow_schema.names}
 
     return {
         "path": str(out_path),

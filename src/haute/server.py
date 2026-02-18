@@ -17,6 +17,7 @@ from haute.schemas import (
     BrowseFilesResponse,
     CacheStatusResponse,
     CatalogListResponse,
+    FetchProgressResponse,
     FetchTableRequest,
     FetchTableResponse,
     FileItem,
@@ -546,9 +547,12 @@ async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse
 async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
     """Fetch a Databricks table and cache it locally as parquet."""
     try:
+        import asyncio
+
         from haute._databricks_io import fetch_and_cache
 
-        result = fetch_and_cache(
+        result = await asyncio.to_thread(
+            fetch_and_cache,
             table=body.table,
             http_path=body.http_path,
             query=body.query,
@@ -562,6 +566,17 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/databricks/fetch/progress", response_model=FetchProgressResponse)
+async def get_fetch_progress(table: str) -> FetchProgressResponse:
+    """Poll fetch progress for a table currently being downloaded."""
+    from haute._databricks_io import fetch_progress
+
+    progress = fetch_progress(table)
+    if progress is None:
+        return FetchProgressResponse(active=False)
+    return FetchProgressResponse(active=True, **progress)
 
 
 @app.get("/api/databricks/cache", response_model=CacheStatusResponse)

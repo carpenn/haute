@@ -280,6 +280,13 @@ class FetchTableResponse(BaseModel):
     fetch_seconds: float
 
 
+class FetchProgressResponse(BaseModel):
+    active: bool
+    rows: int = 0
+    batches: int = 0
+    elapsed: float = 0.0
+
+
 class CacheStatusResponse(BaseModel):
     cached: bool
     path: str | None = None

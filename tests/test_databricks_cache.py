@@ -11,9 +11,12 @@ from haute._databricks_io import (
     CACHE_DIR,
     CacheNotFoundError,
     _cache_path_for,
+    _fetch_lock,
+    _fetch_progress,
     cache_info,
     cached_path,
     clear_cache,
+    fetch_progress,
     read_cached_table,
 )
 
@@ -70,6 +73,24 @@ class TestClearCache:
         assert clear_cache("cat.sch.tbl", project_root=tmp_path) is True
         assert not p.exists()
         assert cached_path("cat.sch.tbl", project_root=tmp_path) is None
+
+
+class TestFetchProgress:
+    def test_returns_none_when_no_active_fetch(self) -> None:
+        assert fetch_progress("cat.sch.tbl") is None
+
+    def test_returns_progress_when_active(self) -> None:
+        with _fetch_lock:
+            _fetch_progress["cat.sch.tbl"] = {"rows": 500, "batches": 5, "elapsed": 1.2}
+        try:
+            result = fetch_progress("cat.sch.tbl")
+            assert result is not None
+            assert result["rows"] == 500
+            assert result["batches"] == 5
+            assert result["elapsed"] == 1.2
+        finally:
+            with _fetch_lock:
+                _fetch_progress.pop("cat.sch.tbl", None)
 
 
 class TestReadCachedTable:
