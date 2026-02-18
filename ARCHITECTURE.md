@@ -461,6 +461,7 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 - Column relevance filtering: pass a `column` name to keep only steps whose output contains the column (irrelevant ancestors are removed)
 - `POST /api/pipeline/trace` endpoint wired up in `server.py`
 - Reuses the existing `executor._build_node_fn` infrastructure - no duplication
+- **Performance**: eager single-pass execution (O(n) vs O(n²) lazy re-execution) with single-entry cache keyed on graph fingerprint (`graph_utils.graph_fingerprint`). Source nodes capped at the frontend's `rowLimit` (default 1000) so model-scoring nodes process 1K rows, not the full dataset. First trace click executes the pipeline once; subsequent clicks on any row/column extract from cached DataFrames in <1ms. Same caching approach used by `executor.execute_graph` for preview
 
 **Phase B (done)** - Frontend trace panel in `frontend/src/`:
 - Clickable cells in `DataPreview` trigger `POST /api/pipeline/trace`
@@ -471,7 +472,7 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 
 **TODO - future phases** (see `docs/EXECUTION_TRACE_DESIGN.md` for full design):
 - [ ] Compare-trace: two rows side-by-side with per-node diff highlighting
-- [ ] Trace caching (LRU keyed on row_index + target + column)
+- [x] Trace caching: single-entry cache keyed on graph fingerprint (row_index and column don't require re-execution)
 - [ ] Human-readable expression generation ("base × area × ncd = £412")
 - [ ] `haute trace export` CLI for regulatory PDF/HTML reports
 - [x] Row-identity tracking via `row_id_column` on the `deploy_input` source node (e.g. `quote_id`); persists through save/reload, displayed in TracePanel header

@@ -459,6 +459,7 @@ function FlowEditor() {
         rowIndex: rowIndex,
         targetNodeId: selectedNode.id,
         column,
+        rowLimit,
       }),
     })
       .then((r) => r.json())
@@ -474,7 +475,7 @@ function FlowEditor() {
         addToast("error", `Trace error: ${err.message}`)
         clearTrace()
       })
-  }, [selectedNode, addToast, clearTrace])
+  }, [selectedNode, addToast, clearTrace, rowLimit])
 
   const toggleSnapToGrid = useCallback(() => {
     setSnapToGrid((prev) => {

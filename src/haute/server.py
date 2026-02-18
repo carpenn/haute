@@ -279,6 +279,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
             row_index=body.rowIndex,
             target_node_id=body.targetNodeId,
             column=body.column,
+            row_limit=body.rowLimit,
         )
         return TraceResponse(
             status="ok",

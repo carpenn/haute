@@ -3,9 +3,11 @@
 Takes a React Flow graph (nodes + edges) and executes it as a real
 Polars pipeline, without needing a saved .py file.
 
-Uses LazyFrames throughout so Polars can push predicates and limits
-down into scans.  Preview mode slaps a .head(row_limit) before
-.collect() - the query optimiser folds this into the scan.
+Node functions produce LazyFrames.  Preview and trace use eager
+single-pass execution with per-graph caching so repeated clicks
+don't re-execute the pipeline.  Source nodes are capped at
+row_limit rows.  Sink and CLI paths use lazy execution so Polars
+can optimise the full plan end-to-end.
 """
 
 from __future__ import annotations
@@ -16,7 +18,14 @@ from typing import Any
 
 import polars as pl
 
-from haute.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
+from haute.graph_utils import (
+    _execute_lazy,
+    _Frame,
+    _prepare_graph,
+    _sanitize_func_name,
+    graph_fingerprint,
+    load_external_object,
+)
 
 
 def _exec_user_code(
@@ -177,19 +186,48 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         return func_name, default_passthrough, False
 
 
+# ---------------------------------------------------------------------------
+# Preview cache — same principle as the trace cache in trace.py.
+# The pipeline doesn't change between node clicks — only the target node
+# changes.  Cache the materialized DataFrames so clicking different nodes
+# is instant instead of re-executing model scoring on 678K rows each time.
+# ---------------------------------------------------------------------------
+
+
+class _PreviewCache:
+    """Single-entry cache for the most recent pipeline execution."""
+
+    __slots__ = ("fingerprint", "eager_outputs", "order")
+
+    def __init__(self) -> None:
+        self.fingerprint: str | None = None
+        self.eager_outputs: dict[str, pl.DataFrame] = {}
+        self.order: list[str] = []
+
+    def invalidate(self) -> None:
+        self.fingerprint = None
+        self.eager_outputs.clear()
+
+
+_preview_cache = _PreviewCache()
+
+
 def execute_graph(
     graph: dict,
     target_node_id: str | None = None,
     row_limit: int | None = None,
     max_preview_rows: int = 100,
 ) -> dict[str, dict]:
-    """Execute a graph (lazy) and return per-node results.
+    """Execute a graph and return per-node results.
+
+    Uses eager single-pass execution with a single-entry cache so
+    clicking different nodes doesn't re-execute the full pipeline.
 
     Args:
         graph: React Flow graph with "nodes" and "edges".
         target_node_id: If set, only execute nodes up to (and including) this node.
-        row_limit: If set, apply .head(row_limit) before .collect() so Polars
-                   pushes the limit into the scan.  None means collect everything.
+        row_limit: If set, apply .head(row_limit) to source nodes so only
+                   that many rows flow through the pipeline.
         max_preview_rows: Max rows to include in the JSON preview payload.
 
     Returns:
@@ -204,16 +242,49 @@ def execute_graph(
     if not graph.get("nodes"):
         return {}
 
-    lazy_outputs, order, _parents, _names = _execute_lazy(
-        graph,
-        _build_node_fn,
-        target_node_id,
-    )
+    fp = graph_fingerprint(graph, str(row_limit))
+
+    errors: dict[str, str] = {}
+
+    # Check if we can extend the cache (same graph, new target is a superset)
+    if fp == _preview_cache.fingerprint and _preview_cache.eager_outputs:
+        cached = _preview_cache.eager_outputs
+        if target_node_id is None or target_node_id in cached:
+            eager_outputs = cached
+            order = _preview_cache.order
+        else:
+            eager_outputs, order, errors = _eager_execute(
+                graph, target_node_id, row_limit,
+            )
+            merged = {**cached, **eager_outputs}
+            _preview_cache.eager_outputs = merged
+            _preview_cache.order = list(
+                dict.fromkeys(_preview_cache.order + order),
+            )
+            eager_outputs = merged
+            order = _preview_cache.order
+    else:
+        eager_outputs, order, errors = _eager_execute(
+            graph, target_node_id, row_limit,
+        )
+        _preview_cache.fingerprint = fp
+        _preview_cache.eager_outputs = eager_outputs
+        _preview_cache.order = order
 
     results: dict[str, dict] = {}
     for nid in order:
-        lf = lazy_outputs.get(nid)
-        if lf is None:
+        if nid in errors:
+            results[nid] = {
+                "status": "error",
+                "row_count": 0,
+                "column_count": 0,
+                "columns": [],
+                "preview": [],
+                "error": errors[nid],
+            }
+            continue
+        df = eager_outputs.get(nid)
+        if df is None:
             results[nid] = {
                 "status": "error",
                 "row_count": 0,
@@ -223,28 +294,75 @@ def execute_graph(
                 "error": "No output",
             }
             continue
-        try:
-            df = lf.head(row_limit).collect() if row_limit is not None else lf.collect()
-            columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
-            results[nid] = {
-                "status": "ok",
-                "row_count": len(df),
-                "column_count": len(df.columns),
-                "columns": columns,
-                "preview": df.head(max_preview_rows).to_dicts(),
-                "error": None,
-            }
-        except Exception as exc:
-            results[nid] = {
-                "status": "error",
-                "row_count": 0,
-                "column_count": 0,
-                "columns": [],
-                "preview": [],
-                "error": str(exc),
-            }
+        columns = [
+            {"name": c, "dtype": str(df[c].dtype)} for c in df.columns
+        ]
+        results[nid] = {
+            "status": "ok",
+            "row_count": len(df),
+            "column_count": len(df.columns),
+            "columns": columns,
+            "preview": df.head(max_preview_rows).to_dicts(),
+            "error": None,
+        }
 
     return results
+
+
+def _eager_execute(
+    graph: dict,
+    target_node_id: str | None,
+    row_limit: int | None,
+) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str]]:
+    """Execute the graph eagerly in topo order.
+
+    Returns (outputs, order, errors) where errors maps node_id → message
+    for nodes that failed.  Failed nodes store None in outputs.
+    """
+    node_map, order, parents_of, id_to_name = _prepare_graph(
+        graph, target_node_id,
+    )
+
+    funcs: dict[str, tuple[Callable, bool]] = {}
+    for nid in order:
+        src_names = [
+            id_to_name[pid]
+            for pid in parents_of.get(nid, [])
+            if pid in id_to_name
+        ]
+        _, fn, is_source = _build_node_fn(
+            node_map[nid], source_names=src_names,
+        )
+        funcs[nid] = (fn, is_source)
+
+    eager_outputs: dict[str, pl.DataFrame | None] = {}
+    errors: dict[str, str] = {}
+
+    for nid in order:
+        fn, is_source = funcs[nid]
+        try:
+            if is_source:
+                result = fn()
+                if row_limit and isinstance(result, pl.LazyFrame):
+                    result = result.head(row_limit)
+            else:
+                input_ids = parents_of.get(nid, [])
+                input_lfs = [
+                    eager_outputs[pid].lazy()
+                    for pid in input_ids
+                    if pid in eager_outputs and eager_outputs[pid] is not None
+                ]
+                if not input_lfs:
+                    raise ValueError("No valid input data available")
+                result = fn(*input_lfs)
+
+            df = result.collect() if isinstance(result, pl.LazyFrame) else result
+            eager_outputs[nid] = df
+        except Exception as exc:
+            eager_outputs[nid] = None
+            errors[nid] = str(exc)
+
+    return eager_outputs, order, errors
 
 
 def execute_sink(graph: dict, sink_node_id: str) -> dict:

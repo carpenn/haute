@@ -91,6 +91,30 @@ def topo_sort_ids(node_ids: list[str], edges: list[dict]) -> list[str]:
     return result
 
 
+def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
+    """Deterministic hash of graph structure for cache invalidation.
+
+    *extra_keys* are prepended (e.g. target_node_id, row_limit) so the
+    same graph with different execution parameters gets a different hash.
+    Used by both the trace cache (trace.py) and preview cache (executor.py).
+    """
+    import hashlib
+
+    parts: list[str] = list(extra_keys)
+    for n in sorted(graph.get("nodes", []), key=lambda n: n["id"]):
+        d = n.get("data", {})
+        c = d.get("config", {})
+        parts.append(
+            f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}",
+        )
+    for e in sorted(
+        graph.get("edges", []),
+        key=lambda e: (e["source"], e["target"]),
+    ):
+        parts.append(f"{e['source']}->{e['target']}")
+    return hashlib.md5("\n".join(parts).encode()).hexdigest()
+
+
 def ancestors(target_id: str, edges: list[dict], all_ids: set[str]) -> set[str]:
     """Get all ancestor node IDs of target (inclusive)."""
     parents: dict[str, list[str]] = {nid: [] for nid in all_ids}

@@ -117,6 +117,7 @@ class TraceRequest(BaseModel):
     rowIndex: int = 0
     targetNodeId: str | None = None
     column: str | None = None
+    rowLimit: int = 1000
 
 
 class SchemaDiffResponse(BaseModel):
