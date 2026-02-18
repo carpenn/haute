@@ -206,6 +206,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Pipeline output files
+output/
+
 # Built frontend (included in wheel via pyproject.toml artifacts)
 src/haute/static/
 

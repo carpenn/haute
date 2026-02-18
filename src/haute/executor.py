@@ -19,8 +19,6 @@ from typing import Any
 
 import polars as pl
 
-logger = logging.getLogger("uvicorn.error")
-
 from haute.graph_utils import (
     _execute_lazy,
     _Frame,
@@ -29,6 +27,8 @@ from haute.graph_utils import (
     graph_fingerprint,
     load_external_object,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def _exec_user_code(

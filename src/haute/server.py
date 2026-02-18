@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from haute.schemas import (
     BrowseFilesResponse,
+    CatalogListResponse,
     FileItem,
     PipelineSummary,
     PreviewNodeRequest,
@@ -22,11 +24,14 @@ from haute.schemas import (
     RunPipelineResponse,
     SavePipelineRequest,
     SavePipelineResponse,
+    SchemaListResponse,
     SchemaResponse,
     SinkRequest,
     SinkResponse,
+    TableListResponse,
     TraceRequest,
     TraceResponse,
+    WarehouseListResponse,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -432,7 +437,7 @@ async def get_schema(path: str) -> SchemaResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _get_databricks_client():
+def _get_databricks_client() -> Any:
     """Return a Databricks WorkspaceClient using data credentials from .env."""
     import os
 
@@ -457,8 +462,8 @@ def _get_databricks_client():
     return WorkspaceClient(host=host, token=token)
 
 
-@app.get("/api/databricks/warehouses")
-async def list_databricks_warehouses():
+@app.get("/api/databricks/warehouses", response_model=WarehouseListResponse)
+async def list_databricks_warehouses() -> WarehouseListResponse:
     """List available Databricks SQL Warehouses."""
     try:
         w = _get_databricks_client()
@@ -478,8 +483,8 @@ async def list_databricks_warehouses():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/databricks/catalogs")
-async def list_databricks_catalogs():
+@app.get("/api/databricks/catalogs", response_model=CatalogListResponse)
+async def list_databricks_catalogs() -> CatalogListResponse:
     """List Unity Catalog catalogs."""
     try:
         w = _get_databricks_client()
@@ -495,8 +500,8 @@ async def list_databricks_catalogs():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/databricks/schemas")
-async def list_databricks_schemas(catalog: str):
+@app.get("/api/databricks/schemas", response_model=SchemaListResponse)
+async def list_databricks_schemas(catalog: str) -> SchemaListResponse:
     """List schemas within a Unity Catalog catalog."""
     try:
         w = _get_databricks_client()
@@ -512,8 +517,8 @@ async def list_databricks_schemas(catalog: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/databricks/tables")
-async def list_databricks_tables(catalog: str, schema: str):
+@app.get("/api/databricks/tables", response_model=TableListResponse)
+async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse:
     """List tables within a Unity Catalog schema."""
     try:
         w = _get_databricks_client()
@@ -537,8 +542,6 @@ async def list_databricks_tables(catalog: str, schema: str):
 @app.get("/api/schema/databricks")
 async def get_databricks_schema(table: str) -> SchemaResponse:
     """Read a Databricks Unity Catalog table and return its schema + preview."""
-    import polars as pl
-
     try:
         from haute._databricks_io import read_databricks_table
 

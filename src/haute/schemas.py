@@ -215,3 +215,49 @@ class PipelineSummary(BaseModel):
     file: str
     node_count: int = 0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# /api/databricks/*
+# ---------------------------------------------------------------------------
+
+
+class WarehouseItem(BaseModel):
+    id: str
+    name: str
+    http_path: str
+    state: str
+    size: str = ""
+
+
+class WarehouseListResponse(BaseModel):
+    warehouses: list[WarehouseItem]
+
+
+class CatalogItem(BaseModel):
+    name: str
+    comment: str = ""
+
+
+class CatalogListResponse(BaseModel):
+    catalogs: list[CatalogItem]
+
+
+class SchemaItem(BaseModel):
+    name: str
+    comment: str = ""
+
+
+class SchemaListResponse(BaseModel):
+    schemas: list[SchemaItem]
+
+
+class TableItem(BaseModel):
+    name: str
+    full_name: str
+    table_type: str = ""
+    comment: str = ""
+
+
+class TableListResponse(BaseModel):
+    tables: list[TableItem]

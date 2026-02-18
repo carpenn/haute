@@ -13,7 +13,6 @@ Secrets are resolved from the environment with fallback:
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 
 import polars as pl
 
@@ -104,19 +103,3 @@ def read_databricks_table(
             arrow_table = cursor.fetchall_arrow()
 
     return pl.from_arrow(arrow_table).lazy()
-
-
-@lru_cache(maxsize=1)
-def _check_sql_connector_available() -> bool:
-    """Return True if databricks-sql-connector is installed."""
-    try:
-        import databricks.sql  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-def is_available() -> bool:
-    """Check whether the Databricks SQL connector is importable."""
-    return _check_sql_connector_available()
