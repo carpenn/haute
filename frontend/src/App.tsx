@@ -55,6 +55,8 @@ export interface TraceResult {
   column: string | null
   output_value: unknown
   steps: TraceStep[]
+  row_id_column: string | null
+  row_id_value: unknown
   total_nodes_in_pipeline: number
   nodes_in_trace: number
   execution_ms: number
@@ -301,6 +303,11 @@ function FlowEditor() {
     [setEdges],
   )
 
+  const clearTrace = useCallback(() => {
+    setTraceResult(null)
+    setTracedCell(null)
+  }, [])
+
   const fetchPreview = useCallback((node: Node) => {
     setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "loading" }))
     const { nodes: n, edges: e } = graphRef.current
@@ -335,9 +342,7 @@ function FlowEditor() {
       setSelectedNode((prev) => {
         if (prev?.id !== node.id) {
           fetchPreview(node)
-          // Clear trace when switching nodes
-          setTraceResult(null)
-          setTracedCell(null)
+          clearTrace()
         }
         return node
       })
@@ -345,10 +350,9 @@ function FlowEditor() {
       // Multi-select or deselect — clear panel and don't fetch preview
       setSelectedNode(null)
       setPreviewData(null)
-      setTraceResult(null)
-      setTracedCell(null)
+      clearTrace()
     }
-  }, [fetchPreview])
+  }, [fetchPreview, clearTrace])
 
   const handleRun = useCallback(() => {
     if (nodes.length === 0) return
@@ -463,21 +467,14 @@ function FlowEditor() {
           setTraceResult(data.trace as TraceResult)
         } else {
           addToast("error", data.error || "Trace failed")
-          setTraceResult(null)
-          setTracedCell(null)
+          clearTrace()
         }
       })
       .catch((err) => {
         addToast("error", `Trace error: ${err.message}`)
-        setTraceResult(null)
-        setTracedCell(null)
+        clearTrace()
       })
-  }, [selectedNode, addToast])
-
-  const clearTrace = useCallback(() => {
-    setTraceResult(null)
-    setTracedCell(null)
-  }, [])
+  }, [selectedNode, addToast, clearTrace])
 
   const toggleSnapToGrid = useCallback(() => {
     setSnapToGrid((prev) => {
@@ -578,8 +575,7 @@ function FlowEditor() {
 
       // Escape → clear trace
       if (e.key === "Escape") {
-        setTraceResult(null)
-        setTracedCell(null)
+        clearTrace()
         return
       }
 
@@ -660,56 +656,62 @@ function FlowEditor() {
     addToast("info", "Auto-layout applied")
   }, [setNodes, fitView, addToast])
 
-  // Build sets: column-relevant nodes (glow) vs all trace nodes (in panel)
-  const { relevantNodeIds, allTraceNodeIds } = useMemo(() => {
-    if (!traceResult) return { relevantNodeIds: new Set<string>(), allTraceNodeIds: new Set<string>() }
-    const all = new Set(traceResult.steps.map((s) => s.node_id))
-    const relevant = new Set(traceResult.steps.filter((s) => s.column_relevant).map((s) => s.node_id))
-    return { relevantNodeIds: relevant, allTraceNodeIds: all }
+  // All node IDs in the trace path (used for opacity + edge styling)
+  const allTraceNodeIds = useMemo(() => {
+    if (!traceResult) return new Set<string>()
+    return new Set(traceResult.steps.map((s) => s.node_id))
   }, [traceResult])
 
-  const traceValueMap = useMemo(() => {
-    if (!traceResult) return new Map<string, unknown>()
-    const m = new Map<string, unknown>()
+  // Derive per-node trace styling + value badges from traceResult
+  const { traceValueMap, relevantNodeIds } = useMemo(() => {
+    if (!traceResult) return { traceValueMap: new Map<string, unknown>(), relevantNodeIds: new Set<string>() }
+    const valMap = new Map<string, unknown>()
+    const relIds = new Set<string>()
     for (const s of traceResult.steps) {
       if (!s.column_relevant) continue
-      // Show the traced column's value if available, otherwise first added/modified column
+      relIds.add(s.node_id)
       if (traceResult.column && s.output_values[traceResult.column] !== undefined) {
-        m.set(s.node_id, s.output_values[traceResult.column])
+        valMap.set(s.node_id, s.output_values[traceResult.column])
       } else {
-        const key = s.schema_diff.columns_added[0] || s.schema_diff.columns_modified[0]
-        if (key) m.set(s.node_id, s.output_values[key])
+        const k = s.schema_diff.columns_added[0] || s.schema_diff.columns_modified[0]
+        if (k) valMap.set(s.node_id, s.output_values[k])
       }
     }
-    return m
+    return { traceValueMap: valMap, relevantNodeIds: relIds }
   }, [traceResult])
 
-  // Memoize nodes with status + trace data
+  // Memoize nodes with status + trace styling (all derived from traceResult)
   const nodesWithStatus = useMemo(() => {
+    const hasTrace = traceResult !== null
     return nodes.map((n) => {
       const status = nodeStatuses[n.id]
-      const hasTrace = traceResult !== null
-      const isRelevant = relevantNodeIds.has(n.id)
       const inTrace = allTraceNodeIds.has(n.id)
-      const traceValue = traceValueMap.get(n.id)
-      const newData = {
-        ...n.data,
-        _status: status,
-        _traceActive: hasTrace && isRelevant,
-        _traceDimmed: hasTrace && !inTrace,
-        _traceValue: traceValue,
+      const dimmed = hasTrace && !inTrace
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          _status: status,
+          _traceActive: hasTrace && relevantNodeIds.has(n.id),
+          _traceDimmed: dimmed,
+          _traceValue: traceValueMap.get(n.id),
+        },
+        style: {
+          ...(n.style || {}),
+          opacity: dimmed ? 0.3 : 1,
+          transition: 'opacity 0.2s ease',
+        },
       }
-      return { ...n, data: newData }
     })
-  }, [nodes, nodeStatuses, traceResult, relevantNodeIds, allTraceNodeIds, traceValueMap])
+  }, [nodes, nodeStatuses, traceResult, allTraceNodeIds, relevantNodeIds, traceValueMap])
 
-  // Edges styled for trace: bright between relevant nodes, dimmed otherwise
+  // Edges styled for trace: bright along entire trace path, dimmed otherwise
   const edgesWithTrace = useMemo(() => {
     if (!traceResult) return edges
     return edges.map((e) => {
-      const srcRelevant = relevantNodeIds.has(e.source)
-      const tgtRelevant = relevantNodeIds.has(e.target)
-      if (srcRelevant && tgtRelevant) {
+      const srcInTrace = allTraceNodeIds.has(e.source)
+      const tgtInTrace = allTraceNodeIds.has(e.target)
+      if (srcInTrace && tgtInTrace) {
         return {
           ...e,
           style: { stroke: 'var(--accent)', strokeWidth: 2.5, filter: 'drop-shadow(0 0 4px var(--accent))' },
@@ -723,7 +725,7 @@ function FlowEditor() {
         markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.05)' },
       }
     })
-  }, [edges, traceResult, relevantNodeIds])
+  }, [edges, traceResult, allTraceNodeIds])
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()

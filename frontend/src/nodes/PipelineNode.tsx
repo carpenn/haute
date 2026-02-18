@@ -29,6 +29,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const accent = nodeTypeColors[nodeType] || nodeTypeColors.transform
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = !!(nodeData.config?.deploy_input)
+  const missingRowId = isDeployInput && !nodeData.config?.row_id_column
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
   const traceValue = nodeData._traceValue
@@ -69,11 +70,18 @@ function PipelineNode({ data, selected }: NodeProps) {
           </span>
           {isDeployInput && (
             <span
-              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+              className={`ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0`}
               style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
             >
               <Radio size={8} />
               API
+              {missingRowId && (
+                <span
+                  className="w-[6px] h-[6px] rounded-full shrink-0 ml-0.5"
+                  style={{ backgroundColor: "#f59e0b" }}
+                  title="Row ID column not set — required for tracing"
+                />
+              )}
             </span>
           )}
           {nodeData._status && (

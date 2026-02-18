@@ -40,7 +40,7 @@ def exposure() -> pl.LazyFrame:
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(path="data/policies.parquet", deploy_input=True)
+@pipeline.node(path="data/policies.parquet", deploy_input=True, row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
     """data_source node"""
     return pl.scan_parquet("data/policies.parquet")

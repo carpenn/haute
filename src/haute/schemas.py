@@ -143,6 +143,8 @@ class TraceResultResponse(BaseModel):
     column: str | None = None
     output_value: Any = None
     steps: list[TraceStepResponse] = Field(default_factory=list)
+    row_id_column: str | None = None
+    row_id_value: Any = None
     total_nodes_in_pipeline: int = 0
     nodes_in_trace: int = 0
     execution_ms: float = 0.0

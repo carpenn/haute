@@ -162,7 +162,11 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
     if node_type == "dataSource":
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
-        deploy_kw = ", deploy_input=True" if config.get("deploy_input") else ""
+        deploy_kw = ""
+        if config.get("deploy_input"):
+            deploy_kw = ", deploy_input=True"
+            if config.get("row_id_column"):
+                deploy_kw += f', row_id_column="{config["row_id_column"]}"'
         if source_type == "databricks":
             table = config.get("table", "catalog.schema.table")
             return _SOURCE_DATABRICKS.format(

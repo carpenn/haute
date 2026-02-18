@@ -404,7 +404,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
                 host=host,
                 port=port,
                 reload=True,
-                reload_excludes=["*.haute.json"],
+                reload_excludes=["*.haute.json", "main.py", "*.haute.py"],
                 log_level="warning",
             )
         finally:

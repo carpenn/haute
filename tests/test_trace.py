@@ -149,36 +149,111 @@ class TestExecuteTrace:
         result = execute_trace(graph)
         assert result.target_node_id == "t"
 
-    def test_trace_with_column_tags_relevance(self, tmp_path):
-        """Column parameter tags steps with column_relevant, keeps all in trace."""
+    def test_trace_calculated_column_keeps_ancestors(self, tmp_path):
+        """Calculated column keeps the creating node AND all its ancestors."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
         graph = {
             "nodes": [
                 _source_node("src", str(p)),
-                # passthrough - doesn't touch 'y'
+                # passthrough - doesn't have 'y' but feeds into t
                 _transform_node("mid"),
-                # adds 'y' - should be column_relevant
+                # adds 'y' - column_relevant, ancestors kept for calc path
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "mid"), _edge("mid", "t")],
         }
-        result_unfiltered = execute_trace(graph)
-        result_filtered = execute_trace(graph, column="y")
+        result = execute_trace(graph, column="y")
 
-        # All steps kept (no filtering), same count
-        assert result_filtered.nodes_in_trace == result_unfiltered.nodes_in_trace
-        assert len(result_filtered.steps) == 3
+        # 'y' is created at t → t is column_relevant, src/mid are ancestors
+        ids = [s.node_id for s in result.steps]
+        assert ids == ["src", "mid", "t"]
+        assert result.steps[2].column_relevant is True   # t: adds y
+        assert result.steps[0].column_relevant is False   # src: ancestor
+        assert result.steps[1].column_relevant is False   # mid: ancestor
 
-        # The node that adds 'y' must be column_relevant
-        t_step = next(s for s in result_filtered.steps if s.node_id == "t")
-        assert "y" in t_step.schema_diff.columns_added
-        assert t_step.column_relevant is True
+    def test_trace_passthrough_prunes_unrelated_branches(self, tmp_path):
+        """Pass-through column prunes source branches that don't carry it."""
+        p1 = tmp_path / "a.parquet"
+        p2 = tmp_path / "b.parquet"
+        pl.DataFrame({"x": [1], "shared": [10]}).write_parquet(p1)
+        pl.DataFrame({"y": [2], "shared": [10]}).write_parquet(p2)
 
-        # Nodes that don't touch 'y' should not be column_relevant
-        mid_step = next(s for s in result_filtered.steps if s.node_id == "mid")
-        assert mid_step.column_relevant is False
+        graph = {
+            "nodes": [
+                _source_node("a", str(p1)),   # has x
+                _source_node("b", str(p2)),   # has y, not x
+                _transform_node("join", "a.join(b, on='shared')"),
+            ],
+            "edges": [_edge("a", "join"), _edge("b", "join")],
+        }
+        result = execute_trace(graph, column="x")
+
+        # 'x' comes from 'a' only — 'b' should be pruned
+        ids = {s.node_id for s in result.steps}
+        assert "a" in ids
+        assert "join" in ids
+        assert "b" not in ids
+
+    def test_trace_column_passthrough_keeps_path(self, tmp_path):
+        """A pass-through column traces back through all nodes that carry it."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
+
+        graph = {
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("mid"),  # passes x through
+                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+            ],
+            "edges": [_edge("src", "mid"), _edge("mid", "t")],
+        }
+        result = execute_trace(graph, column="x")
+
+        # 'x' exists in all 3 nodes → all 3 in trace
+        assert len(result.steps) == 3
+        assert all(s.column_relevant for s in result.steps)
+
+    def test_row_id_from_deploy_input(self, tmp_path):
+        """Trace discovers row_id_column from deploy_input source and extracts its value."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"policy_id": [100, 200, 300], "x": [1, 2, 3]}).write_parquet(p)
+
+        graph = {
+            "nodes": [
+                {
+                    "id": "src",
+                    "data": {
+                        "label": "src",
+                        "nodeType": "dataSource",
+                        "config": {
+                            "path": str(p),
+                            "deploy_input": True,
+                            "row_id_column": "policy_id",
+                        },
+                    },
+                },
+                _transform_node("t"),
+            ],
+            "edges": [_edge("src", "t")],
+        }
+        result = execute_trace(graph, row_index=1)
+        assert result.row_id_column == "policy_id"
+        assert result.row_id_value == 200
+
+    def test_row_id_none_without_deploy_input(self, tmp_path):
+        """Without deploy_input, row_id_column and row_id_value are None."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = {
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        }
+        result = execute_trace(graph, row_index=0)
+        assert result.row_id_column is None
+        assert result.row_id_value is None
 
     def test_empty_graph_raises(self):
         with pytest.raises(ValueError, match="Empty graph"):

@@ -204,7 +204,12 @@ export default function TracePanel({ trace, onClose }: TracePanelProps) {
             Trace{trace.column ? `: ${trace.column}` : ""}
           </div>
           <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            Row {trace.row_index} &middot; {trace.nodes_in_trace} of {trace.total_nodes_in_pipeline} nodes
+            {trace.row_id_column && trace.row_id_value != null ? (
+              <><span className="font-mono">{trace.row_id_column}</span> = <span className="font-mono font-medium" style={{ color: "var(--text-secondary)" }}>{formatValue(trace.row_id_value)}</span></>
+            ) : (
+              <>Row {trace.row_index}</>
+            )}
+            {" "}&middot; {trace.nodes_in_trace} of {trace.total_nodes_in_pipeline} nodes
           </div>
         </div>
         <button

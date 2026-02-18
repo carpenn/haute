@@ -458,19 +458,24 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 - `execute_trace()` runs the pipeline on a single row and captures per-node input/output snapshots
 - `SchemaDiff` classifies columns at each node as `added`, `removed`, `modified`, or `passed_through`
 - `TraceStep` / `TraceResult` dataclasses carry the full trace payload
-- Column filtering: pass a `column` name to prune the trace to only nodes that touch it
+- Column relevance filtering: pass a `column` name to keep only steps whose output contains the column (irrelevant ancestors are removed)
 - `POST /api/pipeline/trace` endpoint wired up in `server.py`
 - Reuses the existing `executor._build_node_fn` infrastructure - no duplication
 
+**Phase B (done)** - Frontend trace panel in `frontend/src/`:
+- Clickable cells in `DataPreview` trigger `POST /api/pipeline/trace`
+- Graph highlighting: column-relevant nodes glow with value badges, off-path nodes dim to 30%, trace edges animate
+- `TracePanel` sidebar replaces `NodePanel` when trace is active: collapsible step cards, schema diff colours, input→output transitions
+- Escape / pane click / node switch clears the trace
+- Shared utils (`utils/nodeTypes.ts`, `utils/formatValue.ts`) - no duplication between components
+
 **TODO - future phases** (see `docs/EXECUTION_TRACE_DESIGN.md` for full design):
-- [ ] Row-identity tracking (`__trace_row_id`) for filters, joins, sorts
-- [ ] `JoinInfo` / `AggregationInfo` for cardinality-changing nodes
-- [ ] Column provenance via Polars expression plan inspection
+- [ ] Compare-trace: two rows side-by-side with per-node diff highlighting
+- [ ] Trace caching (LRU keyed on row_index + target + column)
 - [ ] Human-readable expression generation ("base × area × ncd = £412")
-- [ ] Compare-trace: two rows side-by-side with per-node diff
-- [ ] Frontend trace panel (highlight path on graph, value badges on nodes)
 - [ ] `haute trace export` CLI for regulatory PDF/HTML reports
-- [ ] Trace caching (LRU for recent row traces, cached schema diffs)
+- [x] Row-identity tracking via `row_id_column` on the `deploy_input` source node (e.g. `quote_id`); persists through save/reload, displayed in TracePanel header
+- [ ] `JoinInfo` / `AggregationInfo` for cardinality-changing nodes
 
 ### 9.4 One-Command Deploy to Databricks (the adoption feature)
 
@@ -565,7 +570,7 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 ### Phase 4 - Killer Demo Features
 - [ ] What-if sensitivity mode (slider-driven single-row scoring)
 - [x] Execution trace / data lineage - Phase A: single-row trace engine + schema diffs (`src/haute/trace.py`, `POST /api/pipeline/trace`)
-- [ ] Execution trace / data lineage - Phase B+: row identity tracking, join/agg info, column provenance, expression gen, frontend panel, compare mode
+- [ ] Execution trace / data lineage - Phase B+: join/agg info, expression gen, compare mode, trace export
 - [ ] Rating table hot-reload with impact preview
 - [ ] Natural language → Polars code (LLM-powered node assistant)
 

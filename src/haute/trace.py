@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import polars as pl
+
 from haute.executor import _build_node_fn
 from haute.graph_utils import _execute_lazy, _Frame, topo_sort_ids
 
@@ -75,10 +77,14 @@ class TraceResult:
 
     steps: list[TraceStep]
 
+    # Row identity (from deploy_input node's row_id_column config)
+    row_id_column: str | None = None
+    row_id_value: Any = None
+
     # Summary counts
-    total_nodes_in_pipeline: int
-    nodes_in_trace: int
-    execution_ms: float
+    total_nodes_in_pipeline: int = 0
+    nodes_in_trace: int = 0
+    execution_ms: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -215,30 +221,36 @@ def execute_trace(
     # Determine which nodes are sources
     source_ids = {nid for nid in order if not parents_of.get(nid)}
 
+    # ---------- Batch-collect all node rows in one pass ----------
+    # Each _collect_row used to call .slice().collect() independently, which
+    # re-executes the full upstream lazy plan per node.  pl.collect_all()
+    # collects them in a single batch so Polars can share common sub-plans.
+    sliced_lfs = [lazy_outputs[nid].slice(row_index, 1) for nid in order]
+    collected_dfs = pl.collect_all(sliced_lfs)
+    cached_rows: dict[str, dict[str, Any]] = {}
+    for nid, df in zip(order, collected_dfs):
+        cached_rows[nid] = _jsonify_row(df.row(0, named=True)) if not df.is_empty() else {}
+
     # ---------- Build trace steps ----------
     steps: list[TraceStep] = []
 
     for nid in order:
-        t_node = time.perf_counter()
-
         is_source = nid in source_ids
         node_data = node_map[nid].get("data", {})
         node_name = node_data.get("label", nid)
         node_type = node_data.get("nodeType", "transform")
 
-        output_row = _collect_row(lazy_outputs[nid], row_index)
+        output_row = cached_rows[nid]
 
-        # Collect input row (merge parents for multi-input nodes)
+        # Build input row from cached parent rows (no extra .collect())
         if is_source:
             input_row = None
         else:
             input_ids = parents_of.get(nid, [])
             if input_ids:
-                # Merge parent output rows into one dict (left-to-right)
                 input_row: dict[str, Any] = {}
                 for pid in input_ids:
-                    parent_row = _collect_row(lazy_outputs[pid], row_index)
-                    input_row.update(parent_row)
+                    input_row.update(cached_rows[pid])
             else:
                 input_row = {}
 
@@ -252,17 +264,56 @@ def execute_trace(
                 schema_diff=schema_diff,
                 input_values=input_row if input_row is not None else {},
                 output_values=output_row,
-                execution_ms=round((time.perf_counter() - t_node) * 1000, 2),
             )
         )
 
-    # ---------- Column relevance tagging (no filtering) ----------
+    # ---------- Column relevance: tag then prune irrelevant ancestors ----------
+    #
+    # Two cases:
+    #   1. Pass-through column (e.g. VehGas): exists in multiple nodes' output.
+    #      Keep only nodes whose output contains the column — this prunes
+    #      unrelated source branches (e.g. claims/exposure when tracing VehGas
+    #      which only comes from policies).
+    #   2. Calculated column (e.g. premium): only exists at the node that creates
+    #      it (columns_added).  ALL ancestors of that node feed the calculation,
+    #      so they must stay in the trace even though they don't carry the column
+    #      in their output.  Without this, calculated-field traces collapse to a
+    #      single node with no edges.
     if column:
         _tag_column_relevance(steps, column)
 
-    # ---------- Output value ----------
-    target_row = _collect_row(lazy_outputs[target_node_id], row_index)
+        # Find nodes where the column is first created
+        origin_ids = {
+            s.node_id for s in steps if column in s.schema_diff.columns_added
+        }
+        # Collect all ancestors of origin nodes — they contribute to the calc
+        ancestor_ids: set[str] = set()
+        if origin_ids:
+            queue = list(origin_ids)
+            while queue:
+                nid = queue.pop()
+                for pid in parents_of.get(nid, []):
+                    if pid not in ancestor_ids:
+                        ancestor_ids.add(pid)
+                        queue.append(pid)
+
+        steps = [
+            s for s in steps if s.column_relevant or s.node_id in ancestor_ids
+        ]
+
+    # ---------- Output value (already in cache from batch collect) ----------
+    target_row = cached_rows[target_node_id]
     output_value = target_row.get(column) if column else target_row
+
+    # ---------- Row identity from deploy_input node ----------
+    row_id_column: str | None = None
+    row_id_value: Any = None
+    for n in nodes:
+        cfg = n.get("data", {}).get("config", {})
+        if cfg.get("deploy_input") and cfg.get("row_id_column"):
+            row_id_column = cfg["row_id_column"]
+            row_id_value = target_row.get(row_id_column)
+            break
 
     total_ms = round((time.perf_counter() - t_start) * 1000, 2)
 
@@ -272,6 +323,8 @@ def execute_trace(
         column=column,
         output_value=output_value,
         steps=steps,
+        row_id_column=row_id_column,
+        row_id_value=row_id_value,
         total_nodes_in_pipeline=len(nodes),
         nodes_in_trace=len(steps),
         execution_ms=total_ms,
@@ -284,10 +337,10 @@ def execute_trace(
 
 
 def _tag_column_relevance(steps: list[TraceStep], column: str) -> None:
-    """Tag each step with whether it touches the target column.
+    """Tag each step with whether its output contains the target column.
 
-    All steps remain in the trace (so the full path lights up on the graph).
-    The frontend uses column_relevant to visually emphasise the key nodes.
+    After tagging, the caller filters steps — see execute_trace() for the
+    two-case logic (pass-through vs calculated columns).
     """
     for step in steps:
         sd = step.schema_diff
@@ -329,6 +382,8 @@ def trace_result_to_dict(result: TraceResult) -> dict[str, Any]:
             }
             for s in result.steps
         ],
+        "row_id_column": result.row_id_column,
+        "row_id_value": result.row_id_value,
         "total_nodes_in_pipeline": result.total_nodes_in_pipeline,
         "nodes_in_trace": result.nodes_in_trace,
         "execution_ms": result.execution_ms,
