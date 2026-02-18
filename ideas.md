@@ -1,5 +1,5 @@
 
-#       A cunt ton ae ideas
+#       A ton ae ideas
 
 ##      What's great
 

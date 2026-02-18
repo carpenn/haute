@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import deque
 from collections.abc import Callable
 from typing import Any, TypedDict
@@ -98,8 +99,6 @@ def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
     same graph with different execution parameters gets a different hash.
     Used by both the trace cache (trace.py) and preview cache (executor.py).
     """
-    import hashlib
-
     parts: list[str] = list(extra_keys)
     for n in sorted(graph.get("nodes", []), key=lambda n: n["id"]):
         d = n.get("data", {})
@@ -214,8 +213,10 @@ def _execute_lazy(
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:
     """Execute a graph lazily and return per-node LazyFrames.
 
-    This is the single execution core shared by execute_graph,
-    execute_sink, and execute_trace.
+    Used by execute_sink (batch writes) and score_graph (deploy scoring)
+    where Polars can optimise the full lazy plan end-to-end.
+    Interactive paths (preview, trace) use eager execution with caching
+    instead — see executor._eager_execute and trace.execute_trace.
 
     Args:
         graph: React Flow graph with "nodes" and "edges".
@@ -243,17 +244,10 @@ def _execute_lazy(
             lf = fn()
         else:
             input_ids = parents_of.get(nid, [])
-            if input_ids:
-                input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
-                if not input_lfs:
-                    raise ValueError(f"No input data available for node '{nid}'")
-                lf = fn(*input_lfs)
-            else:
-                last_lfs = list(lazy_outputs.values())
-                if last_lfs:
-                    lf = fn(last_lfs[-1])
-                else:
-                    raise ValueError(f"Node '{nid}' has no input and is not a source")
+            input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
+            if not input_lfs:
+                raise ValueError(f"No input data available for node '{nid}'")
+            lf = fn(*input_lfs)
 
         if isinstance(lf, pl.DataFrame):
             lf = lf.lazy()

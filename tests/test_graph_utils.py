@@ -246,34 +246,23 @@ class TestExecuteLazy:
             return node["id"], lambda *dfs: dfs[0], False
 
         g = _make_graph([("lonely", "Lonely")], [])
-        with pytest.raises(ValueError, match="no input and is not a source"):
+        with pytest.raises(ValueError, match="No input data available"):
             _execute_lazy(g, build_fn)
 
-    def test_fallback_to_last_output(self):
-        """A non-source with no edges but prior outputs uses the last available frame."""
-        call_order = []
-
+    def test_no_edge_non_source_raises(self):
+        """A non-source with no edges raises even when prior outputs exist."""
         def build_fn(node, source_names=None):
             nid = node["id"]
             if nid == "src":
-                def fn():
-                    call_order.append("src")
-                    return pl.DataFrame({"x": [1]}).lazy()
-                return nid, fn, True
-            else:
-                def fn(*dfs):
-                    call_order.append(nid)
-                    return dfs[0].with_columns(y=pl.lit(99))
-                return nid, fn, False
+                return nid, lambda: pl.DataFrame({"x": [1]}).lazy(), True
+            return nid, lambda *dfs: dfs[0], False
 
-        # Two nodes, no edge - "t" should fallback to src's output
+        # Two nodes, no edge — "t" must not silently grab src's output
         g = _make_graph([("src", "Src"), ("t", "T")], [])
         g["nodes"][0]["data"]["nodeType"] = "dataSource"
 
-        outputs, _, _, _ = _execute_lazy(g, build_fn)
-        df = outputs["t"].collect()
-        assert df["y"].to_list() == [99]
-        assert call_order == ["src", "t"]
+        with pytest.raises(ValueError, match="No input data available"):
+            _execute_lazy(g, build_fn)
 
     def test_multi_input_node(self):
         """A node with two parents receives both LazyFrames."""

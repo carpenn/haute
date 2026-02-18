@@ -398,25 +398,29 @@ async def get_schema(path: str) -> SchemaResponse:
 
     try:
         if target.suffix == ".parquet":
-            df = pl.read_parquet(target)
+            lf = pl.scan_parquet(target)
         elif target.suffix == ".csv":
-            df = pl.read_csv(target)
+            lf = pl.scan_csv(target)
         elif target.suffix == ".json":
-            df = pl.read_json(target)
+            # JSON has no scan API — read eagerly (JSON files are small)
+            lf = pl.read_json(target).lazy()
         else:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type: {target.suffix}",
             )
 
-        columns = [{"name": col, "dtype": str(df[col].dtype)} for col in df.columns]
+        schema = lf.collect_schema()
+        columns = [{"name": c, "dtype": str(d)} for c, d in schema.items()]
+        preview_df = lf.head(5).collect()
+        row_count = lf.select(pl.len()).collect().item()
 
         return SchemaResponse(
             path=path,
             columns=columns,
-            row_count=len(df),
-            column_count=len(df.columns),
-            preview=df.head(5).to_dicts(),
+            row_count=row_count,
+            column_count=len(columns),
+            preview=preview_df.to_dicts(),
         )
     except HTTPException:
         raise
