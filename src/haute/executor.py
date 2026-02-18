@@ -114,21 +114,11 @@ def _build_node_fn(
 
         if source_type == "databricks":
             table = config.get("table", "")
-            _limit = row_limit
-            _http_path = config.get("http_path", "") or None
-            _query = config.get("query", "") or None
 
-            def source_fn(
-                _table: str = table,
-                _rl: int | None = _limit,
-                _hp: str | None = _http_path,
-                _q: str | None = _query,
-            ) -> _Frame:
-                from haute._databricks_io import read_databricks_table
+            def source_fn(_table: str = table) -> _Frame:
+                from haute._databricks_io import read_cached_table
 
-                return read_databricks_table(
-                    _table, row_limit=_rl, http_path=_hp, query=_q,
-                )
+                return read_cached_table(_table)
 
             return func_name, source_fn, True
 

@@ -15,7 +15,10 @@ from fastapi.staticfiles import StaticFiles
 
 from haute.schemas import (
     BrowseFilesResponse,
+    CacheStatusResponse,
     CatalogListResponse,
+    FetchTableRequest,
+    FetchTableResponse,
     FileItem,
     PipelineSummary,
     PreviewNodeRequest,
@@ -539,30 +542,77 @@ async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/schema/databricks")
-async def get_databricks_schema(table: str) -> SchemaResponse:
-    """Read a Databricks Unity Catalog table and return its schema + preview."""
+@app.post("/api/databricks/fetch", response_model=FetchTableResponse)
+async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
+    """Fetch a Databricks table and cache it locally as parquet."""
     try:
-        from haute._databricks_io import read_databricks_table
+        from haute._databricks_io import fetch_and_cache
 
-        lf = read_databricks_table(table, row_limit=1000)
-        df = lf.collect()
-
-        columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
-        preview_df = df.head(5)
-
-        return SchemaResponse(
-            path=table,
-            columns=columns,
-            row_count=len(df),
-            column_count=len(columns),
-            preview=preview_df.to_dicts(),
+        result = fetch_and_cache(
+            table=body.table,
+            http_path=body.http_path,
+            query=body.query,
         )
+        return FetchTableResponse(**result)
     except ImportError:
         raise HTTPException(
             status_code=400,
             detail="databricks-sql-connector is not installed. "
             "Install with: pip install haute[databricks]",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/databricks/cache", response_model=CacheStatusResponse)
+async def get_databricks_cache_status(table: str) -> CacheStatusResponse:
+    """Check whether a Databricks table has been fetched and cached locally."""
+    from haute._databricks_io import cache_info
+
+    info = cache_info(table)
+    if info is None:
+        return CacheStatusResponse(cached=False, table=table)
+    return CacheStatusResponse(cached=True, **info)
+
+
+@app.delete("/api/databricks/cache", response_model=CacheStatusResponse)
+async def delete_databricks_cache(table: str) -> CacheStatusResponse:
+    """Delete the local parquet cache for a Databricks table."""
+    from haute._databricks_io import clear_cache
+
+    clear_cache(table)
+    return CacheStatusResponse(cached=False, table=table)
+
+
+@app.get("/api/schema/databricks")
+async def get_databricks_schema(table: str) -> SchemaResponse:
+    """Return schema + preview from the local parquet cache of a Databricks table."""
+    import polars as pl
+
+    from haute._databricks_io import cached_path
+
+    p = cached_path(table)
+    if p is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f'Table "{table}" has not been fetched yet. '
+            f"Click Fetch Data on the data source node to download it.",
+        )
+
+    try:
+        import pyarrow.parquet as pq
+
+        df = pl.scan_parquet(p).head(1000).collect()
+        columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
+        preview_df = df.head(5)
+        row_count = pq.read_metadata(str(p)).num_rows
+
+        return SchemaResponse(
+            path=table,
+            columns=columns,
+            row_count=row_count,
+            column_count=len(columns),
+            preview=preview_df.to_dicts(),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

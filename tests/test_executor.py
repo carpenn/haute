@@ -156,8 +156,10 @@ class TestBuildNodeFn:
         }
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
-        # Without databricks-sql-connector installed, calling fn() raises ImportError
-        with pytest.raises((ImportError, Exception)):
+        # Without a cached parquet file, calling fn() raises CacheNotFoundError
+        from haute._databricks_io import CacheNotFoundError
+
+        with pytest.raises(CacheNotFoundError, match="not been fetched"):
             fn()
 
     def test_transform_with_code(self):

@@ -977,6 +977,7 @@ function FlowEditor() {
             onClose={() => setSelectedNode(null)}
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}
+            onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
           />
         )}
       </div>

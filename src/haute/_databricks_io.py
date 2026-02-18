@@ -1,8 +1,9 @@
-"""Databricks table I/O via the SQL Connector.
+"""Databricks table I/O with local parquet caching.
 
-Reads Unity Catalog tables through a Databricks SQL Warehouse and returns
-Polars LazyFrames, fitting seamlessly into the existing eager/lazy
-execution model.
+Data is fetched from Databricks once via :func:`fetch_and_cache`, which
+writes a local ``.parquet`` file under ``.haute_cache/``.  All subsequent
+pipeline runs read from that cached file with :func:`read_cached_table`,
+giving full Polars ``scan_parquet`` speed with predicate pushdown.
 
 Connection details live on the data source node (``http_path`` in config).
 Secrets are resolved from the environment with fallback:
@@ -13,12 +14,21 @@ Secrets are resolved from the environment with fallback:
 from __future__ import annotations
 
 import os
+import time
+from pathlib import Path
+from typing import TypedDict
 
 import polars as pl
+
+CACHE_DIR = ".haute_cache"
 
 
 class DatabricksConfigError(Exception):
     """Raised when required Databricks data credentials are missing."""
+
+
+class CacheNotFoundError(Exception):
+    """Raised when a pipeline tries to read a table that hasn't been fetched yet."""
 
 
 def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
@@ -62,44 +72,160 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
     return host, token, resolved_http_path
 
 
-def read_databricks_table(
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
+
+
+def _cache_path_for(table: str, project_root: Path | None = None) -> Path:
+    """Return the parquet cache path for a fully-qualified table name."""
+    root = project_root or Path.cwd()
+    safe_name = table.replace(".", "_")
+    return root / CACHE_DIR / f"{safe_name}.parquet"
+
+
+def cached_path(
+    table: str, project_root: Path | None = None,
+) -> Path | None:
+    """Return the cache file path if it exists, else ``None``."""
+    p = _cache_path_for(table, project_root)
+    return p if p.exists() else None
+
+
+def clear_cache(table: str, project_root: Path | None = None) -> bool:
+    """Delete the cached parquet file for a table. Returns True if deleted."""
+    p = cached_path(table, project_root)
+    if p is not None:
+        p.unlink()
+        return True
+    return False
+
+
+class CacheInfoDict(TypedDict):
+    path: str
+    table: str
+    row_count: int
+    column_count: int
+    columns: dict[str, str]
+    size_bytes: int
+    fetched_at: float
+
+
+def cache_info(
+    table: str, project_root: Path | None = None,
+) -> CacheInfoDict | None:
+    """Return metadata about a cached table, or ``None`` if not cached."""
+    p = cached_path(table, project_root)
+    if p is None:
+        return None
+    stat = p.stat()
+    lf = pl.scan_parquet(p)
+    schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
+    row_count = pl.scan_parquet(p).select(pl.len()).collect().item()
+    return {
+        "path": str(p),
+        "table": table,
+        "row_count": row_count,
+        "column_count": len(schema),
+        "columns": schema,
+        "size_bytes": stat.st_size,
+        "fetched_at": stat.st_mtime,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fetch from Databricks → local parquet
+# ---------------------------------------------------------------------------
+
+
+_FETCH_BATCH_SIZE = 100_000
+
+
+class FetchResultDict(CacheInfoDict):
+    fetch_seconds: float
+
+
+def fetch_and_cache(
     table: str,
-    row_limit: int | None = None,
     http_path: str | None = None,
     query: str | None = None,
-) -> pl.LazyFrame:
-    """Read a Unity Catalog table via the Databricks SQL Connector.
+    project_root: Path | None = None,
+    batch_size: int = _FETCH_BATCH_SIZE,
+) -> FetchResultDict:
+    """Fetch a table from Databricks and cache it as a local parquet file.
 
-    Args:
-        table: Fully-qualified table name (e.g. ``catalog.schema.table``).
-        row_limit: If set, wraps the query in a LIMIT so only that many
-            rows are fetched from the warehouse.  Used by the
-            preview/trace eager paths to avoid pulling entire tables.
-        http_path: SQL Warehouse HTTP path from the node config.
-            Falls back to ``DATABRICKS_DATA_HTTP_PATH`` env var.
-        query: Custom select clause (e.g. ``SELECT col1, col2`` or
-            ``SELECT * ... WHERE x > 0``).  Combined with ``table`` as
-            ``{query} FROM {table}``.  Defaults to ``SELECT *``.
+    Data is streamed in Arrow batches of *batch_size* rows and written
+    incrementally to parquet via :class:`pyarrow.parquet.ParquetWriter`,
+    so memory usage stays bounded regardless of table size.
 
-    Returns:
-        A Polars LazyFrame wrapping the fetched data.
+    Returns metadata dict with row_count, column_count, path, etc.
     """
+    import pyarrow.parquet as pq
     from databricks import sql as dbsql
 
-    host, token, http_path = _get_credentials(http_path)
+    host, token, resolved_http_path = _get_credentials(http_path)
 
     select_clause = query.strip().rstrip(";") if query else "SELECT *"
     sql_query = f"{select_clause} FROM {table}"  # noqa: S608
-    if row_limit is not None and row_limit > 0:
-        sql_query = f"SELECT * FROM ({sql_query}) _limited LIMIT {row_limit}"
 
-    with dbsql.connect(
-        server_hostname=host,
-        http_path=http_path,
-        access_token=token,
-    ) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(sql_query)
-            arrow_table = cursor.fetchall_arrow()
+    out_path = _cache_path_for(table, project_root)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    return pl.from_arrow(arrow_table).lazy()
+    row_count = 0
+    writer: pq.ParquetWriter | None = None
+
+    t0 = time.monotonic()
+    try:
+        with dbsql.connect(
+            server_hostname=host,
+            http_path=resolved_http_path,
+            access_token=token,
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql_query)
+                while True:
+                    batch = cursor.fetchmany_arrow(batch_size)
+                    if batch.num_rows == 0:
+                        break
+                    if writer is None:
+                        writer = pq.ParquetWriter(str(out_path), batch.schema)
+                    writer.write_table(batch)
+                    row_count += batch.num_rows
+    finally:
+        if writer is not None:
+            writer.close()
+    elapsed = time.monotonic() - t0
+
+    # Read back lightweight schema info from the written file
+    meta = pq.read_schema(str(out_path))
+    schema = {name: str(meta.field(name).type) for name in meta.names}
+
+    return {
+        "path": str(out_path),
+        "table": table,
+        "row_count": row_count,
+        "column_count": len(schema),
+        "columns": schema,
+        "size_bytes": out_path.stat().st_size,
+        "fetched_at": out_path.stat().st_mtime,
+        "fetch_seconds": round(elapsed, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Read from cache (used by executor at pipeline runtime)
+# ---------------------------------------------------------------------------
+
+
+def read_cached_table(table: str, project_root: Path | None = None) -> pl.LazyFrame:
+    """Read a Databricks table from the local parquet cache.
+
+    Raises :class:`CacheNotFoundError` if the table hasn't been fetched yet.
+    """
+    p = cached_path(table, project_root)
+    if p is None:
+        raise CacheNotFoundError(
+            f'Table "{table}" has not been fetched yet. '
+            f"Click Fetch Data on the data source node to download it."
+        )
+    return pl.scan_parquet(p)

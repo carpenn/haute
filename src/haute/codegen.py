@@ -31,8 +31,8 @@ _SOURCE_DATABRICKS = '''\
 @pipeline.node(table="{table}"{http_path_kw}{query_kw}{deploy_kw})
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
-    from haute._databricks_io import read_databricks_table
-    return read_databricks_table("{table}"{http_path_arg}{query_arg})
+    from haute._databricks_io import read_cached_table
+    return read_cached_table("{table}")
 '''
 
 _MODEL_SCORE = '''\
@@ -170,19 +170,15 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
             table = config.get("table", "catalog.schema.table")
             http_path = config.get("http_path", "")
             http_path_kw = f', http_path="{http_path}"' if http_path else ""
-            http_path_arg = f', http_path="{http_path}"' if http_path else ""
             query = config.get("query", "")
             query_kw = f', query="{query}"' if query else ""
-            query_arg = f', query="{query}"' if query else ""
             return _SOURCE_DATABRICKS.format(
                 func_name=func_name,
                 description=description,
                 table=table,
                 deploy_kw=deploy_kw,
                 http_path_kw=http_path_kw,
-                http_path_arg=http_path_arg,
                 query_kw=query_kw,
-                query_arg=query_arg,
             )
         elif path.endswith(".csv"):
             return _SOURCE_CSV.format(

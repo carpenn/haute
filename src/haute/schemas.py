@@ -261,3 +261,31 @@ class TableItem(BaseModel):
 
 class TableListResponse(BaseModel):
     tables: list[TableItem]
+
+
+class FetchTableRequest(BaseModel):
+    table: str
+    http_path: str | None = None
+    query: str | None = None
+
+
+class FetchTableResponse(BaseModel):
+    path: str
+    table: str
+    row_count: int
+    column_count: int
+    columns: dict[str, str]
+    size_bytes: int
+    fetched_at: float
+    fetch_seconds: float
+
+
+class CacheStatusResponse(BaseModel):
+    cached: bool
+    path: str | None = None
+    table: str = ""
+    row_count: int = 0
+    column_count: int = 0
+    columns: dict[str, str] = Field(default_factory=dict)
+    size_bytes: int = 0
+    fetched_at: float = 0

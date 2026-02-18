@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2 } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { sanitizeName } from "../utils/sanitizeName"
 
@@ -54,6 +54,7 @@ type NodePanelProps = {
   onClose: () => void
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
   onDeleteEdge?: (edgeId: string) => void
+  onRefreshPreview?: () => void
 }
 
 
@@ -530,12 +531,154 @@ function CatalogTablePicker({
   )
 }
 
+type CacheStatus = {
+  cached: boolean
+  path?: string
+  table: string
+  row_count: number
+  column_count: number
+  size_bytes: number
+  fetched_at: number
+}
+
+function DatabricksFetchButton({
+  table,
+  httpPath,
+  query,
+  onFetched,
+}: {
+  table: string
+  httpPath: string
+  query: string
+  onFetched?: (info: CacheStatus) => void
+}) {
+  const [cache, setCache] = useState<CacheStatus | null>(null)
+  const [fetching, setFetching] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!table) { setCache(null); return }
+    fetch(`/api/databricks/cache?table=${encodeURIComponent(table)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setCache(data)
+        if (data.cached) onFetched?.(data)
+      })
+      .catch(() => setCache(null))
+  }, [table])
+
+  const doFetch = () => {
+    if (!table) return
+    setFetching(true)
+    setError("")
+    fetch("/api/databricks/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        table,
+        http_path: httpPath || undefined,
+        query: query || undefined,
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) return r.json().then((d) => { throw new Error(d.detail || `HTTP ${r.status}`) })
+        return r.json()
+      })
+      .then((data) => {
+        const info: CacheStatus = { cached: true, ...data }
+        setCache(info)
+        setFetching(false)
+        onFetched?.(info)
+      })
+      .catch((e) => { setError(e.message); setFetching(false) })
+  }
+
+  const formatBytes = (b: number) => {
+    if (b < 1024) return `${b} B`
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+    return `${(b / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const formatTime = (ts: number) => {
+    if (!ts) return ""
+    const d = new Date(ts * 1000)
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+
+  return (
+    <div>
+      <button
+        onClick={doFetch}
+        disabled={!table || fetching}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
+        style={{
+          background: cache?.cached ? 'rgba(34,197,94,.1)' : 'var(--accent-soft)',
+          border: cache?.cached ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--accent)',
+          color: cache?.cached ? '#22c55e' : 'var(--accent)',
+        }}
+      >
+        {fetching ? (
+          <><Loader2 size={14} className="animate-spin" /> Fetching...</>
+        ) : cache?.cached ? (
+          <><HardDriveDownload size={14} /> Refresh Data</>
+        ) : (
+          <><HardDriveDownload size={14} /> Fetch Data</>
+        )}
+      </button>
+
+      {cache?.cached && (
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] px-1" style={{ color: 'var(--text-muted)' }}>
+          <span>{cache.row_count.toLocaleString()} rows</span>
+          <span>·</span>
+          <span>{cache.column_count} cols</span>
+          <span>·</span>
+          <span>{formatBytes(cache.size_bytes)}</span>
+          {cache.fetched_at > 0 && (
+            <><span>·</span><span>{formatTime(cache.fetched_at)}</span></>
+          )}
+          <span>·</span>
+          <button
+            onClick={() => {
+              fetch(`/api/databricks/cache?table=${encodeURIComponent(table)}`, { method: "DELETE" })
+                .then((r) => {
+                  if (!r.ok) return r.json().then((d) => { throw new Error(d.detail || `HTTP ${r.status}`) })
+                  return r.json()
+                })
+                .then((data) => setCache(data))
+                .catch((e) => setError(e.message))
+            }}
+            className="inline-flex items-center gap-0.5 hover:opacity-70 transition-opacity"
+            style={{ color: '#ef4444' }}
+            title="Delete cached data"
+          >
+            <Trash2 size={10} /> clear
+          </button>
+        </div>
+      )}
+
+      {!cache?.cached && table && !fetching && (
+        <div className="mt-1.5 text-[10px] px-1" style={{ color: '#f59e0b' }}>
+          Not fetched yet — click to download from Databricks
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-1.5 text-[10px] px-2 py-1 rounded" style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DataSourceConfig({
   config,
   onUpdate,
+  onRefreshPreview,
 }: {
   config: Record<string, unknown>
   onUpdate: (key: string, value: unknown) => void
+  onRefreshPreview?: () => void
 }) {
   const [sourceType, setSourceType] = useState<string>((config.sourceType as string) || "flat_file")
   const [schema, setSchema] = useState<SchemaInfo>(null)
@@ -706,6 +849,24 @@ function DataSourceConfig({
                 Combined with table above as: query FROM table
               </div>
             </div>
+            <DatabricksFetchButton
+              table={(config.table as string) || ""}
+              httpPath={(config.http_path as string) || ""}
+              query={(config.query as string) || ""}
+              onFetched={() => {
+                const tbl = (config.table as string) || ""
+                if (tbl) {
+                  setLoadingSchema(true)
+                  fetch(`/api/schema/databricks?table=${encodeURIComponent(tbl)}`)
+                    .then((r) => {
+                      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                      return r.json()
+                    })
+                    .then((data) => { setSchema(data); setLoadingSchema(false); onRefreshPreview?.() })
+                    .catch(() => { setSchema(null); setLoadingSchema(false) })
+                }
+              }}
+            />
           </div>
         )}
       </div>
@@ -1396,7 +1557,7 @@ const MIN_PANEL_W = 320
 const MAX_PANEL_W = 900
 const DEFAULT_PANEL_W = 400
 
-export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview }: NodePanelProps) {
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_W)
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -1493,7 +1654,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
       </div>
 
       {isDataSource ? (
-        <DataSourceConfig config={config} onUpdate={handleConfigUpdate} />
+        <DataSourceConfig config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} />
       ) : isDataSink ? (
         <DataSinkConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
       ) : isExternalFile ? (

@@ -75,7 +75,7 @@ class TestNodeToCode:
             },
         }
         code = _node_to_code(node)
-        assert "read_databricks_table" in code
+        assert "read_cached_table" in code
         assert "catalog.schema.tbl" in code
         _compile_node_code(code)
 

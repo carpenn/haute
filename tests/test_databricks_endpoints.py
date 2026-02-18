@@ -150,3 +150,122 @@ class TestListTables:
     def test_missing_params_returns_422(self, client: TestClient) -> None:
         resp = client.get("/api/databricks/tables", params={"catalog": "main"})
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /api/databricks/cache
+# ---------------------------------------------------------------------------
+
+
+class TestCacheStatus:
+    def test_not_cached(self, client: TestClient) -> None:
+        resp = client.get("/api/databricks/cache", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cached"] is False
+        assert data["table"] == "cat.sch.tbl"
+
+    def test_cached_after_write(self, client: TestClient) -> None:
+        import polars as pl
+
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("cat.sch.tbl")  # uses Path.cwd() set by client fixture
+        p.parent.mkdir(parents=True, exist_ok=True)
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
+
+        resp = client.get("/api/databricks/cache", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cached"] is True
+        assert data["row_count"] == 3
+        assert data["column_count"] == 1
+        assert data["size_bytes"] > 0
+
+    def test_delete_cache(self, client: TestClient) -> None:
+        import polars as pl
+
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("cat.sch.tbl")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+        assert p.exists()
+
+        resp = client.delete("/api/databricks/cache", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cached"] is False
+        assert not p.exists()
+
+    def test_delete_cache_noop_when_missing(self, client: TestClient) -> None:
+        resp = client.delete("/api/databricks/cache", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        assert resp.json()["cached"] is False
+
+
+# ---------------------------------------------------------------------------
+# POST /api/databricks/fetch
+# ---------------------------------------------------------------------------
+
+
+class TestFetchTable:
+    def test_fetch_success(self, client: TestClient) -> None:
+        from haute._databricks_io import _cache_path_for
+
+        fake_result = {
+            "path": str(_cache_path_for("cat.sch.tbl")),
+            "table": "cat.sch.tbl",
+            "row_count": 100,
+            "column_count": 3,
+            "columns": {"a": "Int64", "b": "Utf8", "c": "Float64"},
+            "size_bytes": 4096,
+            "fetched_at": 1700000000.0,
+            "fetch_seconds": 1.5,
+        }
+
+        with patch("haute._databricks_io.fetch_and_cache", return_value=fake_result):
+            resp = client.post("/api/databricks/fetch", json={
+                "table": "cat.sch.tbl",
+                "http_path": "/sql/wh",
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["table"] == "cat.sch.tbl"
+        assert data["row_count"] == 100
+        assert data["column_count"] == 3
+        assert data["size_bytes"] == 4096
+        assert data["fetch_seconds"] == 1.5
+
+    def test_fetch_missing_connector_returns_400(self, client: TestClient) -> None:
+        with patch("haute._databricks_io.fetch_and_cache", side_effect=ImportError("no module")):
+            resp = client.post("/api/databricks/fetch", json={"table": "cat.sch.tbl"})
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /api/schema/databricks
+# ---------------------------------------------------------------------------
+
+
+class TestDatabricksSchema:
+    def test_not_cached_returns_404(self, client: TestClient) -> None:
+        resp = client.get("/api/schema/databricks", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 404
+
+    def test_cached_returns_schema(self, client: TestClient) -> None:
+        import polars as pl
+
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("cat.sch.tbl")  # uses Path.cwd() set by client fixture
+        p.parent.mkdir(parents=True, exist_ok=True)
+        pl.DataFrame({"x": [1, 2, 3], "y": [4.0, 5.0, 6.0]}).write_parquet(p)
+
+        resp = client.get("/api/schema/databricks", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["row_count"] == 3
+        assert data["column_count"] == 2
+        assert len(data["preview"]) <= 5

@@ -209,6 +209,9 @@ __marimo__/
 # Pipeline output files
 output/
 
+# Databricks local parquet cache
+.haute_cache/
+
 # Built frontend (included in wheel via pyproject.toml artifacts)
 src/haute/static/
 
