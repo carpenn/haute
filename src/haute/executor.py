@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -209,18 +210,20 @@ def _build_node_fn(
 class _PreviewCache:
     """Single-entry cache for the most recent pipeline execution."""
 
-    __slots__ = ("fingerprint", "eager_outputs", "errors", "order")
+    __slots__ = ("fingerprint", "eager_outputs", "errors", "order", "timings")
 
     def __init__(self) -> None:
         self.fingerprint: str | None = None
         self.eager_outputs: dict[str, pl.DataFrame] = {}
         self.errors: dict[str, str] = {}
         self.order: list[str] = []
+        self.timings: dict[str, float] = {}
 
     def invalidate(self) -> None:
         self.fingerprint = None
         self.eager_outputs.clear()
         self.errors.clear()
+        self.timings.clear()
 
 
 _preview_cache = _PreviewCache()
@@ -267,26 +270,30 @@ def execute_graph(
             eager_outputs = cached
             order = _preview_cache.order
             errors = _preview_cache.errors
+            timings = _preview_cache.timings
         else:
-            eager_outputs, order, errors = _eager_execute(
+            eager_outputs, order, errors, timings = _eager_execute(
                 graph, target_node_id, row_limit,
             )
             merged = {**cached, **eager_outputs}
             _preview_cache.eager_outputs = merged
             _preview_cache.errors = {**_preview_cache.errors, **errors}
+            _preview_cache.timings = {**_preview_cache.timings, **timings}
             _preview_cache.order = list(
                 dict.fromkeys(_preview_cache.order + order),
             )
             eager_outputs = merged
             errors = _preview_cache.errors
+            timings = _preview_cache.timings
             order = _preview_cache.order
     else:
-        eager_outputs, order, errors = _eager_execute(
+        eager_outputs, order, errors, timings = _eager_execute(
             graph, target_node_id, row_limit,
         )
         _preview_cache.fingerprint = fp
         _preview_cache.eager_outputs = eager_outputs
         _preview_cache.errors = errors
+        _preview_cache.timings = timings
         _preview_cache.order = order
 
     results: dict[str, dict] = {}
@@ -299,6 +306,7 @@ def execute_graph(
                 "columns": [],
                 "preview": [],
                 "error": errors[nid],
+                "timing_ms": timings.get(nid, 0),
             }
             continue
         df = eager_outputs.get(nid)
@@ -310,6 +318,7 @@ def execute_graph(
                 "columns": [],
                 "preview": [],
                 "error": "No output",
+                "timing_ms": timings.get(nid, 0),
             }
             continue
         columns = [
@@ -322,6 +331,7 @@ def execute_graph(
             "columns": columns,
             "preview": df.head(max_preview_rows).to_dicts(),
             "error": None,
+            "timing_ms": timings.get(nid, 0),
         }
 
     return results
@@ -331,11 +341,12 @@ def _eager_execute(
     graph: dict,
     target_node_id: str | None,
     row_limit: int | None,
-) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str]]:
+) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str], dict[str, float]]:
     """Execute the graph eagerly in topo order.
 
-    Returns (outputs, order, errors) where errors maps node_id → message
-    for nodes that failed.  Failed nodes store None in outputs.
+    Returns (outputs, order, errors, timings) where errors maps
+    node_id → message for nodes that failed, and timings maps
+    node_id → execution milliseconds.
     """
     node_map, order, parents_of, id_to_name = _prepare_graph(
         graph, target_node_id,
@@ -355,9 +366,11 @@ def _eager_execute(
 
     eager_outputs: dict[str, pl.DataFrame | None] = {}
     errors: dict[str, str] = {}
+    timings: dict[str, float] = {}
 
     for nid in order:
         fn, is_source = funcs[nid]
+        t0 = time.perf_counter()
         try:
             if is_source:
                 result = fn()
@@ -380,8 +393,9 @@ def _eager_execute(
             logger.warning("Node %s failed: %s", nid, exc)
             eager_outputs[nid] = None
             errors[nid] = str(exc)
+        timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
 
-    return eager_outputs, order, errors
+    return eager_outputs, order, errors, timings
 
 
 def execute_sink(graph: dict, sink_node_id: str) -> dict:

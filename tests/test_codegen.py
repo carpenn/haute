@@ -210,7 +210,7 @@ class TestNodeToCode:
         }
         code = _node_to_code(node, source_names=["features"])
         assert 'external="model.pkl"' in code
-        assert "pickle" in code
+        assert "load_external_object" in code
         assert "obj" in code
         _compile_node_code(code)
 
@@ -227,7 +227,7 @@ class TestNodeToCode:
             },
         }
         code = _node_to_code(node)
-        assert "CatBoostRegressor" in code
+        assert "load_external_object" in code
         assert 'model_class="regressor"' in code
         _compile_node_code(code)
 

@@ -97,6 +97,12 @@ class PreviewNodeRequest(BaseModel):
     rowLimit: int = 1000
 
 
+class NodeTimingInfo(BaseModel):
+    nodeId: str
+    label: str
+    timing_ms: float
+
+
 class PreviewNodeResponse(BaseModel):
     nodeId: str
     status: str
@@ -105,6 +111,8 @@ class PreviewNodeResponse(BaseModel):
     columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+    timing_ms: float = 0
+    timings: list[NodeTimingInfo] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

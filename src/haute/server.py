@@ -327,7 +327,19 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 status_code=404,
                 detail=f"Node '{body.nodeId}' not found in results",
             )
-        return PreviewNodeResponse(nodeId=body.nodeId, **node_result)
+
+        node_map = {n["id"]: n for n in graph["nodes"]}
+        timings = [
+            {
+                "nodeId": nid,
+                "label": node_map[nid]["data"].get("label", nid),
+                "timing_ms": r.get("timing_ms", 0),
+            }
+            for nid, r in results.items()
+            if nid in node_map
+        ]
+
+        return PreviewNodeResponse(nodeId=body.nodeId, timings=timings, **node_result)
     except HTTPException:
         raise
     except Exception as e:
@@ -599,7 +611,7 @@ async def delete_databricks_cache(table: str) -> CacheStatusResponse:
     return CacheStatusResponse(cached=False, table=table)
 
 
-@app.get("/api/schema/databricks")
+@app.get("/api/schema/databricks", response_model=SchemaResponse)
 async def get_databricks_schema(table: str) -> SchemaResponse:
     """Return schema + preview from the local parquet cache of a Databricks table."""
     import polars as pl

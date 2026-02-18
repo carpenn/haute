@@ -325,6 +325,8 @@ function FlowEditor() {
           columns: result.columns || [],
           preview: result.preview || [],
           error: result.error || null,
+          timing_ms: result.timing_ms || 0,
+          timings: result.timings || [],
         }))
         // Cache columns on node data for instant access by output nodes
         if (result.columns) {

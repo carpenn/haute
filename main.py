@@ -3,8 +3,6 @@
 import polars as pl
 import haute
 
-import numpy as np
-from catboost import CatBoostClassifier, CatBoostRegressor
 
 pipeline = haute.Pipeline("my_pipeline", description="")
 
@@ -50,16 +48,15 @@ def policies() -> pl.LazyFrame:
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
 def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
-    from catboost import CatBoostRegressor
-    obj = CatBoostRegressor()
-    obj.load_model("models/freq.cbm")
-    X = (
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("models/freq.cbm", "catboost", "regressor")
+    features = (  # noqa: N806
         policies
         .select(obj.feature_names_)
     ).collect().to_numpy()
-    
-    preds = obj.predict(X)
-    
+
+    preds = obj.predict(features)
+
     df = (
         policies
         .select('IDpol')
@@ -97,16 +94,15 @@ def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
-    from catboost import CatBoostRegressor
-    obj = CatBoostRegressor()
-    obj.load_model("models/sev.cbm")
-    X = (
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("models/sev.cbm", "catboost", "regressor")
+    features = (  # noqa: N806
         policies
         .select(obj.feature_names_)
     ).collect().to_numpy()
-    
-    preds = obj.predict(X)
-    
+
+    preds = obj.predict(features)
+
     df = (
         policies
         .select('IDpol')

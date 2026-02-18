@@ -301,6 +301,23 @@ class TestExecuteGraph:
         assert results["t"]["row_count"] == 3
         assert any(c["name"] == "y" for c in results["t"]["columns"])
 
+    def test_timing_ms_present(self, tmp_path):
+        p = tmp_path / "t.parquet"
+        pl.DataFrame({"x": [1, 2]}).write_parquet(p)
+
+        graph = {
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t", ".with_columns(y=pl.col('x') + 1)"),
+            ],
+            "edges": [_edge("src", "t")],
+        }
+        results = execute_graph(graph)
+        for nid in ("src", "t"):
+            assert "timing_ms" in results[nid]
+            assert isinstance(results[nid]["timing_ms"], float)
+            assert results[nid]["timing_ms"] >= 0
+
     def test_empty_graph(self):
         assert execute_graph({"nodes": [], "edges": []}) == {}
 

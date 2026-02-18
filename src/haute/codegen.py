@@ -71,9 +71,8 @@ _EXTERNAL_PICKLE = '''\
 @pipeline.node(external="{path}", file_type="pickle")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    import pickle
-    with open("{path}", "rb") as _f:
-        obj = pickle.load(_f)
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("{path}", "pickle")
 {body}
 '''
 
@@ -81,9 +80,8 @@ _EXTERNAL_JSON = '''\
 @pipeline.node(external="{path}", file_type="json")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    import json
-    with open("{path}", "r") as _f:
-        obj = json.load(_f)
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("{path}", "json")
 {body}
 '''
 
@@ -91,8 +89,8 @@ _EXTERNAL_JOBLIB = '''\
 @pipeline.node(external="{path}", file_type="joblib")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    import joblib
-    obj = joblib.load("{path}")
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("{path}", "joblib")
 {body}
 '''
 
@@ -100,9 +98,8 @@ _EXTERNAL_CATBOOST = '''\
 @pipeline.node(external="{path}", file_type="catboost", model_class="{model_class}")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    from catboost import {cb_class}
-    obj = {cb_class}()
-    obj.load_model("{path}")
+    from haute.graph_utils import load_external_object
+    obj = load_external_object("{path}", "catboost", "{model_class}")
 {body}
 '''
 

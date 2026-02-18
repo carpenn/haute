@@ -574,7 +574,7 @@ function DatabricksFetchButton({
       fetch(`/api/databricks/fetch/progress?table=${encodeURIComponent(table)}`)
         .then((r) => r.json())
         .then((data) => { if (data.active) setProgress({ rows: data.rows, elapsed: data.elapsed }) })
-        .catch(() => {})
+        .catch(() => { /* polling retry on next interval */ })
     }, 1000)
     return () => { clearInterval(id); setProgress(null) }
   }, [fetching, table])

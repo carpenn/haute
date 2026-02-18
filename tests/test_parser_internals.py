@@ -182,6 +182,19 @@ class TestExtractExternalUserCode:
         assert "score" in result
         assert "joblib" not in result
 
+    def test_strips_load_external_object_boilerplate(self):
+        body = (
+            '    """doc"""\n'
+            "    from haute.graph_utils import load_external_object\n"
+            '    obj = load_external_object("model.cbm", "catboost", "regressor")\n'
+            "    df = df.with_columns(pred=pl.lit(obj.predict()))\n"
+            "    return df"
+        )
+        result = _extract_external_user_code(body, ["df"])
+        assert "df = df.with_columns" in result
+        assert "load_external_object" not in result
+        assert "import" not in result
+
     def test_empty_body(self):
         assert _extract_external_user_code("", ["df"]) == ""
 

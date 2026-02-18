@@ -7,12 +7,13 @@ import pytest
 
 from haute.graph_utils import (
     _execute_lazy,
+    _object_cache,
     _prepare_graph,
     _sanitize_func_name,
     ancestors,
+    load_external_object,
     topo_sort_ids,
 )
-
 
 # ---------------------------------------------------------------------------
 # _sanitize_func_name
@@ -264,6 +265,54 @@ class TestExecuteLazy:
         with pytest.raises(ValueError, match="No input data available"):
             _execute_lazy(g, build_fn)
 
+class TestLoadExternalObjectCache:
+    def test_json_cached_on_second_call(self, tmp_path):
+        p = tmp_path / "data.json"
+        p.write_text('{"a": 1}')
+
+        _object_cache.clear()
+        obj1 = load_external_object(str(p), "json")
+        obj2 = load_external_object(str(p), "json")
+        assert obj1 is obj2
+        assert obj1 == {"a": 1}
+        _object_cache.clear()
+
+    def test_mtime_change_invalidates_cache(self, tmp_path):
+        import os
+        import time as _time
+
+        p = tmp_path / "data.json"
+        p.write_text('{"v": 1}')
+
+        _object_cache.clear()
+        obj1 = load_external_object(str(p), "json")
+        assert obj1 == {"v": 1}
+
+        _time.sleep(0.05)
+        p.write_text('{"v": 2}')
+        os.utime(str(p), None)
+
+        obj2 = load_external_object(str(p), "json")
+        assert obj2 == {"v": 2}
+        assert obj1 is not obj2
+        _object_cache.clear()
+
+    def test_pickle_cached(self, tmp_path):
+        import pickle
+
+        p = tmp_path / "obj.pkl"
+        with open(p, "wb") as f:
+            pickle.dump([1, 2, 3], f)
+
+        _object_cache.clear()
+        obj1 = load_external_object(str(p), "pickle")
+        obj2 = load_external_object(str(p), "pickle")
+        assert obj1 is obj2
+        assert obj1 == [1, 2, 3]
+        _object_cache.clear()
+
+
+class TestExecuteLazyMultiInput:
     def test_multi_input_node(self):
         """A node with two parents receives both LazyFrames."""
         def build_fn(node, source_names=None):

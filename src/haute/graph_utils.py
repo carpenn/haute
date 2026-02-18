@@ -175,11 +175,38 @@ def _prepare_graph(
     return node_map, order, parents_of, id_to_name
 
 
+_object_cache: dict[tuple[str, float, str, str], object] = {}
+
+
 def load_external_object(path: str, file_type: str, model_class: str = "classifier") -> object:
     """Load an external file (model, JSON, pickle, joblib) and return the object.
 
     Shared by the development executor and the deploy scoring engine.
+
+    Results are cached by ``(path, mtime, file_type, model_class)`` so
+    repeated calls (preview clicks, API scoring requests) skip disk I/O.
+    The cache auto-invalidates when the file is modified on disk.
     """
+    import os
+
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0.0
+    key = (path, mtime, file_type, model_class)
+    cached = _object_cache.get(key)
+    if cached is not None:
+        return cached
+
+    obj = _load_external_object_uncached(path, file_type, model_class)
+    _object_cache[key] = obj
+    return obj
+
+
+def _load_external_object_uncached(
+    path: str, file_type: str, model_class: str,
+) -> object:
+    """Deserialize an external file from disk (no caching)."""
     if file_type == "json":
         import json as _json
 
