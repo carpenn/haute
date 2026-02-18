@@ -145,18 +145,19 @@ class TestBuildNodeFn:
         df = result.collect()
         assert df["c"].to_list() == [5, 6]
 
-    def test_data_source_databricks_raises(self):
+    def test_data_source_databricks_is_source(self):
         node = {
             "id": "db",
             "data": {
                 "label": "db",
                 "nodeType": "dataSource",
-                "config": {"sourceType": "databricks"},
+                "config": {"sourceType": "databricks", "table": "cat.sch.tbl"},
             },
         }
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
-        with pytest.raises(NotImplementedError, match="Databricks"):
+        # Without databricks-sql-connector installed, calling fn() raises ImportError
+        with pytest.raises((ImportError, Exception)):
             fn()
 
     def test_transform_with_code(self):

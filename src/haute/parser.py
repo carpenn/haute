@@ -339,6 +339,10 @@ def _build_node_config(
         if "table" in decorator_kwargs:
             config["sourceType"] = "databricks"
             config["table"] = decorator_kwargs["table"]
+            if "http_path" in decorator_kwargs:
+                config["http_path"] = decorator_kwargs["http_path"]
+            if "query" in decorator_kwargs:
+                config["query"] = decorator_kwargs["query"]
         else:
             config["sourceType"] = "flat_file"
         if decorator_kwargs.get("deploy_input"):

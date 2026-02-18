@@ -104,7 +104,8 @@ def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
         d = n.get("data", {})
         c = d.get("config", {})
         parts.append(
-            f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}",
+            f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}"
+            f"|{c.get('table', '')}|{c.get('query', '')}",
         )
     for e in sorted(
         graph.get("edges", []),

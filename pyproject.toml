@@ -26,6 +26,7 @@ dependencies = [
 databricks = [
     "mlflow>=2.15.0",
     "databricks-sdk>=0.30.0",
+    "databricks-sql-connector>=3.0.0",
 ]
 
 [dependency-groups]
@@ -37,6 +38,7 @@ dev = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.27.0",
+    "haute[databricks]",
 ]
 
 [project.scripts]

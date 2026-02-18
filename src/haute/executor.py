@@ -12,11 +12,14 @@ can optimise the full plan end-to-end.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
 
 import polars as pl
+
+logger = logging.getLogger("uvicorn.error")
 
 from haute.graph_utils import (
     _execute_lazy,
@@ -84,11 +87,17 @@ def _exec_user_code(
     return result
 
 
-def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[str, Callable, bool]:
+def _build_node_fn(
+    node: dict,
+    source_names: list[str] | None = None,
+    row_limit: int | None = None,
+) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
     Returns (func_name, fn, is_source).
     source_names: sanitized names of upstream nodes (used as variable names).
+    row_limit: if set, Databricks sources push this into SQL LIMIT so the
+        full table is never fetched during preview/trace.
     """
     data = node.get("data", {})
     node_type = data.get("nodeType", "transform")
@@ -104,9 +113,22 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
         source_type = config.get("sourceType", "flat_file")
 
         if source_type == "databricks":
+            table = config.get("table", "")
+            _limit = row_limit
+            _http_path = config.get("http_path", "") or None
+            _query = config.get("query", "") or None
 
-            def source_fn() -> _Frame:
-                raise NotImplementedError("Databricks source not yet implemented")
+            def source_fn(
+                _table: str = table,
+                _rl: int | None = _limit,
+                _hp: str | None = _http_path,
+                _q: str | None = _query,
+            ) -> _Frame:
+                from haute._databricks_io import read_databricks_table
+
+                return read_databricks_table(
+                    _table, row_limit=_rl, http_path=_hp, query=_q,
+                )
 
             return func_name, source_fn, True
 
@@ -197,16 +219,18 @@ def _build_node_fn(node: dict, source_names: list[str] | None = None) -> tuple[s
 class _PreviewCache:
     """Single-entry cache for the most recent pipeline execution."""
 
-    __slots__ = ("fingerprint", "eager_outputs", "order")
+    __slots__ = ("fingerprint", "eager_outputs", "errors", "order")
 
     def __init__(self) -> None:
         self.fingerprint: str | None = None
         self.eager_outputs: dict[str, pl.DataFrame] = {}
+        self.errors: dict[str, str] = {}
         self.order: list[str] = []
 
     def invalidate(self) -> None:
         self.fingerprint = None
         self.eager_outputs.clear()
+        self.errors.clear()
 
 
 _preview_cache = _PreviewCache()
@@ -252,16 +276,19 @@ def execute_graph(
         if target_node_id is None or target_node_id in cached:
             eager_outputs = cached
             order = _preview_cache.order
+            errors = _preview_cache.errors
         else:
             eager_outputs, order, errors = _eager_execute(
                 graph, target_node_id, row_limit,
             )
             merged = {**cached, **eager_outputs}
             _preview_cache.eager_outputs = merged
+            _preview_cache.errors = {**_preview_cache.errors, **errors}
             _preview_cache.order = list(
                 dict.fromkeys(_preview_cache.order + order),
             )
             eager_outputs = merged
+            errors = _preview_cache.errors
             order = _preview_cache.order
     else:
         eager_outputs, order, errors = _eager_execute(
@@ -269,6 +296,7 @@ def execute_graph(
         )
         _preview_cache.fingerprint = fp
         _preview_cache.eager_outputs = eager_outputs
+        _preview_cache.errors = errors
         _preview_cache.order = order
 
     results: dict[str, dict] = {}
@@ -331,7 +359,7 @@ def _eager_execute(
             if pid in id_to_name
         ]
         _, fn, is_source = _build_node_fn(
-            node_map[nid], source_names=src_names,
+            node_map[nid], source_names=src_names, row_limit=row_limit,
         )
         funcs[nid] = (fn, is_source)
 
@@ -359,6 +387,7 @@ def _eager_execute(
             df = result.collect() if isinstance(result, pl.LazyFrame) else result
             eager_outputs[nid] = df
         except Exception as exc:
+            logger.warning("Node %s failed: %s", nid, exc)
             eager_outputs[nid] = None
             errors[nid] = str(exc)
 

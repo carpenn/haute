@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { sanitizeName } from "../utils/sanitizeName"
 
@@ -242,6 +242,294 @@ function SchemaPreview({ schema }: { schema: SchemaInfo }) {
   )
 }
 
+type Warehouse = {
+  id: string
+  name: string
+  http_path: string
+  state: string
+  size: string
+}
+
+function WarehousePicker({
+  httpPath,
+  onSelect,
+}: {
+  httpPath: string
+  onSelect: (httpPath: string) => void
+}) {
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const fetched = useRef(false)
+
+  const fetchWarehouses = () => {
+    if (fetched.current) {
+      setOpen(true)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    fetch("/api/databricks/warehouses")
+      .then((r) => {
+        if (!r.ok) return r.json().then((d) => { throw new Error(d.detail || `HTTP ${r.status}`) })
+        return r.json()
+      })
+      .then((data) => {
+        setWarehouses(data.warehouses || [])
+        fetched.current = true
+        setOpen(true)
+        setLoading(false)
+      })
+      .catch((e) => {
+        setError(e.message)
+        setLoading(false)
+      })
+  }
+
+  const stateColor = (state: string) => {
+    if (state === "RUNNING") return "#22c55e"
+    if (state === "STOPPED" || state === "DELETED") return "#ef4444"
+    return "#f59e0b"
+  }
+
+  return (
+    <div>
+      <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>SQL Warehouse</label>
+      <div className="mt-1 flex gap-1.5">
+        <input
+          type="text"
+          placeholder="/sql/1.0/warehouses/abc123"
+          value={httpPath}
+          onChange={(e) => onSelect(e.target.value)}
+          className="flex-1 px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
+          style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+        />
+        <button
+          onClick={fetchWarehouses}
+          disabled={loading}
+          className="px-2 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+          style={{
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-secondary)',
+          }}
+          title="Fetch warehouses from Databricks"
+        >
+          {loading ? <Loader2 size={12} className="animate-spin" /> : <ChevronDown size={12} />}
+          <span>{loading ? "" : "Browse"}</span>
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-1.5 text-[10px] px-2 py-1 rounded" style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444' }}>
+          {error}
+        </div>
+      )}
+
+      {open && warehouses.length > 0 && (
+        <div className="mt-1.5 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>
+          {warehouses.map((wh) => (
+            <button
+              key={wh.id}
+              onClick={() => {
+                onSelect(wh.http_path)
+                setOpen(false)
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 text-xs transition-colors hover:brightness-110"
+              style={{
+                background: httpPath === wh.http_path ? 'var(--accent-soft)' : 'transparent',
+                borderBottom: '1px solid var(--border)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{ background: stateColor(wh.state) }}
+                title={wh.state}
+              />
+              <span className="font-medium truncate">{wh.name}</span>
+              {wh.size && (
+                <span className="text-[10px] ml-auto flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{wh.size}</span>
+              )}
+              {httpPath === wh.http_path && <Check size={12} style={{ color: 'var(--accent)' }} className="flex-shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {open && warehouses.length === 0 && !loading && !error && (
+        <div className="mt-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          No SQL Warehouses found in this workspace
+        </div>
+      )}
+    </div>
+  )
+}
+
+type CatalogItem = { name: string; comment: string }
+type SchemaItem = { name: string; comment: string }
+type TableItem = { name: string; full_name: string; table_type: string; comment: string }
+
+function CatalogTablePicker({
+  table,
+  onSelect,
+}: {
+  table: string
+  onSelect: (fullName: string) => void
+}) {
+  const parts = table ? table.split(".") : []
+  const [catalog, setCatalog] = useState(parts[0] || "")
+  const [dbSchema, setDbSchema] = useState(parts[1] || "")
+  const [tableName, setTableName] = useState(parts[2] || "")
+
+  const [catalogs, setCatalogs] = useState<CatalogItem[]>([])
+  const [schemas, setSchemas] = useState<SchemaItem[]>([])
+  const [tables, setTables] = useState<TableItem[]>([])
+
+  const [loadingCatalogs, setLoadingCatalogs] = useState(false)
+  const [loadingSchemas, setLoadingSchemas] = useState(false)
+  const [loadingTables, setLoadingTables] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const apiFetch = (url: string) =>
+    fetch(url).then((r) => {
+      if (!r.ok) return r.json().then((d) => { throw new Error(d.detail || `HTTP ${r.status}`) })
+      return r.json()
+    })
+
+  const refreshCatalogs = () => {
+    setLoadingCatalogs(true)
+    setError(null)
+    apiFetch("/api/databricks/catalogs")
+      .then((data) => { setCatalogs(data.catalogs || []); setLoadingCatalogs(false) })
+      .catch((e) => { setError(e.message); setLoadingCatalogs(false) })
+  }
+
+  const refreshSchemas = (cat: string) => {
+    setLoadingSchemas(true)
+    setError(null)
+    apiFetch(`/api/databricks/schemas?catalog=${encodeURIComponent(cat)}`)
+      .then((data) => { setSchemas(data.schemas || []); setLoadingSchemas(false) })
+      .catch((e) => { setError(e.message); setLoadingSchemas(false) })
+  }
+
+  const refreshTables = (cat: string, sch: string) => {
+    setLoadingTables(true)
+    setError(null)
+    apiFetch(`/api/databricks/tables?catalog=${encodeURIComponent(cat)}&schema=${encodeURIComponent(sch)}`)
+      .then((data) => { setTables(data.tables || []); setLoadingTables(false) })
+      .catch((e) => { setError(e.message); setLoadingTables(false) })
+  }
+
+  const selectStyle = {
+    background: 'var(--bg-input)',
+    border: '1px solid var(--border)',
+    color: 'var(--text-primary)',
+  }
+
+  return (
+    <div>
+      <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Table</label>
+
+      <div className="mt-1 space-y-1.5">
+        {/* Catalog */}
+        <select
+          value={catalog}
+          onFocus={refreshCatalogs}
+          onChange={(e) => {
+            const cat = e.target.value
+            setCatalog(cat)
+            setDbSchema("")
+            setTableName("")
+            setSchemas([])
+            setTables([])
+            onSelect("")
+            if (cat) refreshSchemas(cat)
+          }}
+          className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2"
+          style={selectStyle}
+        >
+          <option value="">{loadingCatalogs ? "Loading..." : "Select catalog..."}</option>
+          {catalog && catalogs.every((c) => c.name !== catalog) && (
+            <option value={catalog}>{catalog}</option>
+          )}
+          {catalogs.map((c) => (
+            <option key={c.name} value={c.name}>{c.name}{c.comment ? ` — ${c.comment}` : ""}</option>
+          ))}
+        </select>
+
+        {/* Schema */}
+        <select
+          value={dbSchema}
+          disabled={!catalog}
+          onFocus={() => { if (catalog) refreshSchemas(catalog) }}
+          onChange={(e) => {
+            const sch = e.target.value
+            setDbSchema(sch)
+            setTableName("")
+            setTables([])
+            onSelect("")
+            if (sch) refreshTables(catalog, sch)
+          }}
+          className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2 disabled:opacity-40"
+          style={selectStyle}
+        >
+          <option value="">{loadingSchemas ? "Loading..." : catalog ? "Select schema..." : "Select catalog first"}</option>
+          {dbSchema && schemas.every((s) => s.name !== dbSchema) && (
+            <option value={dbSchema}>{dbSchema}</option>
+          )}
+          {schemas.map((s) => (
+            <option key={s.name} value={s.name}>{s.name}{s.comment ? ` — ${s.comment}` : ""}</option>
+          ))}
+        </select>
+
+        {/* Table */}
+        <select
+          value={tableName}
+          disabled={!dbSchema}
+          onFocus={() => { if (catalog && dbSchema) refreshTables(catalog, dbSchema) }}
+          onChange={(e) => {
+            const tbl = e.target.value
+            setTableName(tbl)
+            if (tbl) {
+              onSelect(`${catalog}.${dbSchema}.${tbl}`)
+            } else {
+              onSelect("")
+            }
+          }}
+          className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2 disabled:opacity-40"
+          style={selectStyle}
+        >
+          <option value="">{loadingTables ? "Loading..." : dbSchema ? "Select table..." : "Select schema first"}</option>
+          {tableName && tables.every((t) => t.name !== tableName) && (
+            <option value={tableName}>{tableName}</option>
+          )}
+          {tables.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name}{t.table_type ? ` (${t.table_type})` : ""}{t.comment ? ` — ${t.comment}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {table && (
+        <div className="mt-1.5 text-[10px] font-mono px-1" style={{ color: 'var(--text-muted)' }}>
+          {table}
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-1.5 text-[10px] px-2 py-1 rounded" style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DataSourceConfig({
   config,
   onUpdate,
@@ -390,18 +678,34 @@ function DataSourceConfig({
         )}
 
         {sourceType === "databricks" && (
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Table</label>
-            <input
-              type="text"
-              placeholder="catalog.schema.table"
-              defaultValue={(config.table as string) || ""}
-              onChange={(e) => onUpdate("table", e.target.value)}
-              className="mt-1 w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
-              style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+          <div className="space-y-3">
+            <WarehousePicker
+              httpPath={(config.http_path as string) || ""}
+              onSelect={(hp) => onUpdate("http_path", hp || undefined)}
             />
+            <CatalogTablePicker
+              table={(config.table as string) || ""}
+              onSelect={(fullName) => onUpdate("table", fullName || undefined)}
+            />
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+                SQL Query
+                <span className="ml-1.5 normal-case tracking-normal font-normal" style={{ color: 'var(--text-muted)' }}>(optional)</span>
+              </label>
+              <textarea
+                placeholder={"SELECT *\nFROM catalog.schema.table\nWHERE status = 'active'"}
+                defaultValue={(config.query as string) || "SELECT *"}
+                onChange={(e) => onUpdate("query", e.target.value || undefined)}
+                rows={3}
+                className="mt-1 w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2 resize-y"
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+              />
+              <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Combined with table above as: query FROM table
+              </div>
+            </div>
           </div>
         )}
       </div>

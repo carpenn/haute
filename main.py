@@ -40,10 +40,11 @@ def exposure() -> pl.LazyFrame:
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(path="data/policies.parquet", deploy_input=True, row_id_column="IDpol")
+@pipeline.node(table="quotes.delta.policies", http_path="/sql/1.0/warehouses/a4cdf14603abd87b", deploy_input=True, row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
     """data_source node"""
-    return pl.scan_parquet("data/policies.parquet")
+    from haute._databricks_io import read_databricks_table
+    return read_databricks_table("quotes.delta.policies", http_path="/sql/1.0/warehouses/a4cdf14603abd87b")
 
 
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")

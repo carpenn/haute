@@ -37,6 +37,10 @@ _watcher_task: asyncio.Task | None = None
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from haute.deploy._config import _load_env
+
+    _load_env(Path.cwd())
+
     global _watcher_task
     _watcher_task = asyncio.create_task(_file_watcher())
     yield
@@ -424,6 +428,139 @@ async def get_schema(path: str) -> SchemaResponse:
         )
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _get_databricks_client():
+    """Return a Databricks WorkspaceClient using data credentials from .env."""
+    import os
+
+    try:
+        from databricks.sdk import WorkspaceClient
+    except ImportError:
+        raise HTTPException(
+            status_code=400,
+            detail="databricks-sdk is not installed. "
+            "Install with: pip install haute[databricks]",
+        )
+
+    host = os.getenv("DATABRICKS_DATA_HOST") or os.getenv("DATABRICKS_HOST", "")
+    token = os.getenv("DATABRICKS_DATA_TOKEN") or os.getenv("DATABRICKS_TOKEN", "")
+
+    if not host or not token:
+        raise HTTPException(
+            status_code=400,
+            detail="DATABRICKS_HOST and DATABRICKS_TOKEN must be set in .env",
+        )
+
+    return WorkspaceClient(host=host, token=token)
+
+
+@app.get("/api/databricks/warehouses")
+async def list_databricks_warehouses():
+    """List available Databricks SQL Warehouses."""
+    try:
+        w = _get_databricks_client()
+        warehouses = []
+        for wh in w.warehouses.list():
+            warehouses.append({
+                "id": wh.id,
+                "name": wh.name,
+                "http_path": f"/sql/1.0/warehouses/{wh.id}",
+                "state": wh.state.value if wh.state else "UNKNOWN",
+                "size": wh.cluster_size or "",
+            })
+        return {"warehouses": warehouses}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/databricks/catalogs")
+async def list_databricks_catalogs():
+    """List Unity Catalog catalogs."""
+    try:
+        w = _get_databricks_client()
+        catalogs = [
+            {"name": c.name, "comment": c.comment or ""}
+            for c in w.catalogs.list()
+            if c.name
+        ]
+        return {"catalogs": catalogs}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/databricks/schemas")
+async def list_databricks_schemas(catalog: str):
+    """List schemas within a Unity Catalog catalog."""
+    try:
+        w = _get_databricks_client()
+        schemas = [
+            {"name": s.name, "comment": s.comment or ""}
+            for s in w.schemas.list(catalog_name=catalog)
+            if s.name
+        ]
+        return {"schemas": schemas}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/databricks/tables")
+async def list_databricks_tables(catalog: str, schema: str):
+    """List tables within a Unity Catalog schema."""
+    try:
+        w = _get_databricks_client()
+        tables = [
+            {
+                "name": t.name,
+                "full_name": t.full_name or f"{catalog}.{schema}.{t.name}",
+                "table_type": t.table_type.value if t.table_type else "",
+                "comment": t.comment or "",
+            }
+            for t in w.tables.list(catalog_name=catalog, schema_name=schema)
+            if t.name
+        ]
+        return {"tables": tables}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/schema/databricks")
+async def get_databricks_schema(table: str) -> SchemaResponse:
+    """Read a Databricks Unity Catalog table and return its schema + preview."""
+    import polars as pl
+
+    try:
+        from haute._databricks_io import read_databricks_table
+
+        lf = read_databricks_table(table, row_limit=1000)
+        df = lf.collect()
+
+        columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
+        preview_df = df.head(5)
+
+        return SchemaResponse(
+            path=table,
+            columns=columns,
+            row_count=len(df),
+            column_count=len(columns),
+            preview=preview_df.to_dicts(),
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=400,
+            detail="databricks-sql-connector is not installed. "
+            "Install with: pip install haute[databricks]",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
