@@ -926,8 +926,22 @@ function FlowEditor() {
     return map
   }, [nodes])
 
+  // Map external parent node IDs → port node IDs so that trace steps for
+  // nodes outside the submodel resolve to the visible port nodes on canvas.
+  const parentToPortId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const n of nodes) {
+      if (n.id.startsWith("port_in__")) {
+        map.set(n.id.replace("port_in__", ""), n.id)
+      } else if (n.id.startsWith("port_out__")) {
+        map.set(n.id.replace("port_out__", ""), n.id)
+      }
+    }
+    return map
+  }, [nodes])
+
   // Resolve a trace node ID to the visible canvas node ID
-  const resolveTraceId = useCallback((id: string) => childToSubmodelId.get(id) || id, [childToSubmodelId])
+  const resolveTraceId = useCallback((id: string) => childToSubmodelId.get(id) || parentToPortId.get(id) || id, [childToSubmodelId, parentToPortId])
 
   // All node IDs in the trace path (used for opacity + edge styling)
   const allTraceNodeIds = useMemo(() => {

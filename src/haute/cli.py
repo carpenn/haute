@@ -384,7 +384,6 @@ def serve(host: str, port: int, no_browser: bool) -> None:
             cwd=str(frontend_dir),
             stdout=sys.stdout,
             stderr=sys.stderr,
-            shell=True,
         )
 
         def _cleanup(signum, frame):

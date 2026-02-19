@@ -12,23 +12,35 @@ def claims() -> pl.LazyFrame:
     return pl.scan_parquet("data/claims_amounts.parquet")
 
 
+@pipeline.node
+def claims_aggregate(claims: pl.LazyFrame) -> pl.LazyFrame:
+    """claims_aggregate node"""
+    df = (
+    claims
+    .with_columns(
+        ClaimCount = 
+            pl.when(pl.col('ClaimAmount') > 0)
+            .then(pl.lit(1))
+            .otherwise(pl.lit(0))
+    )
+    .group_by('IDpol')
+    .agg(
+        pl.sum('ClaimCount')
+    )
+    )
+    return df
+
+
 @pipeline.node(path="data/exposure.parquet")
 def exposure() -> pl.LazyFrame:
     """exposure node"""
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(sink="output/frequency.parquet", format="parquet")
-def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
-    """frequency_write node"""
-    frequency_set.collect().write_parquet("output/frequency.parquet")
-    return frequency_set
-
-
-@pipeline.node(path="data\policies.parquet", deploy_input=True, row_id_column="IDpol")
+@pipeline.node(path="data/policies.parquet", deploy_input=True, row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
     """data_source node"""
-    return pl.scan_parquet("data\policies.parquet")
+    return pl.scan_parquet("data/policies.parquet")
 
 
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
@@ -49,6 +61,32 @@ def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
         .with_columns(freq_preds = pl.Series(preds))
     )
     return df
+
+
+@pipeline.node
+def frequency_set(policies: pl.LazyFrame, exposure: pl.LazyFrame, claims_aggregate: pl.LazyFrame) -> pl.LazyFrame:
+    """frequency_set node"""
+    df = (
+    policies
+    .join(
+        claims_aggregate, 
+        on = 'IDpol', 
+        how = 'left'
+    )
+    .join(
+        exposure, 
+        on = 'IDpol', 
+        how = 'left'
+    )
+    )
+    return df
+
+
+@pipeline.node(sink="output/frequency.parquet", format="parquet")
+def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
+    """frequency_write node"""
+    frequency_set.collect().write_parquet("output/frequency.parquet")
+    return frequency_set
 
 
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
@@ -93,14 +131,27 @@ def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     return calculate_premium
 
 
+@pipeline.node
+def severity_set(exposure: pl.LazyFrame, claims: pl.LazyFrame, policies: pl.LazyFrame) -> pl.LazyFrame:
+    """claim_exposure_join copy node"""
+    df = (
+    policies
+    .join(
+        claims, 
+        on = 'IDpol', 
+        how = 'left'
+    )
+    .filter(pl.col('ClaimAmount') > 0 )
+    )
+    return df
+
+
 @pipeline.node(sink="output/severity.parquet", format="parquet")
 def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
     """severity_write node"""
     severity_set.collect().write_parquet("output/severity.parquet")
     return severity_set
 
-
-pipeline.submodel("modules/modelling_set.py")
 
 
 # Wire nodes together - edges define data flow
@@ -117,3 +168,4 @@ pipeline.connect("policies", "severity_set")
 pipeline.connect("claims", "claims_aggregate")
 pipeline.connect("frequency_set", "frequency_write")
 pipeline.connect("severity_set", "severity_write")
+pipeline.connect("claims_aggregate", "frequency_set")
