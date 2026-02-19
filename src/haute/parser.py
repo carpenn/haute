@@ -78,6 +78,16 @@ def _is_pipeline_node_decorator(decorator: ast.expr) -> bool:
     return False
 
 
+def _is_submodel_node_decorator(decorator: ast.expr) -> bool:
+    """Check if a decorator is @submodel.node or @submodel.node(...)."""
+    if isinstance(decorator, ast.Attribute):
+        if isinstance(decorator.value, ast.Name) and decorator.attr == "node":
+            return decorator.value.id == "submodel"
+    if isinstance(decorator, ast.Call):
+        return _is_submodel_node_decorator(decorator.func)
+    return False
+
+
 def _get_docstring(func: ast.FunctionDef) -> str:
     """Extract the docstring from a function def."""
     return ast.get_docstring(func) or ""
@@ -260,8 +270,11 @@ def _extract_function_bodies(source: str) -> dict[str, str]:
     return bodies
 
 
-def _extract_connect_calls(tree: ast.Module) -> list[tuple[str, str]]:
-    """Find all pipeline.connect("src", "tgt") calls at module level."""
+def _extract_connect_calls(
+    tree: ast.Module,
+    receiver: str = "pipeline",
+) -> list[tuple[str, str]]:
+    """Find all <receiver>.connect("src", "tgt") calls at module level."""
     connects: list[tuple[str, str]] = []
 
     for node in ast.iter_child_nodes(tree):
@@ -271,9 +284,11 @@ def _extract_connect_calls(tree: ast.Module) -> list[tuple[str, str]]:
         if not isinstance(call, ast.Call):
             continue
 
-        # Check for *.connect(...)
+        # Check for <receiver>.connect(...)
         func = call.func
         if not isinstance(func, ast.Attribute) or func.attr != "connect":
+            continue
+        if isinstance(func.value, ast.Name) and func.value.id != receiver:
             continue
 
         args = call.args
@@ -284,6 +299,27 @@ def _extract_connect_calls(tree: ast.Module) -> list[tuple[str, str]]:
                 connects.append((src, tgt))
 
     return connects
+
+
+def _extract_submodel_calls(tree: ast.Module) -> list[str]:
+    """Find pipeline.submodel("path") calls and return the file paths."""
+    paths: list[str] = []
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, ast.Expr):
+            continue
+        call = node.value
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if not isinstance(func, ast.Attribute) or func.attr != "submodel":
+            continue
+        if not isinstance(func.value, ast.Name):
+            continue
+        if call.args:
+            val = _eval_ast_literal(call.args[0])
+            if isinstance(val, str):
+                paths.append(val)
+    return paths
 
 
 def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
@@ -310,6 +346,39 @@ def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
                 name = val
 
         # keyword description=
+        for kw in call.keywords:
+            if kw.arg == "description":
+                val = _eval_ast_literal(kw.value)
+                if isinstance(val, str):
+                    description = val
+
+        break
+
+    return name, description
+
+
+def _extract_submodel_meta(tree: ast.Module) -> tuple[str, str]:
+    """Find submodel = haute.Submodel("name", description="...") at module level."""
+    name = "unnamed"
+    description = ""
+
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or target.id != "submodel":
+            continue
+        call = node.value
+        if not isinstance(call, ast.Call):
+            continue
+
+        if call.args:
+            val = _eval_ast_literal(call.args[0])
+            if isinstance(val, str):
+                name = val
+
         for kw in call.keywords:
             if kw.arg == "description":
                 val = _eval_ast_literal(kw.value)
@@ -657,8 +726,13 @@ def _extract_preamble(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_pipeline_file(filepath: str | Path) -> dict:
+def parse_pipeline_file(filepath: str | Path, *, flatten: bool = False) -> dict:
     """Parse a pipeline .py file and return a React Flow graph JSON.
+
+    Args:
+        flatten: If *True*, dissolve submodel groupings into a flat graph
+            (for executor / trace / deploy).  If *False* (default), keep
+            submodel metadata so the GUI can render collapsed submodel nodes.
 
     Returns:
         {
@@ -668,6 +742,7 @@ def parse_pipeline_file(filepath: str | Path) -> dict:
             "pipeline_description": str,
             "preamble": str,
             "source_file": str,
+            "submodels": { ... },   # only when flatten=False and submodels exist
         }
 
     On syntax errors the file is still parsed via regex fallback so
@@ -675,11 +750,242 @@ def parse_pipeline_file(filepath: str | Path) -> dict:
     """
     filepath = Path(filepath)
     source = filepath.read_text()
-    return parse_pipeline_source(source, source_file=str(filepath))
+    return parse_pipeline_source(
+        source,
+        source_file=str(filepath),
+        flatten=flatten,
+        _base_dir=filepath.parent,
+    )
 
 
-def parse_pipeline_source(source: str, source_file: str = "") -> dict:
-    """Parse pipeline source code and return graph JSON."""
+def parse_submodel_file(filepath: str | Path) -> dict:
+    """Parse a submodel .py file and return its internal graph JSON.
+
+    Returns:
+        {
+            "nodes": [...],
+            "edges": [...],
+            "submodel_name": str,
+            "submodel_description": str,
+            "source_file": str,
+        }
+    """
+    filepath = Path(filepath)
+    source = filepath.read_text()
+    return _parse_submodel_source(source, source_file=str(filepath))
+
+
+def _parse_submodel_source(source: str, source_file: str = "") -> dict:
+    """Parse submodel source code and return its internal graph JSON."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {
+            "nodes": [],
+            "edges": [],
+            "submodel_name": "unnamed",
+            "submodel_description": "",
+            "source_file": source_file,
+            "warning": "Submodel file has syntax errors",
+        }
+
+    submodel_name, submodel_desc = _extract_submodel_meta(tree)
+
+    func_bodies = _extract_function_bodies(source)
+    raw_nodes: list[dict] = []
+
+    for stmt in ast.iter_child_nodes(tree):
+        if not isinstance(stmt, ast.FunctionDef):
+            continue
+
+        matched_decorator = None
+        for dec in stmt.decorator_list:
+            if _is_submodel_node_decorator(dec):
+                matched_decorator = dec
+                break
+
+        if matched_decorator is None:
+            continue
+
+        func_name = stmt.name
+        decorator_kwargs = _get_decorator_kwargs(matched_decorator)
+        param_names = [arg.arg for arg in stmt.args.args]
+        n_params = len(param_names)
+        node_type = _infer_node_type(decorator_kwargs, n_params)
+        description = _get_docstring(stmt)
+
+        body = func_bodies.get(func_name, "")
+        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+        raw_nodes.append(
+            {
+                "func_name": func_name,
+                "node_type": node_type,
+                "description": description,
+                "config": config,
+                "param_names": param_names,
+            }
+        )
+
+    edges = _build_edges(raw_nodes, _extract_connect_calls(tree, receiver="submodel"))
+    rf_nodes = _build_rf_nodes(raw_nodes)
+
+    return {
+        "nodes": rf_nodes,
+        "edges": edges,
+        "submodel_name": submodel_name,
+        "submodel_description": submodel_desc,
+        "source_file": source_file,
+    }
+
+
+def _merge_submodels(
+    parent_graph: dict,
+    submodel_graphs: dict[str, dict],
+    submodel_files: dict[str, str],
+    parent_edges: list[tuple[str, str]],
+    *,
+    flatten: bool = False,
+) -> dict:
+    """Merge parsed submodels into the parent graph.
+
+    When *flatten* is True, child nodes are inlined directly into the
+    parent graph (for execution).  When False, a single ``submodel``
+    node replaces the group (for the GUI).
+    """
+    if not submodel_graphs:
+        return parent_graph
+
+    parent_nodes = list(parent_graph.get("nodes", []))
+    parent_edge_list = list(parent_graph.get("edges", []))
+
+    # Collect all child node IDs across all submodels
+    all_child_ids: set[str] = set()
+    for sm_graph in submodel_graphs.values():
+        all_child_ids.update(n["id"] for n in sm_graph.get("nodes", []))
+
+    # _build_edges drops edges where one endpoint is a submodel child node
+    # (because it only knows about main-file nodes).  Reconstruct those
+    # cross-boundary edge dicts from the raw parent_edges tuples.
+    existing_pairs = {(e["source"], e["target"]) for e in parent_edge_list}
+    for src, tgt in parent_edges:
+        if (src, tgt) in existing_pairs:
+            continue
+        if src in all_child_ids or tgt in all_child_ids:
+            parent_edge_list.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+            existing_pairs.add((src, tgt))
+
+    if flatten:
+        # Inline all child nodes + edges into the parent graph
+        for sm_name, sm_graph in submodel_graphs.items():
+            parent_nodes.extend(sm_graph.get("nodes", []))
+            parent_edge_list.extend(sm_graph.get("edges", []))
+
+        return {**parent_graph, "nodes": parent_nodes, "edges": parent_edge_list}
+
+    # Hierarchical mode: create submodel placeholder nodes
+    submodels_meta: dict[str, dict] = {}
+
+    for sm_name, sm_graph in submodel_graphs.items():
+        child_node_ids = [n["id"] for n in sm_graph.get("nodes", [])]
+        child_node_names = set(child_node_ids)
+
+        # Determine input and output ports from cross-boundary edges
+        input_ports: list[str] = []
+        output_ports: list[str] = []
+
+        for src, tgt in parent_edges:
+            if tgt in child_node_names and src not in child_node_names:
+                if tgt not in input_ports:
+                    input_ports.append(tgt)
+            if src in child_node_names and tgt not in child_node_names:
+                if src not in output_ports:
+                    output_ports.append(src)
+
+        sm_node_id = f"submodel__{sm_name}"
+        sm_file = submodel_files.get(sm_name, "")
+
+        # Build the submodel node
+        sm_node = {
+            "id": sm_node_id,
+            "type": "submodel",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "label": sm_name,
+                "description": sm_graph.get("submodel_description", ""),
+                "nodeType": "submodel",
+                "config": {
+                    "file": sm_file,
+                    "childNodeIds": child_node_ids,
+                    "inputPorts": input_ports,
+                    "outputPorts": output_ports,
+                },
+            },
+        }
+        parent_nodes.append(sm_node)
+
+        # Rewire edges: replace references to internal child nodes
+        # with references to the submodel node (using handles)
+        new_edges = []
+        for edge in parent_edge_list:
+            src = edge["source"]
+            tgt = edge["target"]
+            if src in child_node_names and tgt not in child_node_names:
+                # Internal → external: source becomes submodel node
+                new_edges.append({
+                    **edge,
+                    "id": f"e_{sm_node_id}_{tgt}__{src}",
+                    "source": sm_node_id,
+                    "sourceHandle": f"out__{src}",
+                    "target": tgt,
+                })
+            elif tgt in child_node_names and src not in child_node_names:
+                # External → internal: target becomes submodel node
+                new_edges.append({
+                    **edge,
+                    "id": f"e_{src}_{sm_node_id}__{tgt}",
+                    "source": src,
+                    "target": sm_node_id,
+                    "targetHandle": f"in__{tgt}",
+                })
+            elif src in child_node_names and tgt in child_node_names:
+                # Fully internal: skip (lives inside submodel)
+                continue
+            else:
+                new_edges.append(edge)
+        parent_edge_list = new_edges
+
+        submodels_meta[sm_name] = {
+            "file": sm_file,
+            "childNodeIds": child_node_ids,
+            "inputPorts": input_ports,
+            "outputPorts": output_ports,
+            "graph": sm_graph,
+        }
+
+    result = {
+        **parent_graph,
+        "nodes": parent_nodes,
+        "edges": parent_edge_list,
+    }
+    if submodels_meta:
+        result["submodels"] = submodels_meta
+    return result
+
+
+def parse_pipeline_source(
+    source: str,
+    source_file: str = "",
+    *,
+    flatten: bool = False,
+    _base_dir: Path | None = None,
+) -> dict:
+    """Parse pipeline source code and return graph JSON.
+
+    Args:
+        flatten: If True, dissolve submodels into flat graph.
+        _base_dir: Directory to resolve relative submodel paths against.
+    """
 
     # Syntax check - fall back to regex if the file has errors
     try:
@@ -740,11 +1046,12 @@ def parse_pipeline_source(source: str, source_file: str = "") -> dict:
         }
 
     # Build edges + nodes using shared helpers
-    edges = _build_edges(raw_nodes, _extract_connect_calls(tree))
+    explicit_connects = _extract_connect_calls(tree)
+    edges = _build_edges(raw_nodes, explicit_connects)
     rf_nodes = _build_rf_nodes(raw_nodes)
     preamble = _extract_preamble(source)
 
-    return {
+    graph = {
         "nodes": rf_nodes,
         "edges": edges,
         "pipeline_name": pipeline_name,
@@ -752,3 +1059,29 @@ def parse_pipeline_source(source: str, source_file: str = "") -> dict:
         "preamble": preamble,
         "source_file": source_file,
     }
+
+    # --- Submodel handling ---------------------------------------------------
+    submodel_paths = _extract_submodel_calls(tree)
+    if submodel_paths and _base_dir is not None:
+        submodel_graphs: dict[str, dict] = {}
+        submodel_files: dict[str, str] = {}
+
+        for rel_path in submodel_paths:
+            sm_filepath = (_base_dir / rel_path).resolve()
+            if not sm_filepath.is_file():
+                continue
+            sm_graph = parse_submodel_file(sm_filepath)
+            sm_name = sm_graph.get("submodel_name", sm_filepath.stem)
+            submodel_graphs[sm_name] = sm_graph
+            submodel_files[sm_name] = rel_path
+
+        if submodel_graphs:
+            graph = _merge_submodels(
+                graph,
+                submodel_graphs,
+                submodel_files,
+                explicit_connects,
+                flatten=flatten,
+            )
+
+    return graph

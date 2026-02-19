@@ -7,6 +7,6 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
-from haute.pipeline import Pipeline
+from haute.pipeline import Pipeline, Submodel
 
-__all__ = ["Pipeline"]
+__all__ = ["Pipeline", "Submodel"]

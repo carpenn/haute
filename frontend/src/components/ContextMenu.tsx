@@ -1,15 +1,17 @@
 import { useEffect, useRef } from "react"
-import { Trash2, Copy, Type } from "lucide-react"
+import { Trash2, Copy, Type, Ungroup } from "lucide-react"
 
 interface ContextMenuProps {
   x: number
   y: number
   nodeId: string
   nodeLabel: string
+  isSubmodel?: boolean
   onClose: () => void
   onDelete: (id: string) => void
   onDuplicate: (id: string) => void
   onRename: (id: string) => void
+  onDissolveSubmodel?: (name: string) => void
 }
 
 export default function ContextMenu({
@@ -20,6 +22,8 @@ export default function ContextMenu({
   onDelete,
   onDuplicate,
   onRename,
+  onDissolveSubmodel,
+  isSubmodel,
   nodeId,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -42,11 +46,16 @@ export default function ContextMenu({
     return () => document.removeEventListener("keydown", handler)
   }, [onClose])
 
-  const items = [
+  const items: { label: string; icon: typeof Type; action: () => void; danger?: boolean }[] = [
     { label: "Rename", icon: Type, action: () => onRename(nodeId) },
     { label: "Duplicate", icon: Copy, action: () => onDuplicate(nodeId) },
     { label: "Delete", icon: Trash2, action: () => onDelete(nodeId), danger: true },
   ]
+
+  if (isSubmodel && onDissolveSubmodel) {
+    const smName = nodeId.replace("submodel__", "")
+    items.splice(2, 0, { label: "Dissolve Submodel", icon: Ungroup, action: () => onDissolveSubmodel(smName), danger: true })
+  }
 
   return (
     <div

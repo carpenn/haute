@@ -15,6 +15,8 @@ class GraphEdge(BaseModel):
     id: str
     source: str
     target: str
+    sourceHandle: str | None = None
+    targetHandle: str | None = None
 
 
 class GraphNodeData(BaseModel):
@@ -37,6 +39,7 @@ class Graph(BaseModel):
     pipeline_name: str | None = None
     pipeline_description: str | None = None
     preamble: str | None = None
+    submodels: dict[str, Any] | None = None
 
 
 class ColumnInfo(BaseModel):
@@ -304,3 +307,43 @@ class CacheStatusResponse(BaseModel):
     columns: dict[str, str] = Field(default_factory=dict)
     size_bytes: int = 0
     fetched_at: float = 0
+
+
+# ---------------------------------------------------------------------------
+# /api/submodel/*
+# ---------------------------------------------------------------------------
+
+
+class CreateSubmodelRequest(BaseModel):
+    name: str
+    node_ids: list[str]
+    graph: Graph
+    preamble: str = ""
+    source_file: str = ""
+    pipeline_name: str = "main"
+
+
+class CreateSubmodelResponse(BaseModel):
+    status: str = "ok"
+    submodel_file: str = ""
+    parent_file: str = ""
+    graph: dict[str, Any] = Field(default_factory=dict)
+
+
+class DissolveSubmodelRequest(BaseModel):
+    submodel_name: str
+    graph: Graph
+    preamble: str = ""
+    source_file: str = ""
+    pipeline_name: str = "main"
+
+
+class DissolveSubmodelResponse(BaseModel):
+    status: str = "ok"
+    graph: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubmodelGraphResponse(BaseModel):
+    status: str = "ok"
+    submodel_name: str = ""
+    graph: dict[str, Any] = Field(default_factory=dict)

@@ -17,6 +17,8 @@ import "@xyflow/react/dist/style.css"
 import ELK from "elkjs/lib/elk.bundled.js"
 
 import PipelineNode from "./nodes/PipelineNode"
+import SubmodelNode from "./nodes/SubmodelNode"
+import SubmodelPortNode from "./nodes/SubmodelPortNode"
 import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview, { type PreviewData } from "./panels/DataPreview"
@@ -24,6 +26,7 @@ import TracePanel from "./panels/TracePanel"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
+import BreadcrumbBar, { type ViewLevel } from "./components/BreadcrumbBar"
 import useUndoRedo from "./hooks/useUndoRedo"
 import { PanelLeftOpen, Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
 
@@ -70,6 +73,8 @@ const nodeTypes = {
   output: PipelineNode,
   dataSink: PipelineNode,
   externalFile: PipelineNode,
+  submodel: SubmodelNode,
+  submodelPort: SubmodelPortNode,
 }
 
 const labelMap: Record<string, string> = {
@@ -80,6 +85,8 @@ const labelMap: Record<string, string> = {
   output: "Output",
   dataSink: "Data Sink",
   externalFile: "External File",
+  submodel: "Submodel",
+  submodelPort: "Port",
 }
 
 function makePreviewData(
@@ -152,7 +159,7 @@ function FlowEditor() {
   const [dirty, setDirty] = useState(false)
   const [rowLimit, setRowLimit] = useState(1000)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
   const [syncBanner, setSyncBanner] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [preamble, setPreamble] = useState("")
@@ -161,8 +168,12 @@ function FlowEditor() {
   const [snapToGrid, setSnapToGrid] = useState(false)
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
   const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
+  const [viewStack, setViewStack] = useState<ViewLevel[]>([{ type: "pipeline", name: "main", file: "" }])
+  const [submodelDialog, setSubmodelDialog] = useState<{ nodeIds: string[] } | null>(null)
+  const submodelsRef = useRef<Record<string, any>>({})
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
+  const parentGraphRef = useRef<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, any> } | null>(null)
   const lastSavedRef = useRef<string>("")
   const preambleRef = useRef("")
   const pipelineNameRef = useRef("main")
@@ -277,6 +288,9 @@ function FlowEditor() {
         if (data.source_file) {
           sourceFileRef.current = data.source_file
         }
+        if (data.submodels) {
+          submodelsRef.current = data.submodels
+        }
         nodeIdCounter.current = (data.nodes || []).length
         lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [], preamble: data.preamble || "" })
         setLoading(false)
@@ -293,11 +307,20 @@ function FlowEditor() {
       // Prevent self-loops
       if (params.source === params.target) return
       // Prevent duplicate edges
-      const { edges: currentEdges } = graphRef.current
+      const { edges: currentEdges, nodes: currentNodes } = graphRef.current
       const exists = currentEdges.some(
         (e) => e.source === params.source && e.target === params.target
       )
       if (exists) return
+
+      // For new connections to a submodel, strip targetHandle so it doesn't
+      // auto-wire to an existing internal port. The user wires it inside.
+      const targetNode = currentNodes.find((n) => n.id === params.target)
+      if (targetNode && (targetNode.data as Record<string, unknown>).nodeType === "submodel" && params.targetHandle) {
+        setEdges((eds) => addEdge({ ...params, targetHandle: null }, eds))
+        return
+      }
+
       setEdges((eds) => addEdge(params, eds))
     },
     [setEdges],
@@ -310,11 +333,15 @@ function FlowEditor() {
 
   const fetchPreview = useCallback((node: Node) => {
     setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "loading" }))
-    const { nodes: n, edges: e } = graphRef.current
+    // When inside a submodel, send the full parent graph so the backend can
+    // flatten it and execute upstream nodes that live outside the submodel.
+    const graph = parentGraphRef.current
+      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
+      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
     fetch("/api/pipeline/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: { nodes: n, edges: e }, nodeId: node.id, rowLimit }),
+      body: JSON.stringify({ graph, nodeId: node.id, rowLimit }),
     })
       .then((r) => r.json())
       .then((result) => {
@@ -415,7 +442,7 @@ function FlowEditor() {
       body: JSON.stringify({
         name: pipelineNameRef.current,
         description: "",
-        graph: { nodes: n, edges: e },
+        graph: { nodes: n, edges: e, submodels: submodelsRef.current },
         preamble: preambleRef.current,
         source_file: sourceFileRef.current,
       }),
@@ -451,13 +478,15 @@ function FlowEditor() {
 
   const handleCellClick = useCallback((rowIndex: number, column: string) => {
     if (!selectedNode) return
-    const { nodes: n, edges: e } = graphRef.current
+    const graph = parentGraphRef.current
+      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
+      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
     setTracedCell({ rowIndex, column })
     fetch("/api/pipeline/trace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        graph: { nodes: n, edges: e },
+        graph,
         rowIndex: rowIndex,
         targetNodeId: selectedNode.id,
         column,
@@ -589,6 +618,19 @@ function FlowEditor() {
         return
       }
 
+      // Ctrl+G → group selected nodes into a submodel
+      if (mod && e.key === "g") {
+        e.preventDefault()
+        const { nodes: currentNodes } = graphRef.current
+        const selectedIds = currentNodes.filter((n) => n.selected).map((n) => n.id)
+        if (selectedIds.length >= 2) {
+          setSubmodelDialog({ nodeIds: selectedIds })
+        } else {
+          addToast("info", "Select at least 2 nodes to create a submodel (Ctrl+G)")
+        }
+        return
+      }
+
       // G → toggle snap-to-grid (unless typing)
       if (e.key === "g" && !isTyping && !mod) {
         toggleSnapToGrid()
@@ -659,11 +701,243 @@ function FlowEditor() {
     addToast("info", "Auto-layout applied")
   }, [setNodes, fitView, addToast])
 
+  // ── Submodel handlers ─────────────────────────────────────────────
+
+  const handleCreateSubmodel = useCallback(async (name: string, nodeIds: string[]) => {
+    try {
+      const graph = { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
+      const resp = await fetch("/api/submodel/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          node_ids: nodeIds,
+          graph,
+          preamble: preambleRef.current,
+          source_file: sourceFileRef.current,
+          pipeline_name: pipelineNameRef.current,
+        }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json()
+        addToast("error", err.detail || "Failed to create submodel")
+        return
+      }
+      const data = await resp.json()
+      const newGraph = data.graph
+      if (newGraph) {
+        setNodesRaw(newGraph.nodes || [])
+        setEdgesRaw((newGraph.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        submodelsRef.current = newGraph.submodels || {}
+        addToast("success", `Submodel "${name}" created`)
+        setDirty(false)
+        setTimeout(() => fitView({ padding: 0.8 }), 100)
+      }
+    } catch (err: unknown) {
+      addToast("error", `Create submodel failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    setSubmodelDialog(null)
+  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
+
+  const handleDrillIntoSubmodel = useCallback(async (nodeId: string) => {
+    // Extract submodel name from node id (submodel__<name>)
+    const smName = nodeId.replace("submodel__", "")
+    try {
+      const resp = await fetch(`/api/submodel/${encodeURIComponent(smName)}`)
+      if (!resp.ok) {
+        addToast("error", `Could not load submodel "${smName}"`)
+        return
+      }
+      const data = await resp.json()
+      const smGraph = data.graph
+      if (smGraph) {
+        // Save current graph state before drilling in
+        const parentNodes = [...graphRef.current.nodes]
+        const parentEdges = [...graphRef.current.edges]
+        parentGraphRef.current = { nodes: parentNodes, edges: parentEdges, submodels: { ...submodelsRef.current } }
+        // Store on the viewStack for restoring later
+        setViewStack((prev) => {
+          // Tag the current level with its graph
+          const updated = [...prev]
+          if (updated.length > 0) {
+            updated[updated.length - 1] = { ...updated[updated.length - 1], _savedNodes: parentNodes, _savedEdges: parentEdges }
+          }
+          return [...updated, { type: "submodel" as const, name: smName, file: `modules/${smName}.py` }]
+        })
+        const newNodes: Node[] = smGraph.nodes || []
+        const newEdges: Edge[] = (smGraph.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))
+
+        // Build input/output port nodes from parent cross-boundary edges
+        const smNodeId = `submodel__${smName}`
+        const parentNodeMap = new Map(parentNodes.map((n: Node) => [n.id, n]))
+        const childIds = new Set(newNodes.map((n: Node) => n.id))
+
+        // Input ports: parent edges targeting this submodel node
+        const inputPortEdges = parentEdges.filter(
+          (e: Edge) => e.target === smNodeId
+        )
+        // Group by external source so each source gets one port node
+        const inputsBySource = new Map<string, string[]>()
+        for (const e of inputPortEdges) {
+          const handle = (e as Record<string, unknown>).targetHandle as string | undefined
+          const childId = handle ? handle.replace("in__", "") : "__unconnected__"
+          const targets = inputsBySource.get(e.source) || []
+          targets.push(childId)
+          inputsBySource.set(e.source, targets)
+        }
+        for (const [srcId, targetChildIds] of inputsBySource) {
+          const srcNode = parentNodeMap.get(srcId)
+          const label = srcNode ? String((srcNode.data as Record<string, unknown>).label || srcId) : srcId
+          const portId = `port_in__${srcId}`
+          newNodes.push({
+            id: portId,
+            type: "submodelPort",
+            position: { x: 0, y: 0 },
+            data: { label, portDirection: "input", portName: label },
+          } as Node)
+          // Only add edges to internal child nodes that exist;
+          // new unconnected ports appear without edges so the user can wire them
+          for (const childId of [...new Set(targetChildIds)]) {
+            if (!childIds.has(childId)) continue
+            newEdges.push({
+              id: `e_${portId}_${childId}`,
+              source: portId,
+              target: childId,
+              type: "default",
+              animated: false,
+              style: { strokeDasharray: "6 3", opacity: 0.5 },
+            } as Edge)
+          }
+        }
+
+        // Output ports: parent edges sourced from this submodel node
+        const outputPortEdges = parentEdges.filter(
+          (e: Edge) => e.source === smNodeId && (e as Record<string, unknown>).sourceHandle
+        )
+        const outputsByTarget = new Map<string, string[]>()
+        for (const e of outputPortEdges) {
+          const childId = ((e as Record<string, unknown>).sourceHandle as string).replace("out__", "")
+          if (!childIds.has(childId)) continue
+          const sources = outputsByTarget.get(e.target) || []
+          sources.push(childId)
+          outputsByTarget.set(e.target, sources)
+        }
+        for (const [tgtId, sourceChildIds] of outputsByTarget) {
+          const tgtNode = parentNodeMap.get(tgtId)
+          const label = tgtNode ? String((tgtNode.data as Record<string, unknown>).label || tgtId) : tgtId
+          const portId = `port_out__${tgtId}`
+          newNodes.push({
+            id: portId,
+            type: "submodelPort",
+            position: { x: 0, y: 0 },
+            data: { label, portDirection: "output", portName: label },
+          } as Node)
+          for (const childId of [...new Set(sourceChildIds)]) {
+            newEdges.push({
+              id: `e_${childId}_${portId}`,
+              source: childId,
+              target: portId,
+              type: "default",
+              animated: false,
+              style: { strokeDasharray: "6 3", opacity: 0.5 },
+            } as Edge)
+          }
+        }
+
+        // Layout all nodes (internal + port nodes) together
+        const layouted = await getLayoutedElements(newNodes, newEdges)
+        setNodesRaw(layouted)
+        setEdgesRaw(newEdges)
+        setSelectedNode(null)
+        setPreviewData(null)
+        setTimeout(() => fitView({ padding: 0.8 }), 100)
+      }
+    } catch (err: unknown) {
+      addToast("error", `Drill-down failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
+
+  const handleBreadcrumbNavigate = useCallback((depth: number) => {
+    setViewStack((prev) => {
+      if (depth >= prev.length - 1) return prev // already at this level
+      const target = prev[depth]
+      if (target._savedNodes && target._savedEdges) {
+        setNodesRaw(target._savedNodes)
+        setEdgesRaw(target._savedEdges.map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        setSelectedNode(null)
+        setPreviewData(null)
+        setTimeout(() => fitView({ padding: 0.8 }), 100)
+      }
+      // Clear parent graph ref when returning to root
+      if (depth === 0) parentGraphRef.current = null
+      return prev.slice(0, depth + 1)
+    })
+  }, [setNodesRaw, setEdgesRaw, fitView])
+
+  const handleDissolveSubmodel = useCallback(async (smName: string) => {
+    try {
+      const graph = { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
+      const resp = await fetch("/api/submodel/dissolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          submodel_name: smName,
+          graph,
+          preamble: preambleRef.current,
+          source_file: sourceFileRef.current,
+          pipeline_name: pipelineNameRef.current,
+        }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json()
+        addToast("error", err.detail || "Failed to dissolve submodel")
+        return
+      }
+      const data = await resp.json()
+      const flat = data.graph
+      if (flat) {
+        setNodesRaw(flat.nodes || [])
+        setEdgesRaw((flat.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        submodelsRef.current = {}
+        addToast("success", `Submodel "${smName}" dissolved`)
+        setDirty(false)
+        setTimeout(() => fitView({ padding: 0.8 }), 100)
+      }
+    } catch (err: unknown) {
+      addToast("error", `Dissolve failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
+
+  // Map child node IDs → submodel placeholder node IDs so trace results
+  // (which use flattened child IDs) can highlight submodel nodes on the canvas.
+  // Built from visible canvas nodes which always have config.childNodeIds.
+  const childToSubmodelId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const n of nodes) {
+      const d = n.data as Record<string, unknown>
+      if (d.nodeType === "submodel") {
+        const cfg = (d.config as Record<string, unknown>) || {}
+        const childIds: string[] = (cfg.childNodeIds as string[]) || []
+        for (const cid of childIds) {
+          map.set(cid, n.id)
+        }
+      }
+    }
+    return map
+  }, [nodes])
+
+  // Resolve a trace node ID to the visible canvas node ID
+  const resolveTraceId = useCallback((id: string) => childToSubmodelId.get(id) || id, [childToSubmodelId])
+
   // All node IDs in the trace path (used for opacity + edge styling)
   const allTraceNodeIds = useMemo(() => {
     if (!traceResult) return new Set<string>()
-    return new Set(traceResult.steps.map((s) => s.node_id))
-  }, [traceResult])
+    const ids = new Set<string>()
+    for (const s of traceResult.steps) {
+      ids.add(resolveTraceId(s.node_id))
+    }
+    return ids
+  }, [traceResult, resolveTraceId])
 
   // Derive per-node trace styling + value badges from traceResult
   const { traceValueMap, relevantNodeIds } = useMemo(() => {
@@ -672,16 +946,17 @@ function FlowEditor() {
     const relIds = new Set<string>()
     for (const s of traceResult.steps) {
       if (!s.column_relevant) continue
-      relIds.add(s.node_id)
+      const visibleId = resolveTraceId(s.node_id)
+      relIds.add(visibleId)
       if (traceResult.column && s.output_values[traceResult.column] !== undefined) {
-        valMap.set(s.node_id, s.output_values[traceResult.column])
+        valMap.set(visibleId, s.output_values[traceResult.column])
       } else {
         const k = s.schema_diff.columns_added[0] || s.schema_diff.columns_modified[0]
-        if (k) valMap.set(s.node_id, s.output_values[k])
+        if (k) valMap.set(visibleId, s.output_values[k])
       }
     }
     return { traceValueMap: valMap, relevantNodeIds: relIds }
-  }, [traceResult])
+  }, [traceResult, resolveTraceId])
 
   // Memoize nodes with status + trace styling (all derived from traceResult)
   const nodesWithStatus = useMemo(() => {
@@ -732,7 +1007,7 @@ function FlowEditor() {
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()
-    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label) })
+    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label), isSubmodel: (node.data as Record<string, unknown>).nodeType === "submodel" })
   }, [])
 
   const onDragOver = useCallback((event: DragEvent) => {
@@ -929,7 +1204,8 @@ function FlowEditor() {
               <button onClick={() => setSyncBanner(null)} className="opacity-60 hover:opacity-100">✕</button>
             </div>
           )}
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 relative">
+            <BreadcrumbBar viewStack={viewStack} onNavigate={handleBreadcrumbNavigate} />
             <ReactFlow
               nodes={nodesWithStatus}
               edges={edgesWithTrace}
@@ -938,6 +1214,11 @@ function FlowEditor() {
               onConnect={onConnect}
               onSelectionChange={onSelectionChange}
               onNodeContextMenu={onNodeContextMenu}
+              onNodeDoubleClick={(_event, node) => {
+                if ((node.data as Record<string, unknown>)?.nodeType === "submodel") {
+                  handleDrillIntoSubmodel(node.id)
+                }
+              }}
               onPaneClick={() => { setContextMenu(null); clearTrace() }}
               onDrop={onDrop}
               onDragOver={onDragOver}
@@ -976,6 +1257,7 @@ function FlowEditor() {
             node={selectedNode as unknown as SimpleNode | null}
             edges={edges as unknown as SimpleEdge[]}
             allNodes={nodes as unknown as SimpleNode[]}
+            submodels={submodelsRef.current}
             onClose={() => setSelectedNode(null)}
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}
@@ -994,6 +1276,8 @@ function FlowEditor() {
           onDelete={handleDeleteNode}
           onDuplicate={handleDuplicateNode}
           onRename={handleRenameNode}
+          isSubmodel={contextMenu.isSubmodel}
+          onDissolveSubmodel={handleDissolveSubmodel}
         />
       )}
 
@@ -1062,6 +1346,63 @@ function FlowEditor() {
       )}
 
       {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)} />}
+
+      {submodelDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,.5)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setSubmodelDialog(null) }}
+        >
+          <div className="w-[400px] flex flex-col rounded-xl overflow-hidden shadow-2xl" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Create Submodel</h2>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Group {submodelDialog.nodeIds.length} selected nodes into a submodel
+              </p>
+            </div>
+            <form
+              className="p-4 flex flex-col gap-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const formData = new FormData(e.currentTarget)
+                const name = (formData.get("name") as string || "").trim()
+                if (name) handleCreateSubmodel(name, submodelDialog.nodeIds)
+              }}
+            >
+              <div>
+                <label className="text-[11px] font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>Submodel name</label>
+                <input
+                  name="name"
+                  type="text"
+                  autoFocus
+                  placeholder="e.g. model_scoring"
+                  className="w-full px-3 py-1.5 text-[13px] rounded-md focus:outline-none focus:ring-2"
+                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)', caretColor: 'var(--accent)' }}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSubmodelDialog(null)}
+                  className="px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-[12px] font-semibold text-white rounded-md transition-colors"
+                  style={{ background: '#f97316' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#fb923c'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = '#f97316'}
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

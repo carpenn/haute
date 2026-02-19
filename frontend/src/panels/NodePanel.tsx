@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2 } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2, Package } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { sanitizeName } from "../utils/sanitizeName"
 
@@ -51,6 +51,7 @@ type NodePanelProps = {
   node: SimpleNode | null
   edges: SimpleEdge[]
   allNodes: SimpleNode[]
+  submodels?: Record<string, unknown>
   onClose: () => void
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
   onDeleteEdge?: (edgeId: string) => void
@@ -759,7 +760,7 @@ function DataSourceConfig({
         </div>
 
         {/* API Input toggle */}
-        <div>
+        <div key="api-input">
           <button
             onClick={() => {
               const next = !config.deploy_input
@@ -781,7 +782,7 @@ function DataSourceConfig({
           </button>
         </div>
 
-        {config.deploy_input && (
+        {Boolean(config.deploy_input) && (
           <div>
             <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
               Row ID Column
@@ -809,7 +810,7 @@ function DataSourceConfig({
                 <option key={col.name} value={col.name}>{col.name} ({col.dtype})</option>
               ))}
             </select>
-            {config.row_id_column && (
+            {Boolean(config.row_id_column) && (
               <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Traces will identify rows by <span className="font-mono font-medium" style={{ color: 'var(--text-secondary)' }}>{config.row_id_column as string}</span>
               </div>
@@ -1377,12 +1378,14 @@ function DataSinkConfig({
   nodeId,
   allNodes,
   edges,
+  submodels,
 }: {
   config: Record<string, unknown>
   onUpdate: (key: string, value: unknown) => void
   nodeId: string
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
+  submodels?: Record<string, unknown>
 }) {
   const [format, setFormat] = useState<string>((config.format as string) || "parquet")
   const [writing, setWriting] = useState(false)
@@ -1398,6 +1401,7 @@ function DataSinkConfig({
     const graph = {
       nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
       edges: edges,
+      submodels: submodels,
     }
 
     fetch("/api/pipeline/sink", {
@@ -1565,11 +1569,71 @@ function OutputConfig({
   )
 }
 
+function SubmodelConfig({
+  config,
+}: {
+  config: Record<string, unknown>
+}) {
+  const file = (config.file as string) || ""
+  const childNodeIds = (config.childNodeIds as string[]) || []
+  const inputPorts = (config.inputPorts as string[]) || []
+  const outputPorts = (config.outputPorts as string[]) || []
+
+  return (
+    <div className="px-4 py-3 space-y-3">
+      <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(249,115,22,.08)', border: '1px solid rgba(249,115,22,.2)' }}>
+        <Package size={14} style={{ color: '#f97316' }} />
+        <span className="text-xs font-medium" style={{ color: '#fb923c' }}>Submodel</span>
+        <span className="ml-auto text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>{childNodeIds.length} nodes</span>
+      </div>
+
+      {file && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>File</label>
+          <div className="mt-1 text-xs font-mono px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+            {file}
+          </div>
+        </div>
+      )}
+
+      {inputPorts.length > 0 && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Inputs</label>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {inputPorts.map((port) => (
+              <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                {port}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {outputPorts.length > 0 && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Outputs</label>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {outputPorts.map((port) => (
+              <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: 'rgba(249,115,22,.1)', color: '#fb923c' }}>
+                {port}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-[11px] pt-1" style={{ color: 'var(--text-muted)' }}>
+        Double-click to view internal nodes
+      </div>
+    </div>
+  )
+}
+
 const MIN_PANEL_W = 320
 const MAX_PANEL_W = 900
 const DEFAULT_PANEL_W = 400
 
-export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview }: NodePanelProps) {
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_W)
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -1613,6 +1677,7 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
   const isExternalFile = node.data.nodeType === "externalFile"
   const isOutput = node.data.nodeType === "output"
   const isTransform = node.data.nodeType === "transform"
+  const isSubmodel = node.data.nodeType === "submodel"
 
   // Compute input sources - variable name = sanitized source node label
   const nodeMap = Object.fromEntries(allNodes.map((n) => [n.id, n]))
@@ -1668,13 +1733,15 @@ export default function NodePanel({ node, edges, allNodes, onClose, onUpdateNode
       {isDataSource ? (
         <DataSourceConfig config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} />
       ) : isDataSink ? (
-        <DataSinkConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
+        <DataSinkConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} />
       ) : isExternalFile ? (
         <ExternalFileConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
       ) : isOutput ? (
         <OutputConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
       ) : isTransform ? (
         <TransformConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
+      ) : isSubmodel ? (
+        <SubmodelConfig config={config} />
       ) : (
         Object.keys(config).length > 0 && (
           <div className="px-4 py-3">
