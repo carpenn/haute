@@ -320,12 +320,12 @@ def run(pipeline_file: str | None) -> None:
         click.echo(f"Error parsing pipeline: {e}", err=True)
         raise SystemExit(1)
 
-    nodes = graph.get("nodes", [])
+    nodes = graph.nodes
     if not nodes:
         click.echo("Error: No pipeline nodes found in file.", err=True)
         raise SystemExit(1)
 
-    name = graph.get("pipeline_name", filepath.stem)
+    name = graph.pipeline_name or filepath.stem
     click.echo(f"Pipeline: {name} ({len(nodes)} nodes)")
 
     try:
@@ -514,11 +514,11 @@ def deploy(
         click.echo(f"  ✗ Resolution failed: {e}", err=True)
         raise SystemExit(1)
 
-    n_kept = len(resolved.pruned_graph.get("nodes", []))
+    n_kept = len(resolved.pruned_graph.nodes)
     n_removed = len(resolved.removed_node_ids)
     click.echo(
         f"  ✓ Parsed pipeline ({n_kept + n_removed} nodes, "
-        f"{len(resolved.pruned_graph.get('edges', []))} edges)"
+        f"{len(resolved.pruned_graph.edges)} edges)"
     )
     click.echo(f"  ✓ Pruned to output ancestors ({n_kept} nodes)")
     if n_removed:
@@ -669,9 +669,9 @@ def lint(pipeline_file: str | None) -> None:
         click.echo(f"  ✗ Parse error: {e}", err=True)
         raise SystemExit(1)
 
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
-    node_ids = {n["id"] for n in nodes}
+    nodes = graph.nodes
+    edges = graph.edges
+    node_ids = {n.id for n in nodes}
 
     if not nodes:
         click.echo("  ✗ No nodes found in pipeline.", err=True)
@@ -681,23 +681,22 @@ def lint(pipeline_file: str | None) -> None:
 
     # Check for edges referencing non-existent nodes
     for edge in edges:
-        if edge["source"] not in node_ids:
-            errors.append(f"Edge references missing source node: {edge['source']}")
-        if edge["target"] not in node_ids:
-            errors.append(f"Edge references missing target node: {edge['target']}")
+        if edge.source not in node_ids:
+            errors.append(f"Edge references missing source node: {edge.source}")
+        if edge.target not in node_ids:
+            errors.append(f"Edge references missing target node: {edge.target}")
 
     # Check for nodes with parse errors
     for node in nodes:
-        data = node.get("data", {})
-        if data.get("parseError"):
-            errors.append(f"Node '{node['id']}' has parse error: {data['parseError']}")
+        if node.data.config.get("parseError"):
+            errors.append(f"Node '{node.id}' has parse error: {node.data.config['parseError']}")
 
     # Check for orphan nodes (no edges at all, in a multi-node graph)
     if len(nodes) > 1:
         connected = set()
         for edge in edges:
-            connected.add(edge["source"])
-            connected.add(edge["target"])
+            connected.add(edge.source)
+            connected.add(edge.target)
         orphans = node_ids - connected
         for orphan in orphans:
             errors.append(f"Node '{orphan}' is disconnected (no edges)")
@@ -708,7 +707,7 @@ def lint(pipeline_file: str | None) -> None:
             click.echo(f"  ✗ {err}", err=True)
         raise SystemExit(1)
 
-    name = graph.get("pipeline_name", filepath.stem)
+    name = graph.pipeline_name or filepath.stem
     click.echo(f"  ✓ Pipeline '{name}': {len(nodes)} nodes, {len(edges)} edges")
     click.echo("  ✓ No structural issues found.")
 

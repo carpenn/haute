@@ -50,14 +50,14 @@ pipeline.connect("load_data", "transform")
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
 
-        assert graph["pipeline_name"] == "test"
-        assert len(graph["nodes"]) == 2
-        assert len(graph["edges"]) >= 1
+        assert graph.pipeline_name == "test"
+        assert len(graph.nodes) == 2
+        assert len(graph.edges) >= 1
 
         # Check node types inferred correctly
-        node_map = {n["id"]: n for n in graph["nodes"]}
-        assert node_map["load_data"]["data"]["nodeType"] == "dataSource"
-        assert node_map["transform"]["data"]["nodeType"] == "transform"
+        node_map = {n.id: n for n in graph.nodes}
+        assert node_map["load_data"].data.nodeType == "dataSource"
+        assert node_map["transform"].data.nodeType == "transform"
 
     def test_pipeline_name_extracted(self, tmp_path):
         code = '''\
@@ -68,7 +68,7 @@ pipeline = haute.Pipeline("my_pricing", description="Motor pricing")
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        assert graph["pipeline_name"] == "my_pricing"
+        assert graph.pipeline_name == "my_pricing"
 
     def test_edges_from_connect_calls(self, tmp_path):
         code = '''\
@@ -92,7 +92,7 @@ pipeline.connect("a", "b")
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        edge_pairs = [(e["source"], e["target"]) for e in graph["edges"]]
+        edge_pairs = [(e.source, e.target) for e in graph.edges]
         assert ("a", "b") in edge_pairs
 
     def test_implicit_edges_from_param_names(self, tmp_path):
@@ -114,7 +114,7 @@ def transform(source: pl.DataFrame) -> pl.DataFrame:
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        edge_pairs = [(e["source"], e["target"]) for e in graph["edges"]]
+        edge_pairs = [(e.source, e.target) for e in graph.edges]
         assert ("source", "transform") in edge_pairs
 
     def test_node_config_extracted(self, tmp_path):
@@ -132,8 +132,8 @@ def load_data() -> pl.DataFrame:
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        node = graph["nodes"][0]
-        assert node["data"]["config"]["path"] == "data/input.parquet"
+        node = graph.nodes[0]
+        assert node.data.config["path"] == "data/input.parquet"
 
     def test_docstring_as_description(self, tmp_path):
         code = '''\
@@ -150,12 +150,12 @@ def my_node() -> pl.DataFrame:
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        assert graph["nodes"][0]["data"]["description"] == "This is the description."
+        assert graph.nodes[0].data.description == "This is the description."
 
     def test_empty_file_returns_empty_graph(self, tmp_path):
         p = _write_pipeline(tmp_path, "")
         graph = parse_pipeline_file(p)
-        assert graph["nodes"] == []
+        assert graph.nodes == []
 
     def test_preamble_extracted(self, tmp_path):
         code = '''\
@@ -175,7 +175,7 @@ def src() -> pl.DataFrame:
 '''
         p = _write_pipeline(tmp_path, code)
         graph = parse_pipeline_file(p)
-        preamble = graph.get("preamble", "")
+        preamble = graph.preamble or ""
         assert "DATA_DIR" in preamble
 
 
@@ -214,9 +214,9 @@ pipeline.connect("source", "transform")
         p2.write_text(generated)
         graph2 = parse_pipeline_file(p2)
 
-        assert len(graph1["nodes"]) == len(graph2["nodes"])
-        assert len(graph1["edges"]) == len(graph2["edges"])
+        assert len(graph1.nodes) == len(graph2.nodes)
+        assert len(graph1.edges) == len(graph2.edges)
 
-        names1 = {n["id"] for n in graph1["nodes"]}
-        names2 = {n["id"] for n in graph2["nodes"]}
+        names1 = {n.id for n in graph1.nodes}
+        names2 = {n.id for n in graph2.nodes}
         assert names1 == names2

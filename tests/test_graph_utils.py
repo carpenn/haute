@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.graph_utils import (
     _execute_lazy,
     _object_cache,
@@ -14,6 +15,10 @@ from haute.graph_utils import (
     load_external_object,
     topo_sort_ids,
 )
+
+
+def _e(src: str, tgt: str) -> GraphEdge:
+    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
 
 # ---------------------------------------------------------------------------
 # _sanitize_func_name
@@ -49,20 +54,12 @@ class TestSanitizeFuncName:
 class TestTopoSort:
     def test_linear_chain(self):
         ids = ["a", "b", "c"]
-        edges = [
-            {"source": "a", "target": "b"},
-            {"source": "b", "target": "c"},
-        ]
+        edges = [_e("a", "b"), _e("b", "c")]
         assert topo_sort_ids(ids, edges) == ["a", "b", "c"]
 
     def test_diamond(self):
         ids = ["a", "b", "c", "d"]
-        edges = [
-            {"source": "a", "target": "b"},
-            {"source": "a", "target": "c"},
-            {"source": "b", "target": "d"},
-            {"source": "c", "target": "d"},
-        ]
+        edges = [_e("a", "b"), _e("a", "c"), _e("b", "d"), _e("c", "d")]
         result = topo_sort_ids(ids, edges)
         assert result[0] == "a"
         assert result[-1] == "d"
@@ -70,7 +67,7 @@ class TestTopoSort:
         # Verify topological invariant
         idx = {nid: i for i, nid in enumerate(result)}
         for e in edges:
-            assert idx[e["source"]] < idx[e["target"]]
+            assert idx[e.source] < idx[e.target]
 
     def test_single_node(self):
         assert topo_sort_ids(["x"], []) == ["x"]
@@ -82,31 +79,27 @@ class TestTopoSort:
     def test_deterministic_ordering(self):
         """With equal in-degree, nodes should be sorted alphabetically."""
         ids = ["c", "b", "a"]
-        edges = [{"source": "a", "target": "c"}, {"source": "b", "target": "c"}]
+        edges = [_e("a", "c"), _e("b", "c")]
         result = topo_sort_ids(ids, edges)
         assert result == ["a", "b", "c"]
         # Verify topological invariant: every parent before its child
         idx = {nid: i for i, nid in enumerate(result)}
         for e in edges:
-            assert idx[e["source"]] < idx[e["target"]], (
-                f"{e['source']} should come before {e['target']}"
+            assert idx[e.source] < idx[e.target], (
+                f"{e.source} should come before {e.target}"
             )
 
     def test_cycle_drops_nodes(self):
         """Cycle nodes never reach in-degree 0, so they're silently dropped."""
         ids = ["a", "b", "c"]
-        edges = [
-            {"source": "a", "target": "b"},
-            {"source": "b", "target": "c"},
-            {"source": "c", "target": "a"},
-        ]
+        edges = [_e("a", "b"), _e("b", "c"), _e("c", "a")]
         result = topo_sort_ids(ids, edges)
         assert len(result) < len(ids)  # cycle members dropped
 
     def test_edges_referencing_unknown_nodes(self):
         """Edges referencing non-existent IDs should be ignored."""
         ids = ["a", "b"]
-        edges = [{"source": "a", "target": "b"}, {"source": "x", "target": "y"}]
+        edges = [_e("a", "b"), _e("x", "y")]
         result = topo_sort_ids(ids, edges)
         assert set(result) == {"a", "b"}
 
@@ -124,18 +117,12 @@ class TestAncestors:
         assert "a" in result
 
     def test_finds_parents(self):
-        edges = [
-            {"source": "a", "target": "b"},
-            {"source": "b", "target": "c"},
-        ]
+        edges = [_e("a", "b"), _e("b", "c")]
         result = ancestors("c", edges, {"a", "b", "c"})
         assert result == {"a", "b", "c"}
 
     def test_excludes_unrelated(self):
-        edges = [
-            {"source": "a", "target": "b"},
-            {"source": "x", "target": "y"},
-        ]
+        edges = [_e("a", "b"), _e("x", "y")]
         result = ancestors("b", edges, {"a", "b", "x", "y"})
         assert result == {"a", "b"}
 
@@ -144,17 +131,14 @@ class TestAncestors:
 # _prepare_graph
 # ---------------------------------------------------------------------------
 
-def _make_graph(nodes_data: list[tuple[str, str]], edges_data: list[tuple[str, str]]) -> dict:
-    """Helper to build a minimal graph dict."""
+def _make_graph(nodes_data: list[tuple[str, str]], edges_data: list[tuple[str, str]]) -> PipelineGraph:
+    """Helper to build a minimal PipelineGraph."""
     nodes = [
-        {"id": nid, "data": {"label": label, "nodeType": "transform", "config": {}}}
+        GraphNode(id=nid, data=NodeData(label=label, nodeType="transform"))
         for nid, label in nodes_data
     ]
-    edges = [
-        {"id": f"e_{s}_{t}", "source": s, "target": t}
-        for s, t in edges_data
-    ]
-    return {"nodes": nodes, "edges": edges}
+    edges = [_e(s, t) for s, t in edges_data]
+    return PipelineGraph(nodes=nodes, edges=edges)
 
 
 class TestPrepareGraph:
@@ -188,11 +172,11 @@ class TestPrepareGraph:
 
 class TestExecuteLazy:
     @staticmethod
-    def _simple_build_fn(node: dict, source_names: list[str] | None = None):
+    def _simple_build_fn(node, source_names=None):
         """Minimal build_node_fn for testing."""
-        nid = node["id"]
-        nt = node.get("data", {}).get("nodeType", "transform")
-        name = node.get("data", {}).get("label", nid)
+        nid = node.id
+        nt = node.data.nodeType
+        name = node.data.label or nid
 
         if nt == "dataSource":
             def fn() -> pl.LazyFrame:
@@ -208,7 +192,11 @@ class TestExecuteLazy:
             [("src", "Source"), ("t", "Transform")],
             [("src", "t")],
         )
-        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+        g = PipelineGraph(
+            nodes=[GraphNode(id="src", data=NodeData(label="Source", nodeType="dataSource")),
+                   GraphNode(id="t", data=NodeData(label="Transform", nodeType="transform"))],
+            edges=g.edges,
+        )
 
         outputs, order, _, _ = _execute_lazy(g, self._simple_build_fn)
         assert "src" in outputs
@@ -222,7 +210,12 @@ class TestExecuteLazy:
             [("a", "A"), ("b", "B"), ("c", "C")],
             [("a", "b"), ("b", "c")],
         )
-        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+        g = PipelineGraph(
+            nodes=[GraphNode(id="a", data=NodeData(label="A", nodeType="dataSource")),
+                   GraphNode(id="b", data=NodeData(label="B", nodeType="transform")),
+                   GraphNode(id="c", data=NodeData(label="C", nodeType="transform"))],
+            edges=g.edges,
+        )
 
         outputs, order, _, _ = _execute_lazy(g, self._simple_build_fn, target_node_id="b")
         assert "b" in outputs
@@ -231,12 +224,15 @@ class TestExecuteLazy:
     def test_dataframe_converted_to_lazy(self):
         """If a node fn returns a DataFrame, it should be auto-converted to LazyFrame."""
         def build_fn(node, source_names=None):
-            if node["id"] == "src":
+            if node.id == "src":
                 return "src", lambda: pl.DataFrame({"x": [1]}), True
             return "t", lambda *dfs: dfs[0], False
 
-        g = _make_graph([("src", "Src"), ("t", "T")], [("src", "t")])
-        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+        g = PipelineGraph(
+            nodes=[GraphNode(id="src", data=NodeData(label="Src", nodeType="dataSource")),
+                   GraphNode(id="t", data=NodeData(label="T", nodeType="transform"))],
+            edges=[_e("src", "t")],
+        )
 
         outputs, _, _, _ = _execute_lazy(g, build_fn)
         assert isinstance(outputs["t"], pl.LazyFrame)
@@ -244,7 +240,7 @@ class TestExecuteLazy:
     def test_non_source_no_input_raises(self):
         """A non-source node with no parents and no prior outputs raises ValueError."""
         def build_fn(node, source_names=None):
-            return node["id"], lambda *dfs: dfs[0], False
+            return node.id, lambda *dfs: dfs[0], False
 
         g = _make_graph([("lonely", "Lonely")], [])
         with pytest.raises(ValueError, match="No input data available"):
@@ -253,14 +249,17 @@ class TestExecuteLazy:
     def test_no_edge_non_source_raises(self):
         """A non-source with no edges raises even when prior outputs exist."""
         def build_fn(node, source_names=None):
-            nid = node["id"]
+            nid = node.id
             if nid == "src":
                 return nid, lambda: pl.DataFrame({"x": [1]}).lazy(), True
             return nid, lambda *dfs: dfs[0], False
 
         # Two nodes, no edge — "t" must not silently grab src's output
-        g = _make_graph([("src", "Src"), ("t", "T")], [])
-        g["nodes"][0]["data"]["nodeType"] = "dataSource"
+        g = PipelineGraph(
+            nodes=[GraphNode(id="src", data=NodeData(label="Src", nodeType="dataSource")),
+                   GraphNode(id="t", data=NodeData(label="T", nodeType="transform"))],
+            edges=[],
+        )
 
         with pytest.raises(ValueError, match="No input data available"):
             _execute_lazy(g, build_fn)
@@ -316,7 +315,7 @@ class TestExecuteLazyMultiInput:
     def test_multi_input_node(self):
         """A node with two parents receives both LazyFrames."""
         def build_fn(node, source_names=None):
-            nid = node["id"]
+            nid = node.id
             if nid in ("a", "b"):
                 data = {"x": [1]} if nid == "a" else {"y": [2]}
                 return nid, lambda d=data: pl.DataFrame(d).lazy(), True
@@ -325,12 +324,12 @@ class TestExecuteLazyMultiInput:
                     return dfs[0].join(dfs[1], how="cross")
                 return nid, fn, False
 
-        g = _make_graph(
-            [("a", "A"), ("b", "B"), ("c", "C")],
-            [("a", "c"), ("b", "c")],
+        g = PipelineGraph(
+            nodes=[GraphNode(id="a", data=NodeData(label="A", nodeType="dataSource")),
+                   GraphNode(id="b", data=NodeData(label="B", nodeType="dataSource")),
+                   GraphNode(id="c", data=NodeData(label="C", nodeType="transform"))],
+            edges=[_e("a", "c"), _e("b", "c")],
         )
-        g["nodes"][0]["data"]["nodeType"] = "dataSource"
-        g["nodes"][1]["data"]["nodeType"] = "dataSource"
 
         outputs, _, _, _ = _execute_lazy(g, build_fn)
         df = outputs["c"].collect()
@@ -394,7 +393,7 @@ class TestBuildInstanceMapping:
 class TestResolveOrigSourceNames:
     def test_non_instance_returns_none(self):
         from haute.graph_utils import resolve_orig_source_names
-        node = {"data": {"config": {}}}
+        node = GraphNode(id="x", data=NodeData(label="x"))
         assert resolve_orig_source_names(node, {}, {}, {}) is None
 
     def test_resolves_from_full_edges(self):
@@ -402,10 +401,10 @@ class TestResolveOrigSourceNames:
         are outside the execution subgraph (target_node_id filtering)."""
         from haute.graph_utils import resolve_orig_source_names
         node_map = {
-            "freq_set": {"data": {"label": "freq_set", "config": {}}},
-            "policies": {"data": {"label": "policies", "config": {}}},
-            "claims_agg": {"data": {"label": "claims_agg", "config": {}}},
-            "inst": {"data": {"label": "inst", "config": {"instanceOf": "freq_set"}}},
+            "freq_set": GraphNode(id="freq_set", data=NodeData(label="freq_set")),
+            "policies": GraphNode(id="policies", data=NodeData(label="policies")),
+            "claims_agg": GraphNode(id="claims_agg", data=NodeData(label="claims_agg")),
+            "inst": GraphNode(id="inst", data=NodeData(label="inst", config={"instanceOf": "freq_set"})),
         }
         all_parents = {"freq_set": ["policies", "claims_agg"]}
         # id_to_name only has nodes in the execution subgraph (inst's ancestors)

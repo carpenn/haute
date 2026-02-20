@@ -63,11 +63,11 @@ def score_graph(
         """Modified _build_node_fn that intercepts apiInput sources."""
         from haute.executor import _build_node_fn, _exec_user_code
 
-        nid = node["id"]
-        data = node["data"]
-        node_type = data["nodeType"]
-        config = data.get("config", {})
-        label = data["label"]
+        nid = node.id
+        data = node.data
+        node_type = data.nodeType
+        config = data.config
+        label = data.label
         func_name = _sanitize_func_name(label)
 
         if source_names is None:

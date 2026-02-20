@@ -21,7 +21,7 @@ def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, st
         ValueError: If the input node has no path or the file can't be read.
     """
     node = _find_node(graph, input_node_id)
-    config = node["data"]["config"]
+    config = node.data.config
     path = config.get("path", "")
 
     if not path:
@@ -62,7 +62,7 @@ def infer_output_schema(
 
     # Build a 1-row sample from the first input node's data
     node = _find_node(graph, input_node_ids[0])
-    config = node["data"]["config"]
+    config = node.data.config
     path = config.get("path", "")
 
     if not path:
@@ -87,7 +87,7 @@ def infer_output_schema(
 
 def _find_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find a node by ID in a graph."""
-    for n in graph.get("nodes", []):
-        if n["id"] == node_id:
+    for n in graph.nodes:
+        if n.id == node_id:
             return n
     raise ValueError(f"Node '{node_id}' not found in graph")

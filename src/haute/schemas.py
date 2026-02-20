@@ -1,4 +1,9 @@
-"""Pydantic models for API request/response validation."""
+"""Pydantic models for API request/response validation.
+
+The canonical graph types (``GraphEdge``, ``NodeData``, ``GraphNode``,
+``PipelineGraph``) are defined in ``haute._types`` and re-exported here
+with API-friendly aliases so that FastAPI endpoint signatures stay clean.
+"""
 
 from __future__ import annotations
 
@@ -6,40 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# ---------------------------------------------------------------------------
-# Shared sub-models
-# ---------------------------------------------------------------------------
-
-
-class GraphEdge(BaseModel):
-    id: str
-    source: str
-    target: str
-    sourceHandle: str | None = None
-    targetHandle: str | None = None
-
-
-class GraphNodeData(BaseModel):
-    label: str = "Unnamed"
-    description: str = ""
-    nodeType: str = "transform"
-    config: dict[str, Any] = Field(default_factory=dict)
-
-
-class GraphNode(BaseModel):
-    id: str
-    type: str = "pipelineNode"
-    position: dict[str, float] = Field(default_factory=lambda: {"x": 0, "y": 0})
-    data: GraphNodeData = Field(default_factory=GraphNodeData)
-
-
-class Graph(BaseModel):
-    nodes: list[GraphNode] = Field(default_factory=list)
-    edges: list[GraphEdge] = Field(default_factory=list)
-    pipeline_name: str | None = None
-    pipeline_description: str | None = None
-    preamble: str | None = None
-    submodels: dict[str, Any] | None = None
+from haute._types import GraphEdge as GraphEdge  # noqa: F401
+from haute._types import GraphNode as GraphNode  # noqa: F401
+from haute._types import NodeData as GraphNodeData  # noqa: F401
+from haute._types import PipelineGraph as Graph  # noqa: F401
 
 
 class ColumnInfo(BaseModel):

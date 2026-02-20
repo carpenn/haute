@@ -1,55 +1,65 @@
-"""Core type definitions for Haute graph structures."""
+"""Core type definitions for Haute graph structures.
+
+These Pydantic models are the **single source of truth** for the graph
+data that flows between the parser, executor, codegen, deploy, and
+server API layers.  ``schemas.py`` re-exports the graph models for
+FastAPI endpoint validation.
+"""
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any
 
 import polars as pl
+from pydantic import BaseModel, Field
 
 # Type alias - nodes pass lazy frames between each other
 _Frame = pl.LazyFrame
 
 
-class NodeData(TypedDict, total=False):
+class NodeData(BaseModel):
     """Data payload for a single pipeline node."""
 
-    label: str
-    description: str
-    nodeType: str
-    config: dict[str, Any]
+    label: str = "Unnamed"
+    description: str = ""
+    nodeType: str = "transform"  # noqa: N815 — matches React Flow frontend convention
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
-class GraphNode(TypedDict, total=False):
+class GraphNode(BaseModel):
     """A single node in the React Flow graph."""
 
     id: str
-    type: str
-    position: dict[str, float]
-    data: NodeData
+    type: str = "pipelineNode"
+    position: dict[str, float] = Field(default_factory=lambda: {"x": 0, "y": 0})
+    data: NodeData = Field(default_factory=NodeData)
 
 
-class GraphEdge(TypedDict):
+class GraphEdge(BaseModel):
     """A single edge in the React Flow graph."""
 
     id: str
     source: str
     target: str
+    sourceHandle: str | None = None  # noqa: N815 — matches React Flow frontend convention
+    targetHandle: str | None = None  # noqa: N815 — matches React Flow frontend convention
 
 
-class PipelineGraph(TypedDict, total=False):
+class PipelineGraph(BaseModel):
     """React Flow graph structure used throughout Haute.
 
     This is the canonical type for the graph dict passed between
     parser, executor, codegen, deploy, and the server API layer.
     """
 
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
-    pipeline_name: str
-    pipeline_description: str
-    preamble: str
-    source_file: str
-    submodels: dict[str, Any]
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+    pipeline_name: str | None = None
+    pipeline_description: str | None = None
+    preamble: str | None = None
+    source_file: str | None = None
+    submodels: dict[str, Any] | None = None
+    warning: str | None = None
 
 
 def _sanitize_func_name(label: str) -> str:
@@ -124,7 +134,7 @@ def resolve_orig_source_names(
 
     Returns ``None`` for non-instance nodes.
     """
-    ref = node["data"]["config"].get("instanceOf")
+    ref = node.data.config.get("instanceOf")
     if not ref or ref not in node_map:
         return None
     result: list[str] = []
@@ -133,5 +143,5 @@ def resolve_orig_source_names(
             result.append(id_to_name[pid])
         else:
             n = node_map.get(pid)
-            result.append(_sanitize_func_name(n["data"]["label"]) if n else pid)
+            result.append(_sanitize_func_name(n.data.label) if n else pid)
     return result

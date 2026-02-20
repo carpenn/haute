@@ -37,7 +37,7 @@ def build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
     config = resolved.config
     return {
         "haute_version": get_haute_version(),
-        "pipeline_name": resolved.pruned_graph.get("pipeline_name", config.model_name),
+        "pipeline_name": resolved.pruned_graph.pipeline_name or config.model_name,
         "pipeline_file": str(config.pipeline_file),
         "target": config.target,
         "created_at": datetime.now(UTC).isoformat(),
@@ -48,8 +48,8 @@ def build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
         "input_schema": resolved.input_schema,
         "output_schema": resolved.output_schema,
         "artifacts": {name: str(path) for name, path in resolved.artifacts.items()},
-        "pruned_graph": resolved.pruned_graph,
-        "nodes_deployed": len(resolved.pruned_graph.get("nodes", [])),
+        "pruned_graph": resolved.pruned_graph.model_dump(),
+        "nodes_deployed": len(resolved.pruned_graph.nodes),
         "nodes_skipped": len(resolved.removed_node_ids),
         "nodes_skipped_names": resolved.removed_node_ids,
     }

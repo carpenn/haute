@@ -30,10 +30,10 @@ def _prepare_graph(
 
     Returns (node_map, order, parents_of, id_to_name).
     """
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
+    nodes = graph.nodes
+    edges = graph.edges
 
-    node_map = {n["id"]: n for n in nodes}
+    node_map = {n.id: n for n in nodes}
     all_ids = set(node_map.keys())
 
     if target_node_id:
@@ -41,17 +41,17 @@ def _prepare_graph(
     else:
         needed = all_ids
 
-    relevant_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]
+    relevant_edges = [e for e in edges if e.source in needed and e.target in needed]
     order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
 
     parents_of: dict[str, list[str]] = {nid: [] for nid in order}
     for e in relevant_edges:
-        if e["target"] in parents_of:
-            parents_of[e["target"]].append(e["source"])
+        if e.target in parents_of:
+            parents_of[e.target].append(e.source)
 
     id_to_name: dict[str, str] = {}
     for nid in order:
-        label = node_map[nid]["data"]["label"]
+        label = node_map[nid].data.label
         id_to_name[nid] = _sanitize_func_name(label)
 
     return node_map, order, parents_of, id_to_name
@@ -81,8 +81,8 @@ def _execute_lazy(
 
     # Full parent lookup from ALL edges for instance resolution
     all_parents: dict[str, list[str]] = {}
-    for e in graph.get("edges", []):
-        all_parents.setdefault(e["target"], []).append(e["source"])
+    for e in graph.edges:
+        all_parents.setdefault(e.target, []).append(e.source)
 
     # Build executable functions
     funcs: dict[str, tuple[Callable, bool]] = {}

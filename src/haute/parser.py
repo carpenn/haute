@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from haute.graph_utils import GraphEdge, GraphNode, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 
 __all__ = [
     "parse_pipeline_file",
@@ -442,15 +442,15 @@ def _build_edges(
     raw_nodes: list[dict],
     explicit_connect_pairs: list[tuple[str, str]],
 ) -> list[GraphEdge]:
-    """Build edge dicts from explicit connect() calls and implicit param-name matching."""
+    """Build GraphEdge models from explicit connect() calls and implicit param-name matching."""
     node_names = {n["func_name"] for n in raw_nodes}
-    edges: list[dict] = []
+    edges: list[GraphEdge] = []
     explicit_edges: set[tuple[str, str]] = set()
 
     for src, tgt in explicit_connect_pairs:
         if src in node_names and tgt in node_names:
             explicit_edges.add((src, tgt))
-            edges.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+            edges.append(GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt))
 
     # Implicit edges from parameter names matching node names
     targets_with_explicit = {tgt for _, tgt in explicit_edges}
@@ -461,38 +461,36 @@ def _build_edges(
             if param in node_names and param != node_info["func_name"]:
                 pair = (param, node_info["func_name"])
                 if pair not in explicit_edges:
-                    edges.append(
-                        {
-                            "id": f"e_{pair[0]}_{pair[1]}",
-                            "source": pair[0],
-                            "target": pair[1],
-                        }
-                    )
+                    edges.append(GraphEdge(
+                        id=f"e_{pair[0]}_{pair[1]}",
+                        source=pair[0],
+                        target=pair[1],
+                    ))
 
     # Fallback: if still no edges, infer linear chain from definition order
     if not edges and len(raw_nodes) > 1:
         for i in range(1, len(raw_nodes)):
             src = raw_nodes[i - 1]["func_name"]
             tgt = raw_nodes[i]["func_name"]
-            edges.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+            edges.append(GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt))
 
     return edges
 
 
 def _build_rf_nodes(raw_nodes: list[dict], x_spacing: int = 300) -> list[GraphNode]:
-    """Convert raw parsed nodes into React Flow node dicts."""
+    """Convert raw parsed nodes into GraphNode Pydantic models."""
     return [
-        {
-            "id": n["func_name"],
-            "type": n["node_type"],
-            "position": {"x": i * x_spacing, "y": 0},
-            "data": {
-                "label": n["func_name"],
-                "description": n["description"],
-                "nodeType": n["node_type"],
-                "config": n["config"],
-            },
-        }
+        GraphNode(
+            id=n["func_name"],
+            type=n["node_type"],
+            position={"x": i * x_spacing, "y": 0},
+            data=NodeData(
+                label=n["func_name"],
+                description=n["description"],
+                nodeType=n["node_type"],
+                config=n["config"],
+            ),
+        )
         for i, n in enumerate(raw_nodes)
     ]
 
@@ -657,15 +655,15 @@ def _fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) ->
     rf_nodes = _build_rf_nodes(raw_nodes)
     preamble = _extract_preamble(source)
 
-    return {
-        "nodes": rf_nodes,
-        "edges": edges,
-        "pipeline_name": pipeline_name,
-        "pipeline_description": pipeline_desc,
-        "preamble": preamble,
-        "source_file": source_file,
-        "warning": f"File has syntax errors - some nodes may show errors. {syntax_error}",
-    }
+    return PipelineGraph(
+        nodes=rf_nodes,
+        edges=edges,
+        pipeline_name=pipeline_name,
+        pipeline_description=pipeline_desc,
+        preamble=preamble,
+        source_file=source_file,
+        warning=f"File has syntax errors (line {syntax_error.lineno}); parsed via regex fallback",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -724,24 +722,13 @@ def _extract_preamble(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_pipeline_file(filepath: str | Path, *, flatten: bool = False) -> dict:
-    """Parse a pipeline .py file and return a React Flow graph JSON.
+def parse_pipeline_file(filepath: str | Path, *, flatten: bool = False) -> PipelineGraph:
+    """Parse a pipeline .py file and return a PipelineGraph.
 
     Args:
         flatten: If *True*, dissolve submodel groupings into a flat graph
             (for executor / trace / deploy).  If *False* (default), keep
             submodel metadata so the GUI can render collapsed submodel nodes.
-
-    Returns:
-        {
-            "nodes": [...],
-            "edges": [...],
-            "pipeline_name": str,
-            "pipeline_description": str,
-            "preamble": str,
-            "source_file": str,
-            "submodels": { ... },   # only when flatten=False and submodels exist
-        }
 
     On syntax errors the file is still parsed via regex fallback so
     that valid nodes are returned alongside broken ones.
@@ -829,8 +816,8 @@ def _parse_submodel_source(source: str, source_file: str = "") -> dict:
     rf_nodes = _build_rf_nodes(raw_nodes)
 
     return {
-        "nodes": rf_nodes,
-        "edges": edges,
+        "nodes": [n.model_dump() for n in rf_nodes],
+        "edges": [e.model_dump() for e in edges],
         "submodel_name": submodel_name,
         "submodel_description": submodel_desc,
         "source_file": source_file,
@@ -839,7 +826,7 @@ def _parse_submodel_source(source: str, source_file: str = "") -> dict:
 
 def _merge_submodels(
     parent_graph: PipelineGraph,
-    submodel_graphs: dict[str, PipelineGraph],
+    submodel_graphs: dict[str, dict],
     submodel_files: dict[str, str],
     parent_edges: list[tuple[str, str]],
     *,
@@ -854,8 +841,8 @@ def _merge_submodels(
     if not submodel_graphs:
         return parent_graph
 
-    parent_nodes = list(parent_graph.get("nodes", []))
-    parent_edge_list = list(parent_graph.get("edges", []))
+    parent_nodes: list[GraphNode] = list(parent_graph.nodes)
+    parent_edge_list: list[GraphEdge] = list(parent_graph.edges)
 
     # Collect all child node IDs across all submodels
     all_child_ids: set[str] = set()
@@ -864,22 +851,26 @@ def _merge_submodels(
 
     # _build_edges drops edges where one endpoint is a submodel child node
     # (because it only knows about main-file nodes).  Reconstruct those
-    # cross-boundary edge dicts from the raw parent_edges tuples.
-    existing_pairs = {(e["source"], e["target"]) for e in parent_edge_list}
+    # cross-boundary edges from the raw parent_edges tuples.
+    existing_pairs = {(e.source, e.target) for e in parent_edge_list}
     for src, tgt in parent_edges:
         if (src, tgt) in existing_pairs:
             continue
         if src in all_child_ids or tgt in all_child_ids:
-            parent_edge_list.append({"id": f"e_{src}_{tgt}", "source": src, "target": tgt})
+            parent_edge_list.append(GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt))
             existing_pairs.add((src, tgt))
 
     if flatten:
         # Inline all child nodes + edges into the parent graph
-        for sm_name, sm_graph in submodel_graphs.items():
-            parent_nodes.extend(sm_graph.get("nodes", []))
-            parent_edge_list.extend(sm_graph.get("edges", []))
+        for _sm_name, sm_graph in submodel_graphs.items():
+            for nd in sm_graph.get("nodes", []):
+                node = GraphNode.model_validate(nd) if isinstance(nd, dict) else nd
+                parent_nodes.append(node)
+            for ed in sm_graph.get("edges", []):
+                edge = GraphEdge.model_validate(ed) if isinstance(ed, dict) else ed
+                parent_edge_list.append(edge)
 
-        return {**parent_graph, "nodes": parent_nodes, "edges": parent_edge_list}
+        return parent_graph.model_copy(update={"nodes": parent_nodes, "edges": parent_edge_list})
 
     # Hierarchical mode: create submodel placeholder nodes
     submodels_meta: dict[str, dict] = {}
@@ -903,49 +894,47 @@ def _merge_submodels(
         sm_node_id = f"submodel__{sm_name}"
         sm_file = submodel_files.get(sm_name, "")
 
-        # Build the submodel node
-        sm_node = {
-            "id": sm_node_id,
-            "type": "submodel",
-            "position": {"x": 0, "y": 0},
-            "data": {
-                "label": sm_name,
-                "description": sm_graph.get("submodel_description", ""),
-                "nodeType": "submodel",
-                "config": {
+        # Build the submodel placeholder node
+        sm_node = GraphNode(
+            id=sm_node_id,
+            type="submodel",
+            position={"x": 0, "y": 0},
+            data=NodeData(
+                label=sm_name,
+                description=sm_graph.get("submodel_description", ""),
+                nodeType="submodel",
+                config={
                     "file": sm_file,
                     "childNodeIds": child_node_ids,
                     "inputPorts": input_ports,
                     "outputPorts": output_ports,
                 },
-            },
-        }
+            ),
+        )
         parent_nodes.append(sm_node)
 
         # Rewire edges: replace references to internal child nodes
         # with references to the submodel node (using handles)
-        new_edges = []
+        new_edges: list[GraphEdge] = []
         for edge in parent_edge_list:
-            src = edge["source"]
-            tgt = edge["target"]
+            src = edge.source
+            tgt = edge.target
             if src in child_node_names and tgt not in child_node_names:
                 # Internal → external: source becomes submodel node
-                new_edges.append({
-                    **edge,
-                    "id": f"e_{sm_node_id}_{tgt}__{src}",
-                    "source": sm_node_id,
-                    "sourceHandle": f"out__{src}",
-                    "target": tgt,
-                })
+                new_edges.append(GraphEdge(
+                    id=f"e_{sm_node_id}_{tgt}__{src}",
+                    source=sm_node_id,
+                    sourceHandle=f"out__{src}",
+                    target=tgt,
+                ))
             elif tgt in child_node_names and src not in child_node_names:
                 # External → internal: target becomes submodel node
-                new_edges.append({
-                    **edge,
-                    "id": f"e_{src}_{sm_node_id}__{tgt}",
-                    "source": src,
-                    "target": sm_node_id,
-                    "targetHandle": f"in__{tgt}",
-                })
+                new_edges.append(GraphEdge(
+                    id=f"e_{src}_{sm_node_id}__{tgt}",
+                    source=src,
+                    target=sm_node_id,
+                    targetHandle=f"in__{tgt}",
+                ))
             elif src in child_node_names and tgt in child_node_names:
                 # Fully internal: skip (lives inside submodel)
                 continue
@@ -961,14 +950,10 @@ def _merge_submodels(
             "graph": sm_graph,
         }
 
-    result = {
-        **parent_graph,
-        "nodes": parent_nodes,
-        "edges": parent_edge_list,
-    }
+    update: dict[str, Any] = {"nodes": parent_nodes, "edges": parent_edge_list}
     if submodels_meta:
-        result["submodels"] = submodels_meta
-    return result
+        update["submodels"] = submodels_meta
+    return parent_graph.model_copy(update=update)
 
 
 def parse_pipeline_source(
@@ -977,8 +962,8 @@ def parse_pipeline_source(
     *,
     flatten: bool = False,
     _base_dir: Path | None = None,
-) -> dict:
-    """Parse pipeline source code and return graph JSON.
+) -> PipelineGraph:
+    """Parse pipeline source code and return a PipelineGraph.
 
     Args:
         flatten: If True, dissolve submodels into flat graph.
@@ -1034,14 +1019,11 @@ def parse_pipeline_source(
         )
 
     if not raw_nodes:
-        return {
-            "nodes": [],
-            "edges": [],
-            "pipeline_name": pipeline_name,
-            "pipeline_description": pipeline_desc,
-            "warning": "No @pipeline.node decorated functions found",
-            "source_file": source_file,
-        }
+        return PipelineGraph(
+            pipeline_name=pipeline_name,
+            pipeline_description=pipeline_desc,
+            source_file=source_file,
+        )
 
     # Build edges + nodes using shared helpers
     explicit_connects = _extract_connect_calls(tree)
@@ -1049,14 +1031,14 @@ def parse_pipeline_source(
     rf_nodes = _build_rf_nodes(raw_nodes)
     preamble = _extract_preamble(source)
 
-    graph = {
-        "nodes": rf_nodes,
-        "edges": edges,
-        "pipeline_name": pipeline_name,
-        "pipeline_description": pipeline_desc,
-        "preamble": preamble,
-        "source_file": source_file,
-    }
+    graph = PipelineGraph(
+        nodes=rf_nodes,
+        edges=edges,
+        pipeline_name=pipeline_name,
+        pipeline_description=pipeline_desc,
+        preamble=preamble,
+        source_file=source_file,
+    )
 
     # --- Submodel handling ---------------------------------------------------
     submodel_paths = _extract_submodel_calls(tree)

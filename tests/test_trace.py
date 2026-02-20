@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from haute._types import GraphNode, PipelineGraph
 from haute.trace import (
     SchemaDiff,
     TraceResult,
@@ -23,6 +24,14 @@ from tests.conftest import (
 from tests.conftest import (
     make_transform_node as _transform_node,
 )
+
+
+def _n(d: dict) -> GraphNode:
+    return GraphNode.model_validate(d)
+
+
+def _g(d: dict) -> PipelineGraph:
+    return PipelineGraph.model_validate(d)
 
 # ---------------------------------------------------------------------------
 # _jsonify_row
@@ -83,13 +92,13 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("t", ".with_columns(y=pl.col('x') * 10)"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         result = execute_trace(graph, row_index=0)
 
         assert isinstance(result, TraceResult)
@@ -109,13 +118,13 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("t"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         result = execute_trace(graph)
         assert result.target_node_id == "t"
 
@@ -124,7 +133,7 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 # passthrough - doesn't have 'y' but feeds into t
@@ -133,7 +142,7 @@ class TestExecuteTrace:
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "mid"), _edge("mid", "t")],
-        }
+        })
         result = execute_trace(graph, column="y")
 
         # 'y' is created at t → t is column_relevant, src/mid are ancestors
@@ -150,14 +159,14 @@ class TestExecuteTrace:
         pl.DataFrame({"x": [1], "shared": [10]}).write_parquet(p1)
         pl.DataFrame({"y": [2], "shared": [10]}).write_parquet(p2)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("a", str(p1)),   # has x
                 _source_node("b", str(p2)),   # has y, not x
                 _transform_node("join", "a.join(b, on='shared')"),
             ],
             "edges": [_edge("a", "join"), _edge("b", "join")],
-        }
+        })
         result = execute_trace(graph, column="x")
 
         # 'x' comes from 'a' only — 'b' should be pruned
@@ -171,14 +180,14 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("mid"),  # passes x through
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "mid"), _edge("mid", "t")],
-        }
+        })
         result = execute_trace(graph, column="x")
 
         # 'x' exists in all 3 nodes → all 3 in trace
@@ -195,9 +204,9 @@ class TestExecuteTrace:
             {"policy_id": 300, "x": 3},
         ]))
 
-        graph = {
+        graph = _g({
             "nodes": [
-                {
+                _n({
                     "id": "src",
                     "data": {
                         "label": "src",
@@ -207,11 +216,11 @@ class TestExecuteTrace:
                             "row_id_column": "policy_id",
                         },
                     },
-                },
+                }),
                 _transform_node("t"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         result = execute_trace(graph, row_index=1)
         assert result.row_id_column == "policy_id"
         assert result.row_id_value == 200
@@ -221,10 +230,10 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [_source_node("src", str(p))],
             "edges": [],
-        }
+        })
         result = execute_trace(graph, row_index=0)
         assert result.row_id_column is None
         assert result.row_id_value is None
@@ -236,10 +245,10 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [10, 20, 30]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [_source_node("src", str(p)), _transform_node("t")],
             "edges": [_edge("src", "t")],
-        }
+        })
         _cache.invalidate()
 
         r0 = execute_trace(graph, row_index=0)
@@ -258,33 +267,33 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph1 = {
+        graph1 = _g({
             "nodes": [_source_node("src", str(p)), _transform_node("t")],
             "edges": [_edge("src", "t")],
-        }
+        })
         _cache.invalidate()
         execute_trace(graph1)
         fp1 = _cache.fingerprint
 
-        graph2 = {
+        graph2 = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         execute_trace(graph2)
         assert _cache.fingerprint != fp1
 
     def test_empty_graph_raises(self):
         with pytest.raises(ValueError, match="Empty graph"):
-            execute_trace({"nodes": [], "edges": []})
+            execute_trace(_g({"nodes": [], "edges": []}))
 
     def test_missing_target_raises(self, tmp_path):
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = {"nodes": [_source_node("src", str(p))], "edges": []}
+        graph = _g({"nodes": [_source_node("src", str(p))], "edges": []})
         with pytest.raises(ValueError, match="not found"):
             execute_trace(graph, target_node_id="nonexistent")
 

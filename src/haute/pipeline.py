@@ -9,6 +9,7 @@ from typing import Self
 
 import polars as pl
 
+from haute._types import GraphEdge
 from haute.graph_utils import topo_sort_ids
 
 
@@ -143,7 +144,7 @@ class Pipeline(NodeRegistry):
             return list(self._nodes)
 
         node_ids = [n.name for n in self._nodes]
-        edges = [{"source": src, "target": tgt} for src, tgt in self._edges]
+        edges = [GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt) for src, tgt in self._edges]
         sorted_ids = topo_sort_ids(node_ids, edges)
 
         if len(sorted_ids) != len(self._nodes):

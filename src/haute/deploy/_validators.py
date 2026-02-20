@@ -35,7 +35,7 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     errors: list[str] = []
 
     # 1. Output node exists in pruned graph
-    output_ids = {n["id"] for n in resolved.pruned_graph.get("nodes", [])}
+    output_ids = {n.id for n in resolved.pruned_graph.nodes}
     if resolved.output_node_id not in output_ids:
         errors.append(f"Output node '{resolved.output_node_id}' not in pruned graph.")
 
@@ -45,7 +45,7 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
             errors.append(f"Input node '{nid}' not in pruned graph.")
 
     # 3. Input nodes are sources (no incoming edges)
-    targets_with_incoming = {e["target"] for e in resolved.pruned_graph.get("edges", [])}
+    targets_with_incoming = {e.target for e in resolved.pruned_graph.edges}
     for nid in resolved.input_node_ids:
         if nid in targets_with_incoming:
             errors.append(f"Input node '{nid}' has incoming edges - it should be a source node.")
@@ -56,15 +56,13 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
             errors.append(f"Artifact '{name}' not found: {path}")
 
     # 5. No unresolved nodes (e.g. Databricks source stubs)
-    for node in resolved.pruned_graph.get("nodes", []):
-        data = node.get("data", {})
-        config = data.get("config", {})
+    for node in resolved.pruned_graph.nodes:
         if (
-            data.get("nodeType") == "dataSource"
-            and config.get("sourceType") == "databricks"
+            node.data.nodeType == "dataSource"
+            and node.data.config.get("sourceType") == "databricks"
         ):
             errors.append(
-                f"Node '{node['id']}' is a Databricks dataSource (not yet implemented "
+                f"Node '{node.id}' is a Databricks dataSource (not yet implemented "
                 "for deploy). Use an apiInput node for live API data."
             )
 

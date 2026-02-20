@@ -156,15 +156,13 @@ def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
 
 def _save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
     """Write node positions to the sidecar .haute.json file."""
-    positions = {}
-    for node in graph.get("nodes", []):
-        positions[node["id"]] = node.get("position", {"x": 0, "y": 0})
+    positions = {node.id: node.position for node in graph.nodes}
 
     sidecar = py_path.with_suffix(".haute.json")
     sidecar.write_text(_json.dumps({"positions": positions}, indent=2) + "\n")
 
 
-def _parse_pipeline_to_graph(py_path: Path) -> dict:
+def _parse_pipeline_to_graph(py_path: Path) -> PipelineGraph:
     """Parse a .py file and merge with sidecar positions."""
     from haute.parser import parse_pipeline_file
 
@@ -172,9 +170,9 @@ def _parse_pipeline_to_graph(py_path: Path) -> dict:
     positions = _load_sidecar_positions(py_path)
 
     # Apply saved positions if available
-    for node in graph.get("nodes", []):
-        if node["id"] in positions:
-            node["position"] = positions[node["id"]]
+    for node in graph.nodes:
+        if node.id in positions:
+            node.position = positions[node.id]
 
     return graph
 
@@ -196,10 +194,10 @@ async def list_pipelines() -> list[PipelineSummary]:
             graph = parse_pipeline_file(f)
             result.append(
                 PipelineSummary(
-                    name=graph.get("pipeline_name", f.stem),
-                    description=graph.get("pipeline_description", ""),
+                    name=graph.pipeline_name or f.stem,
+                    description=graph.pipeline_description or "",
                     file=str(f.relative_to(Path.cwd())),
-                    node_count=len(graph.get("nodes", [])),
+                    node_count=len(graph.nodes),
                 )
             )
         except Exception as e:
@@ -219,8 +217,8 @@ async def get_pipeline(name: str) -> dict:
     for f in _discover_pipelines():
         try:
             graph = _parse_pipeline_to_graph(f)
-            if graph.get("pipeline_name") == name:
-                return graph
+            if graph.pipeline_name == name:
+                return graph.model_dump()
         except Exception as e:
             logger.warning("parse_failed", file=f.name, error=str(e))
             continue
@@ -238,14 +236,14 @@ async def get_first_pipeline() -> dict:
     for f in _discover_pipelines():
         try:
             graph = _parse_pipeline_to_graph(f)
-            if graph.get("nodes"):
-                graph["source_file"] = str(f.relative_to(cwd))
-                return graph
+            if graph.nodes:
+                graph.source_file = str(f.relative_to(cwd))
+                return graph.model_dump()
         except Exception as e:
             logger.warning("parse_failed", file=f.name, error=str(e))
             continue
 
-    return {"nodes": [], "edges": []}
+    return PipelineGraph().model_dump()
 
 
 @app.post("/api/pipeline/save", response_model=SavePipelineResponse)
@@ -257,15 +255,12 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     """
     from haute.codegen import graph_to_code, graph_to_code_multi
 
-    graph = body.graph.model_dump()
+    graph = body.graph
 
     # Validate singleton node types (max 1 each)
     singletons = [("apiInput", "API Input"), ("output", "Output"), ("liveSwitch", "Live Switch")]
     for singleton_type, label in singletons:
-        count = sum(
-            1 for n in graph["nodes"]
-            if n["data"]["nodeType"] == singleton_type
-        )
+        count = sum(1 for n in graph.nodes if n.data.nodeType == singleton_type)
         if count > 1:
             raise HTTPException(
                 status_code=400,
@@ -290,7 +285,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
 
     _mark_self_write()
 
-    if graph.get("submodels"):
+    if graph.submodels:
         # Multi-file write: main .py + submodel .py files
         files = graph_to_code_multi(
             graph,
@@ -329,8 +324,8 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
     from haute.executor import execute_graph
     from haute.graph_utils import flatten_graph
 
-    graph = flatten_graph(body.graph.model_dump())
-    if not graph.get("nodes"):
+    graph = flatten_graph(body.graph)
+    if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
@@ -346,8 +341,8 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
     from haute.graph_utils import flatten_graph
     from haute.trace import execute_trace, trace_result_to_dict
 
-    graph = flatten_graph(body.graph.model_dump())
-    if not graph.get("nodes"):
+    graph = flatten_graph(body.graph)
+    if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
@@ -377,8 +372,8 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     from haute.executor import execute_graph
     from haute.graph_utils import flatten_graph
 
-    graph = flatten_graph(body.graph.model_dump())
-    if not graph.get("nodes"):
+    graph = flatten_graph(body.graph)
+    if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
@@ -395,11 +390,11 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 detail=f"Node '{body.nodeId}' not found in results",
             )
 
-        node_map = {n["id"]: n for n in graph["nodes"]}
+        node_map = {n.id: n for n in graph.nodes}
         timings = [
             {
                 "nodeId": nid,
-                "label": node_map[nid]["data"].get("label", nid),
+                "label": node_map[nid].data.label,
                 "timing_ms": r.get("timing_ms", 0),
             }
             for nid, r in results.items()
@@ -426,8 +421,8 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     from haute.executor import execute_sink
     from haute.graph_utils import flatten_graph
 
-    graph = flatten_graph(body.graph.model_dump())
-    if not graph.get("nodes"):
+    graph = flatten_graph(body.graph)
+    if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
@@ -720,10 +715,13 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     Creates a new ``modules/<name>.py`` file, updates the main pipeline file,
     and returns the updated parent graph with the submodel node.
     """
+    from haute._types import GraphEdge as _GEdge
+    from haute._types import GraphNode as _GNode
+    from haute._types import NodeData as _NData
     from haute.codegen import graph_to_code_multi
     from haute.graph_utils import _sanitize_func_name
 
-    graph = body.graph.model_dump()
+    graph = body.graph
     cwd = Path.cwd()
     sm_name = _sanitize_func_name(body.name)
     sm_file = f"modules/{sm_name}.py"
@@ -735,44 +733,44 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
             detail="A submodel must contain at least 2 nodes.",
         )
 
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
+    nodes = graph.nodes
+    edges = graph.edges
 
     # Separate child vs parent nodes
-    child_nodes = [n for n in nodes if n["id"] in selected_ids]
-    parent_nodes = [n for n in nodes if n["id"] not in selected_ids]
-    child_node_ids = {n["id"] for n in child_nodes}
+    child_nodes = [n for n in nodes if n.id in selected_ids]
+    parent_nodes = [n for n in nodes if n.id not in selected_ids]
+    child_node_ids = {n.id for n in child_nodes}
 
     # Separate edges: internal (both ends inside), cross-boundary, external
     internal_edges = [
         e for e in edges
-        if e["source"] in child_node_ids and e["target"] in child_node_ids
+        if e.source in child_node_ids and e.target in child_node_ids
     ]
     cross_edges = [
         e for e in edges
-        if (e["source"] in child_node_ids) != (e["target"] in child_node_ids)
+        if (e.source in child_node_ids) != (e.target in child_node_ids)
     ]
     external_edges = [
         e for e in edges
-        if e["source"] not in child_node_ids
-        and e["target"] not in child_node_ids
+        if e.source not in child_node_ids
+        and e.target not in child_node_ids
     ]
 
     # Determine input/output ports
-    input_ports = []  # internal child nodes that receive external input
-    output_ports = []  # internal node names feeding out of submodel
+    input_ports: list[str] = []
+    output_ports: list[str] = []
     for e in cross_edges:
-        if e["target"] in child_node_ids and e["source"] not in child_node_ids:
-            if e["target"] not in input_ports:
-                input_ports.append(e["target"])
-        if e["source"] in child_node_ids and e["target"] not in child_node_ids:
-            if e["source"] not in output_ports:
-                output_ports.append(e["source"])
+        if e.target in child_node_ids and e.source not in child_node_ids:
+            if e.target not in input_ports:
+                input_ports.append(e.target)
+        if e.source in child_node_ids and e.target not in child_node_ids:
+            if e.source not in output_ports:
+                output_ports.append(e.source)
 
-    # Build the submodel internal graph
+    # Build the submodel internal graph (dict — stored in submodels metadata)
     sm_graph = {
-        "nodes": child_nodes,
-        "edges": internal_edges,
+        "nodes": [n.model_dump() for n in child_nodes],
+        "edges": [e.model_dump() for e in internal_edges],
         "submodel_name": sm_name,
         "submodel_description": "",
         "source_file": sm_file,
@@ -780,43 +778,43 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
 
     # Build the submodel placeholder node
     sm_node_id = f"submodel__{sm_name}"
-    sm_node = {
-        "id": sm_node_id,
-        "type": "submodel",
-        "position": {"x": 0, "y": 0},
-        "data": {
-            "label": sm_name,
-            "description": "",
-            "nodeType": "submodel",
-            "config": {
+    sm_node = _GNode(
+        id=sm_node_id,
+        type="submodel",
+        position={"x": 0, "y": 0},
+        data=_NData(
+            label=sm_name,
+            description="",
+            nodeType="submodel",
+            config={
                 "file": sm_file,
                 "childNodeIds": list(child_node_ids),
                 "inputPorts": input_ports,
                 "outputPorts": output_ports,
             },
-        },
-    }
+        ),
+    )
 
     # Rewire cross-boundary edges to point to/from the submodel node
-    rewired_cross = []
+    rewired_cross: list[_GEdge] = []
     for e in cross_edges:
-        if e["target"] in child_node_ids:
-            rewired_cross.append({
-                **e,
-                "id": f"e_{e['source']}_{sm_node_id}__{e['target']}",
-                "target": sm_node_id,
-                "targetHandle": f"in__{e['target']}",
-            })
-        elif e["source"] in child_node_ids:
-            rewired_cross.append({
-                **e,
-                "id": f"e_{sm_node_id}_{e['target']}__{e['source']}",
-                "source": sm_node_id,
-                "sourceHandle": f"out__{e['source']}",
-            })
+        if e.target in child_node_ids:
+            rewired_cross.append(_GEdge(
+                id=f"e_{e.source}_{sm_node_id}__{e.target}",
+                source=e.source,
+                target=sm_node_id,
+                targetHandle=f"in__{e.target}",
+            ))
+        elif e.source in child_node_ids:
+            rewired_cross.append(_GEdge(
+                id=f"e_{sm_node_id}_{e.target}__{e.source}",
+                source=sm_node_id,
+                sourceHandle=f"out__{e.source}",
+                target=e.target,
+            ))
 
     # Assemble the new parent graph (preserve existing submodels)
-    existing_submodels = dict(graph.get("submodels") or {})
+    existing_submodels = dict(graph.submodels or {})
     existing_submodels[sm_name] = {
         "file": sm_file,
         "childNodeIds": list(child_node_ids),
@@ -824,12 +822,11 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
         "outputPorts": output_ports,
         "graph": sm_graph,
     }
-    new_graph = {
-        **graph,
+    new_graph = graph.model_copy(update={
         "nodes": parent_nodes + [sm_node],
         "edges": external_edges + rewired_cross,
         "submodels": existing_submodels,
-    }
+    })
 
     # Write files to disk
     _mark_self_write()
@@ -863,7 +860,7 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
         status="ok",
         submodel_file=sm_file,
         parent_file=parent_file,
-        graph=new_graph,
+        graph=new_graph.model_dump(),
     )
 
 
@@ -901,9 +898,9 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
     """
     from haute.graph_utils import flatten_graph
 
-    graph = body.graph.model_dump()
+    graph = body.graph
     sm_name = body.submodel_name
-    submodels = graph.get("submodels", {})
+    submodels = graph.submodels or {}
 
     if sm_name not in submodels:
         raise HTTPException(
@@ -946,7 +943,7 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
         if sm_path.is_file() and sm_path.is_relative_to(cwd):
             sm_path.unlink()
 
-    return DissolveSubmodelResponse(status="ok", graph=flat)
+    return DissolveSubmodelResponse(status="ok", graph=flat.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -1006,11 +1003,11 @@ async def _file_watcher() -> None:
                 await _broadcast(
                     {
                         "type": "graph_update",
-                        "graph": graph,
+                        "graph": graph.model_dump(),
                         "source_file": str(p),
                     }
                 )
-                n_nodes = len(graph.get("nodes", []))
+                n_nodes = len(graph.nodes)
                 logger.info(
                     "graph_broadcast",
                     clients=len(_ws_clients),

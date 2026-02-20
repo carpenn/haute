@@ -112,22 +112,20 @@ def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> Gr
     ``instanceOf`` key itself).  If the original cannot be found the
     instance is returned unchanged.
     """
-    config = node["data"]["config"]
+    config = node.data.config
     ref = config.get("instanceOf")
     if not ref or ref not in node_map:
         return node
     original = node_map[ref]
-    orig_data = original["data"]
-    orig_config = {k: v for k, v in orig_data["config"].items() if k != "instanceOf"}
+    orig_config = {k: v for k, v in original.data.config.items() if k != "instanceOf"}
     # Preserve instance-specific keys (inputMapping) that the UI sets
-    inst_config = config
-    instance_keys = {k: v for k, v in inst_config.items() if k in ("inputMapping",)}
-    merged_data = {
-        **node["data"],
-        "nodeType": orig_data["nodeType"],
-        "config": {**orig_config, "instanceOf": ref, **instance_keys},
-    }
-    return {**node, "data": merged_data}
+    instance_keys = {k: v for k, v in config.items() if k in ("inputMapping",)}
+    merged_config = {**orig_config, "instanceOf": ref, **instance_keys}
+    merged_data = node.data.model_copy(update={
+        "nodeType": original.data.nodeType,
+        "config": merged_config,
+    })
+    return node.model_copy(update={"data": merged_data})
 
 
 def _build_node_fn(
@@ -149,10 +147,10 @@ def _build_node_fn(
     if node_map:
         node = resolve_instance_node(node, node_map)
 
-    data = node["data"]
-    node_type = data["nodeType"]
-    config = data.get("config", {})
-    label = data["label"]
+    data = node.data
+    node_type = data.nodeType
+    config = data.config
+    label = data.label
     func_name = _sanitize_func_name(label)
 
     if source_names is None:
@@ -338,7 +336,7 @@ def execute_graph(
             "error": str | None,
         }
     """
-    if not graph.get("nodes"):
+    if not graph.nodes:
         return {}
 
     fp = graph_fingerprint(graph, str(row_limit))
@@ -381,16 +379,14 @@ def execute_graph(
 
     # Pre-compute schema warnings for instance nodes by comparing the
     # columns available at the instance's inputs vs the original's inputs.
-    nodes_list = graph.get("nodes", [])
-    edges_list = graph.get("edges", [])
-    node_map = {n["id"]: n for n in nodes_list}
+    node_map = {n.id: n for n in graph.nodes}
     parents_of: dict[str, list[str]] = {}
-    for e in edges_list:
-        parents_of.setdefault(e["target"], []).append(e["source"])
+    for e in graph.edges:
+        parents_of.setdefault(e.target, []).append(e.source)
 
     schema_warnings: dict[str, list[dict]] = {}
     for nid in order:
-        ref = node_map[nid]["data"]["config"].get("instanceOf")
+        ref = node_map[nid].data.config.get("instanceOf")
         if not ref or ref not in node_map:
             continue
         # Columns feeding into the original node
@@ -472,8 +468,8 @@ def _eager_execute(
 
     # Full parent lookup from ALL edges for instance resolution
     all_parents: dict[str, list[str]] = {}
-    for e in graph.get("edges", []):
-        all_parents.setdefault(e["target"], []).append(e["source"])
+    for e in graph.edges:
+        all_parents.setdefault(e.target, []).append(e.source)
 
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
@@ -533,15 +529,13 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> dict:
     """
     from pathlib import Path
 
-    nodes = graph.get("nodes", [])
-    node_map = {n["id"]: n for n in nodes}
+    node_map = {n.id: n for n in graph.nodes}
 
     sink_node = node_map.get(sink_node_id)
     if not sink_node:
         raise ValueError(f"Sink node '{sink_node_id}' not found")
 
-    data = sink_node["data"]
-    config = data.get("config", {})
+    config = sink_node.data.config
     path = config.get("path", "")
     fmt = config.get("format", "parquet")
 

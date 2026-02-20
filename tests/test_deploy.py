@@ -11,7 +11,12 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from haute._types import PipelineGraph
 from haute.parser import parse_pipeline_file
+
+
+def _g(d: dict) -> PipelineGraph:
+    return PipelineGraph.model_validate(d)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -23,8 +28,8 @@ DATA_DIR = FIXTURE_DIR / "data"
 
 
 @pytest.fixture()
-def full_graph() -> dict:
-    """Parse the fixture pipeline into a React Flow graph."""
+def full_graph() -> PipelineGraph:
+    """Parse the fixture pipeline into a PipelineGraph."""
     return parse_pipeline_file(PIPELINE_FILE)
 
 
@@ -67,14 +72,14 @@ class TestPruner:
         assert "results_write" in removed_set
 
         # Pruned graph should have fewer nodes
-        assert len(pruned["nodes"]) < len(full_graph["nodes"])
-        assert len(pruned["nodes"]) == len(kept)
+        assert len(pruned.nodes) < len(full_graph.nodes)
+        assert len(pruned.nodes) == len(kept)
 
     def test_prune_drops_batch_branch_at_live_switch(self) -> None:
         """liveSwitch nodes should only keep the live (first) input branch."""
         from haute.deploy._pruner import prune_for_deploy
 
-        graph = {
+        graph = _g({
             "nodes": [
                 {"id": "live_src", "data": {"label": "live_src", "nodeType": "apiInput", "config": {"path": "d.json"}}},
                 {"id": "batch_src", "data": {"label": "batch_src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
@@ -88,7 +93,7 @@ class TestPruner:
                 {"id": "e3", "source": "switch", "target": "score"},
                 {"id": "e4", "source": "score", "target": "out"},
             ],
-        }
+        })
         pruned, kept, removed = prune_for_deploy(graph, "out")
         kept_set = set(kept)
         assert "live_src" in kept_set
@@ -106,11 +111,11 @@ class TestPruner:
     def test_find_output_no_output_raises(self) -> None:
         from haute.deploy._pruner import find_output_node
 
-        graph = {
+        graph = _g({
             "nodes": [
                 {"id": "a", "data": {"nodeType": "dataSource", "config": {}}},
             ]
-        }
+        })
         with pytest.raises(ValueError, match="No output node"):
             find_output_node(graph)
 
@@ -137,7 +142,7 @@ class TestBundler:
     def test_missing_artifact_raises(self) -> None:
         from haute.deploy._bundler import collect_artifacts
 
-        graph = {
+        graph = _g({
             "nodes": [
                 {
                     "id": "ext1",
@@ -147,7 +152,7 @@ class TestBundler:
                     },
                 },
             ]
-        }
+        })
 
         with pytest.raises(FileNotFoundError, match="Artifact not found"):
             collect_artifacts(graph, [], Path("."))
@@ -363,13 +368,14 @@ class TestDatabricksTracking:
         )
         resolved = ResolvedDeploy(
             config=config,
-            full_graph={"nodes": [], "edges": []},
-            pruned_graph={"nodes": [], "edges": []},
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
             input_node_ids=["policies"],
             output_node_id="output",
             artifacts={},
             input_schema={"col": "Int64"},
             output_schema={"col": "Int64"},
+            removed_node_ids=[],
         )
 
         with (
@@ -407,8 +413,8 @@ class TestDatabricksTracking:
         )
         resolved = ResolvedDeploy(
             config=config,
-            full_graph={"nodes": [], "edges": []},
-            pruned_graph={"nodes": [], "edges": []},
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
             input_node_ids=["policies"],
             output_node_id="output",
             artifacts={},
@@ -460,8 +466,8 @@ class TestDatabricksTracking:
         )
         resolved = ResolvedDeploy(
             config=config,
-            full_graph={"nodes": [], "edges": []},
-            pruned_graph={"nodes": [], "edges": []},
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
             input_node_ids=["policies"],
             output_node_id="output",
             artifacts={},
@@ -511,8 +517,8 @@ class TestServingEndpoint:
         )
         resolved = ResolvedDeploy(
             config=config,
-            full_graph={"nodes": [], "edges": []},
-            pruned_graph={"nodes": [], "edges": []},
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
             input_node_ids=["policies"],
             output_node_id="output",
             artifacts={},
@@ -671,8 +677,8 @@ class TestModelsFromCode:
         )
         resolved = ResolvedDeploy(
             config=config,
-            full_graph={"nodes": [], "edges": []},
-            pruned_graph={"nodes": [], "edges": []},
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
             input_node_ids=["policies"],
             output_node_id="output",
             artifacts={},
@@ -721,29 +727,29 @@ class TestParserApiInput:
         """api_input=True in decorator should produce apiInput nodeType."""
         graph = parse_pipeline_file(PIPELINE_FILE)
         quotes_node = None
-        for n in graph["nodes"]:
-            if n["id"] == "quotes":
+        for n in graph.nodes:
+            if n.id == "quotes":
                 quotes_node = n
                 break
 
         assert quotes_node is not None, "quotes node not found"
-        assert quotes_node["data"]["nodeType"] == "apiInput", (
-            f"Expected apiInput nodeType, got: {quotes_node['data']['nodeType']}"
+        assert quotes_node.data.nodeType == "apiInput", (
+            f"Expected apiInput nodeType, got: {quotes_node.data.nodeType}"
         )
 
     def test_live_switch_node_type(self) -> None:
         """live_switch=True in decorator should produce liveSwitch nodeType."""
         graph = parse_pipeline_file(PIPELINE_FILE)
         policies_node = None
-        for n in graph["nodes"]:
-            if n["id"] == "policies":
+        for n in graph.nodes:
+            if n.id == "policies":
                 policies_node = n
                 break
 
         assert policies_node is not None, "policies node not found"
-        assert policies_node["data"]["nodeType"] == "liveSwitch", (
-            f"Expected liveSwitch nodeType, got: {policies_node['data']['nodeType']}"
+        assert policies_node.data.nodeType == "liveSwitch", (
+            f"Expected liveSwitch nodeType, got: {policies_node.data.nodeType}"
         )
-        config = policies_node["data"]["config"]
+        config = policies_node.data.config
         assert config["mode"] == "live"
         assert config["inputs"] == ["quotes", "batch_quotes"]

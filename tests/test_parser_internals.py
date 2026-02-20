@@ -368,9 +368,9 @@ def good_node(df: pl.DataFrame) -> pl.DataFrame:
         graph = parse_pipeline_file(p)
 
         # Should still extract nodes despite syntax error
-        assert graph["pipeline_name"] == "broken"
-        assert "warning" in graph
-        assert len(graph["nodes"]) >= 2  # at least source and good_node
+        assert graph.pipeline_name == "broken"
+        assert graph.warning is not None
+        assert len(graph.nodes) >= 2  # at least source and good_node
 
     def test_fallback_extracts_edges(self, tmp_path):
         """Regex fallback should find pipeline.connect() calls."""
@@ -394,7 +394,7 @@ pipeline.connect("a", "b")
         p = tmp_path / "edges.py"
         p.write_text(code)
         graph = parse_pipeline_file(p)
-        edge_pairs = [(e["source"], e["target"]) for e in graph["edges"]]
+        edge_pairs = [(e.source, e.target) for e in graph.edges]
         assert ("a", "b") in edge_pairs
 
 
@@ -444,36 +444,36 @@ pipeline.connect("transform", "output")
 
         generated = graph_to_code(
             graph1,
-            pipeline_name=graph1["pipeline_name"],
-            description=graph1.get("pipeline_description", ""),
-            preamble=graph1.get("preamble", ""),
+            pipeline_name=graph1.pipeline_name,
+            description=graph1.pipeline_description or "",
+            preamble=graph1.preamble or "",
         )
         p2 = tmp_path / "generated.py"
         p2.write_text(generated)
         graph2 = parse_pipeline_file(p2)
 
         # Same node count
-        assert len(graph1["nodes"]) == len(graph2["nodes"])
+        assert len(graph1.nodes) == len(graph2.nodes)
 
         # Same node types
-        types1 = {n["id"]: n["data"]["nodeType"] for n in graph1["nodes"]}
-        types2 = {n["id"]: n["data"]["nodeType"] for n in graph2["nodes"]}
+        types1 = {n.id: n.data.nodeType for n in graph1.nodes}
+        types2 = {n.id: n.data.nodeType for n in graph2.nodes}
         assert types1 == types2
 
         # Same edge pairs
-        edges1 = {(e["source"], e["target"]) for e in graph1["edges"]}
-        edges2 = {(e["source"], e["target"]) for e in graph2["edges"]}
+        edges1 = {(e.source, e.target) for e in graph1.edges}
+        edges2 = {(e.source, e.target) for e in graph2.edges}
         assert edges1 == edges2
 
         # Source config preserved
-        src1 = next(n for n in graph1["nodes"] if n["id"] == "source")
-        src2 = next(n for n in graph2["nodes"] if n["id"] == "source")
-        assert src1["data"]["config"]["path"] == src2["data"]["config"]["path"]
+        src1 = next(n for n in graph1.nodes if n.id == "source")
+        src2 = next(n for n in graph2.nodes if n.id == "source")
+        assert src1.data.config["path"] == src2.data.config["path"]
 
         # Output fields preserved
-        out1 = next(n for n in graph1["nodes"] if n["id"] == "output")
-        out2 = next(n for n in graph2["nodes"] if n["id"] == "output")
-        assert out1["data"]["config"].get("fields") == out2["data"]["config"].get("fields")
+        out1 = next(n for n in graph1.nodes if n.id == "output")
+        out2 = next(n for n in graph2.nodes if n.id == "output")
+        assert out1.data.config.get("fields") == out2.data.config.get("fields")
 
         # Pipeline name preserved
-        assert graph1["pipeline_name"] == graph2["pipeline_name"]
+        assert graph1.pipeline_name == graph2.pipeline_name

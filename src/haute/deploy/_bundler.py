@@ -34,11 +34,10 @@ def collect_artifacts(
     input_set = set(input_node_ids)
     artifacts: dict[str, Path] = {}
 
-    for node in pruned_graph.get("nodes", []):
-        nid = node["id"]
-        data = node.get("data", {})
-        node_type = data.get("nodeType", "")
-        config = data.get("config", {})
+    for node in pruned_graph.nodes:
+        nid = node.id
+        node_type = node.data.nodeType
+        config = node.data.config
 
         if node_type == "externalFile":
             raw_path = config.get("path", "")

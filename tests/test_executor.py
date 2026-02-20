@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from haute._types import GraphNode, PipelineGraph
 from haute.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
 from tests.conftest import (
     make_edge as _edge,
@@ -18,6 +19,14 @@ from tests.conftest import (
 from tests.conftest import (
     make_transform_node as _transform_node,
 )
+
+
+def _n(d: dict) -> GraphNode:
+    return GraphNode.model_validate(d)
+
+
+def _g(d: dict) -> PipelineGraph:
+    return PipelineGraph.model_validate(d)
 
 # ---------------------------------------------------------------------------
 # _exec_user_code
@@ -116,14 +125,14 @@ class TestBuildNodeFn:
         assert df["c"].to_list() == [5, 6]
 
     def test_data_source_databricks_is_source(self):
-        node = {
+        node = _n({
             "id": "db",
             "data": {
                 "label": "db",
                 "nodeType": "dataSource",
                 "config": {"sourceType": "databricks", "table": "cat.sch.tbl"},
             },
-        }
+        })
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
         # Without a cached parquet file, calling fn() raises CacheNotFoundError
@@ -162,10 +171,10 @@ class TestBuildNodeFn:
         assert set(df.columns) == {"a", "b"}
 
     def test_sink_passthrough(self):
-        node = {
+        node = _n({
             "id": "sink",
             "data": {"label": "sink", "nodeType": "dataSink", "config": {}},
-        }
+        })
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [1]}).lazy()
@@ -178,7 +187,7 @@ class TestBuildNodeFn:
         p = tmp_path / "data.json"
         p.write_text(_json.dumps({"multiplier": 10}))
 
-        node = {
+        node = _n({
             "id": "ext",
             "data": {
                 "label": "ext",
@@ -189,7 +198,7 @@ class TestBuildNodeFn:
                     "code": "df = df.with_columns(y=pl.lit(obj['multiplier']))",
                 },
             },
-        }
+        })
         _, fn, is_source = _build_node_fn(node, source_names=["df"])
         assert is_source is False
         lf = pl.DataFrame({"x": [1]}).lazy()
@@ -203,7 +212,7 @@ class TestBuildNodeFn:
         with open(p, "wb") as f:
             pickle.dump({"factor": 5}, f)
 
-        node = {
+        node = _n({
             "id": "ext",
             "data": {
                 "label": "ext",
@@ -214,7 +223,7 @@ class TestBuildNodeFn:
                     "code": "df = df.with_columns(y=pl.lit(obj['factor']))",
                 },
             },
-        }
+        })
         _, fn, _ = _build_node_fn(node, source_names=["df"])
         lf = pl.DataFrame({"x": [1]}).lazy()
         df = fn(lf).collect()
@@ -222,14 +231,14 @@ class TestBuildNodeFn:
 
     def test_external_file_passthrough_without_code(self):
         """externalFile without code acts as passthrough."""
-        node = {
+        node = _n({
             "id": "ext",
             "data": {
                 "label": "ext",
                 "nodeType": "externalFile",
                 "config": {"path": "model.pkl", "fileType": "pickle", "code": ""},
             },
-        }
+        })
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [7]}).lazy()
@@ -238,10 +247,10 @@ class TestBuildNodeFn:
 
     def test_unknown_node_type_passthrough(self):
         """Unknown nodeType should act as passthrough."""
-        node = {
+        node = _n({
             "id": "unk",
             "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
-        }
+        })
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [3]}).lazy()
@@ -258,13 +267,13 @@ class TestExecuteGraph:
         p = tmp_path / "input.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         results = execute_graph(graph)
         assert results["src"]["status"] == "ok"
         assert results["t"]["status"] == "ok"
@@ -275,13 +284,13 @@ class TestExecuteGraph:
         p = tmp_path / "t.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 _transform_node("t", ".with_columns(y=pl.col('x') + 1)"),
             ],
             "edges": [_edge("src", "t")],
-        }
+        })
         results = execute_graph(graph)
         for nid in ("src", "t"):
             assert "timing_ms" in results[nid]
@@ -289,13 +298,13 @@ class TestExecuteGraph:
             assert results[nid]["timing_ms"] >= 0
 
     def test_empty_graph(self):
-        assert execute_graph({"nodes": [], "edges": []}) == {}
+        assert execute_graph(_g({"nodes": [], "edges": []})) == {}
 
     def test_row_limit(self, tmp_path):
         p = tmp_path / "big.parquet"
         pl.DataFrame({"x": list(range(100))}).write_parquet(p)
 
-        graph = {"nodes": [_source_node("s", str(p))], "edges": []}
+        graph = _g({"nodes": [_source_node("s", str(p))], "edges": []})
         results = execute_graph(graph, row_limit=5)
         assert results["s"]["row_count"] == 5
 
@@ -303,14 +312,14 @@ class TestExecuteGraph:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("a", str(p)),
                 _transform_node("b"),
                 _transform_node("c"),
             ],
             "edges": [_edge("a", "b"), _edge("b", "c")],
-        }
+        })
         results = execute_graph(graph, target_node_id="b")
         assert "b" in results
         assert "c" not in results
@@ -319,14 +328,14 @@ class TestExecuteGraph:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(p)),
                 # Select a column that doesn't exist - triggers ColumnNotFoundError at collect
                 _transform_node("bad", code=".select('nonexistent_col')"),
             ],
             "edges": [_edge("src", "bad")],
-        }
+        })
         results = execute_graph(graph)
         assert results["bad"]["status"] == "error"
         assert "nonexistent_col" in results["bad"]["error"].lower() or "not found" in results["bad"]["error"].lower(), (
@@ -346,20 +355,20 @@ class TestExecuteSink:
         out_path = tmp_path / "out.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(src_path)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(src_path)),
-                {
+                _n({
                     "id": "sink",
                     "data": {
                         "label": "sink",
                         "nodeType": "dataSink",
                         "config": {"path": str(out_path), "format": "parquet"},
                     },
-                },
+                }),
             ],
             "edges": [_edge("src", "sink")],
-        }
+        })
         result = execute_sink(graph, sink_node_id="sink")
         assert result["status"] == "ok"
         assert result["row_count"] == 2
@@ -372,46 +381,46 @@ class TestExecuteSink:
         out_path = tmp_path / "out.csv"
         pl.DataFrame({"a": [10]}).write_parquet(src_path)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(src_path)),
-                {
+                _n({
                     "id": "sink",
                     "data": {
                         "label": "sink",
                         "nodeType": "dataSink",
                         "config": {"path": str(out_path), "format": "csv"},
                     },
-                },
+                }),
             ],
             "edges": [_edge("src", "sink")],
-        }
+        })
         result = execute_sink(graph, sink_node_id="sink")
         assert result["status"] == "ok"
         assert out_path.exists()
 
     def test_missing_sink_raises(self):
-        graph = {"nodes": [], "edges": []}
+        graph = _g({"nodes": [], "edges": []})
         with pytest.raises(ValueError, match="not found"):
             execute_sink(graph, sink_node_id="nope")
 
     def test_no_path_raises(self, tmp_path):
         src = tmp_path / "in.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(src)
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src", str(src)),
-                {
+                _n({
                     "id": "sink",
                     "data": {
                         "label": "sink",
                         "nodeType": "dataSink",
                         "config": {"path": "", "format": "parquet"},
                     },
-                },
+                }),
             ],
             "edges": [_edge("src", "sink")],
-        }
+        })
         with pytest.raises(ValueError, match="no output path"):
             execute_sink(graph, sink_node_id="sink")
 
@@ -461,21 +470,21 @@ class TestInstanceAliasInjection:
         pl.DataFrame({"k": [3], "v": [50]}).write_parquet(alt_a)
         pl.DataFrame({"k": [3], "w": [60]}).write_parquet(alt_b)
 
-        graph = {
+        graph = _g({
             "nodes": [
                 _source_node("src_a", str(src_a)),
                 _source_node("src_b", str(src_b)),
                 _transform_node("joiner", "df = src_a.join(src_b, on='k')"),
                 _source_node("alt_a", str(alt_a)),
                 _source_node("alt_b", str(alt_b)),
-                {
+                _n({
                     "id": "joiner_inst",
                     "data": {
                         "label": "joiner_inst",
                         "nodeType": "transform",
                         "config": {"instanceOf": "joiner"},
                     },
-                },
+                }),
             ],
             "edges": [
                 _edge("src_a", "joiner"),
@@ -483,7 +492,7 @@ class TestInstanceAliasInjection:
                 _edge("alt_a", "joiner_inst"),
                 _edge("alt_b", "joiner_inst"),
             ],
-        }
+        })
         results = execute_graph(graph, target_node_id="joiner_inst")
         assert results["joiner_inst"]["status"] == "ok"
         assert results["joiner_inst"]["row_count"] == 1
@@ -509,11 +518,11 @@ class TestLiveSwitch:
         ]
         if reverse_edges:
             edges = list(reversed(edges))
-        return {
+        return _g({
             "nodes": [
                 _source_node("live_src", str(p1)),
                 _source_node("batch_src", str(p2)),
-                {
+                _n({
                     "id": "switch",
                     "type": "liveSwitch",
                     "data": {
@@ -525,10 +534,10 @@ class TestLiveSwitch:
                         },
                     },
                     "position": {"x": 0, "y": 0},
-                },
+                }),
             ],
             "edges": edges,
-        }
+        })
 
     def test_live_mode_selects_first_input(self, tmp_path):
         graph = self._switch_graph(tmp_path, mode="live")

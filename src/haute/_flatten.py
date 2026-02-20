@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from haute._types import PipelineGraph
+from haute._types import GraphEdge, GraphNode, PipelineGraph
 
 
 def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
@@ -14,63 +14,64 @@ def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
 
     If the graph has no submodels, it is returned unchanged.
     """
-    submodels = graph.get("submodels")
+    submodels = graph.submodels
     if not submodels:
         return graph
 
-    nodes = list(graph.get("nodes", []))
-    edges = list(graph.get("edges", []))
+    nodes: list[GraphNode] = list(graph.nodes)
+    edges: list[GraphEdge] = list(graph.edges)
 
     # Remove submodel placeholder nodes
     submodel_node_ids = {f"submodel__{name}" for name in submodels}
-    nodes = [n for n in nodes if n["id"] not in submodel_node_ids]
+    nodes = [n for n in nodes if n.id not in submodel_node_ids]
 
     # Inline child nodes and internal edges from each submodel
-    for sm_name, sm_meta in submodels.items():
+    for _sm_name, sm_meta in submodels.items():
         sm_graph = sm_meta.get("graph", {})
-        nodes.extend(sm_graph.get("nodes", []))
-        edges_to_add = sm_graph.get("edges", [])
-        edges.extend(edges_to_add)
+        for nd in sm_graph.get("nodes", []):
+            nodes.append(GraphNode.model_validate(nd) if isinstance(nd, dict) else nd)
+        for ed in sm_graph.get("edges", []):
+            edges.append(GraphEdge.model_validate(ed) if isinstance(ed, dict) else ed)
 
     # Rewire boundary edges: submodel handles → actual child nodes
-    rewired_edges: list[dict] = []
+    rewired: list[GraphEdge] = []
     for edge in edges:
-        src = edge.get("source", "")
-        tgt = edge.get("target", "")
-        source_handle = edge.get("sourceHandle", "")
-        target_handle = edge.get("targetHandle", "")
+        src = edge.source
+        tgt = edge.target
+        eid = edge.id
+        sh = edge.sourceHandle or ""
+        th = edge.targetHandle or ""
+        new_sh = edge.sourceHandle
+        new_th = edge.targetHandle
 
-        new_edge = dict(edge)
-
-        if src in submodel_node_ids and source_handle:
+        if src in submodel_node_ids and sh:
             # e.g. sourceHandle="out__frequency_model" → source="frequency_model"
-            actual_src = source_handle.removeprefix("out__")
-            new_edge["source"] = actual_src
-            new_edge["id"] = f"e_{actual_src}_{tgt}"
-            new_edge.pop("sourceHandle", None)
+            src = sh.removeprefix("out__")
+            eid = f"e_{src}_{tgt}"
+            new_sh = None
 
-        if tgt in submodel_node_ids and target_handle:
+        if tgt in submodel_node_ids and th:
             # e.g. targetHandle="in__frequency_model" → target="frequency_model"
-            actual_tgt = target_handle.removeprefix("in__")
-            new_edge["target"] = actual_tgt
-            new_edge["id"] = f"e_{src}_{actual_tgt}"
-            new_edge.pop("targetHandle", None)
+            tgt = th.removeprefix("in__")
+            eid = f"e_{src}_{tgt}"
+            new_th = None
 
         # Skip edges that still reference a submodel node (shouldn't happen)
-        if new_edge["source"] in submodel_node_ids or new_edge["target"] in submodel_node_ids:
+        if src in submodel_node_ids or tgt in submodel_node_ids:
             continue
 
-        rewired_edges.append(new_edge)
+        rewired.append(GraphEdge(
+            id=eid, source=src, target=tgt,
+            sourceHandle=new_sh, targetHandle=new_th,
+        ))
 
     # Deduplicate edges by (source, target)
     seen: set[tuple[str, str]] = set()
-    deduped: list[dict] = []
-    for e in rewired_edges:
-        key = (e["source"], e["target"])
+    deduped: list[GraphEdge] = []
+    for e in rewired:
+        key = (e.source, e.target)
         if key not in seen:
             seen.add(key)
             deduped.append(e)
 
-    result = {**graph, "nodes": nodes, "edges": deduped}
-    result.pop("submodels", None)
-    return result
+    return graph.model_copy(update={"nodes": nodes, "edges": deduped, "submodels": None})

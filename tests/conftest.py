@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from haute._sandbox import _get_project_root, set_project_root
+from haute._types import GraphEdge, GraphNode, NodeData
 
 
 @pytest.fixture(autouse=True)
@@ -28,42 +29,30 @@ def _widen_sandbox_root():
 # ---------------------------------------------------------------------------
 
 
-def make_source_node(nid: str, path: str) -> dict:
-    """Build a minimal dataSource node dict."""
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "dataSource",
-            "config": {"path": path},
-        },
-    }
+def make_source_node(nid: str, path: str) -> GraphNode:
+    """Build a minimal dataSource node."""
+    return GraphNode(
+        id=nid,
+        data=NodeData(label=nid, nodeType="dataSource", config={"path": path}),
+    )
 
 
-def make_transform_node(nid: str, code: str = "") -> dict:
-    """Build a minimal transform node dict."""
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "transform",
-            "config": {"code": code},
-        },
-    }
+def make_transform_node(nid: str, code: str = "") -> GraphNode:
+    """Build a minimal transform node."""
+    return GraphNode(
+        id=nid,
+        data=NodeData(label=nid, nodeType="transform", config={"code": code}),
+    )
 
 
-def make_output_node(nid: str, fields: list[str] | None = None) -> dict:
-    """Build a minimal output node dict."""
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "output",
-            "config": {"fields": fields or []},
-        },
-    }
+def make_output_node(nid: str, fields: list[str] | None = None) -> GraphNode:
+    """Build a minimal output node."""
+    return GraphNode(
+        id=nid,
+        data=NodeData(label=nid, nodeType="output", config={"fields": fields or []}),
+    )
 
 
-def make_edge(src: str, tgt: str) -> dict:
-    """Build a minimal edge dict."""
-    return {"id": f"e_{src}_{tgt}", "source": src, "target": tgt}
+def make_edge(src: str, tgt: str) -> GraphEdge:
+    """Build a minimal edge."""
+    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)

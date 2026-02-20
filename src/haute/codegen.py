@@ -178,11 +178,11 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
 
     source_names: sanitized function names of upstream nodes (used as param names).
     """
-    data = node["data"]
-    node_type = data["nodeType"]
-    config = data.get("config", {})
-    label = data["label"]
-    description = data.get("description", "") or f"{label} node"
+    data = node.data
+    node_type = data.nodeType
+    config = data.config
+    label = data.label
+    description = data.description or f"{label} node"
     func_name = _sanitize_func_name(label)
 
     if source_names is None:
@@ -343,9 +343,9 @@ def _instance_to_code(
     that each original parameter receives the correct instance input regardless
     of edge ordering.
     """
-    data = node.get("data", {})
-    label = data.get("label", "Unnamed")
-    description = data.get("description", "") or f"Instance of {original_func_name}"
+    data = node.data
+    label = data.label
+    description = data.description or f"Instance of {original_func_name}"
     func_name = _sanitize_func_name(label)
 
     if source_names is None:
@@ -354,7 +354,7 @@ def _instance_to_code(
     params = _build_params(source_names)
 
     # Prefer explicit inputMapping from config (set via the UI)
-    explicit_map = data.get("config", {}).get("inputMapping") if data else None
+    explicit_map = data.config.get("inputMapping")
 
     if orig_source_names and source_names:
         explicit = dict(explicit_map) if explicit_map and isinstance(explicit_map, dict) else None
@@ -373,7 +373,7 @@ def _instance_to_code(
 
 def _topo_sort(nodes: list[GraphNode], edges: list[GraphEdge]) -> list[GraphNode]:
     """Sort nodes in topological order based on edges."""
-    node_map = {n["id"]: n for n in nodes}
+    node_map = {n.id: n for n in nodes}
     order = topo_sort_ids(list(node_map.keys()), edges)
     return [node_map[nid] for nid in order if nid in node_map]
 
@@ -385,17 +385,15 @@ def graph_to_code(
     preamble: str = "",
 ) -> str:
     """Convert a React Flow graph to a valid haute pipeline .py file."""
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
+    nodes = graph.nodes
+    edges = graph.edges
 
     sorted_nodes = _topo_sort(nodes, edges)
 
     # Build a map from node id → function name
     id_to_func: dict[str, str] = {}
     for node in sorted_nodes:
-        data = node.get("data", {})
-        label = data.get("label", "Unnamed")
-        id_to_func[node["id"]] = _sanitize_func_name(label)
+        id_to_func[node.id] = _sanitize_func_name(node.data.label)
 
     lines = [
         f'"""Pipeline: {pipeline_name}"""',
@@ -419,29 +417,28 @@ def graph_to_code(
     # Build source names per node from edges (ordered list of upstream func names)
     node_sources: dict[str, list[str]] = {}
     for edge in edges:
-        tgt = edge["target"]
-        src_name = id_to_func.get(edge["source"], edge["source"])
-        node_sources.setdefault(tgt, []).append(src_name)
+        src_name = id_to_func.get(edge.source, edge.source)
+        node_sources.setdefault(edge.target, []).append(src_name)
 
     # Partition: emit originals before instances to ensure the function exists
     # when the instance wrapper calls it.
     instance_of_map: dict[str, str] = {}
     for node in sorted_nodes:
-        ref = node.get("data", {}).get("config", {}).get("instanceOf")
+        ref = node.data.config.get("instanceOf")
         if ref:
-            instance_of_map[node["id"]] = ref
+            instance_of_map[node.id] = ref
 
-    originals = [n for n in sorted_nodes if n["id"] not in instance_of_map]
-    instances = [n for n in sorted_nodes if n["id"] in instance_of_map]
+    originals = [n for n in sorted_nodes if n.id not in instance_of_map]
+    instances = [n for n in sorted_nodes if n.id in instance_of_map]
 
     for node in originals:
-        source_names = node_sources.get(node["id"], [])
+        source_names = node_sources.get(node.id, [])
         lines.append(_node_to_code(node, source_names=source_names))
         lines.append("")
 
     for node in instances:
-        source_names = node_sources.get(node["id"], [])
-        orig_id = instance_of_map[node["id"]]
+        source_names = node_sources.get(node.id, [])
+        orig_id = instance_of_map[node.id]
         orig_func = id_to_func.get(orig_id, orig_id)
         orig_src = node_sources.get(orig_id, [])
         lines.append(_instance_to_code(
@@ -456,8 +453,8 @@ def graph_to_code(
         lines.append("")
         lines.append("# Wire nodes together - edges define data flow")
         for edge in edges:
-            src_func = id_to_func.get(edge["source"], edge["source"])
-            tgt_func = id_to_func.get(edge["target"], edge["target"])
+            src_func = id_to_func.get(edge.source, edge.source)
+            tgt_func = id_to_func.get(edge.target, edge.target)
             lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
         lines.append("")
 
@@ -488,7 +485,7 @@ def graph_to_code_multi(
 
     If the graph has no submodels, the result contains only the main file.
     """
-    submodels = graph.get("submodels", {})
+    submodels = graph.submodels or {}
 
     if not submodels:
         # No submodels — single-file output
@@ -502,24 +499,22 @@ def graph_to_code_multi(
         all_child_ids.update(sm_meta.get("childNodeIds", []))
         submodel_node_ids.add(f"submodel__{sm_name}")
 
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
+    nodes = graph.nodes
+    edges = graph.edges
 
     # Root-level nodes: not children and not the submodel placeholder itself
     root_nodes = [
         n for n in nodes
-        if n["id"] not in all_child_ids and n["id"] not in submodel_node_ids
+        if n.id not in all_child_ids and n.id not in submodel_node_ids
     ]
 
     # Root-level edges: only between root-level nodes OR crossing submodel boundary
-    root_node_ids = {n["id"] for n in root_nodes}
+    root_node_ids = {n.id for n in root_nodes}
 
     # Build id → func_name for root nodes (needed by submodel cross-boundary resolution)
     root_id_to_func: dict[str, str] = {}
     for node in root_nodes:
-        data = node.get("data", {})
-        label = data.get("label", "Unnamed")
-        root_id_to_func[node["id"]] = _sanitize_func_name(label)
+        root_id_to_func[node.id] = _sanitize_func_name(node.data.label)
 
     # ── Generate submodel files ──────────────────────────────────────
     files: dict[str, str] = {}
@@ -527,36 +522,38 @@ def graph_to_code_multi(
     for sm_name, sm_meta in submodels.items():
         sm_graph = sm_meta.get("graph", {})
         sm_file = sm_meta.get("file", f"modules/{sm_name}.py")
-        sm_nodes = sm_graph.get("nodes", [])
-        sm_edges = sm_graph.get("edges", [])
+        raw_nodes = sm_graph.get("nodes", [])
+        raw_edges = sm_graph.get("edges", [])
+        sm_nodes = [
+            GraphNode.model_validate(n) if isinstance(n, dict) else n
+            for n in raw_nodes
+        ]
+        sm_edges = [
+            GraphEdge.model_validate(e) if isinstance(e, dict) else e
+            for e in raw_edges
+        ]
 
         sorted_sm_nodes = _topo_sort(sm_nodes, sm_edges)
 
         # Build id → func_name map for submodel nodes
         sm_id_to_func: dict[str, str] = {}
         for node in sorted_sm_nodes:
-            data = node.get("data", {})
-            label = data.get("label", "Unnamed")
-            sm_id_to_func[node["id"]] = _sanitize_func_name(label)
+            sm_id_to_func[node.id] = _sanitize_func_name(node.data.label)
 
         # Build source names per node (internal edges)
         sm_node_sources: dict[str, list[str]] = {}
         for edge in sm_edges:
-            tgt = edge["target"]
-            src_name = sm_id_to_func.get(edge["source"], edge["source"])
-            sm_node_sources.setdefault(tgt, []).append(src_name)
+            src_name = sm_id_to_func.get(edge.source, edge.source)
+            sm_node_sources.setdefault(edge.target, []).append(src_name)
 
         # Also include cross-boundary inputs from parent graph edges
         sm_node_id = f"submodel__{sm_name}"
-        sm_child_ids = {n["id"] for n in sm_nodes}
+        sm_child_ids = {n.id for n in sm_nodes}
         for edge in edges:
-            tgt = edge.get("target", "")
-            tgt_handle = edge.get("targetHandle", "")
-            if tgt == sm_node_id and tgt_handle:
-                child_id = tgt_handle.removeprefix("in__")
+            if edge.target == sm_node_id and edge.targetHandle:
+                child_id = edge.targetHandle.removeprefix("in__")
                 if child_id in sm_child_ids:
-                    src = edge.get("source", "")
-                    src_name = root_id_to_func.get(src, _sanitize_func_name(src))
+                    src_name = root_id_to_func.get(edge.source, _sanitize_func_name(edge.source))
                     sm_node_sources.setdefault(child_id, []).append(src_name)
 
         sm_lines = [
@@ -572,7 +569,7 @@ def graph_to_code_multi(
         ]
 
         for node in sorted_sm_nodes:
-            source_names = sm_node_sources.get(node["id"], [])
+            source_names = sm_node_sources.get(node.id, [])
             sm_lines.append(_submodel_node_to_code(node, source_names=source_names))
             sm_lines.append("")
 
@@ -580,8 +577,8 @@ def graph_to_code_multi(
         if sm_edges:
             sm_lines.append("")
             for edge in sm_edges:
-                src_func = sm_id_to_func.get(edge["source"], edge["source"])
-                tgt_func = sm_id_to_func.get(edge["target"], edge["target"])
+                src_func = sm_id_to_func.get(edge.source, edge.source)
+                tgt_func = sm_id_to_func.get(edge.target, edge.target)
                 sm_lines.append(f'submodel.connect("{src_func}", "{tgt_func}")')
             sm_lines.append("")
 
@@ -591,16 +588,15 @@ def graph_to_code_multi(
 
     sorted_root = _topo_sort(root_nodes, [
         e for e in edges
-        if e["source"] in root_node_ids and e["target"] in root_node_ids
+        if e.source in root_node_ids and e.target in root_node_ids
     ]) if root_nodes else []
 
     # Also map submodel child node IDs to func names (for edge generation)
     for sm_name, sm_meta in submodels.items():
         sm_graph = sm_meta.get("graph", {})
         for n in sm_graph.get("nodes", []):
-            data = n.get("data", {})
-            label = data.get("label", "Unnamed")
-            root_id_to_func[n["id"]] = _sanitize_func_name(label)
+            nd = GraphNode.model_validate(n) if isinstance(n, dict) else n
+            root_id_to_func[nd.id] = _sanitize_func_name(nd.data.label)
 
     main_lines = [
         f'"""Pipeline: {pipeline_name}"""',
@@ -624,18 +620,18 @@ def graph_to_code_multi(
     # cross-boundary edges (resolving submodel handles to child node names).
     root_node_sources: dict[str, list[str]] = {}
     for edge in edges:
-        src = edge.get("source", "")
-        tgt = edge.get("target", "")
-        src_handle = edge.get("sourceHandle", "")
-        tgt_handle = edge.get("targetHandle", "")
+        src = edge.source
+        tgt = edge.target
+        sh = edge.sourceHandle or ""
+        th = edge.targetHandle or ""
 
         # Resolve submodel handles to actual child node names
         actual_src = src
-        if src in submodel_node_ids and src_handle:
-            actual_src = src_handle.removeprefix("out__")
+        if src in submodel_node_ids and sh:
+            actual_src = sh.removeprefix("out__")
         actual_tgt = tgt
-        if tgt in submodel_node_ids and tgt_handle:
-            actual_tgt = tgt_handle.removeprefix("in__")
+        if tgt in submodel_node_ids and th:
+            actual_tgt = th.removeprefix("in__")
 
         # Only care about edges feeding into root nodes
         if actual_tgt not in root_node_ids:
@@ -646,21 +642,21 @@ def graph_to_code_multi(
     # Partition: emit originals before instances
     root_instance_of: dict[str, str] = {}
     for node in sorted_root:
-        ref = node.get("data", {}).get("config", {}).get("instanceOf")
+        ref = node.data.config.get("instanceOf")
         if ref:
-            root_instance_of[node["id"]] = ref
+            root_instance_of[node.id] = ref
 
-    root_originals = [n for n in sorted_root if n["id"] not in root_instance_of]
-    root_instances = [n for n in sorted_root if n["id"] in root_instance_of]
+    root_originals = [n for n in sorted_root if n.id not in root_instance_of]
+    root_instances = [n for n in sorted_root if n.id in root_instance_of]
 
     for node in root_originals:
-        source_names = root_node_sources.get(node["id"], [])
+        source_names = root_node_sources.get(node.id, [])
         main_lines.append(_node_to_code(node, source_names=source_names))
         main_lines.append("")
 
     for node in root_instances:
-        source_names = root_node_sources.get(node["id"], [])
-        orig_id = root_instance_of[node["id"]]
+        source_names = root_node_sources.get(node.id, [])
+        orig_id = root_instance_of[node.id]
         orig_func = root_id_to_func.get(orig_id, orig_id)
         orig_src = root_node_sources.get(orig_id, [])
         main_lines.append(_instance_to_code(
@@ -682,18 +678,18 @@ def graph_to_code_multi(
     # Also include cross-boundary edges that reference submodel handles
     connect_pairs: list[tuple[str, str]] = []
     for edge in all_edges:
-        src = edge.get("source", "")
-        tgt = edge.get("target", "")
-        src_handle = edge.get("sourceHandle", "")
-        tgt_handle = edge.get("targetHandle", "")
+        src = edge.source
+        tgt = edge.target
+        sh = edge.sourceHandle or ""
+        th = edge.targetHandle or ""
 
         # Resolve submodel handles to actual node names
         actual_src = src
-        if src in submodel_node_ids and src_handle:
-            actual_src = src_handle.removeprefix("out__")
+        if src in submodel_node_ids and sh:
+            actual_src = sh.removeprefix("out__")
         actual_tgt = tgt
-        if tgt in submodel_node_ids and tgt_handle:
-            actual_tgt = tgt_handle.removeprefix("in__")
+        if tgt in submodel_node_ids and th:
+            actual_tgt = th.removeprefix("in__")
 
         src_func = all_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
         tgt_func = all_id_to_func.get(actual_tgt, _sanitize_func_name(actual_tgt))

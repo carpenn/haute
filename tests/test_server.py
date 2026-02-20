@@ -125,7 +125,7 @@ class TestRunPipeline:
     def _graph_payload(self, pipeline_dir: Path) -> dict:
         from haute.parser import parse_pipeline_file
         graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
-        return {"graph": graph}
+        return {"graph": graph.model_dump()}
 
     def test_run_returns_results(self, client: TestClient, pipeline_dir: Path):
         body = self._graph_payload(pipeline_dir)
@@ -152,10 +152,10 @@ class TestPreviewNode:
     def test_preview_returns_node_data(self, client: TestClient, pipeline_dir: Path):
         from haute.parser import parse_pipeline_file
         graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
-        node_id = graph["nodes"][0]["id"]
+        node_id = graph.nodes[0].id
 
         resp = client.post("/api/pipeline/preview", json={
-            "graph": graph, "nodeId": node_id, "rowLimit": 10,
+            "graph": graph.model_dump(), "nodeId": node_id, "rowLimit": 10,
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -181,7 +181,7 @@ class TestTraceRow:
         graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
 
         resp = client.post("/api/pipeline/trace", json={
-            "graph": graph, "rowIndex": 0,
+            "graph": graph.model_dump(), "rowIndex": 0,
         })
         assert resp.status_code == 200
         data = resp.json()

@@ -7,9 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from haute._types import PipelineGraph
 from haute.codegen import graph_to_code, graph_to_code_multi
 from haute.graph_utils import flatten_graph
 from haute.parser import parse_pipeline_file
+
+
+def _g(d: dict) -> PipelineGraph:
+    return PipelineGraph.model_validate(d)
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +33,9 @@ def _write(tmp_path: Path, name: str, code: str) -> Path:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def flat_graph() -> dict:
+def flat_graph() -> PipelineGraph:
     """A simple 3-node flat graph (no submodels)."""
-    return {
+    return _g({
         "nodes": [
             {"id": "src", "type": "dataSource", "position": {"x": 0, "y": 0},
              "data": {"label": "Source", "nodeType": "dataSource", "config": {"path": "data/in.parquet"}}},
@@ -43,13 +48,13 @@ def flat_graph() -> dict:
             {"id": "e1", "source": "src", "target": "tx"},
             {"id": "e2", "source": "tx", "target": "out"},
         ],
-    }
+    })
 
 
 @pytest.fixture()
-def submodel_graph() -> dict:
+def submodel_graph() -> PipelineGraph:
     """A graph with a submodel node wrapping tx+out."""
-    return {
+    return _g({
         "nodes": [
             {"id": "src", "type": "dataSource", "position": {"x": 0, "y": 0},
              "data": {"label": "Source", "nodeType": "dataSource", "config": {"path": "data/in.parquet"}}},
@@ -84,7 +89,7 @@ def submodel_graph() -> dict:
                 },
             },
         },
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -95,15 +100,15 @@ class TestFlattenGraph:
     def test_flat_graph_unchanged(self, flat_graph):
         """A graph with no submodels should pass through unchanged."""
         result = flatten_graph(flat_graph)
-        assert len(result["nodes"]) == 3
-        assert len(result["edges"]) == 2
-        node_ids = {n["id"] for n in result["nodes"]}
+        assert len(result.nodes) == 3
+        assert len(result.edges) == 2
+        node_ids = {n.id for n in result.nodes}
         assert node_ids == {"src", "tx", "out"}
 
     def test_submodel_dissolved(self, submodel_graph):
         """Flattening should inline the submodel's children and remove the placeholder."""
         result = flatten_graph(submodel_graph)
-        node_ids = {n["id"] for n in result["nodes"]}
+        node_ids = {n.id for n in result.nodes}
         # Submodel placeholder should be gone
         assert "submodel__scoring" not in node_ids
         # Child nodes should be present
@@ -115,7 +120,7 @@ class TestFlattenGraph:
     def test_submodel_edges_rewired(self, submodel_graph):
         """Cross-boundary edges should be rewired to point to child nodes."""
         result = flatten_graph(submodel_graph)
-        edge_pairs = [(e["source"], e["target"]) for e in result["edges"]]
+        edge_pairs = [(e.source, e.target) for e in result.edges]
         # Should have src→tx edge (rewired from src→submodel__scoring)
         assert ("src", "tx") in edge_pairs
         # Internal edge tx→out should be present
@@ -124,7 +129,7 @@ class TestFlattenGraph:
     def test_no_submodel_key_in_result(self, submodel_graph):
         """The flattened graph should not have a submodels dict."""
         result = flatten_graph(submodel_graph)
-        assert not result.get("submodels")
+        assert not result.submodels
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +203,9 @@ class TestParserSubmodel:
         """)
 
         graph = parse_pipeline_file(tmp_path / "main.py")
-        assert graph.get("nodes") is not None
-        node_ids = {n["id"] for n in graph["nodes"]}
-        assert "Source" in node_ids or "source" in node_ids.union({n["id"].lower() for n in graph["nodes"]})
+        assert graph.nodes is not None
+        node_ids = {n.id for n in graph.nodes}
+        assert "Source" in node_ids or "source" in node_ids.union({n.id.lower() for n in graph.nodes})
 
     def test_parse_flat_pipeline(self, tmp_path):
         """A pipeline without submodels should parse normally."""
@@ -222,8 +227,8 @@ class TestParserSubmodel:
         """)
 
         graph = parse_pipeline_file(tmp_path / "main.py")
-        assert len(graph["nodes"]) == 2
-        assert len(graph["edges"]) >= 1
+        assert len(graph.nodes) == 2
+        assert len(graph.edges) >= 1
 
 
 # ---------------------------------------------------------------------------

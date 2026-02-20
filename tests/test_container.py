@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from haute._types import GraphNode, NodeData, PipelineGraph
 from haute.deploy._config import ContainerConfig, DeployConfig, ResolvedDeploy
 from haute.deploy._container import (
     _ARTIFACT_EXT_TO_DEP,
@@ -38,8 +39,8 @@ def _make_resolved(
     )
     return ResolvedDeploy(
         config=config,
-        full_graph={"nodes": [], "edges": []},
-        pruned_graph={"nodes": [{"id": "n1"}], "edges": []},
+        full_graph=PipelineGraph(),
+        pruned_graph=PipelineGraph(nodes=[GraphNode(id="n1", data=NodeData(label="n1"))]),
         input_node_ids=["policies"],
         output_node_id="output",
         artifacts=artifacts or {},

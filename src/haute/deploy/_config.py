@@ -307,7 +307,7 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
 
     # Parse the pipeline
     full_graph = parse_pipeline_file(config.pipeline_file)
-    if not full_graph.get("nodes"):
+    if not full_graph.nodes:
         raise ValueError(f"No nodes found in {config.pipeline_file}")
 
     # Find output node

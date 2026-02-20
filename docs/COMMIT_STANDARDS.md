@@ -6,7 +6,7 @@ Every commit merged into `main` must satisfy the checks below. Review this list 
 
 ## Design Philosophy
 
-These are the non-negotiable principles that shape every decision in hauteay. If a commit conflicts with any of these, it needs rethinking.
+These are the non-negotiable principles that shape every decision in haute. If a commit conflicts with any of these, it needs rethinking.
 
 ### Code is the source of truth
 
@@ -169,6 +169,50 @@ Every output value must be traceable back through the graph to its inputs, showi
 - Commit messages follow conventional format: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`.
 - No generated files (`node_modules/`, `__pycache__/`, build output) in commits.
 
+## 18. Design Before Code
+
+- Changes that touch more than 3 files, change a public API, or introduce a new subsystem require a short design doc in `docs/` *before* implementation begins.
+- The doc does not need to be long. A few paragraphs covering **problem**, **approach**, **alternatives considered**, and **open questions** is sufficient.
+- The purpose is to catch bad designs before they become 2,000 lines of code. A 20-minute doc saves a week of rework.
+- Trivial changes (rename, bug fix, test addition) do not need a doc.
+
+## 19. Small Pull Requests
+
+- PRs should be **under 400 lines of diff** wherever possible. Reviewers lose concentration after that; large PRs get rubber-stamped, not reviewed.
+- If a feature requires more, split it into a stack of dependent PRs that each compile and pass tests independently.
+- Refactors and behaviour changes must be in separate PRs. Never mix "move code around" with "change what it does" — it makes the behaviour change invisible.
+- A PR that only adds tests is a perfectly valid PR.
+
+## 20. Canonical Data Types
+
+- Structured data that flows between modules must use **Pydantic `BaseModel`**, not plain dicts. Dicts provide no validation, no autocomplete, and no documentation. Attribute access (`node.data.nodeType`) is explicit; dict access (`node["data"]["nodeType"]`) is opaque.
+- The canonical graph types live in `_types.py`: `NodeData`, `GraphNode`, `GraphEdge`, `PipelineGraph`. All internal code passes these models. Use `.model_dump()` only at serialization boundaries (JSON files, API responses).
+- Use `.model_validate(d)` to convert incoming dicts (e.g. from JSON) to models at the earliest opportunity. Do not pass raw dicts through multiple function calls.
+- If you find code accessing a Pydantic model with `["key"]` syntax or `.get()`, that is a bug.
+
+## 21. Minimal API Surface
+
+- Every public function, class, and constant is a maintenance promise. Prefix internal helpers with `_` (e.g. `_build_edges`, `_sanitize_func_name`).
+- `__init__.py` re-exports should be deliberate. Only export what external consumers need. Do not re-export everything from submodules.
+- If a function is only called from one module, consider whether it belongs in that module rather than in a shared utility file.
+- Before adding a new public function, check whether an existing function can be extended to cover the use case.
+
+## 22. Test Quality
+
+- **Deterministic.** Tests must not depend on wall-clock time, random seeds, filesystem ordering, or network. Flaky tests erode trust and get ignored.
+- **Fast.** The full suite should run in under 10 seconds. If a test needs heavy I/O, use `tmp_path` with minimal data. Never load production-scale data in tests.
+- **Focused.** Each test verifies one behaviour. If a test name needs "and" in it, split it into two tests.
+- **Independent.** Tests must not depend on execution order. No shared mutable state between tests. Use fixtures, not module-level setup.
+- **Readable.** A test is documentation. The arrange/act/assert structure should be obvious. Use helper functions (e.g. `_make_graph`, `_n`, `_g`) to keep test bodies short and intention-clear.
+- Prefer **real objects** over mocks. Mock external services and I/O; do not mock your own code unless there is no alternative.
+
+## 23. Module Boundaries
+
+- Imports flow **downward**: high-level modules import low-level modules, never the reverse. The dependency direction is: `cli` / `server` → `executor` / `codegen` / `deploy` → `parser` → `_types` / `_topo` / `graph_utils`.
+- Circular imports are a design smell. If module A imports module B and module B imports module A, one of them has the wrong responsibility. Fix the design, do not paper over it with deferred imports (unless the circular dependency is genuinely at the type-checking level only).
+- Each module should have a clear one-sentence purpose. If you cannot describe what a module does without "and", it may need splitting.
+- Cross-module communication happens through well-defined types (`PipelineGraph`, `ResolvedDeploy`, `TraceResult`), not raw dicts or tuples.
+
 ---
 
 ## LLM-Generated Code: Watch For These
@@ -294,6 +338,12 @@ Engineering Standards
 - [ ] React state in hooks/refs, not module-level variables
 - [ ] File access endpoints validate paths stay within project root
 - [ ] Tests added for new logic; bug fixes include regression tests
+- [ ] Design doc in `docs/` if change touches >3 files or changes a public API
+- [ ] PR is under 400 lines of diff, or split into a reviewable stack
+- [ ] Structured data uses Pydantic models, not raw dicts
+- [ ] Internal helpers prefixed with `_`; only intentional public API is exported
+- [ ] Tests are deterministic, fast, focused, and independent
+- [ ] No circular imports; import direction flows downward
 
 LLM Code Review
 - [ ] No silent fallbacks that mask errors (return empty data, `or {}`, `or []`)

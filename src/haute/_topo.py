@@ -14,7 +14,7 @@ def topo_sort_ids(node_ids: list[str], edges: list[GraphEdge]) -> list[str]:
     children: dict[str, list[str]] = {nid: [] for nid in node_ids}
 
     for e in edges:
-        src, tgt = e["source"], e["target"]
+        src, tgt = e.source, e.target
         if tgt in in_degree:
             in_degree[tgt] += 1
         if src in children:
@@ -39,8 +39,8 @@ def ancestors(target_id: str, edges: list[GraphEdge], all_ids: set[str]) -> set[
     """Get all ancestor node IDs of target (inclusive)."""
     parents: dict[str, list[str]] = {nid: [] for nid in all_ids}
     for e in edges:
-        if e["target"] in parents:
-            parents[e["target"]].append(e["source"])
+        if e.target in parents:
+            parents[e.target].append(e.source)
 
     visited: set[str] = set()
     queue = deque([target_id])

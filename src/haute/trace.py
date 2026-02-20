@@ -217,17 +217,17 @@ def execute_trace(
     """
     t_start = time.perf_counter()
 
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
+    nodes = graph.nodes
+    edges = graph.edges
 
     if not nodes:
         raise ValueError("Empty graph - nothing to trace")
 
     # Resolve target before _prepare_graph filters to ancestors
     if target_node_id is None:
-        all_ids = {n["id"] for n in nodes}
+        all_ids = {n.id for n in nodes}
         target_node_id = topo_sort_ids(list(all_ids), edges)[-1]
-    if not any(n["id"] == target_node_id for n in nodes):
+    if not any(n.id == target_node_id for n in nodes):
         raise ValueError(f"Target node '{target_node_id}' not found in graph")
 
     # ---------- Eager execution with single-entry cache ----------
@@ -256,8 +256,8 @@ def execute_trace(
 
         # Full parent lookup from ALL edges for instance resolution
         all_parents: dict[str, list[str]] = {}
-        for e in graph.get("edges", []):
-            all_parents.setdefault(e["target"], []).append(e["source"])
+        for e in graph.edges:
+            all_parents.setdefault(e.target, []).append(e.source)
 
         funcs: dict[str, tuple[Any, bool]] = {}
         for nid in order:
@@ -322,9 +322,9 @@ def execute_trace(
 
     for nid in order:
         is_source = nid in source_ids
-        node_data = node_map[nid]["data"]
-        node_name = node_data["label"]
-        node_type = node_data["nodeType"]
+        node_data = node_map[nid].data
+        node_name = node_data.label
+        node_type = node_data.nodeType
 
         output_row = cached_rows[nid]
 
@@ -397,10 +397,8 @@ def execute_trace(
     row_id_column: str | None = None
     row_id_value: Any = None
     for n in nodes:
-        ndata = n.get("data", {})
-        cfg = ndata.get("config", {})
-        if ndata.get("nodeType") == "apiInput" and cfg.get("row_id_column"):
-            row_id_column = cfg["row_id_column"]
+        if n.data.nodeType == "apiInput" and n.data.config.get("row_id_column"):
+            row_id_column = n.data.config["row_id_column"]
             row_id_value = target_row.get(row_id_column)
             break
 

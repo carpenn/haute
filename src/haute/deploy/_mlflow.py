@@ -234,9 +234,8 @@ def _pip_requirements(resolved: ResolvedDeploy) -> list[str]:
     ]
 
     # Check if catboost is used
-    for node in resolved.pruned_graph.get("nodes", []):
-        config = node.get("data", {}).get("config", {})
-        if config.get("fileType") == "catboost":
+    for node in resolved.pruned_graph.nodes:
+        if node.data.config.get("fileType") == "catboost":
             reqs.append("catboost>=1.2.8")
             break
 
