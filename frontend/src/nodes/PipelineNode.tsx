@@ -28,7 +28,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const Icon = nodeTypeIcons[nodeType] || PolarsIcon
   const accent = nodeTypeColors[nodeType] || nodeTypeColors.transform
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
-  const isDeployInput = !!(nodeData.config?.deploy_input)
+  const isDeployInput = nodeType === "apiInput"
   const missingRowId = isDeployInput && !nodeData.config?.row_id_column
   const isInstance = !!(nodeData.config?.instanceOf)
   const traceActive = !!nodeData._traceActive

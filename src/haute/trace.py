@@ -84,7 +84,7 @@ class TraceResult:
 
     steps: list[TraceStep]
 
-    # Row identity (from deploy_input node's row_id_column config)
+    # Row identity (from apiInput node's row_id_column config)
     row_id_column: str | None = None
     row_id_value: Any = None
 
@@ -390,12 +390,13 @@ def execute_trace(
     target_row = cached_rows[target_node_id]
     output_value = target_row.get(column) if column else target_row
 
-    # ---------- Row identity from deploy_input node ----------
+    # ---------- Row identity from apiInput node ----------
     row_id_column: str | None = None
     row_id_value: Any = None
     for n in nodes:
-        cfg = n.get("data", {}).get("config", {})
-        if cfg.get("deploy_input") and cfg.get("row_id_column"):
+        ndata = n.get("data", {})
+        cfg = ndata.get("config", {})
+        if ndata.get("nodeType") == "apiInput" and cfg.get("row_id_column"):
             row_id_column = cfg["row_id_column"]
             row_id_value = target_row.get(row_id_column)
             break

@@ -25,22 +25,36 @@ def _build_params(source_names: list[str]) -> str:
 
 
 # Template fragments for each node type
+_API_INPUT_JSON = '''\
+@pipeline.node(api_input=True, path="{path}"{row_id_kw})
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.read_json("{path}").lazy()
+'''
+
+_API_INPUT_JSONL = '''\
+@pipeline.node(api_input=True, path="{path}"{row_id_kw})
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.scan_ndjson("{path}")
+'''
+
 _SOURCE_FLAT_FILE = '''\
-@pipeline.node(path="{path}"{deploy_kw})
+@pipeline.node(path="{path}")
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
     return pl.scan_parquet("{path}")
 '''
 
 _SOURCE_CSV = '''\
-@pipeline.node(path="{path}"{deploy_kw})
+@pipeline.node(path="{path}")
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
     return pl.scan_csv("{path}")
 '''
 
 _SOURCE_DATABRICKS = '''\
-@pipeline.node(table="{table}"{http_path_kw}{query_kw}{deploy_kw})
+@pipeline.node(table="{table}"{http_path_kw}{query_kw})
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
     from haute._databricks_io import read_cached_table
@@ -167,14 +181,22 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
     if source_names is None:
         source_names = []
 
-    if node_type == "dataSource":
+    if node_type == "apiInput":
+        path = config.get("path", "")
+        row_id_kw = ""
+        if config.get("row_id_column"):
+            row_id_kw = f', row_id_column="{config["row_id_column"]}"'
+        template = _API_INPUT_JSONL if path.endswith(".jsonl") else _API_INPUT_JSON
+        return template.format(
+            func_name=func_name,
+            description=description,
+            path=path,
+            row_id_kw=row_id_kw,
+        )
+
+    elif node_type == "dataSource":
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
-        deploy_kw = ""
-        if config.get("deploy_input"):
-            deploy_kw = ", deploy_input=True"
-            if config.get("row_id_column"):
-                deploy_kw += f', row_id_column="{config["row_id_column"]}"'
         if source_type == "databricks":
             table = config.get("table", "catalog.schema.table")
             http_path = config.get("http_path", "")
@@ -185,7 +207,6 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 func_name=func_name,
                 description=description,
                 table=table,
-                deploy_kw=deploy_kw,
                 http_path_kw=http_path_kw,
                 query_kw=query_kw,
             )
@@ -194,14 +215,12 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 func_name=func_name,
                 description=description,
                 path=path,
-                deploy_kw=deploy_kw,
             )
         else:
             return _SOURCE_FLAT_FILE.format(
                 func_name=func_name,
                 description=description,
                 path=path,
-                deploy_kw=deploy_kw,
             )
 
     elif node_type == "modelScore":

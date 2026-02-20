@@ -24,7 +24,7 @@ class Node:
     @property
     def is_deploy_input(self) -> bool:
         """Whether this node is marked as the live API input for deployment."""
-        return bool(self.config.get("deploy_input"))
+        return bool(self.config.get("api_input"))
 
     @property
     def n_inputs(self) -> int:
@@ -170,7 +170,7 @@ class Pipeline:
     def score(self, df: pl.DataFrame) -> pl.DataFrame:
         """Run the pipeline on an input DataFrame, skipping source nodes.
 
-        If any source node is marked ``deploy_input=True``, only those
+        If any source node is marked ``api_input=True``, only those
         sources are seeded with *df*.  Other sources still execute their
         own loading logic (e.g. static rating tables).  When no node is
         marked, **all** sources are seeded (backward-compatible default).

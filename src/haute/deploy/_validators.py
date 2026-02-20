@@ -62,11 +62,10 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
         if (
             data.get("nodeType") == "dataSource"
             and config.get("sourceType") == "databricks"
-            and node["id"] not in set(resolved.input_node_ids)
         ):
             errors.append(
-                f"Node '{node['id']}' is a Databricks source (not yet implemented) "
-                "and is not a deploy input. Cannot deploy."
+                f"Node '{node['id']}' is a Databricks dataSource (not yet implemented "
+                "for deploy). Use an apiInput node for live API data."
             )
 
     # 6. Input schema is non-empty

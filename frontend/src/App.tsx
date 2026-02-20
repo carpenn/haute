@@ -66,6 +66,7 @@ export interface TraceResult {
 }
 
 const nodeTypes = {
+  apiInput: PipelineNode,
   dataSource: PipelineNode,
   transform: PipelineNode,
   modelScore: PipelineNode,
@@ -78,6 +79,7 @@ const nodeTypes = {
 }
 
 const labelMap: Record<string, string> = {
+  apiInput: "API Input",
   dataSource: "Data Source",
   transform: "Polars",
   modelScore: "Model Score",
@@ -1222,7 +1224,7 @@ function FlowEditor() {
 
       <div className="flex-1 flex min-h-0">
         {paletteOpen ? (
-          <NodePalette onCollapse={() => setPaletteOpen(false)} />
+          <NodePalette onCollapse={() => setPaletteOpen(false)} nodes={nodes} />
         ) : (
           <button
             onClick={() => setPaletteOpen(true)}

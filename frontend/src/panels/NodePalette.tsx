@@ -1,8 +1,19 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
+import type { Node } from "@xyflow/react"
+
+const SINGLETON_TYPES = new Set(["apiInput", "output"])
 
 const nodeTemplates = [
+  {
+    type: "apiInput",
+    label: "API Input",
+    description: "Live API input for deployment (max 1)",
+    icon: Radio,
+    accent: "#22c55e",
+    defaultConfig: { path: "" },
+  },
   {
     type: "dataSource",
     label: "Data Source",
@@ -67,7 +78,16 @@ function onDragStart(event: DragEvent, template: typeof nodeTemplates[number]) {
   event.dataTransfer.effectAllowed = "move"
 }
 
-export default function NodePalette({ onCollapse }: { onCollapse?: () => void }) {
+export default function NodePalette({ onCollapse, nodes }: { onCollapse?: () => void; nodes?: Node[] }) {
+  // Build set of singleton types already present in the graph
+  const existingSingletons = new Set<string>()
+  if (nodes) {
+    for (const n of nodes) {
+      const nt = n.data.nodeType as string
+      if (nt && SINGLETON_TYPES.has(nt)) existingSingletons.add(nt)
+    }
+  }
+
   return (
     <div className="w-[180px] h-full overflow-y-auto shrink-0 flex flex-col" style={{ background: "var(--chrome)", borderRight: "1px solid var(--chrome-border)" }}>
       <div className="px-4 py-3 flex items-center justify-between">
@@ -89,16 +109,17 @@ export default function NodePalette({ onCollapse }: { onCollapse?: () => void })
       <div className="px-2 space-y-0.5 flex-1">
         {nodeTemplates.map((template) => {
           const Icon = template.icon
+          const disabled = SINGLETON_TYPES.has(template.type) && existingSingletons.has(template.type)
           return (
             <div
               key={template.type}
-              draggable
-              onDragStart={(e) => onDragStart(e, template)}
-              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-grab active:cursor-grabbing transition-colors"
+              draggable={!disabled}
+              onDragStart={(e) => { if (!disabled) onDragStart(e, template) }}
+              className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-colors ${disabled ? "opacity-35 cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
               style={{ ["--hover-bg" as string]: "var(--chrome-hover)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--chrome-hover)")}
+              onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--chrome-hover)" }}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              title={template.description}
+              title={disabled ? `Only one ${template.label} allowed per pipeline` : template.description}
             >
               <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: `${template.accent}18` }}>
                 <Icon size={13} style={{ color: template.accent }} />

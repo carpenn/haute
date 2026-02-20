@@ -328,8 +328,8 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
         else:
             raise ValueError(
                 f"Multiple source nodes in pruned graph ({all_sources}) but none "
-                "marked deploy_input=True. Mark one with "
-                "@pipeline.node(path=..., deploy_input=True)."
+                "is an apiInput node. Add an API Input node with "
+                "@pipeline.node(api_input=True, path=...)."
             )
 
     # Collect artifacts

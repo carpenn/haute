@@ -51,12 +51,13 @@ Nodes are the building blocks. Each node is a Python class with defined inputs, 
 
 | Node Type | Purpose | Example |
 |---|---|---|
-| **DataSource** | Connect to data (local CSV/Parquet, Databricks table, SQL) | `DataSource("policies", table="catalog.schema.policies")` |
+| **ApiInput** | Live API input for deployment (max 1 per pipeline) | `@pipeline.node(api_input=True, path="data/policies.parquet")` |
+| **DataSource** | Read data (local CSV/Parquet, Databricks table) | `@pipeline.node(path="data/claims.parquet")` |
 | **Transform** | Data processing / feature engineering | `Transform("vehicle_age", fn=lambda df: df.with_columns(...))` |
 | **ModelScore** | Score records using an MLflow registered model | `ModelScore("frequency_glm", model_uri="models:/freq_glm/Production")` |
 | **RatingStep** | Individual rating operation (lookup, factor, cap/floor, load/discount) | `RatingStep("area_factor", lookup="area_table", key="postcode")` |
-| **Blender** | Combine/weight multiple model outputs | `Blender("blended_frequency", weights={...})` |
-| **Output** | Final output / price assembly | `Output("technical_price", formula="freq * sev * expense_load")` |
+| **Output** | Final API output / price assembly (max 1 per pipeline) | `@pipeline.node(output=True, fields=["technical_price"])` |
+| **DataSink** | Write data (parquet, CSV) | `@pipeline.node(sink="output/results.parquet")` |
 
 ### 3.3 Shared Components
 

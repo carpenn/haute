@@ -14,7 +14,7 @@ def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, st
 
     Args:
         graph: Pruned graph with nodes and edges.
-        input_node_id: The deploy_input source node.
+        input_node_id: The apiInput source node.
 
     Returns:
         Dict of column_name → polars dtype string (e.g. ``{"Area": "String"}``).

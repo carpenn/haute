@@ -72,7 +72,7 @@ def find_output_node(graph: PipelineGraph) -> str:
 
 
 def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
-    """Find source nodes marked deploy_input=True in a graph.
+    """Find apiInput nodes in a graph.
 
     Returns:
         List of node IDs (may be empty if none are marked).
@@ -80,17 +80,16 @@ def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
     inputs: list[str] = []
     for n in graph.get("nodes", []):
         data = n.get("data", {})
-        config = data.get("config", {})
-        if data.get("nodeType") == "dataSource" and config.get("deploy_input"):
+        if data.get("nodeType") == "apiInput":
             inputs.append(n["id"])
     return inputs
 
 
 def find_source_nodes(graph: PipelineGraph) -> list[str]:
-    """Find all dataSource nodes in a graph (regardless of deploy_input flag)."""
+    """Find all source nodes in a graph (dataSource and apiInput)."""
     sources: list[str] = []
     for n in graph.get("nodes", []):
         data = n.get("data", {})
-        if data.get("nodeType") == "dataSource":
+        if data.get("nodeType") in ("dataSource", "apiInput"):
             sources.append(n["id"])
     return sources

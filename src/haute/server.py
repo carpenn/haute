@@ -240,6 +240,18 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
 
     graph = body.graph.model_dump()
 
+    # Validate singleton node types (max 1 each)
+    for singleton_type, label in [("apiInput", "API Input"), ("output", "Output")]:
+        count = sum(
+            1 for n in graph["nodes"]
+            if n["data"]["nodeType"] == singleton_type
+        )
+        if count > 1:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only one {label} node is allowed per pipeline (found {count}).",
+            )
+
     cwd = Path.cwd()
 
     # Determine main pipeline .py path
@@ -462,6 +474,8 @@ async def get_schema(path: str) -> SchemaResponse:
         elif target.suffix == ".json":
             # JSON has no scan API — read eagerly (JSON files are small)
             lf = pl.read_json(target).lazy()
+        elif target.suffix == ".jsonl":
+            lf = pl.scan_ndjson(target)
         else:
             raise HTTPException(
                 status_code=400,

@@ -185,10 +185,15 @@ class TestExecuteTrace:
         assert len(result.steps) == 3
         assert all(s.column_relevant for s in result.steps)
 
-    def test_row_id_from_deploy_input(self, tmp_path):
-        """Trace discovers row_id_column from deploy_input source and extracts its value."""
-        p = tmp_path / "data.parquet"
-        pl.DataFrame({"policy_id": [100, 200, 300], "x": [1, 2, 3]}).write_parquet(p)
+    def test_row_id_from_api_input(self, tmp_path):
+        """Trace discovers row_id_column from apiInput source and extracts its value."""
+        p = tmp_path / "data.json"
+        import json
+        p.write_text(json.dumps([
+            {"policy_id": 100, "x": 1},
+            {"policy_id": 200, "x": 2},
+            {"policy_id": 300, "x": 3},
+        ]))
 
         graph = {
             "nodes": [
@@ -196,10 +201,9 @@ class TestExecuteTrace:
                     "id": "src",
                     "data": {
                         "label": "src",
-                        "nodeType": "dataSource",
+                        "nodeType": "apiInput",
                         "config": {
                             "path": str(p),
-                            "deploy_input": True,
                             "row_id_column": "policy_id",
                         },
                     },
@@ -212,8 +216,8 @@ class TestExecuteTrace:
         assert result.row_id_column == "policy_id"
         assert result.row_id_value == 200
 
-    def test_row_id_none_without_deploy_input(self, tmp_path):
-        """Without deploy_input, row_id_column and row_id_value are None."""
+    def test_row_id_none_without_api_input(self, tmp_path):
+        """Without apiInput node, row_id_column and row_id_value are None."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 

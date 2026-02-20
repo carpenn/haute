@@ -25,10 +25,10 @@ def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
     return frequency_set
 
 
-@pipeline.node(path="data/policies.parquet", deploy_input=True, row_id_column="IDpol")
+@pipeline.node(api_input=True, path="data/IDpol_1052049.json", row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
-    """data_source node"""
-    return pl.scan_parquet("data/policies.parquet")
+    """api_input node"""
+    return pl.read_json("data/IDpol_1052049.json").lazy()
 
 
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")

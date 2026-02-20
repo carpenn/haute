@@ -37,6 +37,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
         return "externalFile"
     if "sink" in decorator_kwargs:
         return "dataSink"
+    if decorator_kwargs.get("api_input"):
+        return "apiInput"
     if decorator_kwargs.get("output"):
         return "output"
     if "model_uri" in decorator_kwargs:
@@ -414,7 +416,11 @@ def _build_node_config(
 ) -> dict[str, Any]:
     """Build the config dict for a node given its type and decorator kwargs."""
     config: dict[str, Any] = {}
-    if node_type == "dataSource":
+    if node_type == "apiInput":
+        config["path"] = decorator_kwargs.get("path", "")
+        if decorator_kwargs.get("row_id_column"):
+            config["row_id_column"] = decorator_kwargs["row_id_column"]
+    elif node_type == "dataSource":
         config["path"] = decorator_kwargs.get("path", "")
         if "table" in decorator_kwargs:
             config["sourceType"] = "databricks"
@@ -425,10 +431,6 @@ def _build_node_config(
                 config["query"] = decorator_kwargs["query"]
         else:
             config["sourceType"] = "flat_file"
-        if decorator_kwargs.get("deploy_input"):
-            config["deploy_input"] = True
-            if decorator_kwargs.get("row_id_column"):
-                config["row_id_column"] = decorator_kwargs["row_id_column"]
     elif node_type == "modelScore":
         config["model_uri"] = decorator_kwargs.get("model_uri", "")
     elif node_type == "ratingStep":

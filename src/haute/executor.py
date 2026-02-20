@@ -155,6 +155,18 @@ def _build_node_fn(
     if source_names is None:
         source_names = []
 
+    if node_type == "apiInput":
+        path = config.get("path", "")
+
+        def api_source_fn() -> _Frame:
+            if path.endswith(".jsonl"):
+                return pl.scan_ndjson(path)
+            else:
+                # .json — single object or array
+                return pl.read_json(path).lazy()
+
+        return func_name, api_source_fn, True
+
     if node_type == "dataSource":
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
@@ -173,7 +185,6 @@ def _build_node_fn(
             if path.endswith(".csv"):
                 return pl.scan_csv(path)
             elif path.endswith(".json"):
-                # json has no scan - read eagerly then make lazy
                 return pl.read_json(path).lazy()
             else:
                 return pl.scan_parquet(path)

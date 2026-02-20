@@ -3,7 +3,7 @@
 Uses the same ``_execute_lazy`` / ``_build_node_fn`` infrastructure as
 the development executor, with a thin wrapper that:
 
-- Injects live input DataFrames at deploy_input source nodes
+- Injects live input DataFrames at apiInput source nodes
 - Remaps artifact paths for externalFile and static dataSource nodes
 - Returns a single collected DataFrame from the output node
 """
@@ -59,7 +59,7 @@ def score_graph(
         node: GraphNode,
         source_names: list[str] | None = None,
     ) -> tuple[str, Callable, bool]:
-        """Modified _build_node_fn that intercepts deploy_input sources."""
+        """Modified _build_node_fn that intercepts apiInput sources."""
         from haute.executor import _build_node_fn, _exec_user_code
 
         nid = node.get("id", "")
@@ -72,8 +72,8 @@ def score_graph(
         if source_names is None:
             source_names = []
 
-        # Intercept: deploy_input source → inject live DataFrame
-        if node_type == "dataSource" and nid in input_set:
+        # Intercept: apiInput source → inject live DataFrame
+        if node_type == "apiInput" and nid in input_set:
 
             def inject_input() -> _Frame:
                 return input_lf

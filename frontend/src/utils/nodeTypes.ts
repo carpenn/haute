@@ -1,7 +1,8 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const nodeTypeIcons: Record<string, React.ElementType> = {
+  apiInput: Radio,
   dataSource: Database,
   transform: PolarsIcon,
   modelScore: Brain,
@@ -14,6 +15,7 @@ export const nodeTypeIcons: Record<string, React.ElementType> = {
 }
 
 export const nodeTypeColors: Record<string, string> = {
+  apiInput: "#22c55e",
   dataSource: "#3b82f6",
   transform: "#06b6d4",
   modelScore: "#8b5cf6",
@@ -26,6 +28,7 @@ export const nodeTypeColors: Record<string, string> = {
 }
 
 export const nodeTypeLabels: Record<string, string> = {
+  apiInput: "API INPUT",
   dataSource: "SOURCE",
   transform: "POLARS",
   modelScore: "MODEL",

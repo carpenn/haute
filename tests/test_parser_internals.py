@@ -220,14 +220,14 @@ class TestBuildNodeConfig:
         assert config["path"] == "d.parquet"
         assert config["sourceType"] == "flat_file"
 
-    def test_data_source_deploy_input_with_row_id(self):
+    def test_api_input_with_row_id(self):
         config = _build_node_config(
-            "dataSource",
-            {"path": "d.parquet", "deploy_input": True, "row_id_column": "policy_id"},
+            "apiInput",
+            {"path": "d.parquet", "api_input": True, "row_id_column": "policy_id"},
             "", [],
         )
-        assert config["deploy_input"] is True
         assert config["row_id_column"] == "policy_id"
+        assert config["path"] == "d.parquet"
 
     def test_data_source_databricks(self):
         config = _build_node_config(

@@ -327,7 +327,7 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
-# Parser deploy_input round-trip test
+# Parser apiInput round-trip test
 # ---------------------------------------------------------------------------
 
 
@@ -700,9 +700,9 @@ class TestHauteModel:
         assert issubclass(HauteModel, PythonModel)
 
 
-class TestParserDeployInput:
-    def test_deploy_input_preserved_in_config(self) -> None:
-        """deploy_input=True in decorator should appear in parsed config."""
+class TestParserApiInput:
+    def test_api_input_node_type(self) -> None:
+        """api_input=True in decorator should produce apiInput nodeType."""
         graph = parse_pipeline_file(PIPELINE_FILE)
         policies_node = None
         for n in graph["nodes"]:
@@ -711,5 +711,6 @@ class TestParserDeployInput:
                 break
 
         assert policies_node is not None, "policies node not found"
-        config = policies_node["data"]["config"]
-        assert config.get("deploy_input") is True, f"deploy_input not in config: {config}"
+        assert policies_node["data"]["nodeType"] == "apiInput", (
+            f"Expected apiInput nodeType, got: {policies_node['data']['nodeType']}"
+        )
