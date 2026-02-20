@@ -12,14 +12,16 @@ can optimise the full plan end-to-end.
 
 from __future__ import annotations
 
-import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
 
 import polars as pl
 
+from haute._logging import get_logger
+from haute._sandbox import safe_globals
 from haute.graph_utils import (
     GraphNode,
     PipelineGraph,
@@ -34,7 +36,7 @@ from haute.graph_utils import (
     resolve_orig_source_names,
 )
 
-logger = logging.getLogger("uvicorn.error")
+logger = get_logger(component="executor")
 
 
 def _exec_user_code(
@@ -80,7 +82,7 @@ def _exec_user_code(
         line_offset = 1
 
     try:
-        exec(exec_code, {"pl": pl, **(extra_ns or {})}, local_ns)
+        exec(exec_code, safe_globals(pl=pl, **(extra_ns or {})), local_ns)
     except SyntaxError as exc:
         if exc.lineno is not None:
             exc.lineno = max(1, exc.lineno - line_offset)
@@ -286,9 +288,9 @@ def _build_node_fn(
 
 
 class _PreviewCache:
-    """Single-entry cache for the most recent pipeline execution."""
+    """Thread-safe single-entry cache for the most recent pipeline execution."""
 
-    __slots__ = ("fingerprint", "eager_outputs", "errors", "order", "timings")
+    __slots__ = ("fingerprint", "eager_outputs", "errors", "order", "timings", "_lock")
 
     def __init__(self) -> None:
         self.fingerprint: str | None = None
@@ -296,12 +298,14 @@ class _PreviewCache:
         self.errors: dict[str, str] = {}
         self.order: list[str] = []
         self.timings: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def invalidate(self) -> None:
-        self.fingerprint = None
-        self.eager_outputs.clear()
-        self.errors.clear()
-        self.timings.clear()
+        with self._lock:
+            self.fingerprint = None
+            self.eager_outputs.clear()
+            self.errors.clear()
+            self.timings.clear()
 
 
 _preview_cache = _PreviewCache()
@@ -342,37 +346,38 @@ def execute_graph(
     errors: dict[str, str] = {}
 
     # Check if we can extend the cache (same graph, new target is a superset)
-    if fp == _preview_cache.fingerprint and _preview_cache.eager_outputs:
-        cached = _preview_cache.eager_outputs
-        if target_node_id is None or target_node_id in cached:
-            eager_outputs = cached
-            order = _preview_cache.order
-            errors = _preview_cache.errors
-            timings = _preview_cache.timings
+    with _preview_cache._lock:
+        if fp == _preview_cache.fingerprint and _preview_cache.eager_outputs:
+            cached = _preview_cache.eager_outputs
+            if target_node_id is None or target_node_id in cached:
+                eager_outputs = cached
+                order = _preview_cache.order
+                errors = _preview_cache.errors
+                timings = _preview_cache.timings
+            else:
+                eager_outputs, order, errors, timings = _eager_execute(
+                    graph, target_node_id, row_limit,
+                )
+                merged = {**cached, **eager_outputs}
+                _preview_cache.eager_outputs = merged
+                _preview_cache.errors = {**_preview_cache.errors, **errors}
+                _preview_cache.timings = {**_preview_cache.timings, **timings}
+                _preview_cache.order = list(
+                    dict.fromkeys(_preview_cache.order + order),
+                )
+                eager_outputs = merged
+                errors = _preview_cache.errors
+                timings = _preview_cache.timings
+                order = _preview_cache.order
         else:
             eager_outputs, order, errors, timings = _eager_execute(
                 graph, target_node_id, row_limit,
             )
-            merged = {**cached, **eager_outputs}
-            _preview_cache.eager_outputs = merged
-            _preview_cache.errors = {**_preview_cache.errors, **errors}
-            _preview_cache.timings = {**_preview_cache.timings, **timings}
-            _preview_cache.order = list(
-                dict.fromkeys(_preview_cache.order + order),
-            )
-            eager_outputs = merged
-            errors = _preview_cache.errors
-            timings = _preview_cache.timings
-            order = _preview_cache.order
-    else:
-        eager_outputs, order, errors, timings = _eager_execute(
-            graph, target_node_id, row_limit,
-        )
-        _preview_cache.fingerprint = fp
-        _preview_cache.eager_outputs = eager_outputs
-        _preview_cache.errors = errors
-        _preview_cache.timings = timings
-        _preview_cache.order = order
+            _preview_cache.fingerprint = fp
+            _preview_cache.eager_outputs = eager_outputs
+            _preview_cache.errors = errors
+            _preview_cache.timings = timings
+            _preview_cache.order = order
 
     # Pre-compute schema warnings for instance nodes by comparing the
     # columns available at the instance's inputs vs the original's inputs.
@@ -512,7 +517,7 @@ def _eager_execute(
             df = result.collect() if isinstance(result, pl.LazyFrame) else result
             eager_outputs[nid] = df
         except Exception as exc:
-            logger.warning("Node %s failed: %s", nid, exc)
+            logger.warning("node_failed", node_id=nid, error=str(exc))
             eager_outputs[nid] = None
             errors[nid] = str(exc)
         timings[nid] = round((time.perf_counter() - t0) * 1000, 1)

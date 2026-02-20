@@ -2,6 +2,27 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from haute._sandbox import _get_project_root, set_project_root
+
+
+@pytest.fixture(autouse=True)
+def _widen_sandbox_root():
+    """Allow tests to load files from temp directories.
+
+    Sets the sandbox project root to ``/`` for the duration of each test
+    so that ``validate_project_path`` accepts paths in ``/tmp``.
+    Restores the original root afterwards.
+    """
+    original = _get_project_root()
+    set_project_root(Path("/"))
+    yield
+    set_project_root(original)
+
+
 # ---------------------------------------------------------------------------
 # Graph builder helpers — used across test_executor, test_trace, etc.
 # ---------------------------------------------------------------------------

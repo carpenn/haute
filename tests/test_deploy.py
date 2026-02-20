@@ -17,12 +17,14 @@ from haute.parser import parse_pipeline_file
 # Fixtures
 # ---------------------------------------------------------------------------
 
-PIPELINE_FILE = Path("main.py")
+FIXTURE_DIR = Path("tests/fixtures")
+PIPELINE_FILE = FIXTURE_DIR / "pipeline.py"
+DATA_DIR = FIXTURE_DIR / "data"
 
 
 @pytest.fixture()
 def full_graph() -> dict:
-    """Parse the example pipeline into a React Flow graph."""
+    """Parse the fixture pipeline into a React Flow graph."""
     return parse_pipeline_file(PIPELINE_FILE)
 
 
@@ -53,7 +55,7 @@ class TestPruner:
         kept_set = set(kept)
         removed_set = set(removed)
 
-        # Live scoring path: quotes → policies (switch) → submodel → output
+        # Live scoring path: quotes → policies (switch) → area_lookup → output
         assert "quotes" in kept_set
         assert "policies" in kept_set
         assert "output" in kept_set
@@ -62,8 +64,7 @@ class TestPruner:
         assert "batch_quotes" in removed_set
 
         # Sink nodes should be pruned
-        assert "frequency_write" in removed_set
-        assert "severity_write" in removed_set
+        assert "results_write" in removed_set
 
         # Pruned graph should have fewer nodes
         assert len(pruned["nodes"]) < len(full_graph["nodes"])
@@ -127,7 +128,7 @@ class TestBundler:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
+        artifacts = collect_artifacts(pruned, ["quotes"], FIXTURE_DIR)
 
         # All artifact paths should exist
         for name, path in artifacts.items():
@@ -165,7 +166,7 @@ class TestScorer:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        sample = pl.read_parquet("data/policies.parquet", n_rows=1)
+        sample = pl.read_parquet(DATA_DIR / "policies.parquet", n_rows=1)
         result = score_graph(
             graph=pruned,
             input_df=sample,
@@ -184,7 +185,7 @@ class TestScorer:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        sample = pl.read_parquet("data/policies.parquet", n_rows=5)
+        sample = pl.read_parquet(DATA_DIR / "policies.parquet", n_rows=5)
         result = score_graph(
             graph=pruned,
             input_df=sample,
@@ -244,7 +245,7 @@ class TestValidators:
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
-        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
+        artifacts = collect_artifacts(pruned, ["quotes"], FIXTURE_DIR)
         input_schema = infer_input_schema(pruned, "quotes")
         output_schema = infer_output_schema(pruned, output_id, ["quotes"])
 
@@ -276,14 +277,14 @@ class TestValidators:
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
-        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
+        artifacts = collect_artifacts(pruned, ["quotes"], FIXTURE_DIR)
         input_schema = infer_input_schema(pruned, "quotes")
         output_schema = infer_output_schema(pruned, output_id, ["quotes"])
 
         config = DeployConfig(
             pipeline_file=PIPELINE_FILE,
             model_name="test-model",
-            test_quotes_dir=Path("tests/quotes"),
+            test_quotes_dir=FIXTURE_DIR / "quotes",
         )
         resolved = ResolvedDeploy(
             config=config,
@@ -328,6 +329,7 @@ class TestConfig:
         assert config.model_name == "motor-pricing"  # original unchanged
 
     def test_resolve_config(self) -> None:
+        """Integration test — resolves via haute.toml which references main.py."""
         from haute.deploy._config import DeployConfig, resolve_config
 
         config = DeployConfig.from_toml(Path("haute.toml"))

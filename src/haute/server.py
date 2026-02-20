@@ -2,17 +2,20 @@
 
 import asyncio
 import json as _json
-import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import structlog
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from haute._logging import configure_logging, get_logger
 from haute.graph_utils import PipelineGraph
 from haute.schemas import (
     BrowseFilesResponse,
@@ -45,7 +48,7 @@ from haute.schemas import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
-logger = logging.getLogger("uvicorn.error")
+logger = get_logger(component="server")
 
 _watcher_task: asyncio.Task | None = None
 
@@ -54,6 +57,7 @@ _watcher_task: asyncio.Task | None = None
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     from haute.deploy._config import _load_env
 
+    configure_logging()
     _load_env(Path.cwd())
 
     global _watcher_task
@@ -64,6 +68,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Haute", version="0.1.0", lifespan=_lifespan)
+
+
+class _RequestIdMiddleware(BaseHTTPMiddleware):
+    """Bind a unique request_id to structlog context for every HTTP request."""
+
+    async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("x-request-id", uuid.uuid4().hex[:12])
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=rid)
+        response = await call_next(request)
+        response.headers["x-request-id"] = rid
+        return response
+
+
+app.add_middleware(_RequestIdMiddleware)
 
 # ---------------------------------------------------------------------------
 # Self-write tracking (avoid file-watcher feedback loops)
@@ -105,7 +124,7 @@ async def ws_sync(websocket: WebSocket) -> None:
     """WebSocket endpoint for live code ↔ GUI sync."""
     await websocket.accept()
     _ws_clients.add(websocket)
-    logger.info("WebSocket client connected (%d total)", len(_ws_clients))
+    logger.info("ws_connected", total_clients=len(_ws_clients))
     try:
         while True:
             await websocket.receive_text()  # keep-alive / client messages
@@ -113,7 +132,7 @@ async def ws_sync(websocket: WebSocket) -> None:
         pass
     finally:
         _ws_clients.discard(websocket)
-        logger.info("WebSocket client disconnected (%d remaining)", len(_ws_clients))
+        logger.info("ws_disconnected", remaining_clients=len(_ws_clients))
 
 
 def _discover_pipelines() -> list[Path]:
@@ -131,7 +150,7 @@ def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
             data = _json.loads(sidecar.read_text())
             return data.get("positions", {})
         except Exception as e:
-            logger.warning("Corrupt sidecar %s: %s", sidecar.name, e)
+            logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}
 
 
@@ -203,7 +222,7 @@ async def get_pipeline(name: str) -> dict:
             if graph.get("pipeline_name") == name:
                 return graph
         except Exception as e:
-            logger.warning("Failed to parse %s: %s", f.name, e)
+            logger.warning("parse_failed", file=f.name, error=str(e))
             continue
     raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
 
@@ -223,7 +242,7 @@ async def get_first_pipeline() -> dict:
                 graph["source_file"] = str(f.relative_to(cwd))
                 return graph
         except Exception as e:
-            logger.warning("Failed to parse %s: %s", f.name, e)
+            logger.warning("parse_failed", file=f.name, error=str(e))
             continue
 
     return {"nodes": [], "edges": []}
@@ -315,7 +334,7 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        results = execute_graph(graph)
+        results = await asyncio.to_thread(execute_graph, graph)
         return RunPipelineResponse(status="ok", results=results)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -332,7 +351,8 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        result = execute_trace(
+        result = await asyncio.to_thread(
+            execute_trace,
             graph,
             row_index=body.rowIndex,
             target_node_id=body.targetNodeId,
@@ -362,7 +382,8 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        results = execute_graph(
+        results = await asyncio.to_thread(
+            execute_graph,
             graph,
             target_node_id=body.nodeId,
             row_limit=body.rowLimit,
@@ -410,7 +431,9 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        result = execute_sink(graph, sink_node_id=body.nodeId)
+        result = await asyncio.to_thread(
+            execute_sink, graph, sink_node_id=body.nodeId,
+        )
         return SinkResponse(**result)
     except Exception as e:
         return SinkResponse(status="error", message=str(e))
@@ -936,7 +959,7 @@ async def _file_watcher() -> None:
     try:
         from watchfiles import Change, awatch
     except ImportError:
-        logger.warning("watchfiles not installed - live sync disabled")
+        logger.warning("watchfiles_missing", msg="live sync disabled")
         return
 
     cwd = Path.cwd()
@@ -945,7 +968,7 @@ async def _file_watcher() -> None:
     if modules_dir.is_dir():
         watch_dirs.append(modules_dir)
 
-    logger.info("File watcher started, watching: %s", [str(d) for d in watch_dirs])
+    logger.info("file_watcher_started", watch_dirs=[str(d) for d in watch_dirs])
 
     async for changes in awatch(*watch_dirs, recursive=False):
         if _is_self_write():
@@ -977,7 +1000,7 @@ async def _file_watcher() -> None:
                 continue
             seen.add(key)
 
-            logger.info("File changed: %s - re-parsing", p.name)
+            logger.info("file_changed", file=p.name)
             try:
                 graph = _parse_pipeline_to_graph(p)
                 await _broadcast(
@@ -989,12 +1012,12 @@ async def _file_watcher() -> None:
                 )
                 n_nodes = len(graph.get("nodes", []))
                 logger.info(
-                    "Broadcast graph_update to %d clients (%d nodes)",
-                    len(_ws_clients),
-                    n_nodes,
+                    "graph_broadcast",
+                    clients=len(_ws_clients),
+                    nodes=n_nodes,
                 )
             except Exception as e:
-                logger.error("Parse error for %s: %s", p.name, e)
+                logger.error("parse_error", file=p.name, error=str(e))
                 await _broadcast(
                     {
                         "type": "parse_error",

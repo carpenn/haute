@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Self
 
 import polars as pl
 
@@ -53,23 +54,11 @@ class Node:
         return self.fn(dfs[0])
 
 
-class Pipeline:
-    """A haute pricing pipeline - a DAG of decorated nodes.
+class NodeRegistry:
+    """Base class for Pipeline and Submodel — shared node/edge registration.
 
-    Nodes are functions. Edges define data flow: the output DataFrame
-    of the source node is passed as the input to the target node.
-
-    Usage:
-        pipeline = Pipeline("main")
-
-        @pipeline.node(path="data.parquet")
-        def read_data() -> pl.DataFrame: ...
-
-        @pipeline.node
-        def transform(df: pl.DataFrame) -> pl.DataFrame: ...
-
-        pipeline.connect("read_data", "transform")
-        result = pipeline.run()
+    Provides the ``@registry.node`` decorator, ``connect()`` for wiring
+    edges, and read-only ``nodes`` / ``edges`` properties.
     """
 
     def __init__(self, name: str, description: str = "") -> None:
@@ -80,13 +69,14 @@ class Pipeline:
         self._edges: list[tuple[str, str]] = []
 
     def node(self, fn: Callable | None = None, **config) -> Callable:
-        """Decorator to register a function as a pipeline node.
+        """Decorator to register a function as a node.
 
-        Can be used bare or with config:
-            @pipeline.node
+        Can be used bare or with config::
+
+            @registry.node
             def my_node(df): ...
 
-            @pipeline.node(path="data.parquet")
+            @registry.node(path="data.parquet")
             def read_data(): ...
         """
 
@@ -110,10 +100,10 @@ class Pipeline:
             return _register(fn)
         return _register
 
-    def connect(self, source: str, target: str) -> Pipeline:
+    def connect(self, source: str, target: str) -> Self:
         """Declare an edge: source node's output feeds into target node.
 
-        Can be chained: pipeline.connect("a", "b").connect("b", "c")
+        Can be chained: ``registry.connect("a", "b").connect("b", "c")``
         """
         self._edges.append((source, target))
         return self
@@ -125,6 +115,26 @@ class Pipeline:
     @property
     def edges(self) -> list[tuple[str, str]]:
         return list(self._edges)
+
+
+class Pipeline(NodeRegistry):
+    """A haute pricing pipeline - a DAG of decorated nodes.
+
+    Nodes are functions. Edges define data flow: the output DataFrame
+    of the source node is passed as the input to the target node.
+
+    Usage:
+        pipeline = Pipeline("main")
+
+        @pipeline.node(path="data.parquet")
+        def read_data() -> pl.DataFrame: ...
+
+        @pipeline.node
+        def transform(df: pl.DataFrame) -> pl.DataFrame: ...
+
+        pipeline.connect("read_data", "transform")
+        result = pipeline.run()
+    """
 
     def _topo_order(self) -> list[Node]:
         """Return nodes in topological order based on edges."""
@@ -278,7 +288,7 @@ class Pipeline:
         return list(getattr(self, "_submodel_files", []))
 
 
-class Submodel:
+class Submodel(NodeRegistry):
     """A reusable group of nodes defined in a separate .py file.
 
     Mirrors :class:`Pipeline` but is intended for submodel files that
@@ -293,53 +303,3 @@ class Submodel:
 
         submodel.connect("policies", "frequency_model")
     """
-
-    def __init__(self, name: str, description: str = "") -> None:
-        self.name = name
-        self.description = description
-        self._nodes: list[Node] = []
-        self._node_map: dict[str, Node] = {}
-        self._edges: list[tuple[str, str]] = []
-
-    # -- Decorator ----------------------------------------------------------
-
-    def node(self, fn: Callable | None = None, **config) -> Callable:
-        """Decorator to register a function as a submodel node.
-
-        Identical API to :meth:`Pipeline.node`.
-        """
-
-        def _register(f: Callable) -> Callable:
-            sig = inspect.signature(f)
-            params = [p for p in sig.parameters.values() if p.name != "self"]
-            is_source = len(params) == 0
-
-            n = Node(
-                name=f.__name__,
-                description=(f.__doc__ or "").strip(),
-                fn=f,
-                is_source=is_source,
-                config=config,
-            )
-            self._nodes.append(n)
-            self._node_map[n.name] = n
-            return f
-
-        if fn is not None:
-            return _register(fn)
-        return _register
-
-    def connect(self, source: str, target: str) -> Submodel:
-        """Declare an edge within this submodel."""
-        self._edges.append((source, target))
-        return self
-
-    # -- Read-only properties -----------------------------------------------
-
-    @property
-    def nodes(self) -> list[Node]:
-        return list(self._nodes)
-
-    @property
-    def edges(self) -> list[tuple[str, str]]:
-        return list(self._edges)

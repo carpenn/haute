@@ -21,6 +21,7 @@ TODO (future phases):
 from __future__ import annotations
 
 import math
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -166,10 +167,10 @@ def _jsonify_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class _TraceCache:
-    """Single-entry cache for the most recent pipeline execution."""
+    """Thread-safe single-entry cache for the most recent pipeline execution."""
 
     __slots__ = ("fingerprint", "eager_outputs", "order", "parents_of",
-                 "node_map", "source_ids")
+                 "node_map", "source_ids", "_lock")
 
     def __init__(self) -> None:
         self.fingerprint: str | None = None
@@ -178,10 +179,12 @@ class _TraceCache:
         self.parents_of: dict[str, list[str]] = {}
         self.node_map: dict[str, GraphNode] = {}
         self.source_ids: set[str] = set()
+        self._lock = threading.Lock()
 
     def invalidate(self) -> None:
-        self.fingerprint = None
-        self.eager_outputs.clear()
+        with self._lock:
+            self.fingerprint = None
+            self.eager_outputs.clear()
 
 
 _cache = _TraceCache()
@@ -234,14 +237,17 @@ def execute_trace(
     # reuse them: first click ~1.7s, subsequent clicks <10ms.
     fp = graph_fingerprint(graph, target_node_id, str(row_limit))
 
-    if fp == _cache.fingerprint and _cache.eager_outputs:
-        # Cache hit — reuse previously executed DataFrames
-        node_map = _cache.node_map
-        order = _cache.order
-        parents_of = _cache.parents_of
-        source_ids = _cache.source_ids
-        eager_outputs = _cache.eager_outputs
-    else:
+    cache_hit = False
+    with _cache._lock:
+        if fp == _cache.fingerprint and _cache.eager_outputs:
+            cache_hit = True
+            node_map = _cache.node_map
+            order = _cache.order
+            parents_of = _cache.parents_of
+            source_ids = _cache.source_ids
+            eager_outputs = _cache.eager_outputs
+
+    if not cache_hit:
         # Cache miss — execute eagerly in topo order
         node_map, order, parents_of, id_to_name = _prepare_graph(
             graph, target_node_id,
@@ -294,12 +300,13 @@ def execute_trace(
             eager_outputs[nid] = df
 
         # Populate cache
-        _cache.fingerprint = fp
-        _cache.eager_outputs = eager_outputs
-        _cache.order = order
-        _cache.parents_of = parents_of
-        _cache.node_map = node_map
-        _cache.source_ids = source_ids
+        with _cache._lock:
+            _cache.fingerprint = fp
+            _cache.eager_outputs = eager_outputs
+            _cache.order = order
+            _cache.parents_of = parents_of
+            _cache.node_map = node_map
+            _cache.source_ids = source_ids
 
     # Extract single row from each node's cached DataFrame
     cached_rows: dict[str, dict[str, Any]] = {}

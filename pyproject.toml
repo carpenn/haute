@@ -20,6 +20,7 @@ dependencies = [
     "libcst>=1.8.6",
     "watchfiles>=1.1.1",
     "catboost>=1.2.8",
+    "structlog>=24.1.0",
 ]
 
 [project.optional-dependencies]
