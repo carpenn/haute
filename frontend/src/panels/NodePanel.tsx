@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2, Package } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2, Package, Link2 } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { sanitizeName } from "../utils/sanitizeName"
 
@@ -1672,6 +1672,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
   if (!node) return null
 
   const config = (node.data.config || {}) as Record<string, unknown>
+  const isInstance = !!config.instanceOf
   const isDataSource = node.data.nodeType === "dataSource"
   const isDataSink = node.data.nodeType === "dataSink"
   const isExternalFile = node.data.nodeType === "externalFile"
@@ -1730,7 +1731,146 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
         </button>
       </div>
 
-      {isDataSource ? (
+      {isInstance ? (
+        <div className="px-4 py-3 flex flex-col gap-3">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: 'var(--accent-soft)', border: '1px solid rgba(96,165,250,.15)' }}>
+            <Link2 size={13} style={{ color: 'var(--accent)' }} className="shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--accent)' }}>Instance of</div>
+              <div className="text-[13px] font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                {(() => {
+                  const orig = allNodes.find((n) => n.id === config.instanceOf)
+                  return orig ? orig.data.label : String(config.instanceOf)
+                })()}
+              </div>
+            </div>
+          </div>
+          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            This node uses the same logic as the original. To edit the code or config, select the original node. Changes will automatically apply to all instances.
+          </p>
+
+          {/* ── Input Mapping ── */}
+          {(() => {
+            const origId = config.instanceOf as string
+            // Original's upstream inputs (variable names the code expects)
+            const origInputs = edges
+              .filter((e) => e.target === origId)
+              .map((e) => {
+                const srcNode = nodeMap[e.source]
+                return srcNode ? sanitizeName(srcNode.data.label) : e.source
+              })
+            // Instance's upstream inputs (what's actually connected)
+            const instInputs = edges
+              .filter((e) => e.target === node.id)
+              .map((e) => {
+                const srcNode = nodeMap[e.source]
+                return {
+                  varName: srcNode ? sanitizeName(srcNode.data.label) : e.source,
+                  label: srcNode ? srcNode.data.label : e.source,
+                }
+              })
+
+            if (origInputs.length === 0 && instInputs.length === 0) return null
+
+            const currentMapping = (config.inputMapping || {}) as Record<string, string>
+
+            // Auto-initialise mapping if empty or stale.
+            // Mirrors build_instance_mapping() in graph_utils.py — keep in sync.
+            const autoMap: Record<string, string> = {}
+            const usedInst = new Set<string>()
+            // Pass 1: exact
+            for (const orig of origInputs) {
+              const exact = instInputs.find((i) => i.varName === orig && !usedInst.has(i.varName))
+              if (exact) { autoMap[orig] = exact.varName; usedInst.add(exact.varName) }
+            }
+            // Pass 2: substring
+            for (const orig of origInputs) {
+              if (autoMap[orig]) continue
+              const sub = instInputs.find((i) => !usedInst.has(i.varName) && i.varName.includes(orig))
+              if (sub) { autoMap[orig] = sub.varName; usedInst.add(sub.varName) }
+            }
+            // Pass 3: positional fallback
+            const remaining = instInputs.filter((i) => !usedInst.has(i.varName))
+            const unmapped = origInputs.filter((o) => !autoMap[o])
+            unmapped.forEach((orig, idx) => {
+              if (idx < remaining.length) autoMap[orig] = remaining[idx].varName
+            })
+
+            // Use saved mapping if it exists and all keys still valid, otherwise use auto
+            const effectiveMap: Record<string, string> = {}
+            const instVarNames = new Set(instInputs.map((i) => i.varName))
+            for (const orig of origInputs) {
+              if (currentMapping[orig] && instVarNames.has(currentMapping[orig])) {
+                effectiveMap[orig] = currentMapping[orig]
+              } else {
+                effectiveMap[orig] = autoMap[orig] || ""
+              }
+            }
+
+            const handleMappingChange = (origParam: string, instVar: string) => {
+              const newMapping = { ...effectiveMap, [origParam]: instVar }
+              handleConfigUpdate("inputMapping", newMapping)
+            }
+
+            return (
+              <div className="flex flex-col gap-2">
+                <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+                  Input Mapping
+                </div>
+                <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  Map each original input to a connected upstream node.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {origInputs.map((orig) => (
+                    <div key={orig} className="flex items-center gap-2 px-2 py-1.5 rounded-md" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                      <span className="text-[11px] font-mono shrink-0 min-w-[90px] truncate" style={{ color: 'var(--text-secondary)' }} title={orig}>
+                        {orig}
+                      </span>
+                      <span className="text-[10px] shrink-0" style={{ color: 'var(--text-muted)' }}>→</span>
+                      <select
+                        className="flex-1 min-w-0 text-[11px] font-mono px-1.5 py-1 rounded border bg-transparent appearance-none cursor-pointer truncate"
+                        style={{ color: 'var(--text-primary)', borderColor: 'var(--border)', background: 'var(--bg-panel)' }}
+                        value={effectiveMap[orig] || ""}
+                        onChange={(e) => handleMappingChange(orig, e.target.value)}
+                      >
+                        <option value="">— unmapped —</option>
+                        {instInputs.map((i) => (
+                          <option key={i.varName} value={i.varName}>{i.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {(() => {
+            const warnings = (node.data._schemaWarnings as { column: string; status: string }[]) || []
+            if (warnings.length === 0) return null
+            return (
+              <div className="flex flex-col gap-1.5 px-3 py-2 rounded-lg" style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.2)' }}>
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle size={11} style={{ color: '#f59e0b' }} className="shrink-0" />
+                  <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: '#f59e0b' }}>
+                    Missing columns ({warnings.length})
+                  </span>
+                </div>
+                <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  The original node receives columns that are not available at this instance&apos;s position:
+                </p>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {warnings.map((w) => (
+                    <span key={w.column} className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ background: 'rgba(245,158,11,.12)', color: '#fbbf24' }}>
+                      {w.column}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      ) : isDataSource ? (
         <DataSourceConfig config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} />
       ) : isDataSink ? (
         <DataSinkConfig config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} />

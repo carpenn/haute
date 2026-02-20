@@ -64,6 +64,81 @@ def _sanitize_func_name(label: str) -> str:
     return name or "unnamed_node"
 
 
+def build_instance_mapping(
+    orig_names: list[str],
+    inst_names: list[str],
+    explicit: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Map original input parameter names to instance input names.
+
+    Priority: explicit mapping → exact name match → substring match → positional.
+    Used by the executor (alias injection) and codegen (kwarg generation).
+    The frontend mirrors this algorithm in NodePanel.tsx (InstanceConfig auto-mapping).
+    """
+    mapping: dict[str, str] = {}
+    if explicit:
+        mapping = {k: v for k, v in explicit.items() if v}
+
+    used: set[int] = set()
+    for v in mapping.values():
+        for i, inst in enumerate(inst_names):
+            if inst == v and i not in used:
+                used.add(i)
+                break
+    # Pass 1: exact match
+    for orig in orig_names:
+        if orig in mapping:
+            continue
+        for i, inst in enumerate(inst_names):
+            if i not in used and inst == orig:
+                mapping[orig] = inst
+                used.add(i)
+                break
+    # Pass 2: substring match (e.g. "claims_aggregate" in "claims_aggregate_instance")
+    for orig in orig_names:
+        if orig in mapping:
+            continue
+        for i, inst in enumerate(inst_names):
+            if i not in used and orig in inst:
+                mapping[orig] = inst
+                used.add(i)
+                break
+    # Pass 3: positional fallback for remaining
+    unused = [i for i in range(len(inst_names)) if i not in used]
+    unmatched = [o for o in orig_names if o not in mapping]
+    for orig, i in zip(unmatched, unused):
+        mapping[orig] = inst_names[i]
+
+    return mapping
+
+
+def resolve_orig_source_names(
+    node: dict,
+    node_map: dict[str, dict],
+    all_parents: dict[str, list[str]],
+    id_to_name: dict[str, str],
+) -> list[str] | None:
+    """For an instance node, return the sanitized names of the original's upstream inputs.
+
+    Uses *all_parents* (built from the full edge list, not filtered by
+    ``target_node_id``) so this works even when the original node isn't
+    in the current execution subgraph.
+
+    Returns ``None`` for non-instance nodes.
+    """
+    ref = node["data"]["config"].get("instanceOf")
+    if not ref or ref not in node_map:
+        return None
+    result: list[str] = []
+    for pid in all_parents.get(ref, []):
+        if pid in id_to_name:
+            result.append(id_to_name[pid])
+        else:
+            n = node_map.get(pid)
+            result.append(_sanitize_func_name(n["data"]["label"]) if n else pid)
+    return result
+
+
 def topo_sort_ids(node_ids: list[str], edges: list[dict]) -> list[str]:
     """Topological sort of node IDs based on edges (Kahn's algorithm)."""
     in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
@@ -105,7 +180,7 @@ def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
         c = d.get("config", {})
         parts.append(
             f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}"
-            f"|{c.get('table', '')}|{c.get('query', '')}",
+            f"|{c.get('table', '')}|{c.get('query', '')}|{c.get('instanceOf', '')}",
         )
     for e in sorted(
         graph.get("edges", []),
@@ -327,11 +402,23 @@ def _execute_lazy(
     """
     node_map, order, parents_of, id_to_name = _prepare_graph(graph, target_node_id)
 
+    # Full parent lookup from ALL edges for instance resolution
+    all_parents: dict[str, list[str]] = {}
+    for e in graph.get("edges", []):
+        all_parents.setdefault(e["target"], []).append(e["source"])
+
     # Build executable functions
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
         source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        _, fn, is_source = build_node_fn(node_map[nid], source_names=source_names)
+        orig_src_names = resolve_orig_source_names(
+            node_map[nid], node_map, all_parents, id_to_name,
+        )
+        kwargs: dict[str, Any] = {"source_names": source_names}
+        if orig_src_names is not None:
+            kwargs["node_map"] = node_map
+            kwargs["orig_source_names"] = orig_src_names
+        _, fn, is_source = build_node_fn(node_map[nid], **kwargs)
         funcs[nid] = (fn, is_source)
 
     # Execute - all intermediate results stay lazy

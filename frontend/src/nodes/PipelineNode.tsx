@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
-import { Radio } from "lucide-react"
+import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import { nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
@@ -30,6 +30,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = !!(nodeData.config?.deploy_input)
   const missingRowId = isDeployInput && !nodeData.config?.row_id_column
+  const isInstance = !!(nodeData.config?.instanceOf)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
   const traceValue = nodeData._traceValue
@@ -43,7 +44,9 @@ function PipelineNode({ data, selected }: NodeProps) {
           ? `1.5px solid ${accent}`
           : selected
             ? `1.5px solid ${accent}`
-            : "1px solid var(--border-bright)",
+            : isInstance
+              ? `1.5px dashed ${accent}60`
+              : "1px solid var(--border-bright)",
         boxShadow: traceActive
           ? `0 0 12px ${accent}40, var(--node-shadow)`
           : "var(--node-shadow)",
@@ -68,6 +71,16 @@ function PipelineNode({ data, selected }: NodeProps) {
           >
             {typeLabel}
           </span>
+          {isInstance && (
+            <span
+              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+              style={{ background: `${accent}15`, color: accent, border: `1px solid ${accent}25` }}
+              title={`Instance of ${nodeData.config?.instanceOf}`}
+            >
+              <Link2 size={8} />
+              Instance
+            </span>
+          )}
           {isDeployInput && (
             <span
               className={`ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0`}

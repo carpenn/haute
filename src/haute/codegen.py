@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from haute.graph_utils import _sanitize_func_name, topo_sort_ids
+from haute.graph_utils import _sanitize_func_name, build_instance_mapping, topo_sort_ids
 
 
 def _build_params(source_names: list[str]) -> str:
@@ -283,6 +283,46 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
     )
 
 
+def _instance_to_code(
+    node: dict,
+    original_func_name: str,
+    source_names: list[str] | None = None,
+    orig_source_names: list[str] | None = None,
+) -> str:
+    """Generate code for an instance node that delegates to the original function.
+
+    When *orig_source_names* is provided the wrapper emits keyword arguments so
+    that each original parameter receives the correct instance input regardless
+    of edge ordering.
+    """
+    data = node.get("data", {})
+    label = data.get("label", "Unnamed")
+    description = data.get("description", "") or f"Instance of {original_func_name}"
+    func_name = _sanitize_func_name(label)
+
+    if source_names is None:
+        source_names = []
+
+    params = _build_params(source_names)
+
+    # Prefer explicit inputMapping from config (set via the UI)
+    explicit_map = data.get("config", {}).get("inputMapping") if data else None
+
+    if orig_source_names and source_names:
+        explicit = dict(explicit_map) if explicit_map and isinstance(explicit_map, dict) else None
+        mapping = build_instance_mapping(orig_source_names, source_names, explicit)
+        args = ", ".join(f"{orig}={mapping[orig]}" for orig in orig_source_names if orig in mapping)
+    else:
+        args = ", ".join(source_names) if source_names else "df"
+
+    return (
+        f'@pipeline.node(instance_of="{original_func_name}")\n'
+        f"def {func_name}({params}) -> pl.LazyFrame:\n"
+        f'    """{description}"""\n'
+        f"    return {original_func_name}({args})\n"
+    )
+
+
 def _topo_sort(nodes: list[dict], edges: list[dict]) -> list[dict]:
     """Sort nodes in topological order based on edges."""
     node_map = {n["id"]: n for n in nodes}
@@ -335,9 +375,32 @@ def graph_to_code(
         src_name = id_to_func.get(edge["source"], edge["source"])
         node_sources.setdefault(tgt, []).append(src_name)
 
+    # Partition: emit originals before instances to ensure the function exists
+    # when the instance wrapper calls it.
+    instance_of_map: dict[str, str] = {}
     for node in sorted_nodes:
+        ref = node.get("data", {}).get("config", {}).get("instanceOf")
+        if ref:
+            instance_of_map[node["id"]] = ref
+
+    originals = [n for n in sorted_nodes if n["id"] not in instance_of_map]
+    instances = [n for n in sorted_nodes if n["id"] in instance_of_map]
+
+    for node in originals:
         source_names = node_sources.get(node["id"], [])
         lines.append(_node_to_code(node, source_names=source_names))
+        lines.append("")
+
+    for node in instances:
+        source_names = node_sources.get(node["id"], [])
+        orig_id = instance_of_map[node["id"]]
+        orig_func = id_to_func.get(orig_id, orig_id)
+        orig_src = node_sources.get(orig_id, [])
+        lines.append(_instance_to_code(
+            node, orig_func,
+            source_names=source_names,
+            orig_source_names=orig_src,
+        ))
         lines.append("")
 
     # Emit edges as pipeline.connect() calls
@@ -532,9 +595,31 @@ def graph_to_code_multi(
         src_name = root_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
         root_node_sources.setdefault(actual_tgt, []).append(src_name)
 
+    # Partition: emit originals before instances
+    root_instance_of: dict[str, str] = {}
     for node in sorted_root:
+        ref = node.get("data", {}).get("config", {}).get("instanceOf")
+        if ref:
+            root_instance_of[node["id"]] = ref
+
+    root_originals = [n for n in sorted_root if n["id"] not in root_instance_of]
+    root_instances = [n for n in sorted_root if n["id"] in root_instance_of]
+
+    for node in root_originals:
         source_names = root_node_sources.get(node["id"], [])
         main_lines.append(_node_to_code(node, source_names=source_names))
+        main_lines.append("")
+
+    for node in root_instances:
+        source_names = root_node_sources.get(node["id"], [])
+        orig_id = root_instance_of[node["id"]]
+        orig_func = root_id_to_func.get(orig_id, orig_id)
+        orig_src = root_node_sources.get(orig_id, [])
+        main_lines.append(_instance_to_code(
+            node, orig_func,
+            source_names=source_names,
+            orig_source_names=orig_src,
+        ))
         main_lines.append("")
 
     # Emit pipeline.submodel() imports

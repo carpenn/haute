@@ -354,10 +354,11 @@ function FlowEditor() {
           error: result.error || null,
           timing_ms: result.timing_ms || 0,
           timings: result.timings || [],
+          schema_warnings: result.schema_warnings || [],
         }))
-        // Cache columns on node data for instant access by output nodes
+        // Cache columns + schema warnings on node data for instant access
         if (result.columns) {
-          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns } } : n))
+          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _schemaWarnings: result.schema_warnings || [] } } : n))
         }
       })
       .catch((err) => {
@@ -681,6 +682,31 @@ function FlowEditor() {
     setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
     setSelectedNode(newNode)
   }, [setNodes])
+
+  const handleCreateInstance = useCallback((id: string) => {
+    const { nodes: n } = graphRef.current
+    const original = n.find((node) => node.id === id)
+    if (!original) return
+    nodeIdCounter.current += 1
+    const origData = original.data as Record<string, unknown>
+    const origNodeType = origData.nodeType as string || "transform"
+    const newId = `${origNodeType}_${nodeIdCounter.current}`
+    const newNode: Node = {
+      id: newId,
+      type: original.type,
+      position: { x: original.position.x + 60, y: original.position.y + 80 },
+      selected: true,
+      data: {
+        label: `${origData.label} instance`,
+        description: `Instance of ${origData.label}`,
+        nodeType: origNodeType,
+        config: { instanceOf: id },
+      },
+    }
+    setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
+    setSelectedNode(newNode)
+    addToast("info", `Created instance of "${origData.label}"`)
+  }, [setNodes, addToast])
 
   const handleRenameNode = useCallback((id: string) => {
     const { nodes: n } = graphRef.current
@@ -1290,6 +1316,7 @@ function FlowEditor() {
           onDelete={handleDeleteNode}
           onDuplicate={handleDuplicateNode}
           onRename={handleRenameNode}
+          onCreateInstance={handleCreateInstance}
           isSubmodel={contextMenu.isSubmodel}
           onDissolveSubmodel={handleDissolveSubmodel}
         />

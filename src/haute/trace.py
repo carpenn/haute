@@ -27,7 +27,12 @@ from typing import Any
 import polars as pl
 
 from haute.executor import _build_node_fn
-from haute.graph_utils import _prepare_graph, graph_fingerprint, topo_sort_ids
+from haute.graph_utils import (
+    _prepare_graph,
+    graph_fingerprint,
+    resolve_orig_source_names,
+    topo_sort_ids,
+)
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -245,6 +250,11 @@ def execute_trace(
         )
         source_ids = {nid for nid in order if not parents_of.get(nid)}
 
+        # Full parent lookup from ALL edges for instance resolution
+        all_parents: dict[str, list[str]] = {}
+        for e in graph.get("edges", []):
+            all_parents.setdefault(e["target"], []).append(e["source"])
+
         funcs: dict[str, tuple[Any, bool]] = {}
         for nid in order:
             src_names = [
@@ -252,8 +262,12 @@ def execute_trace(
                 for pid in parents_of.get(nid, [])
                 if pid in id_to_name
             ]
+            orig_src_names = resolve_orig_source_names(
+                node_map[nid], node_map, all_parents, id_to_name,
+            )
             _, fn, is_source = _build_node_fn(
                 node_map[nid], source_names=src_names,
+                node_map=node_map, orig_source_names=orig_src_names,
             )
             funcs[nid] = (fn, is_source)
 

@@ -14,6 +14,11 @@ interface NodeTiming {
   timing_ms: number
 }
 
+export interface SchemaWarning {
+  column: string
+  status: string
+}
+
 export interface PreviewData {
   nodeId: string
   nodeLabel: string
@@ -25,6 +30,7 @@ export interface PreviewData {
   error: string | null
   timing_ms?: number
   timings?: NodeTiming[]
+  schema_warnings?: SchemaWarning[]
 }
 
 interface DataPreviewProps {

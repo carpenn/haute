@@ -335,3 +335,81 @@ class TestExecuteLazyMultiInput:
         outputs, _, _, _ = _execute_lazy(g, build_fn)
         df = outputs["c"].collect()
         assert set(df.columns) == {"x", "y"}
+
+
+# ---------------------------------------------------------------------------
+# build_instance_mapping
+# ---------------------------------------------------------------------------
+
+class TestBuildInstanceMapping:
+    def test_exact_match(self):
+        from haute.graph_utils import build_instance_mapping
+        result = build_instance_mapping(["a", "b"], ["b", "a"])
+        assert result == {"a": "a", "b": "b"}
+
+    def test_substring_match(self):
+        from haute.graph_utils import build_instance_mapping
+        result = build_instance_mapping(
+            ["claims_aggregate"],
+            ["claims_aggregate_instance"],
+        )
+        assert result == {"claims_aggregate": "claims_aggregate_instance"}
+
+    def test_positional_fallback(self):
+        """Regression: instance input named 'instance' must map to 'claims_aggregate'
+        via positional fallback when no exact or substring match exists."""
+        from haute.graph_utils import build_instance_mapping
+        result = build_instance_mapping(
+            ["policies", "exposure", "claims_aggregate"],
+            ["exposure", "policies", "instance"],
+        )
+        assert result["policies"] == "policies"
+        assert result["exposure"] == "exposure"
+        assert result["claims_aggregate"] == "instance"
+
+    def test_explicit_mapping_overrides_heuristic(self):
+        from haute.graph_utils import build_instance_mapping
+        result = build_instance_mapping(
+            ["a", "b"],
+            ["x", "y"],
+            explicit={"a": "y", "b": "x"},
+        )
+        assert result == {"a": "y", "b": "x"}
+
+    def test_explicit_mapping_filters_empty_values(self):
+        from haute.graph_utils import build_instance_mapping
+        result = build_instance_mapping(
+            ["a", "b"],
+            ["a", "b"],
+            explicit={"a": "", "b": "b"},
+        )
+        assert result["a"] == "a"
+        assert result["b"] == "b"
+
+
+# ---------------------------------------------------------------------------
+# resolve_orig_source_names
+# ---------------------------------------------------------------------------
+
+class TestResolveOrigSourceNames:
+    def test_non_instance_returns_none(self):
+        from haute.graph_utils import resolve_orig_source_names
+        node = {"data": {"config": {}}}
+        assert resolve_orig_source_names(node, {}, {}, {}) is None
+
+    def test_resolves_from_full_edges(self):
+        """Regression: original's parents must be resolved even when they
+        are outside the execution subgraph (target_node_id filtering)."""
+        from haute.graph_utils import resolve_orig_source_names
+        node_map = {
+            "freq_set": {"data": {"label": "freq_set", "config": {}}},
+            "policies": {"data": {"label": "policies", "config": {}}},
+            "claims_agg": {"data": {"label": "claims_agg", "config": {}}},
+            "inst": {"data": {"label": "inst", "config": {"instanceOf": "freq_set"}}},
+        }
+        all_parents = {"freq_set": ["policies", "claims_agg"]}
+        # id_to_name only has nodes in the execution subgraph (inst's ancestors)
+        id_to_name = {"policies": "policies", "inst": "inst"}
+
+        result = resolve_orig_source_names(node_map["inst"], node_map, all_parents, id_to_name)
+        assert result == ["policies", "claims_agg"]

@@ -25,8 +25,10 @@ from haute.graph_utils import (
     _Frame,
     _prepare_graph,
     _sanitize_func_name,
+    build_instance_mapping,
     graph_fingerprint,
     load_external_object,
+    resolve_orig_source_names,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -37,6 +39,8 @@ def _exec_user_code(
     src_names: list[str],
     dfs: tuple[_Frame, ...],
     extra_ns: dict[str, Any] | None = None,
+    orig_source_names: list[str] | None = None,
+    input_mapping: dict[str, str] | None = None,
 ) -> _Frame:
     """Wrap, execute, and return the result of user-provided code.
 
@@ -50,6 +54,13 @@ def _exec_user_code(
     for i, d in enumerate(dfs):
         if i < len(src_names):
             local_ns[src_names[i]] = d
+    # Instance alias injection: bind original source names so the original's
+    # code can reference variables by their original upstream labels.
+    if orig_source_names:
+        mapping = build_instance_mapping(orig_source_names, src_names, input_mapping)
+        for orig, inst in mapping.items():
+            if orig not in local_ns and inst in local_ns:
+                local_ns[orig] = local_ns[inst]
     if dfs:
         local_ns["df"] = dfs[0]
     if extra_ns:
@@ -88,10 +99,38 @@ def _exec_user_code(
     return result
 
 
+def resolve_instance_node(node: dict, node_map: dict[str, dict]) -> dict:
+    """If *node* is an instance, return a merged node with the original's config.
+
+    The returned node keeps the instance's own id, label, and position but
+    uses the original node's ``nodeType`` and ``config`` (minus the
+    ``instanceOf`` key itself).  If the original cannot be found the
+    instance is returned unchanged.
+    """
+    config = node.get("data", {}).get("config", {})
+    ref = config.get("instanceOf")
+    if not ref or ref not in node_map:
+        return node
+    original = node_map[ref]
+    orig_data = original.get("data", {})
+    orig_config = {k: v for k, v in orig_data.get("config", {}).items() if k != "instanceOf"}
+    # Preserve instance-specific keys (inputMapping) that the UI sets
+    inst_config = node.get("data", {}).get("config", {})
+    instance_keys = {k: v for k, v in inst_config.items() if k in ("inputMapping",)}
+    merged_data = {
+        **node.get("data", {}),
+        "nodeType": orig_data.get("nodeType", "transform"),
+        "config": {**orig_config, "instanceOf": ref, **instance_keys},
+    }
+    return {**node, "data": merged_data}
+
+
 def _build_node_fn(
     node: dict,
     source_names: list[str] | None = None,
     row_limit: int | None = None,
+    node_map: dict[str, dict] | None = None,
+    orig_source_names: list[str] | None = None,
 ) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
@@ -99,7 +138,12 @@ def _build_node_fn(
     source_names: sanitized names of upstream nodes (used as variable names).
     row_limit: if set, Databricks sources push this into SQL LIMIT so the
         full table is never fetched during preview/trace.
+    node_map: full graph node_map — used to resolve ``instanceOf`` references.
     """
+    # Resolve instance → use original's config/nodeType
+    if node_map:
+        node = resolve_instance_node(node, node_map)
+
     data = node.get("data", {})
     node_type = data.get("nodeType", "transform")
     config = data.get("config", {})
@@ -149,11 +193,18 @@ def _build_node_fn(
         model_class = config.get("modelClass", "classifier")
         _src_names = list(source_names)
 
+        _orig_src = list(orig_source_names) if orig_source_names else None
+        _in_map = dict(config.get("inputMapping", {})) or None
         if code:
 
             def external_fn(*dfs: _Frame) -> _Frame:
                 obj = load_external_object(path, file_type, model_class)
-                return _exec_user_code(code, _src_names, dfs, extra_ns={"obj": obj})
+                return _exec_user_code(
+                    code, _src_names, dfs,
+                    extra_ns={"obj": obj},
+                    orig_source_names=_orig_src,
+                    input_mapping=_in_map,
+                )
 
             return func_name, external_fn, False
         else:
@@ -177,11 +228,17 @@ def _build_node_fn(
     elif node_type in ("transform", "modelScore", "ratingStep"):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
+        _orig_src = list(orig_source_names) if orig_source_names else None
+        _in_map = dict(config.get("inputMapping", {})) or None
 
         if code:
 
             def transform_fn(*dfs: _Frame) -> _Frame:
-                return _exec_user_code(code, _src_names, dfs)
+                return _exec_user_code(
+                    code, _src_names, dfs,
+                    orig_source_names=_orig_src,
+                    input_mapping=_in_map,
+                )
 
             return func_name, transform_fn, False
         else:
@@ -296,6 +353,38 @@ def execute_graph(
         _preview_cache.timings = timings
         _preview_cache.order = order
 
+    # Pre-compute schema warnings for instance nodes by comparing the
+    # columns available at the instance's inputs vs the original's inputs.
+    nodes_list = graph.get("nodes", [])
+    edges_list = graph.get("edges", [])
+    node_map = {n["id"]: n for n in nodes_list}
+    parents_of: dict[str, list[str]] = {}
+    for e in edges_list:
+        parents_of.setdefault(e["target"], []).append(e["source"])
+
+    schema_warnings: dict[str, list[dict]] = {}
+    for nid in order:
+        ref = node_map.get(nid, {}).get("data", {}).get("config", {}).get("instanceOf")
+        if not ref or ref not in node_map:
+            continue
+        # Columns feeding into the original node
+        orig_input_cols: set[str] = set()
+        for pid in parents_of.get(ref, []):
+            df = eager_outputs.get(pid)
+            if df is not None:
+                orig_input_cols.update(df.columns)
+        # Columns feeding into the instance node
+        inst_input_cols: set[str] = set()
+        for pid in parents_of.get(nid, []):
+            df = eager_outputs.get(pid)
+            if df is not None:
+                inst_input_cols.update(df.columns)
+        missing = orig_input_cols - inst_input_cols
+        if missing:
+            schema_warnings[nid] = [
+                {"column": c, "status": "missing"} for c in sorted(missing)
+            ]
+
     results: dict[str, dict] = {}
     for nid in order:
         if nid in errors:
@@ -307,6 +396,7 @@ def execute_graph(
                 "preview": [],
                 "error": errors[nid],
                 "timing_ms": timings.get(nid, 0),
+                "schema_warnings": schema_warnings.get(nid, []),
             }
             continue
         df = eager_outputs.get(nid)
@@ -319,6 +409,7 @@ def execute_graph(
                 "preview": [],
                 "error": "No output",
                 "timing_ms": timings.get(nid, 0),
+                "schema_warnings": [],
             }
             continue
         columns = [
@@ -332,6 +423,7 @@ def execute_graph(
             "preview": df.head(max_preview_rows).to_dicts(),
             "error": None,
             "timing_ms": timings.get(nid, 0),
+            "schema_warnings": schema_warnings.get(nid, []),
         }
 
     return results
@@ -352,6 +444,11 @@ def _eager_execute(
         graph, target_node_id,
     )
 
+    # Full parent lookup from ALL edges for instance resolution
+    all_parents: dict[str, list[str]] = {}
+    for e in graph.get("edges", []):
+        all_parents.setdefault(e["target"], []).append(e["source"])
+
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
         src_names = [
@@ -359,8 +456,12 @@ def _eager_execute(
             for pid in parents_of.get(nid, [])
             if pid in id_to_name
         ]
+        orig_src_names = resolve_orig_source_names(
+            node_map[nid], node_map, all_parents, id_to_name,
+        )
         _, fn, is_source = _build_node_fn(
             node_map[nid], source_names=src_names, row_limit=row_limit,
+            node_map=node_map, orig_source_names=orig_src_names,
         )
         funcs[nid] = (fn, is_source)
 

@@ -106,6 +106,11 @@ class NodeTimingInfo(BaseModel):
     timing_ms: float
 
 
+class SchemaWarning(BaseModel):
+    column: str
+    status: str
+
+
 class PreviewNodeResponse(BaseModel):
     nodeId: str
     status: str
@@ -116,6 +121,7 @@ class PreviewNodeResponse(BaseModel):
     error: str | None = None
     timing_ms: float = 0
     timings: list[NodeTimingInfo] = Field(default_factory=list)
+    schema_warnings: list[SchemaWarning] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

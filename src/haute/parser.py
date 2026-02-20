@@ -22,6 +22,10 @@ from typing import Any
 
 def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
     """Infer the GUI node type from decorator config and param count."""
+    if "instance_of" in decorator_kwargs:
+        # Instance nodes borrow their type from the original at runtime;
+        # default to transform here — the executor resolves the real type.
+        return "transform"
     if "external" in decorator_kwargs:
         return "externalFile"
     if "sink" in decorator_kwargs:
@@ -437,6 +441,9 @@ def _build_node_config(
     else:
         # transform
         config["code"] = _extract_user_code(body, param_names) if body else ""
+    # Instance reference (works for any node type)
+    if "instance_of" in decorator_kwargs:
+        config["instanceOf"] = decorator_kwargs["instance_of"]
     return config
 
 
