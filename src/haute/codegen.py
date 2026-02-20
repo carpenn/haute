@@ -79,6 +79,20 @@ def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
     return df
 '''
 
+_BANDING_SINGLE = '''\
+@pipeline.node(banding="{banding}", column="{column}", output_column="{output_column}"{rules_kw}{default_kw})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return df
+'''
+
+_BANDING_MULTI = '''\
+@pipeline.node(factors={factors_repr})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return df
+'''
+
 _RATING_STEP = '''\
 @pipeline.node(table="{table}", key="{key}")
 def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
@@ -248,6 +262,57 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
         return _MODEL_SCORE.format(
             func_name=func_name, description=description, model_uri=model_uri
         )
+
+    elif node_type == "banding":
+        factors = config.get("factors", []) or []
+        # Fallback: old single-factor config at top level
+        if not factors and config.get("column"):
+            factors = [{
+                "banding": config.get("banding", "continuous"),
+                "column": config.get("column", ""),
+                "outputColumn": config.get("outputColumn", ""),
+                "rules": config.get("rules", []),
+                "default": config.get("default"),
+            }]
+        params = _build_params(source_names)
+        if len(factors) == 1:
+            f = factors[0]
+            banding = f.get("banding", "continuous")
+            column = f.get("column", "")
+            output_column = f.get("outputColumn", "")
+            rules = f.get("rules", []) or []
+            default = f.get("default")
+            rules_kw = f", rules={rules!r}" if rules else ""
+            default_kw = f', default="{default}"' if default else ""
+            return _BANDING_SINGLE.format(
+                func_name=func_name,
+                description=description,
+                banding=banding,
+                column=column,
+                output_column=output_column,
+                rules_kw=rules_kw,
+                default_kw=default_kw,
+                params=params,
+            )
+        else:
+            # Multi-factor: emit factors list with output_column key for decorator
+            emit_factors = []
+            for f in factors:
+                ef: dict = {
+                    "banding": f.get("banding", "continuous"),
+                    "column": f.get("column", ""),
+                    "output_column": f.get("outputColumn", ""),
+                    "rules": f.get("rules", []),
+                }
+                if f.get("default"):
+                    ef["default"] = f["default"]
+                emit_factors.append(ef)
+            return _BANDING_MULTI.format(
+                func_name=func_name,
+                description=description,
+                factors_repr=repr(emit_factors),
+                params=params,
+            )
 
     elif node_type == "ratingStep":
         table = config.get("table", "")

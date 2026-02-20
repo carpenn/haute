@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const nodeTypeIcons: Record<string, React.ElementType> = {
@@ -7,6 +7,7 @@ export const nodeTypeIcons: Record<string, React.ElementType> = {
   transform: PolarsIcon,
   modelScore: Brain,
   ratingStep: TableProperties,
+  banding: SlidersHorizontal,
   output: CircleDot,
   dataSink: HardDriveDownload,
   externalFile: FileArchive,
@@ -21,6 +22,7 @@ export const nodeTypeColors: Record<string, string> = {
   transform: "#06b6d4",
   modelScore: "#8b5cf6",
   ratingStep: "#10b981",
+  banding: "#14b8a6",
   output: "#f43f5e",
   dataSink: "#f59e0b",
   externalFile: "#ec4899",
@@ -35,6 +37,7 @@ export const nodeTypeLabels: Record<string, string> = {
   transform: "POLARS",
   modelScore: "MODEL",
   ratingStep: "RATING",
+  banding: "BANDING",
   output: "OUTPUT",
   dataSink: "SINK",
   externalFile: "EXTERNAL",

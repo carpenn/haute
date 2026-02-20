@@ -38,6 +38,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
         return "output"
     if "model_uri" in decorator_kwargs:
         return "modelScore"
+    if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
+        return "banding"
     if "table" in decorator_kwargs and "key" in decorator_kwargs:
         return "ratingStep"
     if "path" in decorator_kwargs or n_params == 0:
@@ -347,6 +349,29 @@ def _build_node_config(
         config["inputs"] = param_names
     elif node_type == "modelScore":
         config["model_uri"] = decorator_kwargs.get("model_uri", "")
+    elif node_type == "banding":
+        if "factors" in decorator_kwargs:
+            # Multi-factor format: factors=[{...}, {...}]
+            raw_factors = decorator_kwargs["factors"]
+            config["factors"] = [
+                {
+                    "banding": f.get("banding", "continuous"),
+                    "column": f.get("column", ""),
+                    "outputColumn": f.get("output_column", f.get("outputColumn", "")),
+                    "rules": f.get("rules", []),
+                    "default": f.get("default"),
+                }
+                for f in (raw_factors if isinstance(raw_factors, list) else [])
+            ]
+        else:
+            # Single-factor format → wrap into factors array
+            config["factors"] = [{
+                "banding": decorator_kwargs.get("banding", "continuous"),
+                "column": decorator_kwargs.get("column", ""),
+                "outputColumn": decorator_kwargs.get("output_column", ""),
+                "rules": decorator_kwargs.get("rules", []),
+                "default": decorator_kwargs.get("default"),
+            }]
     elif node_type == "ratingStep":
         config["table"] = decorator_kwargs.get("table", "")
         config["key"] = decorator_kwargs.get("key", "")

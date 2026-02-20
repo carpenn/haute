@@ -108,6 +108,106 @@ def _exec_user_code(
     return result
 
 
+def _apply_banding(
+    lf: _Frame,
+    column: str,
+    output_column: str,
+    banding_type: str,
+    rules: list[dict[str, Any]],
+    default: Any = None,
+) -> _Frame:
+    """Apply banding rules to a column, producing a new output column.
+
+    Continuous rules use operator/value pairs to define ranges::
+
+        {"op1": ">", "val1": 0, "op2": "<=", "val2": 25, "assignment": "0-25"}
+
+    Categorical rules map exact values to groups::
+
+        {"value": "Semi-detached House", "assignment": "House"}
+    """
+    col = pl.col(column)
+    default_lit = pl.lit(default) if default is not None else pl.lit(None, dtype=pl.Utf8)
+
+    if banding_type == "categorical":
+        # Build a remap dict: value → assignment
+        remap: dict[str, str] = {}
+        for rule in rules:
+            val = rule.get("value", "")
+            assignment = rule.get("assignment", "")
+            if val and assignment:
+                remap[str(val)] = str(assignment)
+        if not remap:
+            return lf
+        expr = col.cast(pl.Utf8).replace_strict(remap, default=default_lit).alias(output_column)
+        return lf.with_columns(expr)
+
+    # Continuous: build a when/then chain
+    expr: pl.Expr | None = None
+    for rule in rules:
+        cond = _banding_condition(col, rule)
+        if cond is None:
+            continue
+        assignment = str(rule.get("assignment", ""))
+        branch = pl.when(cond).then(pl.lit(assignment))
+        expr = branch if expr is None else expr.when(cond).then(pl.lit(assignment))
+
+    if expr is None:
+        return lf
+    final_expr = expr.otherwise(default_lit).alias(output_column)
+    return lf.with_columns(final_expr)
+
+
+def _normalise_banding_factors(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise banding config to a list of factor dicts.
+
+    Supports both the multi-factor format (``factors: [...]``) and the
+    legacy single-factor format (``column``, ``outputColumn``, ``rules``
+    at the top level).
+    """
+    factors = config.get("factors")
+    if isinstance(factors, list) and factors:
+        return factors
+    # Single-factor fallback
+    col = config.get("column", "")
+    if col:
+        return [{
+            "banding": config.get("banding", "continuous"),
+            "column": col,
+            "outputColumn": config.get("outputColumn", ""),
+            "rules": config.get("rules", []),
+            "default": config.get("default"),
+        }]
+    return []
+
+
+_OP_MAP: dict[str, str] = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "=": "eq", "==": "eq"}
+
+
+def _banding_condition(col: pl.Expr, rule: dict[str, Any]) -> pl.Expr | None:
+    """Build a Polars boolean expression from a continuous banding rule."""
+    parts: list[pl.Expr] = []
+    for suffix in ("1", "2"):
+        op = str(rule.get(f"op{suffix}", "") or "").strip()
+        val = rule.get(f"val{suffix}")
+        if not op or val is None or val == "":
+            continue
+        try:
+            num = float(val)
+        except (ValueError, TypeError):
+            continue
+        method = _OP_MAP.get(op)
+        if method is None:
+            continue
+        parts.append(getattr(col, method)(num))
+    if not parts:
+        return None
+    result = parts[0]
+    for p in parts[1:]:
+        result = result & p
+    return result
+
+
 def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> GraphNode:
     """If *node* is an instance, return a merged node with the original's config.
 
@@ -249,6 +349,25 @@ def _build_node_fn(
             return lf
 
         return func_name, output_fn, False
+
+    elif node_type == "banding":
+        factors = _normalise_banding_factors(config)
+
+        def banding_fn(*dfs: _Frame, _factors: list = list(factors)) -> _Frame:
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            for f in _factors:
+                col = f.get("column", "")
+                out = f.get("outputColumn", "")
+                rules = f.get("rules", []) or []
+                if not col or not out or not rules:
+                    continue
+                lf = _apply_banding(
+                    lf, col, out, f.get("banding", "continuous"),
+                    rules, f.get("default"),
+                )
+            return lf
+
+        return func_name, banding_fn, False
 
     elif node_type in ("transform", "modelScore", "ratingStep"):
         code = config.get("code", "").strip()

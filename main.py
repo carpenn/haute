@@ -55,6 +55,12 @@ def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     return quotes
 
 
+@pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '', 'val2': '', 'assignment': 'positive'}]}, {'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '30', 'op2': '', 'val2': '', 'assignment': '30+'}]}])
+def Banding_15(policies: pl.LazyFrame) -> pl.LazyFrame:
+    """Banding 15 node"""
+    return df
+
+
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
 def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
@@ -183,3 +189,4 @@ pipeline.connect("policies", "frequency_model")
 pipeline.connect("policies", "severity_model")
 pipeline.connect("severity_model", "calculate_premium")
 pipeline.connect("frequency_model", "calculate_premium")
+pipeline.connect("policies", "Banding_15")

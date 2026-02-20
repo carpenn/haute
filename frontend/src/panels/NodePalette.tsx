@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
@@ -37,6 +37,14 @@ const nodeTemplates = [
     icon: Brain,
     accent: "#8b5cf6",
     defaultConfig: { model_uri: "" },
+  },
+  {
+    type: "banding",
+    label: "Banding",
+    description: "Group numerical or categorical values into bands",
+    icon: SlidersHorizontal,
+    accent: "#14b8a6",
+    defaultConfig: { factors: [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }] },
   },
   {
     type: "ratingStep",
