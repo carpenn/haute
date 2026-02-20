@@ -1,0 +1,205 @@
+"""Regex-based fallback parser for pipeline files with syntax errors.
+
+When a .py file has syntax errors and ``ast.parse`` fails, this module
+extracts ``@pipeline.node`` functions, ``pipeline.connect()`` calls,
+and pipeline metadata using regular expressions.  The result is a
+best-effort PipelineGraph that the GUI can render alongside error markers.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from typing import Any
+
+from haute._logging import get_logger
+from haute._parser_helpers import (
+    _build_edges,
+    _build_node_config,
+    _build_rf_nodes,
+    _extract_preamble,
+    _get_docstring,
+    _infer_node_type,
+)
+from haute.graph_utils import PipelineGraph
+
+logger = get_logger(component="parser.regex")
+
+# ---------------------------------------------------------------------------
+# Compiled patterns
+# ---------------------------------------------------------------------------
+
+_RE_DECORATOR = re.compile(
+    r"^(@pipeline\.node(?:\([^)]*\))?)\s*\n"
+    r"def\s+(\w+)\s*\(([^)]*)\)",
+    re.MULTILINE,
+)
+
+_RE_PIPELINE_META = re.compile(
+    r'pipeline\s*=\s*haute\.Pipeline\(\s*["\']([^"\']*)["\']'
+    r'(?:.*?description\s*=\s*["\']([^"\']*)["\'])?',
+)
+
+_RE_CONNECT = re.compile(
+    r'pipeline\.connect\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\)',
+)
+
+_RE_DECORATOR_KWARG = re.compile(
+    r'(\w+)\s*=\s*["\']([^"\']*)["\']',
+)
+
+_RE_DECORATOR_BOOL_KWARG = re.compile(
+    r"(\w+)\s*=\s*(True|False)",
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _find_function_blocks(source: str) -> list[dict]:
+    """Find @pipeline.node function blocks using regex.
+
+    Returns a list of dicts with keys: func_name, decorator_text, params,
+    body_text, start_line.
+    """
+    lines = source.splitlines()
+    blocks: list[dict] = []
+
+    for m in _RE_DECORATOR.finditer(source):
+        decorator_text = m.group(1)
+        func_name = m.group(2)
+        params_text = m.group(3)
+
+        # Find the line number of the def
+        def_pos = m.start()
+        start_line = source[:def_pos].count("\n")
+
+        # Extract parameter names (strip type annotations)
+        param_names = []
+        for p in params_text.split(","):
+            p = p.strip()
+            if not p:
+                continue
+            name = p.split(":")[0].strip()
+            if name:
+                param_names.append(name)
+
+        # Find the body: everything indented after the def line
+        # The def line is somewhere after the decorator
+        def_line_idx = source[: m.end()].count("\n")
+        body_lines = []
+        for i in range(def_line_idx + 1, len(lines)):
+            line = lines[i]
+            if line.strip() == "":
+                body_lines.append(line)
+                continue
+            if line[0] == " " or line[0] == "\t":
+                body_lines.append(line)
+            else:
+                break
+
+        # Strip trailing empty lines
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+
+        blocks.append(
+            {
+                "func_name": func_name,
+                "decorator_text": decorator_text,
+                "param_names": param_names,
+                "body_text": "\n".join(body_lines),
+                "start_line": start_line,
+            }
+        )
+
+    return blocks
+
+
+def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, Any]:
+    """Extract keyword arguments from a decorator using regex."""
+    # Strip the @pipeline.node( ... ) wrapper
+    if "(" in decorator_text:
+        inner = decorator_text.split("(", 1)[1].rstrip(")")
+        result: dict[str, Any] = dict(_RE_DECORATOR_KWARG.findall(inner))
+        # Also capture boolean kwargs (e.g. output=True)
+        for key, val in _RE_DECORATOR_BOOL_KWARG.findall(inner):
+            if key not in result:
+                result[key] = val == "True"
+        return result
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Public
+# ---------------------------------------------------------------------------
+
+
+def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> PipelineGraph:
+    """Parse a pipeline file with syntax errors using regex fallback.
+
+    Extracts all @pipeline.node functions, marks broken ones with an error
+    in their config, and still returns the full graph.
+    """
+    # Pipeline metadata via regex
+    meta_match = _RE_PIPELINE_META.search(source)
+    pipeline_name = meta_match.group(1) if meta_match else "main"
+    pipeline_desc = (meta_match.group(2) or "") if meta_match else ""
+
+    # Find function blocks
+    blocks = _find_function_blocks(source)
+    raw_nodes: list[dict] = []
+
+    for block in blocks:
+        func_name = block["func_name"]
+        decorator_kwargs = _parse_decorator_kwargs_regex(block["decorator_text"])
+        param_names = block["param_names"]
+        n_params = len(param_names)
+        node_type = _infer_node_type(decorator_kwargs, n_params)
+
+        # Try to parse the function individually to get the docstring
+        params_str = ", ".join(param_names)
+        func_source = (
+            f"{block['decorator_text']}\ndef {func_name}({params_str}):\n{block['body_text']}"
+        )
+        description = ""
+        has_syntax_error = False
+
+        try:
+            func_tree = ast.parse(func_source)
+            for stmt in ast.iter_child_nodes(func_tree):
+                if isinstance(stmt, ast.FunctionDef):
+                    description = _get_docstring(stmt)
+                    break
+        except SyntaxError:
+            has_syntax_error = True
+
+        body = block["body_text"] if not has_syntax_error else ""
+        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+        raw_nodes.append(
+            {
+                "func_name": func_name,
+                "node_type": node_type,
+                "description": description or f"{func_name} node",
+                "config": config,
+                "param_names": param_names,
+            }
+        )
+
+    # Build edges + nodes using shared helpers
+    connect_pairs = _RE_CONNECT.findall(source)
+    edges = _build_edges(raw_nodes, connect_pairs)
+    rf_nodes = _build_rf_nodes(raw_nodes)
+    preamble = _extract_preamble(source)
+
+    return PipelineGraph(
+        nodes=rf_nodes,
+        edges=edges,
+        pipeline_name=pipeline_name,
+        pipeline_description=pipeline_desc,
+        preamble=preamble,
+        source_file=source_file,
+        warning=f"File has syntax errors (line {syntax_error.lineno}); parsed via regex fallback",
+    )

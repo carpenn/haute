@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from haute.parser import (
+from haute._parser_helpers import (
     _build_node_config,
     _dedent,
     _extract_external_user_code,
@@ -16,9 +16,8 @@ from haute.parser import (
     _extract_user_code,
     _infer_node_type,
     _strip_docstring,
-    parse_pipeline_file,
-    parse_pipeline_source,
 )
+from haute.parser import parse_pipeline_file, parse_pipeline_source
 
 
 # ---------------------------------------------------------------------------

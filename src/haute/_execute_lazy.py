@@ -1,9 +1,10 @@
-"""Lazy graph execution — shared by executor and scorer."""
+"""Lazy and eager graph execution — shared by executor, trace, and scorer."""
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 import polars as pl
 
@@ -17,7 +18,7 @@ from haute._types import (
     resolve_orig_source_names,
 )
 
-logger = get_logger(component="execute_lazy")
+logger = get_logger(component="execute")
 
 
 def _prepare_graph(
@@ -120,3 +121,128 @@ def _execute_lazy(
         lazy_outputs[nid] = lf
 
     return lazy_outputs, order, parents_of, id_to_name
+
+
+# ---------------------------------------------------------------------------
+# Eager execution core — shared by executor (preview) and trace
+# ---------------------------------------------------------------------------
+
+
+def _build_funcs(
+    order: list[str],
+    node_map: dict[str, GraphNode],
+    parents_of: dict[str, list[str]],
+    id_to_name: dict[str, str],
+    all_parents: dict[str, list[str]],
+    build_node_fn: Callable,
+    *,
+    row_limit: int | None = None,
+) -> dict[str, tuple[Callable, bool]]:
+    """Build per-node executable functions from the graph.
+
+    Shared between eager and lazy paths.  ``row_limit`` is forwarded to
+    ``build_node_fn`` so Databricks sources can push LIMIT into SQL.
+    """
+    funcs: dict[str, tuple[Callable, bool]] = {}
+    for nid in order:
+        src_names = [
+            id_to_name[pid]
+            for pid in parents_of.get(nid, [])
+            if pid in id_to_name
+        ]
+        orig_src_names = resolve_orig_source_names(
+            node_map[nid], node_map, all_parents, id_to_name,
+        )
+        _, fn, is_source = build_node_fn(
+            node_map[nid], source_names=src_names, row_limit=row_limit,
+            node_map=node_map, orig_source_names=orig_src_names,
+        )
+        funcs[nid] = (fn, is_source)
+    return funcs
+
+
+class EagerResult(NamedTuple):
+    """Result of eager graph execution."""
+
+    outputs: dict[str, pl.DataFrame | None]
+    order: list[str]
+    parents_of: dict[str, list[str]]
+    node_map: dict[str, GraphNode]
+    id_to_name: dict[str, str]
+    errors: dict[str, str]
+    timings: dict[str, float]
+
+
+def _execute_eager_core(
+    graph: PipelineGraph,
+    build_node_fn: Callable,
+    target_node_id: str | None = None,
+    row_limit: int | None = None,
+    swallow_errors: bool = False,
+) -> EagerResult:
+    """Execute the graph eagerly in topo order and collect DataFrames.
+
+    Shared core for the preview executor and the trace engine.
+
+    Args:
+        graph: React Flow graph.
+        build_node_fn: ``(node, source_names=..., ...) -> (name, fn, is_source)``.
+        target_node_id: If set, only execute ancestors of this node.
+        row_limit: Cap source-node output to this many rows.
+        swallow_errors: If ``True``, record per-node errors and continue
+            (preview behaviour).  If ``False``, raise immediately (trace).
+
+    Returns:
+        An ``EagerResult`` with named fields for outputs, order,
+        parents_of, node_map, id_to_name, errors, and timings.
+    """
+    node_map, order, parents_of, id_to_name = _prepare_graph(
+        graph, target_node_id,
+    )
+
+    # Full parent lookup from ALL edges for instance resolution
+    all_parents: dict[str, list[str]] = {}
+    for e in graph.edges:
+        all_parents.setdefault(e.target, []).append(e.source)
+
+    funcs = _build_funcs(
+        order, node_map, parents_of, id_to_name, all_parents,
+        build_node_fn, row_limit=row_limit,
+    )
+
+    eager_outputs: dict[str, pl.DataFrame | None] = {}
+    errors: dict[str, str] = {}
+    timings: dict[str, float] = {}
+
+    for nid in order:
+        fn, is_source = funcs[nid]
+        t0 = time.perf_counter()
+        try:
+            if is_source:
+                result = fn()
+                if row_limit and isinstance(result, pl.LazyFrame):
+                    result = result.head(row_limit)
+            else:
+                input_ids = parents_of.get(nid, [])
+                input_lfs = [
+                    eager_outputs[pid].lazy()
+                    for pid in input_ids
+                    if pid in eager_outputs and eager_outputs[pid] is not None
+                ]
+                if not input_lfs:
+                    raise ValueError(
+                        f"No input data available for node '{nid}'",
+                    )
+                result = fn(*input_lfs)
+
+            df = result.collect() if isinstance(result, pl.LazyFrame) else result
+            eager_outputs[nid] = df
+        except Exception as exc:
+            if not swallow_errors:
+                raise
+            logger.warning("node_failed", node_id=nid, error=str(exc))
+            eager_outputs[nid] = None
+            errors[nid] = str(exc)
+        timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
+
+    return EagerResult(eager_outputs, order, parents_of, node_map, id_to_name, errors, timings)

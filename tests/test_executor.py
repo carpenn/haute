@@ -370,8 +370,8 @@ class TestExecuteSink:
             "edges": [_edge("src", "sink")],
         })
         result = execute_sink(graph, sink_node_id="sink")
-        assert result["status"] == "ok"
-        assert result["row_count"] == 2
+        assert result.status == "ok"
+        assert result.row_count == 2
         assert out_path.exists()
         df = pl.read_parquet(out_path)
         assert len(df) == 2
@@ -396,7 +396,7 @@ class TestExecuteSink:
             "edges": [_edge("src", "sink")],
         })
         result = execute_sink(graph, sink_node_id="sink")
-        assert result["status"] == "ok"
+        assert result.status == "ok"
         assert out_path.exists()
 
     def test_missing_sink_raises(self):

@@ -14,27 +14,26 @@ from __future__ import annotations
 
 import re
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
 import polars as pl
 
 from haute._logging import get_logger
-from haute._sandbox import safe_globals
+from haute._sandbox import safe_globals, validate_user_code
 from haute.graph_utils import (
     GraphNode,
     PipelineGraph,
+    _execute_eager_core,
     _execute_lazy,
     _Frame,
-    _prepare_graph,
     _sanitize_func_name,
     build_instance_mapping,
     graph_fingerprint,
     load_external_object,
     read_source,
-    resolve_orig_source_names,
 )
+from haute.schemas import SinkResponse
 
 logger = get_logger(component="executor")
 
@@ -80,6 +79,11 @@ def _exec_user_code(
     elif "df =" not in code and "df=" not in code:
         exec_code = f"df = (\n    {code}\n)"
         line_offset = 1
+
+    # Validate the original user code at the AST level before exec().
+    # This blocks dunder access, imports, getattr, class defs, etc.
+    # at the structural level — a stronger layer than restricted builtins.
+    validate_user_code(code)
 
     try:
         exec(exec_code, safe_globals(pl=pl, **(extra_ns or {})), local_ns)
@@ -469,70 +473,21 @@ def _eager_execute(
     node_id → message for nodes that failed, and timings maps
     node_id → execution milliseconds.
     """
-    node_map, order, parents_of, id_to_name = _prepare_graph(
-        graph, target_node_id,
+    result = _execute_eager_core(
+        graph,
+        _build_node_fn,
+        target_node_id=target_node_id,
+        row_limit=row_limit,
+        swallow_errors=True,
     )
-
-    # Full parent lookup from ALL edges for instance resolution
-    all_parents: dict[str, list[str]] = {}
-    for e in graph.edges:
-        all_parents.setdefault(e.target, []).append(e.source)
-
-    funcs: dict[str, tuple[Callable, bool]] = {}
-    for nid in order:
-        src_names = [
-            id_to_name[pid]
-            for pid in parents_of.get(nid, [])
-            if pid in id_to_name
-        ]
-        orig_src_names = resolve_orig_source_names(
-            node_map[nid], node_map, all_parents, id_to_name,
-        )
-        _, fn, is_source = _build_node_fn(
-            node_map[nid], source_names=src_names, row_limit=row_limit,
-            node_map=node_map, orig_source_names=orig_src_names,
-        )
-        funcs[nid] = (fn, is_source)
-
-    eager_outputs: dict[str, pl.DataFrame | None] = {}
-    errors: dict[str, str] = {}
-    timings: dict[str, float] = {}
-
-    for nid in order:
-        fn, is_source = funcs[nid]
-        t0 = time.perf_counter()
-        try:
-            if is_source:
-                result = fn()
-                if row_limit and isinstance(result, pl.LazyFrame):
-                    result = result.head(row_limit)
-            else:
-                input_ids = parents_of.get(nid, [])
-                input_lfs = [
-                    eager_outputs[pid].lazy()
-                    for pid in input_ids
-                    if pid in eager_outputs and eager_outputs[pid] is not None
-                ]
-                if not input_lfs:
-                    raise ValueError("No valid input data available")
-                result = fn(*input_lfs)
-
-            df = result.collect() if isinstance(result, pl.LazyFrame) else result
-            eager_outputs[nid] = df
-        except Exception as exc:
-            logger.warning("node_failed", node_id=nid, error=str(exc))
-            eager_outputs[nid] = None
-            errors[nid] = str(exc)
-        timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
-
-    return eager_outputs, order, errors, timings
+    return result.outputs, result.order, result.errors, result.timings
 
 
-def execute_sink(graph: PipelineGraph, sink_node_id: str) -> dict:
+def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
     """Execute the pipeline up to a sink node and write its input to disk.
 
     This is called on-demand (not during normal run/preview).
-    Returns a status dict with row count and output path.
+    Returns a ``SinkResponse`` with row count and output path.
     """
     from pathlib import Path
 
@@ -569,10 +524,10 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> dict:
     else:
         df.write_parquet(out)
 
-    return {
-        "status": "ok",
-        "message": f"Wrote {len(df):,} rows to {path}",
-        "row_count": len(df),
-        "path": path,
-        "format": fmt,
-    }
+    return SinkResponse(
+        status="ok",
+        message=f"Wrote {len(df):,} rows to {path}",
+        row_count=len(df),
+        path=path,
+        format=fmt,
+    )

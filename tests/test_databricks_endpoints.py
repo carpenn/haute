@@ -36,7 +36,7 @@ class TestListWarehouses:
         mock_ws = MagicMock()
         mock_ws.warehouses.list.return_value = [mock_wh]
 
-        with patch("haute.server._get_databricks_client", return_value=mock_ws):
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/warehouses")
 
         assert resp.status_code == 200
@@ -79,7 +79,7 @@ class TestListCatalogs:
         mock_ws = MagicMock()
         mock_ws.catalogs.list.return_value = [mock_cat]
 
-        with patch("haute.server._get_databricks_client", return_value=mock_ws):
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/catalogs")
 
         assert resp.status_code == 200
@@ -103,7 +103,7 @@ class TestListSchemas:
         mock_ws = MagicMock()
         mock_ws.schemas.list.return_value = [mock_sch]
 
-        with patch("haute.server._get_databricks_client", return_value=mock_ws):
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/schemas", params={"catalog": "main"})
 
         assert resp.status_code == 200
@@ -132,7 +132,7 @@ class TestListTables:
         mock_ws = MagicMock()
         mock_ws.tables.list.return_value = [mock_tbl]
 
-        with patch("haute.server._get_databricks_client", return_value=mock_ws):
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get(
                 "/api/databricks/tables",
                 params={"catalog": "main", "schema": "pricing"},

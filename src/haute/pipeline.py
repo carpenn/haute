@@ -71,6 +71,7 @@ class NodeRegistry:
         self._nodes: list[Node] = []
         self._node_map: dict[str, Node] = {}
         self._edges: list[tuple[str, str]] = []
+        self._submodel_files: list[str] = []
 
     def node(self, fn: Callable | None = None, **config) -> Callable:
         """Decorator to register a function as a node.
@@ -281,15 +282,13 @@ class Pipeline(NodeRegistry):
 
         Can be chained: ``pipeline.submodel("a.py").submodel("b.py")``
         """
-        if not hasattr(self, "_submodel_files"):
-            self._submodel_files: list[str] = []
         self._submodel_files.append(file)
         return self
 
     @property
     def submodel_files(self) -> list[str]:
         """Paths passed to :meth:`submodel`."""
-        return list(getattr(self, "_submodel_files", []))
+        return list(self._submodel_files)
 
 
 class Submodel(NodeRegistry):

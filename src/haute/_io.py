@@ -92,9 +92,9 @@ def _load_external_object_uncached(
         with open(path) as f:
             return _json.load(f)
     elif file_type == "joblib":
-        import joblib
+        from haute._sandbox import safe_joblib_load
 
-        return joblib.load(path)
+        return safe_joblib_load(path)
     elif file_type == "catboost":
         if model_class == "regressor":
             from catboost import CatBoostRegressor

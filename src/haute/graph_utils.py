@@ -14,6 +14,8 @@ Modules:
 """
 
 from haute._cache import graph_fingerprint as graph_fingerprint
+from haute._execute_lazy import EagerResult as EagerResult
+from haute._execute_lazy import _execute_eager_core as _execute_eager_core
 from haute._execute_lazy import _execute_lazy as _execute_lazy
 from haute._execute_lazy import _prepare_graph as _prepare_graph
 from haute._flatten import flatten_graph as flatten_graph

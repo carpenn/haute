@@ -33,9 +33,8 @@ from haute.executor import _build_node_fn
 from haute.graph_utils import (
     GraphNode,
     PipelineGraph,
-    _prepare_graph,
+    _execute_eager_core,
     graph_fingerprint,
-    resolve_orig_source_names,
     topo_sort_ids,
 )
 
@@ -251,56 +250,22 @@ def execute_trace(
             eager_outputs = _cache.eager_outputs
 
     if not cache_hit:
-        # Cache miss — execute eagerly in topo order
-        node_map, order, parents_of, id_to_name = _prepare_graph(
-            graph, target_node_id,
+        # Cache miss — execute eagerly via shared core (raises on error)
+        result = _execute_eager_core(
+            graph,
+            _build_node_fn,
+            target_node_id=target_node_id,
+            row_limit=row_limit,
+            swallow_errors=False,
         )
+        # Trace never swallows errors so all values are DataFrames here.
+        eager_outputs: dict[str, pl.DataFrame] = {
+            nid: df for nid, df in result.outputs.items() if df is not None
+        }
+        order = result.order
+        parents_of = result.parents_of
+        node_map = result.node_map
         source_ids = {nid for nid in order if not parents_of.get(nid)}
-
-        # Full parent lookup from ALL edges for instance resolution
-        all_parents: dict[str, list[str]] = {}
-        for e in graph.edges:
-            all_parents.setdefault(e.target, []).append(e.source)
-
-        funcs: dict[str, tuple[Any, bool]] = {}
-        for nid in order:
-            src_names = [
-                id_to_name[pid]
-                for pid in parents_of.get(nid, [])
-                if pid in id_to_name
-            ]
-            orig_src_names = resolve_orig_source_names(
-                node_map[nid], node_map, all_parents, id_to_name,
-            )
-            _, fn, is_source = _build_node_fn(
-                node_map[nid], source_names=src_names,
-                node_map=node_map, orig_source_names=orig_src_names,
-            )
-            funcs[nid] = (fn, is_source)
-
-        eager_outputs: dict[str, pl.DataFrame] = {}
-        for nid in order:
-            fn, is_source = funcs[nid]
-            if is_source:
-                result = fn()
-                # Limit source data to match the preview the user sees
-                if row_limit and isinstance(result, pl.LazyFrame):
-                    result = result.head(row_limit)
-            else:
-                input_ids = parents_of.get(nid, [])
-                input_lfs = [
-                    eager_outputs[pid].lazy()
-                    for pid in input_ids
-                    if pid in eager_outputs
-                ]
-                if not input_lfs:
-                    raise ValueError(
-                        f"No input data available for node '{nid}'",
-                    )
-                result = fn(*input_lfs)
-
-            df = result.collect() if isinstance(result, pl.LazyFrame) else result
-            eager_outputs[nid] = df
 
         # Populate cache
         with _cache._lock:

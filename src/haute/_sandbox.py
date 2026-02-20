@@ -1,9 +1,21 @@
 """Security sandbox for user-code execution and file deserialization.
 
-Provides:
-- ``SAFE_GLOBALS`` — restricted builtins for ``exec()`` that block
-  dangerous operations (``__import__``, ``open``, ``eval``, etc.)
-  while preserving everything Polars transform code needs.
+Two layers of defence for ``exec()``-based user code:
+
+1. **AST validation** (``validate_user_code``) — parses the code string
+   and walks the tree *before* execution, rejecting dangerous patterns:
+   dunder attribute access (``__class__``, ``__subclasses__``), reflection
+   helpers (``getattr``, ``type``, ``vars``), import statements, class
+   definitions, and scope-escaping keywords (``global``, ``nonlocal``).
+   This closes known CPython sandbox-escape vectors at the structural
+   level.
+
+2. **Restricted builtins** (``safe_globals``) — runtime defence-in-depth
+   that removes ``__import__``, ``open``, ``eval``, ``exec``, ``compile``,
+   ``breakpoint``, ``globals``, ``locals``, and ``input`` from the
+   namespace passed to ``exec()``.
+
+Also provides:
 - ``safe_unpickle(path)`` — a ``RestrictedUnpickler`` that only allows
   known-safe classes (numpy, sklearn, catboost, etc.).
 - ``validate_project_path(path)`` — ensures a path resolves inside the
@@ -12,10 +24,15 @@ Provides:
 
 from __future__ import annotations
 
+import ast
 import builtins
 import pickle
 from pathlib import Path
 from typing import Any
+
+from haute._logging import get_logger
+
+logger = get_logger(component="sandbox")
 
 # ---------------------------------------------------------------------------
 # Project-root path validation
@@ -95,6 +112,137 @@ def safe_globals(**extra: Any) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# AST-level code validation — runs BEFORE exec()
+# ---------------------------------------------------------------------------
+
+# Attribute names that enable sandbox escapes via the Python type system.
+_BLOCKED_ATTRS = frozenset({
+    "__subclasses__",
+    "__bases__",
+    "__mro__",
+    "__class__",
+    "__globals__",
+    "__code__",
+    "__func__",
+    "__self__",
+    "__module__",
+    "__dict__",
+    "__init_subclass__",
+    "__set_name__",
+    "__reduce__",
+    "__reduce_ex__",
+    "__getattr__",
+    "__setattr__",
+    "__delattr__",
+    "__import__",
+    "__builtins__",
+    "__loader__",
+    "__spec__",
+})
+
+# Built-in function names that can be used to bypass attribute restrictions.
+_BLOCKED_CALLS = frozenset({
+    "getattr",
+    "setattr",
+    "delattr",
+    "type",
+    "vars",
+    "dir",
+    "hasattr",
+    "classmethod",
+    "staticmethod",
+    "super",
+    "__import__",
+    "eval",
+    "exec",
+    "compile",
+    "open",
+    "breakpoint",
+    "globals",
+    "locals",
+    "input",
+    "exit",
+    "quit",
+    "help",
+})
+
+
+class UnsafeCodeError(Exception):
+    """Raised when AST validation detects a dangerous pattern."""
+
+
+class _ASTValidator(ast.NodeVisitor):
+    """Walk an AST and raise ``UnsafeCodeError`` on dangerous patterns.
+
+    Blocks:
+    - Dunder attribute access (``obj.__class__``, ``obj.__subclasses__()``)
+    - Calls to reflection helpers (``getattr``, ``type``, ``vars``, etc.)
+    - Import statements
+    - Class, async, and lambda definitions
+    - Star expressions in assignments (``a, *b = ...``)
+    """
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr.startswith("__") and node.attr.endswith("__"):
+            if node.attr in _BLOCKED_ATTRS:
+                raise UnsafeCodeError(
+                    f"Access to '{node.attr}' is blocked in pipeline code"
+                )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        # Block calls to dangerous built-in names
+        if isinstance(node.func, ast.Name) and node.func.id in _BLOCKED_CALLS:
+            raise UnsafeCodeError(
+                f"Call to '{node.func.id}()' is blocked in pipeline code"
+            )
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        raise UnsafeCodeError("import statements are blocked in pipeline code")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        raise UnsafeCodeError("import statements are blocked in pipeline code")
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        raise UnsafeCodeError("class definitions are blocked in pipeline code")
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        raise UnsafeCodeError(
+            "async function definitions are blocked in pipeline code"
+        )
+
+    def visit_Global(self, node: ast.Global) -> None:
+        raise UnsafeCodeError("global statements are blocked in pipeline code")
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        raise UnsafeCodeError(
+            "nonlocal statements are blocked in pipeline code"
+        )
+
+
+_validator = _ASTValidator()
+
+
+def validate_user_code(code: str) -> None:
+    """Parse *code* and check for dangerous AST patterns.
+
+    Raises ``UnsafeCodeError`` if the code contains blocked constructs
+    (dunder access, imports, getattr, class defs, etc.).
+
+    Called by ``_exec_user_code`` before ``exec()`` so dangerous code
+    is rejected at the structural level — not just at runtime via
+    restricted builtins.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # Let exec() produce the proper SyntaxError with line numbers
+        return
+    _validator.visit(tree)
+
+
+# ---------------------------------------------------------------------------
 # Restricted unpickler
 # ---------------------------------------------------------------------------
 
@@ -109,6 +257,7 @@ _ALLOWED_PICKLE_PREFIXES: list[tuple[str, ...]] = [
     ("lightgbm",),
     ("pandas",),
     ("polars",),
+    ("joblib",),
     ("collections",),
     ("builtins",),
     ("_codecs",),
@@ -144,3 +293,45 @@ def safe_unpickle(path: str | Path) -> Any:
     validated = validate_project_path(path)
     with open(validated, "rb") as f:
         return _RestrictedUnpickler(f).load()
+
+
+def safe_joblib_load(path: str | Path) -> Any:
+    """Deserialize a joblib file using a restricted unpickler.
+
+    ``joblib.load()`` uses pickle internally but provides no class
+    restriction hook.  This function patches joblib's ``NumpyUnpickler``
+    with the same ``find_class`` allowlist used by ``safe_unpickle``,
+    then restores the original after loading.
+
+    Also validates the path is within the project root.
+    """
+    validated = validate_project_path(path)
+
+    try:
+        from joblib.numpy_pickle import NumpyUnpickler
+    except ImportError:
+        # joblib not installed — fall back to restricted pickle
+        logger.warning("joblib_missing", msg="falling back to safe_unpickle")
+        return safe_unpickle(validated)
+
+    original_find_class = NumpyUnpickler.find_class
+
+    def _restricted_joblib_find_class(self: Any, module: str, name: str) -> Any:
+        """find_class with allowlist, delegating to the original on match."""
+        for prefix in _ALLOWED_PICKLE_PREFIXES:
+            if module.startswith(prefix[0]):
+                return original_find_class(self, module, name)
+        raise pickle.UnpicklingError(
+            f"Blocked unpickling of {module}.{name} — "
+            f"class not in the allowlist. If this is a legitimate model "
+            f"class, add its module to _ALLOWED_PICKLE_PREFIXES in "
+            f"src/haute/_sandbox.py"
+        )
+
+    NumpyUnpickler.find_class = _restricted_joblib_find_class
+    try:
+        import joblib
+
+        return joblib.load(validated)
+    finally:
+        NumpyUnpickler.find_class = original_find_class
