@@ -102,8 +102,8 @@ def find_output_node(graph: PipelineGraph) -> str:
     """
     candidates: list[str] = []
     for n in graph.get("nodes", []):
-        data = n.get("data", {})
-        if data.get("nodeType") == "output":
+        data = n["data"]
+        if data["nodeType"] == "output":
             candidates.append(n["id"])
         elif data.get("config", {}).get("output"):
             candidates.append(n["id"])
@@ -126,8 +126,7 @@ def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
     """
     inputs: list[str] = []
     for n in graph.get("nodes", []):
-        data = n.get("data", {})
-        if data.get("nodeType") == "apiInput":
+        if n["data"]["nodeType"] == "apiInput":
             inputs.append(n["id"])
     return inputs
 
@@ -136,7 +135,6 @@ def find_source_nodes(graph: PipelineGraph) -> list[str]:
     """Find all source nodes in a graph (dataSource and apiInput)."""
     sources: list[str] = []
     for n in graph.get("nodes", []):
-        data = n.get("data", {})
-        if data.get("nodeType") in ("dataSource", "apiInput"):
+        if n["data"]["nodeType"] in ("dataSource", "apiInput"):
             sources.append(n["id"])
     return sources

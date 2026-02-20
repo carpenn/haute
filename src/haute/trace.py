@@ -20,6 +20,7 @@ TODO (future phases):
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -139,12 +140,7 @@ def _compute_schema_diff(
 
 
 def _is_nan(v: Any) -> bool:
-    try:
-        import math
-
-        return isinstance(v, float) and math.isnan(v)
-    except (TypeError, ValueError):
-        return False
+    return isinstance(v, float) and math.isnan(v)
 
 
 def _jsonify_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -319,9 +315,9 @@ def execute_trace(
 
     for nid in order:
         is_source = nid in source_ids
-        node_data = node_map[nid].get("data", {})
-        node_name = node_data.get("label", nid)
-        node_type = node_data.get("nodeType", "transform")
+        node_data = node_map[nid]["data"]
+        node_name = node_data["label"]
+        node_type = node_data["nodeType"]
 
         output_row = cached_rows[nid]
 

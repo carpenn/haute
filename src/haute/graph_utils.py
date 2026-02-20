@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
+import json as _json
 from collections import deque
 from collections.abc import Callable
 from typing import Any, TypedDict
@@ -53,6 +55,27 @@ class PipelineGraph(TypedDict, total=False):
     preamble: str
     source_file: str
     submodels: dict[str, Any]
+
+
+def read_source(path: str) -> pl.LazyFrame:
+    """Read a data file into a LazyFrame, dispatching on file extension.
+
+    Centralises the csv/json/parquet dispatch that was previously duplicated
+    across the executor, scorer, schema inference, and server modules.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    if path.endswith(".csv"):
+        return pl.scan_csv(path)
+    if path.endswith(".json"):
+        return pl.read_json(path).lazy()
+    if path.endswith(".jsonl"):
+        return pl.scan_ndjson(path)
+    if path.endswith(".parquet"):
+        return pl.scan_parquet(path)
+    suffix = path.rsplit(".", 1)[-1] if "." in path else ""
+    raise ValueError(f"Unsupported file type: .{suffix}")
 
 
 def _sanitize_func_name(label: str) -> str:
@@ -152,18 +175,17 @@ def topo_sort_ids(node_ids: list[str], edges: list[GraphEdge]) -> list[str]:
         if src in children:
             children[src].append(tgt)
 
-    queue = deque(sorted(nid for nid, deg in in_degree.items() if deg == 0))
+    heap = sorted(nid for nid, deg in in_degree.items() if deg == 0)
+    heapq.heapify(heap)
     result: list[str] = []
 
-    while queue:
-        nid = queue.popleft()
+    while heap:
+        nid = heapq.heappop(heap)
         result.append(nid)
         for child in children.get(nid, []):
             in_degree[child] -= 1
             if in_degree[child] == 0:
-                queue.append(child)
-        # Re-sort for deterministic ordering (queue is small)
-        queue = deque(sorted(queue))
+                heapq.heappush(heap, child)
 
     return result
 
@@ -180,9 +202,7 @@ def graph_fingerprint(graph: PipelineGraph, *extra_keys: str) -> str:
         d = n.get("data", {})
         c = d.get("config", {})
         parts.append(
-            f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}"
-            f"|{c.get('table', '')}|{c.get('query', '')}|{c.get('instanceOf', '')}"
-            f"|{c.get('mode', '')}",
+            f"{n['id']}|{d.get('nodeType')}|{_json.dumps(c, sort_keys=True, default=str)}",
         )
     for e in sorted(
         graph.get("edges", []),
@@ -200,15 +220,13 @@ def ancestors(target_id: str, edges: list[GraphEdge], all_ids: set[str]) -> set[
             parents[e["target"]].append(e["source"])
 
     visited: set[str] = set()
-
-    def walk(nid: str) -> None:
+    queue = deque([target_id])
+    while queue:
+        nid = queue.popleft()
         if nid in visited:
-            return
+            continue
         visited.add(nid)
-        for p in parents.get(nid, []):
-            walk(p)
-
-    walk(target_id)
+        queue.extend(parents.get(nid, []))
     return visited
 
 
@@ -246,7 +264,7 @@ def _prepare_graph(
 
     id_to_name: dict[str, str] = {}
     for nid in order:
-        label = node_map[nid].get("data", {}).get("label", "Unnamed")
+        label = node_map[nid]["data"]["label"]
         id_to_name[nid] = _sanitize_func_name(label)
 
     return node_map, order, parents_of, id_to_name

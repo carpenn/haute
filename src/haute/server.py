@@ -259,7 +259,8 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     if not body.source_file:
         raise HTTPException(
             status_code=400,
-            detail="source_file is required — the frontend must track and send the original pipeline file path",
+            detail="source_file is required — the frontend must track"
+            " and send the original pipeline file path",
         )
     py_path = (cwd / body.source_file).resolve()
     if not py_path.is_relative_to(cwd):
@@ -468,20 +469,9 @@ async def get_schema(path: str) -> SchemaResponse:
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
 
     try:
-        if target.suffix == ".parquet":
-            lf = pl.scan_parquet(target)
-        elif target.suffix == ".csv":
-            lf = pl.scan_csv(target)
-        elif target.suffix == ".json":
-            # JSON has no scan API — read eagerly (JSON files are small)
-            lf = pl.read_json(target).lazy()
-        elif target.suffix == ".jsonl":
-            lf = pl.scan_ndjson(target)
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {target.suffix}",
-            )
+        from haute.graph_utils import read_source
+
+        lf = read_source(str(target))
 
         schema = lf.collect_schema()
         columns = [{"name": c, "dtype": str(d)} for c, d in schema.items()]
@@ -495,6 +485,8 @@ async def get_schema(path: str) -> SchemaResponse:
             column_count=len(columns),
             preview=preview_df.to_dicts(),
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -729,12 +721,19 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     child_node_ids = {n["id"] for n in child_nodes}
 
     # Separate edges: internal (both ends inside), cross-boundary, external
-    internal_edges = [e for e in edges if e["source"] in child_node_ids and e["target"] in child_node_ids]
+    internal_edges = [
+        e for e in edges
+        if e["source"] in child_node_ids and e["target"] in child_node_ids
+    ]
     cross_edges = [
         e for e in edges
         if (e["source"] in child_node_ids) != (e["target"] in child_node_ids)
     ]
-    external_edges = [e for e in edges if e["source"] not in child_node_ids and e["target"] not in child_node_ids]
+    external_edges = [
+        e for e in edges
+        if e["source"] not in child_node_ids
+        and e["target"] not in child_node_ids
+    ]
 
     # Determine input/output ports
     input_ports = []  # internal child nodes that receive external input
@@ -827,7 +826,8 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     if not body.source_file:
         raise HTTPException(
             status_code=400,
-            detail="source_file is required — the frontend must track and send the original pipeline file path",
+            detail="source_file is required — the frontend must track"
+            " and send the original pipeline file path",
         )
     parent_file = body.source_file
 
@@ -904,7 +904,8 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
     if not body.source_file:
         raise HTTPException(
             status_code=400,
-            detail="source_file is required — the frontend must track and send the original pipeline file path",
+            detail="source_file is required — the frontend must track"
+            " and send the original pipeline file path",
         )
     py_path = (cwd / body.source_file).resolve()
 

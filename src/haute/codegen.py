@@ -178,10 +178,10 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
 
     source_names: sanitized function names of upstream nodes (used as param names).
     """
-    data = node.get("data", {})
-    node_type = data.get("nodeType", "transform")
+    data = node["data"]
+    node_type = data["nodeType"]
     config = data.get("config", {})
-    label = data.get("label", "Unnamed")
+    label = data["label"]
     description = data.get("description", "") or f"{label} node"
     func_name = _sanitize_func_name(label)
 

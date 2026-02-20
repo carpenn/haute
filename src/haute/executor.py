@@ -30,6 +30,7 @@ from haute.graph_utils import (
     build_instance_mapping,
     graph_fingerprint,
     load_external_object,
+    read_source,
     resolve_orig_source_names,
 )
 
@@ -109,19 +110,19 @@ def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> Gr
     ``instanceOf`` key itself).  If the original cannot be found the
     instance is returned unchanged.
     """
-    config = node.get("data", {}).get("config", {})
+    config = node["data"]["config"]
     ref = config.get("instanceOf")
     if not ref or ref not in node_map:
         return node
     original = node_map[ref]
-    orig_data = original.get("data", {})
-    orig_config = {k: v for k, v in orig_data.get("config", {}).items() if k != "instanceOf"}
+    orig_data = original["data"]
+    orig_config = {k: v for k, v in orig_data["config"].items() if k != "instanceOf"}
     # Preserve instance-specific keys (inputMapping) that the UI sets
-    inst_config = node.get("data", {}).get("config", {})
+    inst_config = config
     instance_keys = {k: v for k, v in inst_config.items() if k in ("inputMapping",)}
     merged_data = {
-        **node.get("data", {}),
-        "nodeType": orig_data.get("nodeType", "transform"),
+        **node["data"],
+        "nodeType": orig_data["nodeType"],
         "config": {**orig_config, "instanceOf": ref, **instance_keys},
     }
     return {**node, "data": merged_data}
@@ -146,10 +147,10 @@ def _build_node_fn(
     if node_map:
         node = resolve_instance_node(node, node_map)
 
-    data = node.get("data", {})
-    node_type = data.get("nodeType", "transform")
+    data = node["data"]
+    node_type = data["nodeType"]
     config = data.get("config", {})
-    label = data.get("label", "Unnamed")
+    label = data["label"]
     func_name = _sanitize_func_name(label)
 
     if source_names is None:
@@ -159,11 +160,7 @@ def _build_node_fn(
         path = config.get("path", "")
 
         def api_source_fn() -> _Frame:
-            if path.endswith(".jsonl"):
-                return pl.scan_ndjson(path)
-            else:
-                # .json — single object or array
-                return pl.read_json(path).lazy()
+            return read_source(path)
 
         return func_name, api_source_fn, True
 
@@ -182,12 +179,7 @@ def _build_node_fn(
             return func_name, source_fn, True
 
         def source_fn() -> _Frame:
-            if path.endswith(".csv"):
-                return pl.scan_csv(path)
-            elif path.endswith(".json"):
-                return pl.read_json(path).lazy()
-            else:
-                return pl.scan_parquet(path)
+            return read_source(path)
 
         return func_name, source_fn, True
 
@@ -393,7 +385,7 @@ def execute_graph(
 
     schema_warnings: dict[str, list[dict]] = {}
     for nid in order:
-        ref = node_map.get(nid, {}).get("data", {}).get("config", {}).get("instanceOf")
+        ref = node_map[nid]["data"]["config"].get("instanceOf")
         if not ref or ref not in node_map:
             continue
         # Columns feeding into the original node

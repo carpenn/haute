@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import polars as pl
-
-from haute.graph_utils import GraphNode, PipelineGraph
+from haute.graph_utils import GraphNode, PipelineGraph, read_source
 
 
 def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, str]:
@@ -23,7 +21,7 @@ def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, st
         ValueError: If the input node has no path or the file can't be read.
     """
     node = _find_node(graph, input_node_id)
-    config = node.get("data", {}).get("config", {})
+    config = node["data"]["config"]
     path = config.get("path", "")
 
     if not path:
@@ -32,19 +30,14 @@ def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, st
         )
 
     try:
-        if path.endswith(".csv"):
-            df = pl.read_csv(path, n_rows=0)
-        elif path.endswith(".json"):
-            df = pl.read_json(path)
-            df = df.head(0)
-        else:
-            df = pl.read_parquet(path, n_rows=0)
+        lf = read_source(path)
+        schema = lf.collect_schema()
     except Exception as exc:
         raise ValueError(
             f"Failed to read schema from '{path}' for input node '{input_node_id}': {exc}"
         ) from exc
 
-    return {col: str(df[col].dtype) for col in df.columns}
+    return {col: str(dtype) for col, dtype in schema.items()}
 
 
 def infer_output_schema(
@@ -69,7 +62,7 @@ def infer_output_schema(
 
     # Build a 1-row sample from the first input node's data
     node = _find_node(graph, input_node_ids[0])
-    config = node.get("data", {}).get("config", {})
+    config = node["data"]["config"]
     path = config.get("path", "")
 
     if not path:
@@ -78,12 +71,7 @@ def infer_output_schema(
         )
 
     try:
-        if path.endswith(".csv"):
-            sample = pl.read_csv(path, n_rows=1)
-        elif path.endswith(".json"):
-            sample = pl.read_json(path).head(1)
-        else:
-            sample = pl.read_parquet(path, n_rows=1)
+        sample = read_source(path).head(1).collect()
     except Exception as exc:
         raise ValueError(f"Failed to read sample from '{path}': {exc}") from exc
 

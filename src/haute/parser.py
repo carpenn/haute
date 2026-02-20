@@ -337,9 +337,11 @@ def _extract_submodel_calls(tree: ast.Module) -> list[str]:
     return paths
 
 
-def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
-    """Find pipeline = haute.Pipeline("name", description="...") at module level."""
-    name = "main"
+def _extract_meta(
+    tree: ast.Module, var_name: str, default_name: str = "main",
+) -> tuple[str, str]:
+    """Find ``<var_name> = haute.<Class>("name", description="...")`` at module level."""
+    name = default_name
     description = ""
 
     for node in ast.iter_child_nodes(tree):
@@ -348,19 +350,17 @@ def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
         if len(node.targets) != 1:
             continue
         target = node.targets[0]
-        if not isinstance(target, ast.Name) or target.id != "pipeline":
+        if not isinstance(target, ast.Name) or target.id != var_name:
             continue
         call = node.value
         if not isinstance(call, ast.Call):
             continue
 
-        # Positional first arg = name
         if call.args:
             val = _eval_ast_literal(call.args[0])
             if isinstance(val, str):
                 name = val
 
-        # keyword description=
         for kw in call.keywords:
             if kw.arg == "description":
                 val = _eval_ast_literal(kw.value)
@@ -370,39 +370,16 @@ def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
         break
 
     return name, description
+
+
+def _extract_pipeline_meta(tree: ast.Module) -> tuple[str, str]:
+    """Find pipeline = haute.Pipeline("name", description="...") at module level."""
+    return _extract_meta(tree, "pipeline", "main")
 
 
 def _extract_submodel_meta(tree: ast.Module) -> tuple[str, str]:
     """Find submodel = haute.Submodel("name", description="...") at module level."""
-    name = "unnamed"
-    description = ""
-
-    for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name) or target.id != "submodel":
-            continue
-        call = node.value
-        if not isinstance(call, ast.Call):
-            continue
-
-        if call.args:
-            val = _eval_ast_literal(call.args[0])
-            if isinstance(val, str):
-                name = val
-
-        for kw in call.keywords:
-            if kw.arg == "description":
-                val = _eval_ast_literal(kw.value)
-                if isinstance(val, str):
-                    description = val
-
-        break
-
-    return name, description
+    return _extract_meta(tree, "submodel", "unnamed")
 
 
 # ---------------------------------------------------------------------------

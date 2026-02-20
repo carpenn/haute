@@ -22,6 +22,7 @@ from haute.graph_utils import (
     _Frame,
     _sanitize_func_name,
     load_external_object,
+    read_source,
 )
 
 
@@ -62,11 +63,11 @@ def score_graph(
         """Modified _build_node_fn that intercepts apiInput sources."""
         from haute.executor import _build_node_fn, _exec_user_code
 
-        nid = node.get("id", "")
-        data = node.get("data", {})
-        node_type = data.get("nodeType", "transform")
+        nid = node["id"]
+        data = node["data"]
+        node_type = data["nodeType"]
         config = data.get("config", {})
-        label = data.get("label", "Unnamed")
+        label = data["label"]
         func_name = _sanitize_func_name(label)
 
         if source_names is None:
@@ -119,12 +120,7 @@ def score_graph(
                 remapped_path = remap[artifact_key]
 
                 def static_source(_p: str = remapped_path) -> _Frame:
-                    if _p.endswith(".csv"):
-                        return pl.scan_csv(_p)
-                    elif _p.endswith(".json"):
-                        return pl.read_json(_p).lazy()
-                    else:
-                        return pl.scan_parquet(_p)
+                    return read_source(_p)
 
                 return func_name, static_source, True
 
