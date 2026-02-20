@@ -40,45 +40,54 @@ Haute deploys pipelines as **live pricing APIs**. The team picks the target that
 A **Pipeline** is a directed acyclic graph (DAG) of **Nodes**. It represents the full journey from raw data to a deployable price.
 
 ```python
-from haute import Pipeline, DataSource, Transform, Model, RatingStep, Output
+import haute
 
-pipeline = Pipeline(name="motor_pricing_v2")
+pipeline = haute.Pipeline("motor_pricing_v2")
 ```
 
 ### 3.2 Nodes
 
-Nodes are the building blocks. Each node is a Python class with defined inputs, outputs, and logic.
+Nodes are the building blocks. Each node is a decorated Python function with defined inputs, outputs, and logic.
 
 | Node Type | Purpose | Example |
 |---|---|---|
 | **ApiInput** | Live API input for deployment (max 1 per pipeline) | `@pipeline.node(api_input=True, path="data/policies.json")` |
 | **DataSource** | Read data (local CSV/Parquet, Databricks table) | `@pipeline.node(path="data/claims.parquet")` |
 | **LiveSwitch** | Route live API or batch data into pipeline (max 1) | `@pipeline.node(live_switch=True)` |
-| **Transform** | Data processing / feature engineering | `Transform("vehicle_age", fn=lambda df: df.with_columns(...))` |
-| **ModelScore** | Score records using an MLflow registered model | `ModelScore("frequency_glm", model_uri="models:/freq_glm/Production")` |
-| **RatingStep** | Individual rating operation (lookup, factor, cap/floor, load/discount) | `RatingStep("area_factor", lookup="area_table", key="postcode")` |
+| **Transform** | Data processing / feature engineering | `@pipeline.node` with 1+ input params |
+| **ModelScore** | Score records using a CatBoost / external model | `@pipeline.node(model="models/freq.cbm")` |
+| **RatingStep** | Individual rating operation (lookup, factor, cap/floor) | `@pipeline.node(rating_step=True)` |
 | **Output** | Final API output / price assembly (max 1 per pipeline) | `@pipeline.node(output=True, fields=["technical_price"])` |
 | **DataSink** | Write data (parquet, CSV) | `@pipeline.node(sink="output/results.parquet")` |
 
-### 3.3 Shared Components
+### 3.3 Submodels (Composable Sub-Pipelines)
 
-**Transforms** and **RatingSteps** can be defined once and reused across multiple pipelines. This maps to the user's requirement for shareable data processing.
+A group of nodes can be extracted into a **submodel** — a separate `modules/<name>.py` file that the parent pipeline references via `pipeline.submodel("modules/<name>.py")`. In the GUI, a submodel appears as a single collapsible node with drill-down. At execution time, submodels are flattened into the parent graph.
 
 ```python
-# shared/transforms.py
-from haute import Transform
+# main.py
+import haute
+pipeline = haute.Pipeline("motor_pricing")
 
-clean_vehicle = Transform(
-    "clean_vehicle",
-    fn=vehicle_cleaning_function,
-    description="Standardise vehicle make/model codes"
-)
+@pipeline.node(path="data/claims.parquet")
+def load_claims(): ...
 
-# motor.py
-from shared.transforms import clean_vehicle
+pipeline.submodel("modules/model_scoring.py")
+pipeline.connect("load_claims", "feature_engineering")
+```
 
-pipeline = Pipeline("motor")
-pipeline.add(data_source >> clean_vehicle >> model_score >> output)
+```python
+# modules/model_scoring.py
+import haute
+submodel = haute.Submodel("model_scoring")
+
+@submodel.node
+def feature_engineering(df): ...
+
+@submodel.node(model="models/freq.cbm")
+def score_frequency(df): ...
+
+submodel.connect("feature_engineering", "score_frequency")
 ```
 
 ### 3.4 Bidirectional Code ↔ GUI
@@ -103,10 +112,13 @@ my-pricing-project/
 │   ├── ci.yml              #   PR checks: lint, test, pipeline validation
 │   └── deploy.yml          #   Merge-to-main: staging → smoke → production
 ├── data/                   # Local data files (parquet, CSV)
+├── models/                 # Serialised model files (CatBoost .cbm, etc.)
+├── modules/                # Submodel .py files (extracted via GUI or hand-written)
 ├── tests/                  # Tests + JSON test quotes for deploy validation
 │   ├── quotes/
 │   │   └── example.json
 ├── main.py                 # Pipeline definition (root-level)
+├── main.haute.json         # Sidecar: node positions for the GUI (not in .py)
 ├── haute.toml              # Project, deploy, safety & CI config
 ├── .env.example            # Template for secrets (DATABRICKS_HOST, etc.)
 └── .gitignore
@@ -166,7 +178,7 @@ uv add haute
 │  │  - Watch .py files for changes      │ │
 │  │  - Push updates to UI via WebSocket │ │
 │  └─────────────────────────────────────┘ │
-│  Storage: local filesystem + SQLite      │
+│  Storage: local filesystem               │
 └──────────────────────────────────────────┘
                │
 ┌──────────────┴───────────────────────────┐
@@ -189,11 +201,17 @@ uv add haute
 | **WebSockets** | websockets | File watcher → UI sync |
 | **Validation** | Pydantic v2 | |
 | **DataFrames** | Polars | Fast, no pandas dependency |
-| **CLI** | Click | `haute init`, `haute serve`, `haute deploy`, `haute lint` |
-| **MLflow client** | mlflow | Model registry, tracking, serving |
-| **Databricks client** | databricks-sdk | Unity Catalog, Model Serving, jobs |
-| **AST / code gen** | libcst | Concrete syntax tree - parse & modify Python preserving formatting |
+| **CLI** | Click | `haute init`, `haute serve`, `haute deploy`, `haute lint`, etc. |
+| **Logging** | structlog | Structured JSON logging throughout backend |
+| **Env loading** | python-dotenv | `.env` credential loading |
+| **Gradient boosting** | CatBoost | Model scoring nodes |
+| **MLflow client** | mlflow | Model registry, tracking, serving (optional: `haute[databricks]`) |
+| **Databricks client** | databricks-sdk | Unity Catalog, Model Serving, jobs (optional: `haute[databricks]`) |
+| **AST parsing** | ast (stdlib) | Parse pipeline `.py` files; regex fallback for syntax errors |
+| **Code gen** | libcst | Reserved for future surgical write-back (not yet used in read path) |
 | **File watching** | watchfiles | Detect .py changes, push to UI |
+| **Type checking** | mypy | Dev-time static type analysis (CI) |
+| **Linting** | ruff | Fast Python linting + import sorting |
 
 ### 4.4 Frontend Stack
 
@@ -209,7 +227,57 @@ uv add haute
 | **Components** | shadcn/ui | Pre-built accessible components |
 | **State management** | Zustand | Lightweight, works well with React Flow |
 
-### 4.5 Key Technical Decisions
+### 4.5 Backend Module Layout
+
+```
+src/haute/
+├── __init__.py              # Public API surface
+├── cli.py                   # Click CLI: init, serve, run, deploy, lint, smoke, status, impact
+├── pipeline.py              # Pipeline DSL: Node, NodeRegistry, Pipeline, Submodel
+├── parser.py                # AST parser: .py → PipelineGraph
+├── _parser_helpers.py       #   Shared helper functions for all parser modules
+├── _parser_regex.py         #   Regex fallback parser (syntax-error tolerance)
+├── _parser_submodels.py     #   Submodel parsing and merging
+├── codegen.py               # Code generator: PipelineGraph → .py
+├── executor.py              # Graph executor: run/preview/sink (eager + lazy)
+├── _execute_lazy.py         #   Shared eager execution core (EagerResult)
+├── trace.py                 # Single-row trace engine (per-node snapshots)
+├── _types.py                # Canonical Pydantic types: GraphNode, GraphEdge, PipelineGraph
+├── _topo.py                 # Topological sort
+├── _flatten.py              # Submodel flattening for execution
+├── graph_utils.py           # Re-export facade for graph utilities
+├── schemas.py               # Pydantic request/response models for API
+├── server.py                # FastAPI app factory, middleware, WebSocket, file watcher
+├── routes/                  # FastAPI route modules (split from server.py)
+│   ├── pipeline.py          #   Pipeline CRUD, run, preview, trace, sink
+│   ├── databricks.py        #   Unity Catalog browsing, data fetching
+│   ├── files.py             #   File browsing, schema inspection
+│   ├── submodel.py          #   Submodel create, get, dissolve
+│   └── _helpers.py          #   Shared route helpers (broadcast, discovery)
+├── deploy/                  # Deployment subsystem
+│   ├── _config.py           #   haute.toml + .env resolution
+│   ├── _mlflow.py           #   MLflow model packaging + Databricks serving
+│   ├── _container.py        #   Container (Docker) deployment
+│   ├── _pruner.py           #   Graph pruning (scoring path only)
+│   ├── _bundler.py          #   Artifact bundling
+│   ├── _schema.py           #   Input/output schema inference
+│   ├── _scorer.py           #   Test quote scoring
+│   ├── _validators.py       #   Pre-deploy validation
+│   ├── _impact.py           #   Impact analysis
+│   ├── _model_code.py       #   Generated model serving code
+│   └── _utils.py            #   Deploy utilities
+├── discovery.py             # Pipeline file discovery
+├── _io.py                   # File I/O: read_source, load_external_object
+├── _sandbox.py              # Security: safe_globals, validate_user_code, safe_unpickle
+├── _cache.py                # Graph execution caching
+├── _databricks_io.py        # Databricks table fetch + local parquet cache
+├── _logging.py              # structlog configuration
+└── _scaffold.py             # Project scaffolding templates (haute init)
+```
+
+Import direction flows **downward**: `cli` / `server` / `routes` → `executor` / `codegen` / `deploy` → `parser` → `_types` / `_topo` / `graph_utils`. Circular imports are not permitted (see `docs/COMMIT_STANDARDS.md` §23).
+
+### 4.6 Key Technical Decisions
 
 - **AST for parsing, libcst reserved for surgical write-back**: The read path (`parser.py`) uses Python's `ast` module with a regex fallback for syntax errors. `libcst` is reserved for Phase 2 surgical write-back - editing individual nodes in a `.py` file without regenerating the whole file. The current write path (`codegen.py`) regenerates the full file, which is fine while the GUI is the only write source.
 - **Polars over pandas**: Faster, more memory efficient, better API.
@@ -385,6 +453,7 @@ class TestMotorPipeline(PipelineTestCase):
 | `haute lint [pipeline]` | Validate pipeline structure (parse, orphans, edges) |
 | `haute smoke` | Score test quotes against a live endpoint (`--endpoint-suffix`) |
 | `haute status [model]` | Show deployed model version and status (`--version-only`) |
+| `haute impact` | Compare live vs staging pricing across a sample dataset (`--endpoint-suffix`, `--sample`) |
 
 ---
 
@@ -394,21 +463,31 @@ class TestMotorPipeline(PipelineTestCase):
 Coarse pipeline stages by default, expandable to fine-grained operations. Users see a clean high-level graph and can drill into any node to see/edit individual operations.
 
 ### 8.2 Code generation strategy → Decorators + Declarative
-Each decorated block of code (`@haute.node`) corresponds to a node in the GUI. Code is organised into sections using decorators. Simple nodes can use a declarative API, complex nodes use decorated Python functions. Low floor, high ceiling.
+Each decorated function (`@pipeline.node(...)`) corresponds to a node in the GUI. The decorator accepts keyword arguments for node configuration (path, model, output fields, etc.). Low floor, high ceiling.
 
 ```python
 import haute
+import polars as pl
 
-@haute.node
-def clean_vehicle(df: pl.DataFrame) -> pl.DataFrame:
-    """Standardise vehicle make/model codes."""
+pipeline = haute.Pipeline("motor_pricing")
+
+@pipeline.node(path="data/claims.parquet")
+def load_claims():
+    """Source node — reads claims data."""
+    return pl.scan_parquet("data/claims.parquet")
+
+@pipeline.node
+def clean_vehicle(df: pl.LazyFrame) -> pl.LazyFrame:
+    """Transform node — standardise vehicle codes."""
     return df.with_columns(...)
 
-@haute.node
-def score_frequency(df: pl.DataFrame) -> pl.DataFrame:
-    """Score using the frequency GLM from MLflow."""
-    model = haute.mlflow_model("models:/freq_glm/Production")
-    return df.with_columns(pred_freq=model.predict(df))
+@pipeline.node(model="models/freq.cbm")
+def score_frequency(df: pl.LazyFrame) -> pl.LazyFrame:
+    """Model scoring node — CatBoost frequency model."""
+    ...
+
+pipeline.connect("load_claims", "clean_vehicle")
+pipeline.connect("clean_vehicle", "score_frequency")
 ```
 
 ### 8.3 Rating tables → All in Databricks
@@ -430,7 +509,7 @@ The features below are ordered by impact. Features 1–2 are what get **attentio
 
 Edit a `.py` file in VS Code → the React Flow graph updates in real-time. Edit the graph → the `.py` file updates on disk. No other tool does this well. This is the feature that sells itself in a 30-second demo.
 
-Implementation: libcst for round-trip-safe Python parsing. File watcher (watchfiles) detects `.py` changes, pushes updated graph state to the React Flow UI via WebSocket. GUI edits generate clean, idiomatic, diffable Python code back to disk.
+Implementation: Python's `ast` module parses pipeline `.py` files into a `PipelineGraph`; a regex fallback handles files with syntax errors. File watcher (`watchfiles`) detects `.py` changes and pushes updated graph state to the React Flow UI via WebSocket. GUI edits regenerate clean, idiomatic, diffable Python code back to disk via `codegen.py`.
 
 The hard part isn't parsing - it's **conflict resolution** when both sides edit simultaneously. Treat the `.py` file as the single source of truth; GUI edits write to disk immediately, and the file watcher debounces to avoid loops.
 
@@ -461,8 +540,8 @@ This is **regulatory gold** for insurance (Solvency II, IFRS 17 require explaina
 - `SchemaDiff` classifies columns at each node as `added`, `removed`, `modified`, or `passed_through`
 - `TraceStep` / `TraceResult` dataclasses carry the full trace payload
 - Column relevance filtering: pass a `column` name to keep only steps whose output contains the column (irrelevant ancestors are removed)
-- `POST /api/pipeline/trace` endpoint wired up in `server.py`
-- Reuses the existing `executor._build_node_fn` infrastructure - no duplication
+- `POST /api/pipeline/trace` endpoint in `routes/pipeline.py`
+- Reuses the shared `_execute_eager_core` from `_execute_lazy.py` - no duplication with executor
 - **Performance**: eager single-pass execution (O(n) vs O(n²) lazy re-execution) with single-entry cache keyed on graph fingerprint (`graph_utils.graph_fingerprint`). Source nodes capped at the frontend's `rowLimit` (default 1000) so model-scoring nodes process 1K rows, not the full dataset. First trace click executes the pipeline once; subsequent clicks on any row/column extract from cached DataFrames in <1ms. Same caching approach used by `executor.execute_graph` for preview
 
 **Phase B (done)** - Frontend trace panel in `frontend/src/`:
@@ -548,6 +627,7 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 - [x] GUI edits write back to `.py` files (clean, diffable code via full regeneration)
 - [x] File watcher pushes changes to UI via WebSocket
 - [x] Conflict resolution (file = source of truth, debounced sync with self-write detection)
+- [x] Submodels: group nodes into `modules/*.py` files, drill-down view, dissolve back
 - [ ] Surgical write-back with libcst (edit individual nodes without regenerating the whole file)
 - [ ] Schema validation between connected nodes (red edge on mismatch)
 
@@ -573,7 +653,8 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 ### Phase 4 - Killer Demo Features
 - [ ] What-if sensitivity mode (slider-driven single-row scoring)
 - [x] Execution trace / data lineage - Phase A: single-row trace engine + schema diffs (`src/haute/trace.py`, `POST /api/pipeline/trace`)
-- [ ] Execution trace / data lineage - Phase B+: join/agg info, expression gen, compare mode, trace export
+- [x] Execution trace / data lineage - Phase B: frontend trace panel (clickable cells, graph highlighting, trace sidebar)
+- [ ] Execution trace / data lineage - Phase C: join/agg info, expression gen, compare mode, trace export
 - [ ] Rating table hot-reload with impact preview
 - [ ] Natural language → Polars code (LLM-powered node assistant)
 
@@ -589,7 +670,7 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 - [ ] Pipeline visual diff (`haute diff HEAD~1`)
 
 ### Phase 6 - Advanced
-- [ ] Composable pipelines (sub-pipelines as nodes)
+- [x] Composable pipelines / submodels (sub-pipelines as nodes with drill-down)
 - [ ] Monitoring dashboard (actual vs expected pricing)
 - [ ] A/B testing for deployed endpoints
 - [ ] Optimisation engine
