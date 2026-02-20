@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from haute._logging import get_logger
 from haute.graph_utils import GraphNode, PipelineGraph, read_source
+
+logger = get_logger(component="deploy.schema")
 
 
 def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, str]:

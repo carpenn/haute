@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from haute._logging import get_logger
 from haute.graph_utils import PipelineGraph
+
+logger = get_logger(component="deploy.bundler")
 
 
 def collect_artifacts(

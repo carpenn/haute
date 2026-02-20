@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from haute._logging import get_logger
+
+logger = get_logger(component="discovery")
+
 _SKIP = {"__init__.py", "setup.py", "conftest.py"}
 
 

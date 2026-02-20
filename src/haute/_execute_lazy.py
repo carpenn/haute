@@ -7,6 +7,7 @@ from typing import Any
 
 import polars as pl
 
+from haute._logging import get_logger
 from haute._topo import ancestors, topo_sort_ids
 from haute._types import (
     GraphNode,
@@ -15,6 +16,8 @@ from haute._types import (
     _sanitize_func_name,
     resolve_orig_source_names,
 )
+
+logger = get_logger(component="execute_lazy")
 
 
 def _prepare_graph(

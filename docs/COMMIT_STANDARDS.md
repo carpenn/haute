@@ -213,6 +213,41 @@ Every output value must be traceable back through the graph to its inputs, showi
 - Each module should have a clear one-sentence purpose. If you cannot describe what a module does without "and", it may need splitting.
 - Cross-module communication happens through well-defined types (`PipelineGraph`, `ResolvedDeploy`, `TraceResult`), not raw dicts or tuples.
 
+## 24. Logging & Observability
+
+Haute pipelines run in production serving environments (Databricks model serving, containerised endpoints). When something fails at 2am, logs are the only diagnostic tool. Good logging is not optional.
+
+- **Use structlog, not `print`.** All runtime output goes through `structlog` via `from haute._logging import get_logger`. `print()` is for CLI user-facing output only (via `click.echo`). Never use `print` for diagnostic or debug information.
+- **One logger per module.** Declare `logger = get_logger(component="module_name")` at module level. Do not pass logger objects between functions. The `component` kwarg identifies the source in JSON logs.
+
+```python
+from haute._logging import get_logger
+
+logger = get_logger(component="parser")
+```
+
+- **Structured context via keyword arguments.** structlog logs are key-value pairs, not format strings. Include the identifiers a human needs to diagnose the problem.
+
+```python
+# BAD
+logger.error("Node failed")
+logger.error(f"Node {node_id} failed: {exc}")
+
+# GOOD — structured, searchable, machine-parseable
+logger.error("node_execution_failed", node_id=node_id, error=str(exc))
+logger.info("pipeline_parsed", file=str(path), node_count=len(graph.nodes))
+```
+
+- **Correct log levels.**
+  - `DEBUG` — internal state useful only when actively debugging (intermediate row counts, cache hits, topo sort order).
+  - `INFO` — significant lifecycle events (pipeline parsed, deploy started, model logged to MLflow, graph executed).
+  - `WARNING` — something unexpected that the system recovered from (fallback parser used, missing optional config, cache invalidated).
+  - `ERROR` — something failed that the user needs to know about (node execution error, file not found, deploy rejected).
+- **Every module that does work must have a logger.** Pure data-structure modules (`_types.py`) are exempt. Anything that parses, executes, deploys, validates, or does I/O needs logging at `INFO` level for lifecycle events and `ERROR` level for failures.
+- **No logging in hot paths.** Do not log per-row or per-node-per-execution inside the executor loop. Log once at the start and once at the end with summary counts.
+- **No sensitive data in logs.** Do not log file contents, DataFrame values, API keys, or user code. Log metadata (file paths, column names, row counts) only.
+- **Errors carry context up.** When catching and re-raising, use `raise ... from exc` to preserve the chain. When logging an error, include the exception: `logger.exception("...")` or `logger.error("...", exc_info=True)`.
+
 ---
 
 ## LLM-Generated Code: Watch For These
@@ -344,6 +379,7 @@ Engineering Standards
 - [ ] Internal helpers prefixed with `_`; only intentional public API is exported
 - [ ] Tests are deterministic, fast, focused, and independent
 - [ ] No circular imports; import direction flows downward
+- [ ] Logging uses `logging` module, not `print`; correct levels; structured context
 
 LLM Code Review
 - [ ] No silent fallbacks that mask errors (return empty data, `or {}`, `or []`)

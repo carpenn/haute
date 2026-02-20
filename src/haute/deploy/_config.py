@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from haute._logging import get_logger
 from haute.deploy._pruner import (
     find_deploy_input_nodes,
     find_output_node,
@@ -15,6 +16,8 @@ from haute.deploy._pruner import (
     prune_for_deploy,
 )
 from haute.graph_utils import PipelineGraph
+
+logger = get_logger(component="deploy.config")
 
 
 @dataclass
@@ -340,6 +343,15 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
     input_schema = infer_input_schema(pruned_graph, deploy_inputs[0])
     output_schema = infer_output_schema(pruned_graph, output_node_id, deploy_inputs)
 
+    logger.info(
+        "config_resolved",
+        pipeline=str(config.pipeline_file),
+        total_nodes=len(full_graph.nodes),
+        pruned_nodes=len(pruned_graph.nodes),
+        removed_nodes=len(removed_ids),
+        input_nodes=len(deploy_inputs),
+        artifacts=len(artifacts),
+    )
     return ResolvedDeploy(
         config=config,
         full_graph=full_graph,

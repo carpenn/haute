@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from haute._logging import get_logger
 from haute.graph_utils import (
     GraphEdge,
     GraphNode,
@@ -10,6 +11,8 @@ from haute.graph_utils import (
     build_instance_mapping,
     topo_sort_ids,
 )
+
+logger = get_logger(component="codegen")
 
 __all__ = [
     "graph_to_code",
@@ -458,6 +461,7 @@ def graph_to_code(
             lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
         lines.append("")
 
+    logger.info("code_generated", pipeline_name=pipeline_name, node_count=len(sorted_nodes))
     return "\n".join(lines)
 
 

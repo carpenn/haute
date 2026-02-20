@@ -448,6 +448,13 @@ def execute_graph(
             "schema_warnings": schema_warnings.get(nid, []),
         }
 
+    error_count = sum(1 for r in results.values() if r["status"] == "error")
+    logger.info(
+        "graph_executed",
+        node_count=len(results),
+        error_count=error_count,
+        target=target_node_id,
+    )
     return results
 
 

@@ -6,7 +6,10 @@ import getpass
 from datetime import UTC, datetime
 from typing import Any
 
+from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
+
+logger = get_logger(component="deploy.utils")
 
 
 def get_user() -> str:

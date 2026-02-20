@@ -878,14 +878,18 @@ async def get_submodel(name: str) -> SubmodelGraphResponse:
 
     # Load sidecar positions if available
     positions = _load_sidecar_positions(sm_path)
-    for node in sm_graph.get("nodes", []):
-        if node["id"] in positions:
-            node["position"] = positions[node["id"]]
+    updated_nodes = []
+    for node in sm_graph.nodes:
+        if node.id in positions:
+            node = node.model_copy(update={"position": positions[node.id]})
+        updated_nodes.append(node)
+    if updated_nodes:
+        sm_graph = sm_graph.model_copy(update={"nodes": updated_nodes})
 
     return SubmodelGraphResponse(
         status="ok",
-        submodel_name=sm_graph.get("submodel_name", name),
-        graph=sm_graph,
+        submodel_name=sm_graph.pipeline_name or name,
+        graph=sm_graph.model_dump(),
     )
 
 

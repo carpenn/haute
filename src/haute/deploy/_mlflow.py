@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
+
+logger = get_logger(component="deploy.mlflow")
 
 # Resolve the path to the models-from-code script shipped with the package
 _MODEL_CODE_PATH = str(importlib.resources.files("haute.deploy") / "_model_code.py")
@@ -57,6 +60,7 @@ def deploy_to_mlflow(
 
     config = resolved.config
     model_name = config.model_name
+    logger.info("deploy_started", model_name=model_name, target="mlflow")
 
     # Point MLflow at the Databricks workspace (uses DATABRICKS_HOST/TOKEN env vars)
     _log("Connecting to Databricks MLflow...")
@@ -130,6 +134,13 @@ def deploy_to_mlflow(
         model_version=int(latest_version),
     )
 
+    logger.info(
+        "deploy_completed",
+        model_name=model_name,
+        model_uri=model_uri,
+        version=int(latest_version),
+        endpoint=config.effective_endpoint_name,
+    )
     return DeployResult(
         model_name=model_name,
         model_version=int(latest_version),

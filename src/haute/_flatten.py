@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from haute._logging import get_logger
 from haute._types import GraphEdge, GraphNode, PipelineGraph
+
+logger = get_logger(component="flatten")
 
 
 def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
@@ -74,4 +77,10 @@ def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
             seen.add(key)
             deduped.append(e)
 
+    logger.debug(
+        "graph_flattened",
+        submodel_count=len(submodels),
+        node_count=len(nodes),
+        edge_count=len(deduped),
+    )
     return graph.model_copy(update={"nodes": nodes, "edges": deduped, "submodels": None})

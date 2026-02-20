@@ -9,6 +9,10 @@ from pathlib import Path
 
 import click
 
+from haute._logging import get_logger
+
+logger = get_logger(component="cli")
+
 
 def _open_browser(url: str) -> None:
     """Open *url* in the default browser, suppressing noisy stderr from gio."""

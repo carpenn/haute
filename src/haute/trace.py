@@ -28,6 +28,7 @@ from typing import Any
 
 import polars as pl
 
+from haute._logging import get_logger
 from haute.executor import _build_node_fn
 from haute.graph_utils import (
     GraphNode,
@@ -37,6 +38,8 @@ from haute.graph_utils import (
     resolve_orig_source_names,
     topo_sort_ids,
 )
+
+logger = get_logger(component="trace")
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -403,6 +406,16 @@ def execute_trace(
             break
 
     total_ms = round((time.perf_counter() - t_start) * 1000, 2)
+
+    logger.info(
+        "trace_executed",
+        target=target_node_id,
+        row_index=row_index,
+        column=column,
+        steps=len(steps),
+        cache_hit=cache_hit,
+        duration_ms=total_ms,
+    )
 
     return TraceResult(
         target_node_id=target_node_id,

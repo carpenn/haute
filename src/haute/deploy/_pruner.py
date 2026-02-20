@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from haute._logging import get_logger
 from haute.graph_utils import (
     GraphEdge,
     GraphNode,
@@ -9,6 +10,8 @@ from haute.graph_utils import (
     _sanitize_func_name,
     ancestors,
 )
+
+logger = get_logger(component="deploy.pruner")
 
 
 def _live_only_edges(

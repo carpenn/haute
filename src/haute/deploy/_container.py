@@ -10,8 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
 from haute.deploy._mlflow import DeployResult
+
+logger = get_logger(component="deploy.container")
 
 # ── Targets that share container build+push ────────────────────────
 

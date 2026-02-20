@@ -7,6 +7,10 @@ from collections import OrderedDict
 
 import polars as pl
 
+from haute._logging import get_logger
+
+logger = get_logger(component="io")
+
 _OBJECT_CACHE_MAX_SIZE = 32
 
 
@@ -28,6 +32,7 @@ def read_source(path: str) -> pl.LazyFrame:
     if path.endswith(".parquet"):
         return pl.scan_parquet(path)
     suffix = path.rsplit(".", 1)[-1] if "." in path else ""
+    logger.error("unsupported_file_type", path=path, suffix=suffix)
     raise ValueError(f"Unsupported file type: .{suffix}")
 
 

@@ -15,7 +15,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from haute._logging import get_logger
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
+
+logger = get_logger(component="parser")
 
 __all__ = [
     "parse_pipeline_file",
@@ -743,36 +746,28 @@ def parse_pipeline_file(filepath: str | Path, *, flatten: bool = False) -> Pipel
     )
 
 
-def parse_submodel_file(filepath: str | Path) -> dict:
-    """Parse a submodel .py file and return its internal graph JSON.
+def parse_submodel_file(filepath: str | Path) -> PipelineGraph:
+    """Parse a submodel .py file and return a PipelineGraph.
 
-    Returns:
-        {
-            "nodes": [...],
-            "edges": [...],
-            "submodel_name": str,
-            "submodel_description": str,
-            "source_file": str,
-        }
+    The submodel name and description are stored in ``pipeline_name``
+    and ``pipeline_description`` respectively.
     """
     filepath = Path(filepath)
     source = filepath.read_text()
     return _parse_submodel_source(source, source_file=str(filepath))
 
 
-def _parse_submodel_source(source: str, source_file: str = "") -> dict:
-    """Parse submodel source code and return its internal graph JSON."""
+def _parse_submodel_source(source: str, source_file: str = "") -> PipelineGraph:
+    """Parse submodel source code and return a PipelineGraph."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return {
-            "nodes": [],
-            "edges": [],
-            "submodel_name": "unnamed",
-            "submodel_description": "",
-            "source_file": source_file,
-            "warning": "Submodel file has syntax errors",
-        }
+        return PipelineGraph(
+            pipeline_name="unnamed",
+            pipeline_description="",
+            source_file=source_file,
+            warning="Submodel file has syntax errors",
+        )
 
     submodel_name, submodel_desc = _extract_submodel_meta(tree)
 
@@ -815,18 +810,18 @@ def _parse_submodel_source(source: str, source_file: str = "") -> dict:
     edges = _build_edges(raw_nodes, _extract_connect_calls(tree, receiver="submodel"))
     rf_nodes = _build_rf_nodes(raw_nodes)
 
-    return {
-        "nodes": [n.model_dump() for n in rf_nodes],
-        "edges": [e.model_dump() for e in edges],
-        "submodel_name": submodel_name,
-        "submodel_description": submodel_desc,
-        "source_file": source_file,
-    }
+    return PipelineGraph(
+        nodes=rf_nodes,
+        edges=edges,
+        pipeline_name=submodel_name,
+        pipeline_description=submodel_desc,
+        source_file=source_file,
+    )
 
 
 def _merge_submodels(
     parent_graph: PipelineGraph,
-    submodel_graphs: dict[str, dict],
+    submodel_graphs: dict[str, PipelineGraph],
     submodel_files: dict[str, str],
     parent_edges: list[tuple[str, str]],
     *,
@@ -847,7 +842,7 @@ def _merge_submodels(
     # Collect all child node IDs across all submodels
     all_child_ids: set[str] = set()
     for sm_graph in submodel_graphs.values():
-        all_child_ids.update(n["id"] for n in sm_graph.get("nodes", []))
+        all_child_ids.update(n.id for n in sm_graph.nodes)
 
     # _build_edges drops edges where one endpoint is a submodel child node
     # (because it only knows about main-file nodes).  Reconstruct those
@@ -863,12 +858,8 @@ def _merge_submodels(
     if flatten:
         # Inline all child nodes + edges into the parent graph
         for _sm_name, sm_graph in submodel_graphs.items():
-            for nd in sm_graph.get("nodes", []):
-                node = GraphNode.model_validate(nd) if isinstance(nd, dict) else nd
-                parent_nodes.append(node)
-            for ed in sm_graph.get("edges", []):
-                edge = GraphEdge.model_validate(ed) if isinstance(ed, dict) else ed
-                parent_edge_list.append(edge)
+            parent_nodes.extend(sm_graph.nodes)
+            parent_edge_list.extend(sm_graph.edges)
 
         return parent_graph.model_copy(update={"nodes": parent_nodes, "edges": parent_edge_list})
 
@@ -876,7 +867,7 @@ def _merge_submodels(
     submodels_meta: dict[str, dict] = {}
 
     for sm_name, sm_graph in submodel_graphs.items():
-        child_node_ids = [n["id"] for n in sm_graph.get("nodes", [])]
+        child_node_ids = [n.id for n in sm_graph.nodes]
         child_node_names = set(child_node_ids)
 
         # Determine input and output ports from cross-boundary edges
@@ -901,7 +892,7 @@ def _merge_submodels(
             position={"x": 0, "y": 0},
             data=NodeData(
                 label=sm_name,
-                description=sm_graph.get("submodel_description", ""),
+                description=sm_graph.pipeline_description or "",
                 nodeType="submodel",
                 config={
                     "file": sm_file,
@@ -947,7 +938,7 @@ def _merge_submodels(
             "childNodeIds": child_node_ids,
             "inputPorts": input_ports,
             "outputPorts": output_ports,
-            "graph": sm_graph,
+            "graph": sm_graph.model_dump(),
         }
 
     update: dict[str, Any] = {"nodes": parent_nodes, "edges": parent_edge_list}
@@ -974,6 +965,7 @@ def parse_pipeline_source(
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
+        logger.warning("fallback_parse", file=source_file, line=e.lineno)
         return _fallback_parse(source, source_file, e)
 
     # Pipeline metadata
@@ -1043,7 +1035,7 @@ def parse_pipeline_source(
     # --- Submodel handling ---------------------------------------------------
     submodel_paths = _extract_submodel_calls(tree)
     if submodel_paths and _base_dir is not None:
-        submodel_graphs: dict[str, dict] = {}
+        submodel_graphs: dict[str, PipelineGraph] = {}
         submodel_files: dict[str, str] = {}
 
         for rel_path in submodel_paths:
@@ -1051,7 +1043,7 @@ def parse_pipeline_source(
             if not sm_filepath.is_file():
                 continue
             sm_graph = parse_submodel_file(sm_filepath)
-            sm_name = sm_graph.get("submodel_name", sm_filepath.stem)
+            sm_name = sm_graph.pipeline_name or sm_filepath.stem
             submodel_graphs[sm_name] = sm_graph
             submodel_files[sm_name] = rel_path
 
@@ -1064,4 +1056,11 @@ def parse_pipeline_source(
                 flatten=flatten,
             )
 
+    logger.info(
+        "pipeline_parsed",
+        file=source_file,
+        node_count=len(graph.nodes),
+        edge_count=len(graph.edges),
+        pipeline_name=graph.pipeline_name,
+    )
     return graph

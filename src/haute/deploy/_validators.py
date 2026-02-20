@@ -8,8 +8,11 @@ from pathlib import Path
 
 import polars as pl
 
+from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
 from haute.deploy._scorer import score_graph
+
+logger = get_logger(component="deploy.validators")
 
 
 def load_test_quote_file(path: Path) -> list[dict]:
@@ -74,6 +77,10 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     if not resolved.output_schema:
         errors.append("Output schema is empty - dry-run produced no output columns.")
 
+    if errors:
+        logger.warning("validation_failed", error_count=len(errors))
+    else:
+        logger.info("validation_passed")
     return errors
 
 

@@ -9,8 +9,11 @@ from typing import Self
 
 import polars as pl
 
+from haute._logging import get_logger
 from haute._types import GraphEdge
 from haute.graph_utils import topo_sort_ids
+
+logger = get_logger(component="pipeline")
 
 
 @dataclass
