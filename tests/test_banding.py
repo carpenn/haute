@@ -380,19 +380,13 @@ class TestMultiFactor:
         assert factors[1]["banding"] == "categorical"
         assert factors[1]["column"] == "b"
 
-    def test_legacy_single_factor_config_still_works(self):
-        """Old-style config with top-level banding/column/rules still executes."""
-        legacy_config = {
-            "banding": "continuous",
-            "column": "x",
-            "outputColumn": "x_band",
-            "rules": [{"op1": "<=", "val1": 10, "assignment": "low"}],
-        }
+    def test_empty_factors_passthrough(self):
+        """A banding node with no factors passes through the DataFrame unchanged."""
         node = GraphNode(
-            id="legacy",
-            data=NodeData(label="legacy", nodeType="banding", config=legacy_config),
+            id="empty",
+            data=NodeData(label="empty", nodeType="banding", config={"factors": []}),
         )
         _, fn, _ = _build_node_fn(node)
         lf = pl.DataFrame({"x": [5, 20]}).lazy()
         result = fn(lf).collect()
-        assert result["x_band"].to_list() == ["low", None]
+        assert result.columns == ["x"]

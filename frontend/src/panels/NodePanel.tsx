@@ -1388,15 +1388,6 @@ type BandingFactor = {
 function normaliseBandingFactors(config: Record<string, unknown>): BandingFactor[] {
   const raw = config.factors as BandingFactor[] | undefined
   if (Array.isArray(raw) && raw.length > 0) return raw
-  if (config.column) {
-    return [{
-      banding: (config.banding as string) || "continuous",
-      column: (config.column as string) || "",
-      outputColumn: (config.outputColumn as string) || "",
-      rules: (config.rules as (ContinuousRule | CategoricalRule)[]) || [],
-      default: (config.default as string) || null,
-    }]
-  }
   return [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }]
 }
 

@@ -159,25 +159,10 @@ def _apply_banding(
 
 
 def _normalise_banding_factors(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalise banding config to a list of factor dicts.
-
-    Supports both the multi-factor format (``factors: [...]``) and the
-    legacy single-factor format (``column``, ``outputColumn``, ``rules``
-    at the top level).
-    """
+    """Return the ``factors`` list from banding config."""
     factors = config.get("factors")
-    if isinstance(factors, list) and factors:
+    if isinstance(factors, list):
         return factors
-    # Single-factor fallback
-    col = config.get("column", "")
-    if col:
-        return [{
-            "banding": config.get("banding", "continuous"),
-            "column": col,
-            "outputColumn": config.get("outputColumn", ""),
-            "rules": config.get("rules", []),
-            "default": config.get("default"),
-        }]
     return []
 
 

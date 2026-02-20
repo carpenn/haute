@@ -80,7 +80,8 @@ def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
 '''
 
 _BANDING_SINGLE = '''\
-@pipeline.node(banding="{banding}", column="{column}", output_column="{output_column}"{rules_kw}{default_kw})
+@pipeline.node(banding="{banding}", column="{column}",
+               output_column="{output_column}"{rules_kw}{default_kw})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return df
@@ -265,15 +266,6 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
 
     elif node_type == "banding":
         factors = config.get("factors", []) or []
-        # Fallback: old single-factor config at top level
-        if not factors and config.get("column"):
-            factors = [{
-                "banding": config.get("banding", "continuous"),
-                "column": config.get("column", ""),
-                "outputColumn": config.get("outputColumn", ""),
-                "rules": config.get("rules", []),
-                "default": config.get("default"),
-            }]
         params = _build_params(source_names)
         if len(factors) == 1:
             f = factors[0]
