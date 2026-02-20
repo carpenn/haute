@@ -3,7 +3,6 @@
 import polars as pl
 import haute
 
-
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
@@ -38,11 +37,10 @@ def exposure() -> pl.LazyFrame:
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(table="quotes.delta.policies", http_path="/sql/1.0/warehouses/a4cdf14603abd87b", deploy_input=True, row_id_column="IDpol")
+@pipeline.node(path="data/policies.parquet", deploy_input=True, row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
     """data_source node"""
-    from haute._databricks_io import read_databricks_table
-    return read_databricks_table("quotes.delta.policies", http_path="/sql/1.0/warehouses/a4cdf14603abd87b")
+    return pl.scan_parquet("data/policies.parquet")
 
 
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
@@ -54,9 +52,9 @@ def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
         policies
         .select(obj.feature_names_)
     ).collect().to_numpy()
-
+    
     preds = obj.predict(features)
-
+    
     df = (
         policies
         .select('IDpol')
@@ -100,9 +98,9 @@ def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
         policies
         .select(obj.feature_names_)
     ).collect().to_numpy()
-
+    
     preds = obj.predict(features)
-
+    
     df = (
         policies
         .select('IDpol')
@@ -157,17 +155,17 @@ def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
 
 
 # Wire nodes together - edges define data flow
+pipeline.connect("policies", "frequency_model")
+pipeline.connect("policies", "severity_model")
+pipeline.connect("severity_model", "calculate_premium")
+pipeline.connect("frequency_model", "calculate_premium")
+pipeline.connect("calculate_premium", "output")
 pipeline.connect("policies", "frequency_set")
 pipeline.connect("exposure", "frequency_set")
 pipeline.connect("exposure", "severity_set")
 pipeline.connect("claims", "severity_set")
 pipeline.connect("policies", "severity_set")
 pipeline.connect("claims", "claims_aggregate")
-pipeline.connect("claims_aggregate", "frequency_set")
 pipeline.connect("frequency_set", "frequency_write")
 pipeline.connect("severity_set", "severity_write")
-pipeline.connect("policies", "frequency_model")
-pipeline.connect("policies", "severity_model")
-pipeline.connect("severity_model", "calculate_premium")
-pipeline.connect("frequency_model", "calculate_premium")
-pipeline.connect("calculate_premium", "output")
+pipeline.connect("claims_aggregate", "frequency_set")

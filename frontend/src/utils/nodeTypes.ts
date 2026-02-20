@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const nodeTypeIcons: Record<string, React.ElementType> = {
@@ -9,6 +9,8 @@ export const nodeTypeIcons: Record<string, React.ElementType> = {
   output: CircleDot,
   dataSink: HardDriveDownload,
   externalFile: FileArchive,
+  submodel: Package,
+  submodelPort: ArrowRight,
 }
 
 export const nodeTypeColors: Record<string, string> = {
@@ -19,6 +21,8 @@ export const nodeTypeColors: Record<string, string> = {
   output: "#f43f5e",
   dataSink: "#f59e0b",
   externalFile: "#ec4899",
+  submodel: "#f97316",
+  submodelPort: "#94a3b8",
 }
 
 export const nodeTypeLabels: Record<string, string> = {
@@ -29,4 +33,6 @@ export const nodeTypeLabels: Record<string, string> = {
   output: "OUTPUT",
   dataSink: "SINK",
   externalFile: "EXTERNAL",
+  submodel: "SUBMODEL",
+  submodelPort: "PORT",
 }

@@ -351,3 +351,231 @@ def graph_to_code(
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _submodel_node_to_code(node: dict, source_names: list[str] | None = None) -> str:
+    """Generate code for a single node inside a submodel file.
+
+    Identical to ``_node_to_code`` but uses ``@submodel.node`` instead of
+    ``@pipeline.node``.
+    """
+    code = _node_to_code(node, source_names=source_names)
+    return code.replace("@pipeline.node", "@submodel.node", 1)
+
+
+def graph_to_code_multi(
+    graph: dict,
+    pipeline_name: str = "main",
+    description: str = "",
+    preamble: str = "",
+    source_file: str = "",
+) -> dict[str, str]:
+    """Generate code for a pipeline with submodels.
+
+    Returns a dict mapping relative file path → generated Python code.
+    E.g. ``{"main.py": "...", "modules/model_scoring.py": "..."}``.
+
+    If the graph has no submodels, the result contains only the main file.
+    """
+    submodels = graph.get("submodels", {})
+
+    if not submodels:
+        # No submodels — single-file output
+        main_key = source_file or f"{pipeline_name}.py"
+        return {main_key: graph_to_code(graph, pipeline_name, description, preamble)}
+
+    # ── Separate nodes into root-level vs submodel children ──────────
+    all_child_ids: set[str] = set()
+    submodel_node_ids: set[str] = set()
+    for sm_name, sm_meta in submodels.items():
+        all_child_ids.update(sm_meta.get("childNodeIds", []))
+        submodel_node_ids.add(f"submodel__{sm_name}")
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+
+    # Root-level nodes: not children and not the submodel placeholder itself
+    root_nodes = [
+        n for n in nodes
+        if n["id"] not in all_child_ids and n["id"] not in submodel_node_ids
+    ]
+
+    # Root-level edges: only between root-level nodes OR crossing submodel boundary
+    root_node_ids = {n["id"] for n in root_nodes}
+
+    # Build id → func_name for root nodes (needed by submodel cross-boundary resolution)
+    root_id_to_func: dict[str, str] = {}
+    for node in root_nodes:
+        data = node.get("data", {})
+        label = data.get("label", "Unnamed")
+        root_id_to_func[node["id"]] = _sanitize_func_name(label)
+
+    # ── Generate submodel files ──────────────────────────────────────
+    files: dict[str, str] = {}
+
+    for sm_name, sm_meta in submodels.items():
+        sm_graph = sm_meta.get("graph", {})
+        sm_file = sm_meta.get("file", f"modules/{sm_name}.py")
+        sm_nodes = sm_graph.get("nodes", [])
+        sm_edges = sm_graph.get("edges", [])
+
+        sorted_sm_nodes = _topo_sort(sm_nodes, sm_edges)
+
+        # Build id → func_name map for submodel nodes
+        sm_id_to_func: dict[str, str] = {}
+        for node in sorted_sm_nodes:
+            data = node.get("data", {})
+            label = data.get("label", "Unnamed")
+            sm_id_to_func[node["id"]] = _sanitize_func_name(label)
+
+        # Build source names per node (internal edges)
+        sm_node_sources: dict[str, list[str]] = {}
+        for edge in sm_edges:
+            tgt = edge["target"]
+            src_name = sm_id_to_func.get(edge["source"], edge["source"])
+            sm_node_sources.setdefault(tgt, []).append(src_name)
+
+        # Also include cross-boundary inputs from parent graph edges
+        sm_node_id = f"submodel__{sm_name}"
+        sm_child_ids = {n["id"] for n in sm_nodes}
+        for edge in edges:
+            tgt = edge.get("target", "")
+            tgt_handle = edge.get("targetHandle", "")
+            if tgt == sm_node_id and tgt_handle:
+                child_id = tgt_handle.removeprefix("in__")
+                if child_id in sm_child_ids:
+                    src = edge.get("source", "")
+                    src_name = root_id_to_func.get(src, _sanitize_func_name(src))
+                    sm_node_sources.setdefault(child_id, []).append(src_name)
+
+        sm_lines = [
+            f'"""Submodel: {sm_name}"""',
+            "",
+            "import polars as pl",
+            "import haute",
+            "",
+            "",
+            f'submodel = haute.Submodel("{sm_name}")',
+            "",
+            "",
+        ]
+
+        for node in sorted_sm_nodes:
+            source_names = sm_node_sources.get(node["id"], [])
+            sm_lines.append(_submodel_node_to_code(node, source_names=source_names))
+            sm_lines.append("")
+
+        # Emit submodel.connect() calls for internal edges
+        if sm_edges:
+            sm_lines.append("")
+            for edge in sm_edges:
+                src_func = sm_id_to_func.get(edge["source"], edge["source"])
+                tgt_func = sm_id_to_func.get(edge["target"], edge["target"])
+                sm_lines.append(f'submodel.connect("{src_func}", "{tgt_func}")')
+            sm_lines.append("")
+
+        files[sm_file] = "\n".join(sm_lines)
+
+    # ── Generate main pipeline file ──────────────────────────────────
+
+    sorted_root = _topo_sort(root_nodes, [
+        e for e in edges
+        if e["source"] in root_node_ids and e["target"] in root_node_ids
+    ]) if root_nodes else []
+
+    # Also map submodel child node IDs to func names (for edge generation)
+    for sm_name, sm_meta in submodels.items():
+        sm_graph = sm_meta.get("graph", {})
+        for n in sm_graph.get("nodes", []):
+            data = n.get("data", {})
+            label = data.get("label", "Unnamed")
+            root_id_to_func[n["id"]] = _sanitize_func_name(label)
+
+    main_lines = [
+        f'"""Pipeline: {pipeline_name}"""',
+        "",
+        "import polars as pl",
+        "import haute",
+    ]
+
+    if preamble.strip():
+        main_lines.append("")
+        main_lines.append(preamble.rstrip())
+
+    main_lines += [
+        "",
+        f'pipeline = haute.Pipeline("{pipeline_name}", description="{description}")',
+        "",
+        "",
+    ]
+
+    # Build source names per root node from root-level edges AND
+    # cross-boundary edges (resolving submodel handles to child node names).
+    root_node_sources: dict[str, list[str]] = {}
+    for edge in edges:
+        src = edge.get("source", "")
+        tgt = edge.get("target", "")
+        src_handle = edge.get("sourceHandle", "")
+        tgt_handle = edge.get("targetHandle", "")
+
+        # Resolve submodel handles to actual child node names
+        actual_src = src
+        if src in submodel_node_ids and src_handle:
+            actual_src = src_handle.removeprefix("out__")
+        actual_tgt = tgt
+        if tgt in submodel_node_ids and tgt_handle:
+            actual_tgt = tgt_handle.removeprefix("in__")
+
+        # Only care about edges feeding into root nodes
+        if actual_tgt not in root_node_ids:
+            continue
+        src_name = root_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
+        root_node_sources.setdefault(actual_tgt, []).append(src_name)
+
+    for node in sorted_root:
+        source_names = root_node_sources.get(node["id"], [])
+        main_lines.append(_node_to_code(node, source_names=source_names))
+        main_lines.append("")
+
+    # Emit pipeline.submodel() imports
+    for sm_name, sm_meta in submodels.items():
+        sm_file = sm_meta.get("file", f"modules/{sm_name}.py")
+        main_lines.append(f'pipeline.submodel("{sm_file}")')
+    main_lines.append("")
+
+    # Emit pipeline.connect() calls for ALL edges (cross-boundary use real node names)
+    all_id_to_func = dict(root_id_to_func)
+    all_edges = edges
+    # Also include cross-boundary edges that reference submodel handles
+    connect_pairs: list[tuple[str, str]] = []
+    for edge in all_edges:
+        src = edge.get("source", "")
+        tgt = edge.get("target", "")
+        src_handle = edge.get("sourceHandle", "")
+        tgt_handle = edge.get("targetHandle", "")
+
+        # Resolve submodel handles to actual node names
+        actual_src = src
+        if src in submodel_node_ids and src_handle:
+            actual_src = src_handle.removeprefix("out__")
+        actual_tgt = tgt
+        if tgt in submodel_node_ids and tgt_handle:
+            actual_tgt = tgt_handle.removeprefix("in__")
+
+        src_func = all_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
+        tgt_func = all_id_to_func.get(actual_tgt, _sanitize_func_name(actual_tgt))
+        connect_pairs.append((src_func, tgt_func))
+
+    if connect_pairs:
+        main_lines.append("")
+        main_lines.append("# Wire nodes together - edges define data flow")
+        seen: set[tuple[str, str]] = set()
+        for src_func, tgt_func in connect_pairs:
+            if (src_func, tgt_func) not in seen:
+                seen.add((src_func, tgt_func))
+                main_lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
+        main_lines.append("")
+
+    main_key = source_file or f"{pipeline_name}.py"
+    files[main_key] = "\n".join(main_lines)
+    return files

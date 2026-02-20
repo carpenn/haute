@@ -375,9 +375,9 @@ def serve(host: str, port: int, no_browser: bool) -> None:
     dev_mode = frontend_dir is not None and (frontend_dir / "node_modules").exists()
 
     if dev_mode:
-        click.echo("🔧 Dev mode: starting Vite dev server + FastAPI backend")
-        click.echo("   Frontend → http://localhost:5173  (open this)")
-        click.echo(f"   Backend  → http://{host}:{port}   (API only)")
+        click.echo("[dev] Dev mode: starting Vite dev server + FastAPI backend")
+        click.echo("  Frontend -> http://localhost:5173  (open this)")
+        click.echo(f"  Backend  -> http://{host}:{port}   (API only)")
         click.echo("")
         vite_proc = subprocess.Popen(
             ["npm", "run", "dev"],
@@ -398,13 +398,19 @@ def serve(host: str, port: int, no_browser: bool) -> None:
 
             threading.Timer(2.0, _open_browser, args=("http://localhost:5173",)).start()
 
+        # Resolve the haute package directory so uvicorn only reloads on
+        # server source changes, not on user pipeline file writes.
+        import haute as _haute_pkg
+
+        _haute_src_dir = str(Path(_haute_pkg.__file__).resolve().parent)
+
         try:
             uvicorn.run(
                 "haute.server:app",
                 host=host,
                 port=port,
                 reload=True,
-                reload_excludes=["*.haute.json", "main.py", "*.haute.py"],
+                reload_dirs=[_haute_src_dir],
                 log_level="warning",
             )
         finally:
