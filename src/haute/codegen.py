@@ -39,6 +39,13 @@ def {func_name}() -> pl.LazyFrame:
     return pl.scan_ndjson("{path}")
 '''
 
+_LIVE_SWITCH = '''\
+@pipeline.node(live_switch=True)
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first_param}
+'''
+
 _SOURCE_FLAT_FILE = '''\
 @pipeline.node(path="{path}")
 def {func_name}() -> pl.LazyFrame:
@@ -192,6 +199,16 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             description=description,
             path=path,
             row_id_kw=row_id_kw,
+        )
+
+    elif node_type == "liveSwitch":
+        params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
+        first_param = source_names[0] if source_names else "df"
+        return _LIVE_SWITCH.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first_param=first_param,
         )
 
     elif node_type == "dataSource":

@@ -191,6 +191,22 @@ def _build_node_fn(
 
         return func_name, source_fn, True
 
+    elif node_type == "liveSwitch":
+        mode = config.get("mode", "live")
+        input_names = list(source_names)
+        param_names = config.get("inputs", [])
+        live_name = param_names[0] if param_names else None
+
+        def switch_fn(*dfs: _Frame) -> _Frame:
+            target = live_name if mode == "live" else mode
+            if target:
+                for i, name in enumerate(input_names):
+                    if name == target:
+                        return dfs[i]
+            return dfs[0]
+
+        return func_name, switch_fn, False
+
     elif node_type == "dataSink":
         # During normal run/preview, dataSink is a pass-through.
         # Actual writing happens via execute_sink() on explicit user action.

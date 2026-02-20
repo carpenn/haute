@@ -74,6 +74,7 @@ const nodeTypes = {
   output: PipelineNode,
   dataSink: PipelineNode,
   externalFile: PipelineNode,
+  liveSwitch: PipelineNode,
   submodel: SubmodelNode,
   submodelPort: SubmodelPortNode,
 }
@@ -87,6 +88,7 @@ const labelMap: Record<string, string> = {
   output: "Output",
   dataSink: "Data Sink",
   externalFile: "External File",
+  liveSwitch: "Live Switch",
   submodel: "Submodel",
   submodelPort: "Port",
 }

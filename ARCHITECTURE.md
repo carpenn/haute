@@ -51,8 +51,9 @@ Nodes are the building blocks. Each node is a Python class with defined inputs, 
 
 | Node Type | Purpose | Example |
 |---|---|---|
-| **ApiInput** | Live API input for deployment (max 1 per pipeline) | `@pipeline.node(api_input=True, path="data/policies.parquet")` |
+| **ApiInput** | Live API input for deployment (max 1 per pipeline) | `@pipeline.node(api_input=True, path="data/policies.json")` |
 | **DataSource** | Read data (local CSV/Parquet, Databricks table) | `@pipeline.node(path="data/claims.parquet")` |
+| **LiveSwitch** | Route live API or batch data into pipeline (max 1) | `@pipeline.node(live_switch=True)` |
 | **Transform** | Data processing / feature engineering | `Transform("vehicle_age", fn=lambda df: df.with_columns(...))` |
 | **ModelScore** | Score records using an MLflow registered model | `ModelScore("frequency_glm", model_uri="models:/freq_glm/Production")` |
 | **RatingStep** | Individual rating operation (lookup, factor, cap/floor, load/discount) | `RatingStep("area_factor", lookup="area_table", key="postcode")` |

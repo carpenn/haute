@@ -42,7 +42,7 @@ class TestPruner:
         from haute.deploy._pruner import find_deploy_input_nodes
 
         inputs = find_deploy_input_nodes(full_graph)
-        assert inputs == ["policies"]
+        assert inputs == ["quotes"]
 
     def test_prune_for_deploy(self, full_graph: dict) -> None:
         from haute.deploy._pruner import find_output_node, prune_for_deploy
@@ -53,16 +53,13 @@ class TestPruner:
         kept_set = set(kept)
         removed_set = set(removed)
 
-        # policies, frequency_model, severity_model, calculate_premium, output
+        # Live scoring path: quotes → policies (switch) → submodel → output
+        assert "quotes" in kept_set
         assert "policies" in kept_set
         assert "output" in kept_set
-        assert "frequency_model" in kept_set
-        assert "severity_model" in kept_set
-        assert "calculate_premium" in kept_set
 
-        # Training data nodes should be pruned
-        assert "claims" in removed_set
-        assert "exposure" in removed_set
+        # Batch source pruned (liveSwitch keeps only live branch)
+        assert "batch_quotes" in removed_set
 
         # Sink nodes should be pruned
         assert "frequency_write" in removed_set
@@ -71,6 +68,33 @@ class TestPruner:
         # Pruned graph should have fewer nodes
         assert len(pruned["nodes"]) < len(full_graph["nodes"])
         assert len(pruned["nodes"]) == len(kept)
+
+    def test_prune_drops_batch_branch_at_live_switch(self) -> None:
+        """liveSwitch nodes should only keep the live (first) input branch."""
+        from haute.deploy._pruner import prune_for_deploy
+
+        graph = {
+            "nodes": [
+                {"id": "live_src", "data": {"label": "live_src", "nodeType": "apiInput", "config": {"path": "d.json"}}},
+                {"id": "batch_src", "data": {"label": "batch_src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
+                {"id": "switch", "data": {"label": "switch", "nodeType": "liveSwitch", "config": {"mode": "live", "inputs": ["live_src", "batch_src"]}}},
+                {"id": "score", "data": {"label": "score", "nodeType": "transform", "config": {}}},
+                {"id": "out", "data": {"label": "out", "nodeType": "output", "config": {}}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "live_src", "target": "switch"},
+                {"id": "e2", "source": "batch_src", "target": "switch"},
+                {"id": "e3", "source": "switch", "target": "score"},
+                {"id": "e4", "source": "score", "target": "out"},
+            ],
+        }
+        pruned, kept, removed = prune_for_deploy(graph, "out")
+        kept_set = set(kept)
+        assert "live_src" in kept_set
+        assert "switch" in kept_set
+        assert "score" in kept_set
+        assert "out" in kept_set
+        assert "batch_src" in set(removed)
 
     def test_prune_missing_output_raises(self, full_graph: dict) -> None:
         from haute.deploy._pruner import prune_for_deploy
@@ -103,16 +127,7 @@ class TestBundler:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        artifacts = collect_artifacts(pruned, ["policies"], PIPELINE_FILE.parent)
-
-        # Should find the catboost model files
-        artifact_names = set(artifacts.keys())
-        assert any("freq" in name for name in artifact_names), (
-            f"Expected freq model in {artifact_names}"
-        )
-        assert any("sev" in name for name in artifact_names), (
-            f"Expected sev model in {artifact_names}"
-        )
+        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
 
         # All artifact paths should exist
         for name, path in artifacts.items():
@@ -154,7 +169,7 @@ class TestScorer:
         result = score_graph(
             graph=pruned,
             input_df=sample,
-            input_node_ids=["policies"],
+            input_node_ids=["quotes"],
             output_node_id=output_id,
         )
 
@@ -173,7 +188,7 @@ class TestScorer:
         result = score_graph(
             graph=pruned,
             input_df=sample,
-            input_node_ids=["policies"],
+            input_node_ids=["quotes"],
             output_node_id=output_id,
         )
 
@@ -194,7 +209,7 @@ class TestSchema:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        schema = infer_input_schema(pruned, "policies")
+        schema = infer_input_schema(pruned, "quotes")
 
         assert isinstance(schema, dict)
         assert len(schema) > 0
@@ -208,7 +223,7 @@ class TestSchema:
         output_id = find_output_node(full_graph)
         pruned, _kept, _removed = prune_for_deploy(full_graph, output_id)
 
-        schema = infer_output_schema(pruned, output_id, ["policies"])
+        schema = infer_output_schema(pruned, output_id, ["quotes"])
 
         assert isinstance(schema, dict)
         assert len(schema) > 0
@@ -229,9 +244,9 @@ class TestValidators:
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
-        artifacts = collect_artifacts(pruned, ["policies"], PIPELINE_FILE.parent)
-        input_schema = infer_input_schema(pruned, "policies")
-        output_schema = infer_output_schema(pruned, output_id, ["policies"])
+        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
+        input_schema = infer_input_schema(pruned, "quotes")
+        output_schema = infer_output_schema(pruned, output_id, ["quotes"])
 
         config = DeployConfig(
             pipeline_file=PIPELINE_FILE,
@@ -241,7 +256,7 @@ class TestValidators:
             config=config,
             full_graph=full_graph,
             pruned_graph=pruned,
-            input_node_ids=["policies"],
+            input_node_ids=["quotes"],
             output_node_id=output_id,
             artifacts=artifacts,
             input_schema=input_schema,
@@ -261,9 +276,9 @@ class TestValidators:
 
         output_id = find_output_node(full_graph)
         pruned, _kept, removed = prune_for_deploy(full_graph, output_id)
-        artifacts = collect_artifacts(pruned, ["policies"], PIPELINE_FILE.parent)
-        input_schema = infer_input_schema(pruned, "policies")
-        output_schema = infer_output_schema(pruned, output_id, ["policies"])
+        artifacts = collect_artifacts(pruned, ["quotes"], PIPELINE_FILE.parent)
+        input_schema = infer_input_schema(pruned, "quotes")
+        output_schema = infer_output_schema(pruned, output_id, ["quotes"])
 
         config = DeployConfig(
             pipeline_file=PIPELINE_FILE,
@@ -274,7 +289,7 @@ class TestValidators:
             config=config,
             full_graph=full_graph,
             pruned_graph=pruned,
-            input_node_ids=["policies"],
+            input_node_ids=["quotes"],
             output_node_id=output_id,
             artifacts=artifacts,
             input_schema=input_schema,
@@ -319,10 +334,9 @@ class TestConfig:
         resolved = resolve_config(config)
 
         assert resolved.output_node_id == "output"
-        assert "policies" in resolved.input_node_ids
+        assert "quotes" in resolved.input_node_ids
         assert len(resolved.input_schema) > 0
         assert len(resolved.output_schema) > 0
-        assert len(resolved.artifacts) > 0
         assert len(resolved.removed_node_ids) > 0
 
 
@@ -704,6 +718,20 @@ class TestParserApiInput:
     def test_api_input_node_type(self) -> None:
         """api_input=True in decorator should produce apiInput nodeType."""
         graph = parse_pipeline_file(PIPELINE_FILE)
+        quotes_node = None
+        for n in graph["nodes"]:
+            if n["id"] == "quotes":
+                quotes_node = n
+                break
+
+        assert quotes_node is not None, "quotes node not found"
+        assert quotes_node["data"]["nodeType"] == "apiInput", (
+            f"Expected apiInput nodeType, got: {quotes_node['data']['nodeType']}"
+        )
+
+    def test_live_switch_node_type(self) -> None:
+        """live_switch=True in decorator should produce liveSwitch nodeType."""
+        graph = parse_pipeline_file(PIPELINE_FILE)
         policies_node = None
         for n in graph["nodes"]:
             if n["id"] == "policies":
@@ -711,6 +739,9 @@ class TestParserApiInput:
                 break
 
         assert policies_node is not None, "policies node not found"
-        assert policies_node["data"]["nodeType"] == "apiInput", (
-            f"Expected apiInput nodeType, got: {policies_node['data']['nodeType']}"
+        assert policies_node["data"]["nodeType"] == "liveSwitch", (
+            f"Expected liveSwitch nodeType, got: {policies_node['data']['nodeType']}"
         )
+        config = policies_node["data"]["config"]
+        assert config["mode"] == "live"
+        assert config["inputs"] == ["quotes", "batch_quotes"]

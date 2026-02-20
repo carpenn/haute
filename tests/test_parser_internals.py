@@ -50,6 +50,12 @@ class TestInferNodeType:
     def test_transform_default(self):
         assert _infer_node_type({}, 1) == "transform"
 
+    def test_live_switch(self):
+        assert _infer_node_type({"live_switch": True}, 2) == "liveSwitch"
+
+    def test_api_input(self):
+        assert _infer_node_type({"api_input": True, "path": "d.json"}, 0) == "apiInput"
+
     def test_priority_external_over_path(self):
         """external takes priority even if path is present."""
         assert _infer_node_type({"external": "m.pkl", "path": "x"}, 1) == "externalFile"
@@ -228,6 +234,15 @@ class TestBuildNodeConfig:
         )
         assert config["row_id_column"] == "policy_id"
         assert config["path"] == "d.parquet"
+
+    def test_live_switch(self):
+        config = _build_node_config(
+            "liveSwitch",
+            {"live_switch": True},
+            "", ["live", "nb", "rn"],
+        )
+        assert config["mode"] == "live"
+        assert config["inputs"] == ["live", "nb", "rn"]
 
     def test_data_source_databricks(self):
         config = _build_node_config(

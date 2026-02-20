@@ -241,7 +241,8 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     graph = body.graph.model_dump()
 
     # Validate singleton node types (max 1 each)
-    for singleton_type, label in [("apiInput", "API Input"), ("output", "Output")]:
+    singletons = [("apiInput", "API Input"), ("output", "Output"), ("liveSwitch", "Live Switch")]
+    for singleton_type, label in singletons:
         count = sum(
             1 for n in graph["nodes"]
             if n["data"]["nodeType"] == singleton_type

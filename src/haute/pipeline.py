@@ -27,6 +27,11 @@ class Node:
         return bool(self.config.get("api_input"))
 
     @property
+    def is_live_switch(self) -> bool:
+        """Whether this node is a live/batch switch."""
+        return bool(self.config.get("live_switch"))
+
+    @property
     def n_inputs(self) -> int:
         """Number of DataFrame inputs the function accepts."""
         if self.is_source:

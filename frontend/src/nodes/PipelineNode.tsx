@@ -30,6 +30,8 @@ function PipelineNode({ data, selected }: NodeProps) {
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = nodeType === "apiInput"
   const missingRowId = isDeployInput && !nodeData.config?.row_id_column
+  const isLiveSwitch = nodeType === "liveSwitch"
+  const switchMode = isLiveSwitch ? ((nodeData.config?.mode as string) || "live") : null
   const isInstance = !!(nodeData.config?.instanceOf)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
@@ -95,6 +97,17 @@ function PipelineNode({ data, selected }: NodeProps) {
                   title="Row ID column not set — required for tracing"
                 />
               )}
+            </span>
+          )}
+          {switchMode && (
+            <span
+              className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+              style={switchMode === "live"
+                ? { background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }
+                : { background: "rgba(245,158,11,.12)", color: "#f59e0b", border: "1px solid rgba(245,158,11,.2)" }
+              }
+            >
+              {switchMode === "live" ? "LIVE" : switchMode}
             </span>
           )}
           {nodeData._status && (

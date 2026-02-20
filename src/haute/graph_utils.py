@@ -181,7 +181,8 @@ def graph_fingerprint(graph: PipelineGraph, *extra_keys: str) -> str:
         c = d.get("config", {})
         parts.append(
             f"{n['id']}|{d.get('nodeType')}|{c.get('code', '')}|{c.get('path', '')}"
-            f"|{c.get('table', '')}|{c.get('query', '')}|{c.get('instanceOf', '')}",
+            f"|{c.get('table', '')}|{c.get('query', '')}|{c.get('instanceOf', '')}"
+            f"|{c.get('mode', '')}",
         )
     for e in sorted(
         graph.get("edges", []),

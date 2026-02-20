@@ -489,3 +489,62 @@ class TestInstanceAliasInjection:
         assert results["joiner_inst"]["row_count"] == 1
         col_names = {c["name"] for c in results["joiner_inst"]["columns"]}
         assert col_names == {"k", "v", "w"}
+
+
+# ---------------------------------------------------------------------------
+# liveSwitch node
+# ---------------------------------------------------------------------------
+
+
+class TestLiveSwitch:
+    def _switch_graph(self, tmp_path, mode="live", reverse_edges=False):
+        """Build a graph with two sources feeding a liveSwitch."""
+        p1 = tmp_path / "live.parquet"
+        p2 = tmp_path / "batch.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p1)
+        pl.DataFrame({"x": [10, 20, 30, 40]}).write_parquet(p2)
+        edges = [
+            _edge("live_src", "switch"),
+            _edge("batch_src", "switch"),
+        ]
+        if reverse_edges:
+            edges = list(reversed(edges))
+        return {
+            "nodes": [
+                _source_node("live_src", str(p1)),
+                _source_node("batch_src", str(p2)),
+                {
+                    "id": "switch",
+                    "type": "liveSwitch",
+                    "data": {
+                        "label": "switch",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "mode": mode,
+                            "inputs": ["live_src", "batch_src"],
+                        },
+                    },
+                    "position": {"x": 0, "y": 0},
+                },
+            ],
+            "edges": edges,
+        }
+
+    def test_live_mode_selects_first_input(self, tmp_path):
+        graph = self._switch_graph(tmp_path, mode="live")
+        results = execute_graph(graph, target_node_id="switch")
+        assert results["switch"]["status"] == "ok"
+        assert results["switch"]["row_count"] == 3
+
+    def test_live_mode_works_regardless_of_edge_order(self, tmp_path):
+        """Edge order in the graph JSON is arbitrary — live must still pick the correct input."""
+        graph = self._switch_graph(tmp_path, mode="live", reverse_edges=True)
+        results = execute_graph(graph, target_node_id="switch")
+        assert results["switch"]["status"] == "ok"
+        assert results["switch"]["row_count"] == 3
+
+    def test_batch_mode_selects_named_input(self, tmp_path):
+        graph = self._switch_graph(tmp_path, mode="batch_src")
+        results = execute_graph(graph, target_node_id="switch")
+        assert results["switch"]["status"] == "ok"
+        assert results["switch"]["row_count"] == 4

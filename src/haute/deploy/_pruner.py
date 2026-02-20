@@ -2,7 +2,51 @@
 
 from __future__ import annotations
 
-from haute.graph_utils import PipelineGraph, ancestors
+from haute.graph_utils import PipelineGraph, _sanitize_func_name, ancestors
+
+
+def _live_only_edges(
+    nodes: list[dict],
+    edges: list[dict],
+) -> list[dict]:
+    """Filter edges so liveSwitch nodes only keep their first (live) input.
+
+    For deployment we only want the live branch.  The first input edge
+    (by source order matching the function's first parameter) is kept;
+    all other input edges to the liveSwitch are dropped.
+    """
+    switch_ids: set[str] = set()
+    for n in nodes:
+        if n["data"]["nodeType"] == "liveSwitch":
+            switch_ids.add(n["id"])
+
+    if not switch_ids:
+        return edges
+
+    # For each switch, identify the first input param name from config
+    switch_live_source: dict[str, str | None] = {}
+    node_map = {n["id"]: n for n in nodes}
+    for sid in switch_ids:
+        inputs = node_map[sid]["data"]["config"].get("inputs", [])
+        first_input_name = inputs[0] if inputs else None
+        if first_input_name:
+            for e in edges:
+                if e["target"] == sid:
+                    src_label = node_map[e["source"]]["data"]["label"]
+                    if _sanitize_func_name(src_label) == first_input_name:
+                        switch_live_source[sid] = e["source"]
+                        break
+
+    filtered: list[dict] = []
+    for e in edges:
+        if e["target"] in switch_ids:
+            # Only keep the live source edge
+            if switch_live_source.get(e["target"]) == e["source"]:
+                filtered.append(e)
+        else:
+            filtered.append(e)
+
+    return filtered
 
 
 def prune_for_deploy(
@@ -10,6 +54,8 @@ def prune_for_deploy(
     output_node_id: str,
 ) -> tuple[PipelineGraph, list[str], list[str]]:
     """Prune a graph to only the ancestors of the output node.
+
+    For liveSwitch nodes, only the live (first) input branch is kept.
 
     Args:
         graph: Full React Flow graph with "nodes" and "edges".
@@ -30,7 +76,8 @@ def prune_for_deploy(
             f"Output node '{output_node_id}' not found in graph. Available nodes: {sorted(all_ids)}"
         )
 
-    needed = ancestors(output_node_id, edges, all_ids)
+    deploy_edges = _live_only_edges(nodes, edges)
+    needed = ancestors(output_node_id, deploy_edges, all_ids)
 
     kept_nodes = [n for n in nodes if n["id"] in needed]
     kept_edges = [e for e in edges if e["source"] in needed and e["target"] in needed]

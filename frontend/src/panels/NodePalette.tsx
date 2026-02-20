@@ -1,9 +1,9 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
 
-const SINGLETON_TYPES = new Set(["apiInput", "output"])
+const SINGLETON_TYPES = new Set(["apiInput", "output", "liveSwitch"])
 
 const nodeTemplates = [
   {
@@ -53,6 +53,14 @@ const nodeTemplates = [
     icon: CircleDot,
     accent: "#f43f5e",
     defaultConfig: { fields: [] },
+  },
+  {
+    type: "liveSwitch",
+    label: "Live Switch",
+    description: "Switch between live API and batch data (max 1)",
+    icon: ToggleLeft,
+    accent: "#f59e0b",
+    defaultConfig: { mode: "live" },
   },
   {
     type: "dataSink",

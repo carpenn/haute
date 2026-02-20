@@ -39,6 +39,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
         return "dataSink"
     if decorator_kwargs.get("api_input"):
         return "apiInput"
+    if decorator_kwargs.get("live_switch"):
+        return "liveSwitch"
     if decorator_kwargs.get("output"):
         return "output"
     if "model_uri" in decorator_kwargs:
@@ -431,6 +433,9 @@ def _build_node_config(
                 config["query"] = decorator_kwargs["query"]
         else:
             config["sourceType"] = "flat_file"
+    elif node_type == "liveSwitch":
+        config["mode"] = decorator_kwargs.get("mode", "live")
+        config["inputs"] = param_names
     elif node_type == "modelScore":
         config["model_uri"] = decorator_kwargs.get("model_uri", "")
     elif node_type == "ratingStep":
