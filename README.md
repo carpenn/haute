@@ -18,29 +18,24 @@
 
 ---
 
-Haute is a free pricing engine that lets insurance teams build rating pipelines in a visual editor, keep everything as version-controlled Python, and deploy to a live scoring API - on Databricks, Azure Container Apps, AWS ECS, GCP Cloud Run, or a plain Docker container.
-
-It's aimed at the gap between enterprise platforms like Radar that cost six or seven figures a year, and the in-house Python notebooks that never quite make it to production.
+Haute is a free, open-source pricing engine that lets insurance teams build rating pipelines in a visual editor, keep everything as version-controlled Python, and deploy to a live scoring API with built-in safety and audit trails.
 
 ---
 
-## Why this exists
+## Quick start
 
-### The platform problem
+```bash
+pip install haute
+haute init my-project --target databricks --ci github
+cd my-project
+haute serve
+```
 
-Tools like WTW Radar have been the default for 30 years. They give you visual editing, deployment, monitoring - the full package. But you pay for it in ways beyond the licence fee:
-
-Your models live inside a proprietary format. If you want to leave, you're rebuilding from scratch. Your team learns a platform-specific way of working instead of Python, Git, and the tools the rest of the data science world uses. You're tied to a single cloud provider. And there's no way to look under the hood - no source code, no public documentation, no community outside the vendor's ecosystem.
-
-These tools made sense when there wasn't a credible open-source alternative. That's less true now.
-
-### The notebook problem
-
-The other path - building pricing pipelines in Python notebooks with custom deployment scripts - gives you freedom, but the deployment story is usually painful. Models sit in notebooks for months. Getting to a live API means weeks of back-and-forth with an engineering team. There's no visual layer for analysts to work with, no impact analysis before changes go live, and no standardised way of doing things across the team.
+`haute serve` opens a browser-based visual editor. Drag, connect, and configure nodes - or edit the Python file directly. They stay in sync via WebSocket.
 
 ---
 
-## What Haute actually does
+## Code ↔ GUI sync
 
 A pricing pipeline in Haute is a Python file. Standard Python, using Polars DataFrames. It lives in Git, you can open it in any editor, and it's testable with pytest like any other code.
 
@@ -49,6 +44,50 @@ But it's also a visual graph. Haute runs a browser-based editor where the pipeli
 The key bit: **these are the same thing**. The visual editor reads from and writes to the Python file. Change a node in the GUI and the `.py` file updates on disk. Edit the `.py` file and the graph updates in the browser. There's no import/export step, no translation layer, no "generate code" button. They're always in sync.
 
 This means analysts can work visually while everything stays in version control. Technical people can work in code without losing the visual representation. And nobody has to choose one or the other.
+
+---
+
+## Polars-native execution engine
+
+Pipelines run on [Polars](https://pola.rs/) LazyFrames end-to-end. Haute builds a lazy query plan across your entire graph - source nodes, transforms, model scores, joins, outputs - and lets Polars optimise the full plan before collecting results. This means predicate pushdown, projection pushdown, and parallel execution happen automatically.
+
+During preview and tracing, Haute switches to eager single-pass execution with a per-graph cache. The pipeline is fingerprinted by its structure and code content - if nothing changed, clicking a different node reuses the cached DataFrames instantly instead of re-executing model scoring on hundreds of thousands of rows.
+
+Any model that runs in Python works here: scikit-learn GLMs, CatBoost, LightGBM, XGBoost, or anything else. Nodes are plain functions that take and return DataFrames, so standard testing tools just work.
+
+---
+
+## Databricks connector
+
+Data source nodes can point directly at Databricks Unity Catalog tables. Haute streams data from Databricks SQL via Arrow batches (100K rows at a time, zstd-compressed), writes it to a local `.parquet` cache, and from there every pipeline run reads from that cache with full `scan_parquet` speed - predicate pushdown, zero-copy reads, no round-trips.
+
+The fetch is incremental and memory-bounded: a `ParquetWriter` writes each Arrow batch to disk as it arrives, so even multi-million-row tables don't spike memory. Writes go to a temporary file first and atomically rename on success, so a failed fetch never leaves a corrupt cache behind.
+
+From the GUI, you browse catalogs, schemas, and tables directly - pick a table, click Fetch, and the data is ready. The connector also supports custom SQL queries if you only need a subset.
+
+---
+
+## Execution tracing
+
+Click any output price and trace the full path through every node that produced it, with intermediate values at each step:
+
+```
+base rate £300  →  area factor ×1.2  →  NCD ×0.85  →  frequency load ×1.35  →  £412.50
+```
+
+The tracer runs the pipeline on a single row and captures per-node snapshots: input schema, output schema, row values, and a column-level diff (added, removed, modified, passed through). When you trace a specific column, Haute prunes the graph to only the nodes that contributed to that value - irrelevant branches disappear.
+
+Traces are cached by graph fingerprint. The first click executes the full pipeline (~1-2s on large datasets); subsequent clicks with a different row or column reuse the cached DataFrames and extract a different slice in under 10ms.
+
+This is useful for regulatory explainability (Solvency II, IFRS 17, FCA pricing practices), but it's also just a good way to debug a pipeline and understand what's happening at each step.
+
+---
+
+## Submodels
+
+Group nodes into reusable submodels - separate `.py` files that the main pipeline imports. Select nodes in the GUI, click Group, and Haute extracts them into `modules/<name>.py` with their own internal edges. The main pipeline gets a single submodel node with auto-wired input/output ports.
+
+Submodels can be drilled into (double-click to see the internal graph), dissolved back into the parent pipeline, and reused across multiple pipelines. They're regular Python files with a `haute.Submodel` class, so they work with imports, tests, and linting like anything else.
 
 ---
 
@@ -64,9 +103,7 @@ Haute deploys pipelines as live scoring APIs. You set the target once in a confi
 | **AWS ECS** | Same image, deployed as an ECS task | Build+push implemented |
 | **GCP Cloud Run** | Same image, deployed as a Cloud Run service | Build+push implemented |
 
-All container-based targets share the same build: a FastAPI app wrapping `score_graph()` with `POST /quote` and `GET /health`, packaged into a Docker image, pushed to a registry. What differs per platform is only the service update step after push.
-
-The generic container target is there for teams who manage their own infrastructure - Kubernetes, on-prem, or local testing. The platform targets let Haute handle the full lifecycle: build, push, and update the running service.
+All container-based targets share the same build: a FastAPI app wrapping `score_graph()` with `POST /quote` and `GET /health`, packaged into a Docker image, pushed to a registry. The generic container target is there for teams who manage their own infrastructure - Kubernetes, on-prem, or local testing. The platform targets handle the full lifecycle.
 
 ### What runs where
 
@@ -80,76 +117,39 @@ Analysts only need Python installed. Everything else happens in CI.
 | `haute smoke` | CI only | Cloud creds |
 | `haute impact` | CI only | Cloud creds |
 
-The workflow is: edit your pipeline, open `haute serve` to preview, push to Git, and CI does the rest. Deployments can only happen through this process - nobody can push a model to production from their laptop.
-
 ---
 
 ## Safety
 
-This is where Haute is most opinionated. A pricing engine without safety rails is dangerous - one wrong factor can misprice an entire book before anyone notices. So deployment safety isn't optional, it's baked into how the tool works.
+A pricing engine without safety rails is dangerous - one wrong factor can misprice an entire book before anyone notices. Deployment safety isn't optional in Haute, it's baked into how the tool works.
 
 Before any model reaches production, Haute scores a set of example quotes through the pipeline. If anything breaks - a missing column, a model that won't load, a transform that errors on edge cases - the deployment is blocked. You can also set expected outputs with tolerances, so you're testing not just "does it run" but "does it produce the right prices".
 
-When a new model is ready, it gets deployed to a staging environment first. Haute then scores a portfolio sample through both the new model and the one currently in production, and produces a comparison report: how many quotes changed, by how much, which segments moved, what the overall premium impact looks like. The people who need to approve the change see the financial effect before it goes live. Nobody has to ask "what will this do to the book" - the answer is already there.
+When a new model is ready, it gets deployed to a staging environment first. Haute then scores a portfolio sample through both the new model and the one currently in production, and produces a comparison report: how many quotes changed, by how much, which segments moved, what the overall premium impact looks like. The people who need to approve the change see the financial effect before it goes live.
 
-The path to production is always the same: deploy to staging, verify it works, review the impact, then manually promote. A solo actuary gets the same process as a large team. You can adjust how many people need to sign off, but the structure itself is fixed. There are no shortcuts because there shouldn't be.
-
-Every deployment records what changed, who approved it, the impact report, and what version it replaced. Solvency II, IFRS 17, FCA pricing practices - the traceability requirements are real, and this covers them without you having to build anything.
-
----
-
-## Why Python matters here
-
-Haute pipelines are standard Python. Not a proprietary DSL, not a visual-only format, not a configuration language that looks like code but isn't.
-
-This matters for a few reasons. People you hire already know Python - or can learn it, and those skills are useful beyond one vendor's ecosystem. Any model that runs in Python works in Haute: scikit-learn GLMs, CatBoost, LightGBM, XGBoost, whatever comes next. You can read the pipeline file and understand what it does. And every node is a plain function, so standard testing tools just work.
-
-The dataframe library is [Polars](https://pola.rs/) rather than pandas - it's faster, has a cleaner API, and handles the kind of operations pricing pipelines need (joins, group-bys, window functions) well. But the point is that it's a real, general-purpose data tool, not something that only exists inside Haute.
+The path to production is always the same: deploy to staging, verify it works, review the impact, then manually promote. Every deployment records what changed, who approved it, the impact report, and what version it replaced.
 
 ---
 
 ## One pipeline, multiple uses
 
-The same pipeline file works for live quoting (a single JSON request, sub-second response), batch scoring (millions of rows), what-if analysis (an analyst dragging sliders to see how price changes through each node), impact analysis, and execution tracing.
+The same pipeline file works for:
 
-On the tracing point - you can click any output price and see the path through every node that produced it, with intermediate values at each step. Something like:
-
-```
-base rate £300  →  area factor ×1.2  →  NCD ×0.85  →  frequency load ×1.35  →  £412.50
-```
-
-This is genuinely useful for regulatory explainability, but it's also just a good way to debug a pipeline and understand what's happening at each step.
+- **Live quoting** - a single JSON request, sub-second response
+- **Batch scoring** - millions of rows via the Polars lazy engine
+- **What-if analysis** - drag sliders to see how price changes through each node
+- **Impact analysis** - compare new vs current model across a portfolio sample
+- **Execution tracing** - single-row lineage with per-node intermediate values
 
 ---
 
 ## Version control and CI/CD
 
-Pipelines are plain `.py` files in Git. This gives you branching (work on a new rating structure without touching production), pull requests (every change is reviewed and discussed before it goes live), full history, and the ability to roll back to any previous version.
+Pipelines are plain `.py` files in Git. Branching, pull requests, full history, and rollback all work out of the box.
 
-Haute generates the automation around this when you set up a project. You tell it which CI provider your team uses and it creates the configuration files that wire everything together. Proposed changes get validated, tested, and scored automatically before anyone reviews them. Once a change is approved and merged, the new model goes to staging, gets verified, and an impact report is produced. Promoting to production is always a separate, deliberate act.
+`haute init` generates CI configuration for your provider - GitHub Actions, GitLab CI, or Azure DevOps. The generated pipeline runs: validate → deploy to staging → smoke test → impact analysis → manual promotion to production. You don't have to build any of this yourself.
 
-You can also lock things down so that deployments can only happen through this process - nobody can push a model to production from their laptop. The only path to live is through the review pipeline.
-
-The intent is that pricing teams get the same release discipline that software engineering teams use, without having to build it themselves.
-
----
-
-## Comparison
-
-Being honest about this:
-
-|  | Haute | WTW Radar | Earnix | In-House |
-|---|---|---|---|---|
-| **Cost** | Free | $100K–$1M+/yr | Enterprise | Engineering salaries |
-| **Visual editor** | Yes | Yes (more mature) | Yes | No |
-| **Code-native** | Python | Proprietary | Proprietary | Whatever you build |
-| **Version control** | Git (built-in) | No | No | If you set it up |
-| **Deploy targets** | Multi-cloud + Docker | Azure | Vendor-managed | DIY |
-| **Impact analysis** | Built-in | Manual / partial | Partial | DIY |
-| **Maturity** | Early | 30 years, 500+ clients | Established | Varies |
-| **Vendor lock-in** | None | High | High | None |
-
-Radar and Earnix are mature products with decades of development and large teams behind them. Haute is newer and less feature-complete. The trade-off is openness, portability, and cost. If you need the full breadth of what Radar offers today - optimisation engines, monitoring dashboards, commercial underwriting workflows - Haute isn't there yet. If you want to own your pricing code, deploy to your own infrastructure, and not be locked into a platform, it's worth a look.
+Deployments can only happen through this process. Nobody can push a model to production from their laptop. The only path to live is through the review pipeline.
 
 ---
 
