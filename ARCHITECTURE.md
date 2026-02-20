@@ -620,7 +620,7 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 - [x] Data preview panel with resizable split
 - [x] Polars lazy execution with configurable row limit
 - [x] Dark theme, polished UI
-- [ ] Static asset bundling (frontend builds into Python wheel)
+- [x] Static asset bundling (frontend builds into Python wheel)
 
 ### Phase 2 - Live Code ↔ GUI Sync (partially complete)
 - [x] Parse decorated `.py` files → React Flow graph (AST + regex fallback)
@@ -647,7 +647,7 @@ Low-hanging fruit with high impact - the schema is already available from Polars
 - [x] `haute status --version-only` for scripting (used in deploy workflow for git tagging)
 - [x] `[safety]` and `[ci]` config sections in `haute.toml`
 - [x] `HAUTE_` environment variable overrides for 12-factor config
-- [ ] DataSource node with Databricks Unity Catalog support
+- [x] DataSource node with Databricks Unity Catalog support
 - [ ] Rating table viewer (reads from Databricks)
 
 ### Phase 4 - Killer Demo Features
