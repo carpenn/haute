@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from haute.graph_utils import PipelineGraph
 from haute.schemas import (
     BrowseFilesResponse,
     CacheStatusResponse,
@@ -134,7 +135,7 @@ def _load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
     return {}
 
 
-def _save_sidecar(py_path: Path, graph: dict) -> None:
+def _save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
     """Write node positions to the sidecar .haute.json file."""
     positions = {}
     for node in graph.get("nodes", []):

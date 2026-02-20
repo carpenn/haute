@@ -52,6 +52,7 @@ class PipelineGraph(TypedDict, total=False):
     pipeline_description: str
     preamble: str
     source_file: str
+    submodels: dict[str, Any]
 
 
 def _sanitize_func_name(label: str) -> str:
@@ -113,8 +114,8 @@ def build_instance_mapping(
 
 
 def resolve_orig_source_names(
-    node: dict,
-    node_map: dict[str, dict],
+    node: GraphNode,
+    node_map: dict[str, GraphNode],
     all_parents: dict[str, list[str]],
     id_to_name: dict[str, str],
 ) -> list[str] | None:
@@ -139,7 +140,7 @@ def resolve_orig_source_names(
     return result
 
 
-def topo_sort_ids(node_ids: list[str], edges: list[dict]) -> list[str]:
+def topo_sort_ids(node_ids: list[str], edges: list[GraphEdge]) -> list[str]:
     """Topological sort of node IDs based on edges (Kahn's algorithm)."""
     in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
     children: dict[str, list[str]] = {nid: [] for nid in node_ids}
@@ -167,7 +168,7 @@ def topo_sort_ids(node_ids: list[str], edges: list[dict]) -> list[str]:
     return result
 
 
-def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
+def graph_fingerprint(graph: PipelineGraph, *extra_keys: str) -> str:
     """Deterministic hash of graph structure for cache invalidation.
 
     *extra_keys* are prepended (e.g. target_node_id, row_limit) so the
@@ -190,7 +191,7 @@ def graph_fingerprint(graph: dict, *extra_keys: str) -> str:
     return hashlib.md5("\n".join(parts).encode()).hexdigest()
 
 
-def ancestors(target_id: str, edges: list[dict], all_ids: set[str]) -> set[str]:
+def ancestors(target_id: str, edges: list[GraphEdge], all_ids: set[str]) -> set[str]:
     """Get all ancestor node IDs of target (inclusive)."""
     parents: dict[str, list[str]] = {nid: [] for nid in all_ids}
     for e in edges:
@@ -211,10 +212,10 @@ def ancestors(target_id: str, edges: list[dict], all_ids: set[str]) -> set[str]:
 
 
 def _prepare_graph(
-    graph: dict,
+    graph: PipelineGraph,
     target_node_id: str | None = None,
 ) -> tuple[
-    dict[str, dict],  # node_map
+    dict[str, GraphNode],  # node_map
     list[str],  # order (topo-sorted node IDs)
     dict[str, list[str]],  # parents_of
     dict[str, str],  # id_to_name
@@ -309,7 +310,7 @@ def _load_external_object_uncached(
             return pickle.load(f)
 
 
-def flatten_graph(graph: dict) -> dict:
+def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
     """Dissolve all submodel nodes into a flat graph for execution.
 
     Replaces each ``submodel`` node with its child nodes (stored in the
@@ -381,7 +382,7 @@ def flatten_graph(graph: dict) -> dict:
 
 
 def _execute_lazy(
-    graph: dict,
+    graph: PipelineGraph,
     build_node_fn: Callable,
     target_node_id: str | None = None,
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:

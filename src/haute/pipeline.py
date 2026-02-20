@@ -38,7 +38,9 @@ class Node:
         if self.is_source:
             return self.fn()
         if len(dfs) == 0:
-            raise ValueError(f"Node '{self.name}' expects a DataFrame input")
+            raise ValueError(
+                f"Node '{self.name}' expects {self.n_inputs} input(s) but received none"
+            )
         # If function accepts multiple params, pass separately
         if self.n_inputs > 1:
             return self.fn(*dfs[: self.n_inputs])

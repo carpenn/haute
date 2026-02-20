@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from haute.graph_utils import PipelineGraph
+
 
 def collect_artifacts(
-    pruned_graph: dict,
+    pruned_graph: PipelineGraph,
     input_node_ids: list[str],
     pipeline_dir: Path,
 ) -> dict[str, Path]:

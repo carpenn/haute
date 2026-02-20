@@ -28,6 +28,8 @@ import polars as pl
 
 from haute.executor import _build_node_fn
 from haute.graph_utils import (
+    GraphNode,
+    PipelineGraph,
     _prepare_graph,
     graph_fingerprint,
     resolve_orig_source_names,
@@ -178,7 +180,7 @@ class _TraceCache:
         self.eager_outputs: dict[str, pl.DataFrame] = {}
         self.order: list[str] = []
         self.parents_of: dict[str, list[str]] = {}
-        self.node_map: dict[str, dict] = {}
+        self.node_map: dict[str, GraphNode] = {}
         self.source_ids: set[str] = set()
 
     def invalidate(self) -> None:
@@ -195,7 +197,7 @@ _cache = _TraceCache()
 
 
 def execute_trace(
-    graph: dict,
+    graph: PipelineGraph,
     row_index: int = 0,
     target_node_id: str | None = None,
     column: str | None = None,

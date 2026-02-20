@@ -15,6 +15,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+from haute.graph_utils import GraphEdge, GraphNode, PipelineGraph
+
+__all__ = [
+    "parse_pipeline_file",
+    "parse_pipeline_source",
+]
+
 # ---------------------------------------------------------------------------
 # Node type inference
 # ---------------------------------------------------------------------------
@@ -450,7 +457,7 @@ def _build_node_config(
 def _build_edges(
     raw_nodes: list[dict],
     explicit_connect_pairs: list[tuple[str, str]],
-) -> list[dict]:
+) -> list[GraphEdge]:
     """Build edge dicts from explicit connect() calls and implicit param-name matching."""
     node_names = {n["func_name"] for n in raw_nodes}
     edges: list[dict] = []
@@ -488,7 +495,7 @@ def _build_edges(
     return edges
 
 
-def _build_rf_nodes(raw_nodes: list[dict], x_spacing: int = 300) -> list[dict]:
+def _build_rf_nodes(raw_nodes: list[dict], x_spacing: int = 300) -> list[GraphNode]:
     """Convert raw parsed nodes into React Flow node dicts."""
     return [
         {
@@ -847,13 +854,13 @@ def _parse_submodel_source(source: str, source_file: str = "") -> dict:
 
 
 def _merge_submodels(
-    parent_graph: dict,
-    submodel_graphs: dict[str, dict],
+    parent_graph: PipelineGraph,
+    submodel_graphs: dict[str, PipelineGraph],
     submodel_files: dict[str, str],
     parent_edges: list[tuple[str, str]],
     *,
     flatten: bool = False,
-) -> dict:
+) -> PipelineGraph:
     """Merge parsed submodels into the parent graph.
 
     When *flatten* is True, child nodes are inlined directly into the

@@ -14,6 +14,7 @@ from haute.deploy._pruner import (
     find_source_nodes,
     prune_for_deploy,
 )
+from haute.graph_utils import PipelineGraph
 
 
 @dataclass
@@ -259,8 +260,8 @@ class ResolvedDeploy:
     """
 
     config: DeployConfig
-    full_graph: dict
-    pruned_graph: dict
+    full_graph: PipelineGraph
+    pruned_graph: PipelineGraph
     input_node_ids: list[str]
     output_node_id: str
     artifacts: dict[str, Path]

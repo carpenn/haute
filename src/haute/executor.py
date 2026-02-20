@@ -21,6 +21,8 @@ from typing import Any
 import polars as pl
 
 from haute.graph_utils import (
+    GraphNode,
+    PipelineGraph,
     _execute_lazy,
     _Frame,
     _prepare_graph,
@@ -99,7 +101,7 @@ def _exec_user_code(
     return result
 
 
-def resolve_instance_node(node: dict, node_map: dict[str, dict]) -> dict:
+def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> GraphNode:
     """If *node* is an instance, return a merged node with the original's config.
 
     The returned node keeps the instance's own id, label, and position but
@@ -126,10 +128,10 @@ def resolve_instance_node(node: dict, node_map: dict[str, dict]) -> dict:
 
 
 def _build_node_fn(
-    node: dict,
+    node: GraphNode,
     source_names: list[str] | None = None,
     row_limit: int | None = None,
-    node_map: dict[str, dict] | None = None,
+    node_map: dict[str, GraphNode] | None = None,
     orig_source_names: list[str] | None = None,
 ) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
@@ -287,7 +289,7 @@ _preview_cache = _PreviewCache()
 
 
 def execute_graph(
-    graph: dict,
+    graph: PipelineGraph,
     target_node_id: str | None = None,
     row_limit: int | None = None,
     max_preview_rows: int = 100,
@@ -430,7 +432,7 @@ def execute_graph(
 
 
 def _eager_execute(
-    graph: dict,
+    graph: PipelineGraph,
     target_node_id: str | None,
     row_limit: int | None,
 ) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str], dict[str, float]]:
@@ -499,7 +501,7 @@ def _eager_execute(
     return eager_outputs, order, errors, timings
 
 
-def execute_sink(graph: dict, sink_node_id: str) -> dict:
+def execute_sink(graph: PipelineGraph, sink_node_id: str) -> dict:
     """Execute the pipeline up to a sink node and write its input to disk.
 
     This is called on-demand (not during normal run/preview).

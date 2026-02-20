@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.resources
 import json
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,52 +72,53 @@ def deploy_to_mlflow(
     # 1. Build deployment manifest
     manifest = _build_manifest(resolved)
 
-    # 2. Write manifest to a temp file
-    with tempfile.TemporaryDirectory() as tmpdir:
-        manifest_path = Path(tmpdir) / "deploy_manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2))
+    # 2. Write manifest to a persistent location (not a temp dir that gets deleted)
+    build_dir = config.pipeline_file.resolve().parent / ".haute_build"
+    build_dir.mkdir(exist_ok=True)
+    manifest_path = build_dir / "deploy_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
 
-        # 3. Build artifact dict for mlflow.pyfunc.log_model
-        artifacts: dict[str, str] = {
-            "deploy_manifest": str(manifest_path),
-        }
-        for artifact_name, artifact_path in resolved.artifacts.items():
-            artifacts[artifact_name] = str(artifact_path)
+    # 3. Build artifact dict for mlflow.pyfunc.log_model
+    artifacts: dict[str, str] = {
+        "deploy_manifest": str(manifest_path),
+    }
+    for artifact_name, artifact_path in resolved.artifacts.items():
+        artifacts[artifact_name] = str(artifact_path)
 
-        # 4. Build MLflow model signature
-        signature = _build_signature(resolved)
+    # 4. Build MLflow model signature
+    signature = _build_signature(resolved)
 
-        # 5. Set experiment - append endpoint suffix for staging isolation
-        experiment_name = config.databricks.experiment_name
-        if config.endpoint_suffix:
-            experiment_name = experiment_name + config.endpoint_suffix
-        _log(f"Setting experiment: {experiment_name}")
-        mlflow.set_experiment(experiment_name)
+    # 5. Set experiment - append endpoint suffix for staging isolation
+    experiment_name = config.databricks.experiment_name
+    if config.endpoint_suffix:
+        experiment_name = experiment_name + config.endpoint_suffix
+    _log(f"Setting experiment: {experiment_name}")
+    mlflow.set_experiment(experiment_name)
 
-        # 6. Log the model
-        _log("Logging model to MLflow (this may take a minute)...")
-        with mlflow.start_run(run_name=f"deploy-{model_name}"):
-            mlflow.log_dict(manifest, "deploy_manifest.json")
+    # 6. Log the model
+    _log("Logging model to MLflow (this may take a minute)...")
+    with mlflow.start_run(run_name=f"deploy-{model_name}"):
+        mlflow.log_dict(manifest, "deploy_manifest.json")
 
-            mlflow.pyfunc.log_model(
-                name="model",
-                python_model=_MODEL_CODE_PATH,
-                artifacts=artifacts,
-                signature=signature,
-                conda_env=_conda_env(resolved),
-                registered_model_name=uc_model_name,
-            )
+        mlflow.pyfunc.log_model(
+            name="model",
+            python_model=_MODEL_CODE_PATH,
+            artifacts=artifacts,
+            signature=signature,
+            conda_env=_conda_env(resolved),
+            registered_model_name=uc_model_name,
+        )
 
-        _log(f"Model logged. Fetching registered version for {uc_model_name}...")
-        # 7. Get the registered model version
-        client = mlflow.tracking.MlflowClient()
-        versions = client.search_model_versions(f"name='{uc_model_name}'")
-        if versions:
-            latest_version = max(v.version for v in versions)
-        else:
-            latest_version = 1
+    _log(f"Model logged. Fetching registered version for {uc_model_name}...")
+    # 7. Get the registered model version
+    client = mlflow.tracking.MlflowClient()
+    versions = client.search_model_versions(f"name='{uc_model_name}'")
+    if versions:
+        latest_version = max(v.version for v in versions)
+    else:
+        latest_version = 1
 
-        model_uri = f"models:/{uc_model_name}/{latest_version}"
+    model_uri = f"models:/{uc_model_name}/{latest_version}"
 
     _log(f"Model URI: {model_uri}")
 

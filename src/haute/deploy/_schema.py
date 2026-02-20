@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import polars as pl
 
+from haute.graph_utils import GraphNode, PipelineGraph
 
-def infer_input_schema(graph: dict, input_node_id: str) -> dict[str, str]:
+
+def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, str]:
     """Infer the input schema by reading the input source node's data file.
 
     Reads the first 0 rows to get column names + types without loading data.
@@ -46,7 +48,7 @@ def infer_input_schema(graph: dict, input_node_id: str) -> dict[str, str]:
 
 
 def infer_output_schema(
-    graph: dict,
+    graph: PipelineGraph,
     output_node_id: str,
     input_node_ids: list[str],
 ) -> dict[str, str]:
@@ -95,7 +97,7 @@ def infer_output_schema(
     return {col: str(result[col].dtype) for col in result.columns}
 
 
-def _find_node(graph: dict, node_id: str) -> dict:
+def _find_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find a node by ID in a graph."""
     for n in graph.get("nodes", []):
         if n["id"] == node_id:

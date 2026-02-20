@@ -213,6 +213,7 @@ class TestSavePipeline:
             "name": "saved_pipe",
             "description": "Test save",
             "graph": graph,
+            "source_file": "saved_pipe.py",
         })
         assert resp.status_code == 200
         data = resp.json()

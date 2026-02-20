@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from haute.graph_utils import ancestors
+from haute.graph_utils import PipelineGraph, ancestors
 
 
 def prune_for_deploy(
-    graph: dict,
+    graph: PipelineGraph,
     output_node_id: str,
-) -> tuple[dict, list[str], list[str]]:
+) -> tuple[PipelineGraph, list[str], list[str]]:
     """Prune a graph to only the ancestors of the output node.
 
     Args:
@@ -45,7 +45,7 @@ def prune_for_deploy(
     return pruned_graph, sorted(needed), removed_ids
 
 
-def find_output_node(graph: dict) -> str:
+def find_output_node(graph: PipelineGraph) -> str:
     """Find the single output node in a graph.
 
     Looks for nodes with ``nodeType="output"`` or ``config.output=True``.
@@ -71,7 +71,7 @@ def find_output_node(graph: dict) -> str:
     return candidates[0]
 
 
-def find_deploy_input_nodes(graph: dict) -> list[str]:
+def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
     """Find source nodes marked deploy_input=True in a graph.
 
     Returns:
@@ -86,7 +86,7 @@ def find_deploy_input_nodes(graph: dict) -> list[str]:
     return inputs
 
 
-def find_source_nodes(graph: dict) -> list[str]:
+def find_source_nodes(graph: PipelineGraph) -> list[str]:
     """Find all dataSource nodes in a graph (regardless of deploy_input flag)."""
     sources: list[str] = []
     for n in graph.get("nodes", []):

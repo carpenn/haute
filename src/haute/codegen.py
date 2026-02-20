@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from haute.graph_utils import _sanitize_func_name, build_instance_mapping, topo_sort_ids
+from haute.graph_utils import (
+    GraphEdge,
+    GraphNode,
+    PipelineGraph,
+    _sanitize_func_name,
+    build_instance_mapping,
+    topo_sort_ids,
+)
+
+__all__ = [
+    "graph_to_code",
+    "graph_to_code_multi",
+]
 
 
 def _build_params(source_names: list[str]) -> str:
@@ -140,7 +152,7 @@ def _wrap_user_code(code: str, source_names: list[str]) -> str:
         return f"    df = (\n{indented}\n    )\n    return df"
 
 
-def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
+def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str:
     """Generate code for a single node.
 
     source_names: sanitized function names of upstream nodes (used as param names).
@@ -284,7 +296,7 @@ def _node_to_code(node: dict, source_names: list[str] | None = None) -> str:
 
 
 def _instance_to_code(
-    node: dict,
+    node: GraphNode,
     original_func_name: str,
     source_names: list[str] | None = None,
     orig_source_names: list[str] | None = None,
@@ -323,7 +335,7 @@ def _instance_to_code(
     )
 
 
-def _topo_sort(nodes: list[dict], edges: list[dict]) -> list[dict]:
+def _topo_sort(nodes: list[GraphNode], edges: list[GraphEdge]) -> list[GraphNode]:
     """Sort nodes in topological order based on edges."""
     node_map = {n["id"]: n for n in nodes}
     order = topo_sort_ids(list(node_map.keys()), edges)
@@ -331,7 +343,7 @@ def _topo_sort(nodes: list[dict], edges: list[dict]) -> list[dict]:
 
 
 def graph_to_code(
-    graph: dict,
+    graph: PipelineGraph,
     pipeline_name: str = "main",
     description: str = "",
     preamble: str = "",
@@ -416,7 +428,7 @@ def graph_to_code(
     return "\n".join(lines)
 
 
-def _submodel_node_to_code(node: dict, source_names: list[str] | None = None) -> str:
+def _submodel_node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str:
     """Generate code for a single node inside a submodel file.
 
     Identical to ``_node_to_code`` but uses ``@submodel.node`` instead of
@@ -427,7 +439,7 @@ def _submodel_node_to_code(node: dict, source_names: list[str] | None = None) ->
 
 
 def graph_to_code_multi(
-    graph: dict,
+    graph: PipelineGraph,
     pipeline_name: str = "main",
     description: str = "",
     preamble: str = "",

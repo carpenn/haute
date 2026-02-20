@@ -15,11 +15,18 @@ from pathlib import PurePosixPath
 
 import polars as pl
 
-from haute.graph_utils import _execute_lazy, _Frame, _sanitize_func_name, load_external_object
+from haute.graph_utils import (
+    GraphNode,
+    PipelineGraph,
+    _execute_lazy,
+    _Frame,
+    _sanitize_func_name,
+    load_external_object,
+)
 
 
 def score_graph(
-    graph: dict,
+    graph: PipelineGraph,
     input_df: pl.DataFrame,
     input_node_ids: list[str],
     output_node_id: str,
@@ -49,7 +56,7 @@ def score_graph(
     remap = artifact_paths or {}
 
     def _build_scoring_fn(
-        node: dict,
+        node: GraphNode,
         source_names: list[str] | None = None,
     ) -> tuple[str, Callable, bool]:
         """Modified _build_node_fn that intercepts deploy_input sources."""

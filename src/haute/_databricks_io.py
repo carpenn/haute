@@ -14,12 +14,19 @@ Secrets are resolved from the environment with fallback:
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from pathlib import Path
 from typing import TypedDict
 
 import polars as pl
+
+# Fully-qualified Databricks table names: catalog.schema.table (each part is
+# alphanumeric + underscores/hyphens, optionally backtick-quoted).
+_TABLE_NAME_RE = re.compile(
+    r"^`?[\w-]+`?\.`?[\w-]+`?\.`?[\w-]+`?$"
+)
 
 CACHE_DIR = ".haute_cache"
 
@@ -181,6 +188,13 @@ def fetch_and_cache(
     from databricks import sql as dbsql
 
     host, token, resolved_http_path = _get_credentials(http_path)
+
+    # Validate table name to prevent SQL injection via GUI-editable config
+    if not _TABLE_NAME_RE.match(table):
+        raise ValueError(
+            f"Invalid table name: {table!r}. "
+            "Expected fully-qualified name like 'catalog.schema.table'."
+        )
 
     select_clause = query.strip().rstrip(";") if query else "SELECT *"
     sql_query = f"{select_clause} FROM {table}"  # noqa: S608

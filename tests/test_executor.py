@@ -2,52 +2,22 @@
 
 from __future__ import annotations
 
-import pytest
 import polars as pl
+import pytest
 
 from haute.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _source_node(nid: str, path: str) -> dict:
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "dataSource",
-            "config": {"path": path},
-        },
-    }
-
-
-def _transform_node(nid: str, code: str = "") -> dict:
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "transform",
-            "config": {"code": code},
-        },
-    }
-
-
-def _output_node(nid: str, fields: list[str] | None = None) -> dict:
-    return {
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "output",
-            "config": {"fields": fields or []},
-        },
-    }
-
-
-def _edge(src: str, tgt: str) -> dict:
-    return {"id": f"e_{src}_{tgt}", "source": src, "target": tgt}
-
+from tests.conftest import (
+    make_edge as _edge,
+)
+from tests.conftest import (
+    make_output_node as _output_node,
+)
+from tests.conftest import (
+    make_source_node as _source_node,
+)
+from tests.conftest import (
+    make_transform_node as _transform_node,
+)
 
 # ---------------------------------------------------------------------------
 # _exec_user_code
