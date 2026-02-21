@@ -2,7 +2,7 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
-import { NODE_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
+import { NODE_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
 
 const statusColors: Record<string, string> = {
@@ -33,6 +33,8 @@ function PipelineNode({ data, selected }: NodeProps) {
   const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH
   const switchMode = isLiveSwitch ? ((nodeData.config?.mode as string) || "live") : null
   const isInstance = !!(nodeData.config?.instanceOf)
+  const isSourceOnly = SOURCE_ONLY_TYPES.has(nodeType)
+  const isSinkOnly = SINK_ONLY_TYPES.has(nodeType)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
   const traceValue = nodeData._traceValue
@@ -62,7 +64,7 @@ function PipelineNode({ data, selected }: NodeProps) {
         style={{ backgroundColor: accent, opacity: selected ? 1 : 0.6, transition: "opacity 0.2s ease" }}
       />
 
-      <Handle type="target" position={Position.Left} />
+      {!isSourceOnly && <Handle type="target" position={Position.Left} />}
 
       <div className="pl-4 pr-3 py-2.5">
         <div className="flex items-center gap-2 mb-1">
@@ -135,7 +137,7 @@ function PipelineNode({ data, selected }: NodeProps) {
         )}
       </div>
 
-      <Handle type="source" position={Position.Right} />
+      {!isSinkOnly && <Handle type="source" position={Position.Right} />}
     </div>
   )
 }

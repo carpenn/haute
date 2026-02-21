@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { NODE_TYPES, SINGLETON_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../nodeTypes"
+import { NODE_TYPES, SINGLETON_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../nodeTypes"
 
 describe("NODE_TYPES", () => {
   it("contains all expected node types", () => {
@@ -36,6 +36,40 @@ describe("SINGLETON_TYPES", () => {
 
   it("has exactly 3 entries", () => {
     expect(SINGLETON_TYPES.size).toBe(3)
+  })
+})
+
+describe("SOURCE_ONLY_TYPES", () => {
+  it("contains dataSource and apiInput", () => {
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(true)
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(true)
+  })
+
+  it("does not contain non-source types", () => {
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.OUTPUT)).toBe(false)
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.DATA_SINK)).toBe(false)
+  })
+
+  it("has exactly 2 entries", () => {
+    expect(SOURCE_ONLY_TYPES.size).toBe(2)
+  })
+})
+
+describe("SINK_ONLY_TYPES", () => {
+  it("contains output and dataSink", () => {
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.OUTPUT)).toBe(true)
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.DATA_SINK)).toBe(true)
+  })
+
+  it("does not contain non-sink types", () => {
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(false)
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(false)
+  })
+
+  it("has exactly 2 entries", () => {
+    expect(SINK_ONLY_TYPES.size).toBe(2)
   })
 })
 

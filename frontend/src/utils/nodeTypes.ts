@@ -22,6 +22,16 @@ export const SINGLETON_TYPES = new Set<NodeTypeValue>([
   NODE_TYPES.API_INPUT, NODE_TYPES.OUTPUT, NODE_TYPES.LIVE_SWITCH,
 ])
 
+/** Nodes that only produce data — no input handle. */
+export const SOURCE_ONLY_TYPES = new Set<string>([
+  NODE_TYPES.DATA_SOURCE, NODE_TYPES.API_INPUT,
+])
+
+/** Nodes that only consume data — no output handle. */
+export const SINK_ONLY_TYPES = new Set<string>([
+  NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK,
+])
+
 export const nodeTypeIcons: Record<string, React.ElementType> = {
   [NODE_TYPES.API_INPUT]: Radio,
   [NODE_TYPES.DATA_SOURCE]: Database,
