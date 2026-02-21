@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from haute._logging import get_logger
-from haute.graph_utils import PipelineGraph
+from haute.graph_utils import NodeType, PipelineGraph
 
 logger = get_logger(component="deploy.bundler")
 
@@ -42,7 +42,7 @@ def collect_artifacts(
         node_type = node.data.nodeType
         config = node.data.config
 
-        if node_type == "externalFile":
+        if node_type == NodeType.EXTERNAL_FILE:
             raw_path = config.get("path", "")
             if not raw_path:
                 continue
@@ -51,7 +51,7 @@ def collect_artifacts(
             _check_exists(abs_path, nid, "externalFile")
             artifacts[artifact_name] = abs_path
 
-        elif node_type == "dataSource" and nid not in input_set:
+        elif node_type == NodeType.DATA_SOURCE and nid not in input_set:
             raw_path = config.get("path", "")
             if not raw_path:
                 continue

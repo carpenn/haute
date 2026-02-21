@@ -1,0 +1,175 @@
+import { useEffect } from "react"
+import type { Node, Edge } from "@xyflow/react"
+import type { ToastMessage } from "../components/Toast"
+
+interface KeyboardShortcutsParams {
+  handleSave: () => void
+  setNodes: (updater: Node[] | ((nds: Node[]) => Node[])) => void
+  setEdges: (updater: Edge[] | ((eds: Edge[]) => Edge[])) => void
+  undo: () => void
+  redo: () => void
+  fitView: (options?: { padding?: number }) => void
+  addToast: (type: ToastMessage["type"], text: string) => void
+  graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
+  clipboard: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
+  nodeIdCounter: React.MutableRefObject<number>
+  setSelectedNode: (node: Node | null) => void
+  setPreviewData: (data: null) => void
+  clearTrace: () => void
+  setShortcutsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  setSubmodelDialog: React.Dispatch<React.SetStateAction<{ nodeIds: string[] } | null>>
+  toggleSnapToGrid: () => void
+}
+
+export default function useKeyboardShortcuts({
+  handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+  graphRef, clipboard, nodeIdCounter,
+  setSelectedNode, setPreviewData, clearTrace,
+  setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+}: KeyboardShortcutsParams) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      const isTyping = tag === "INPUT" || tag === "TEXTAREA"
+      const mod = e.ctrlKey || e.metaKey
+
+      // Ctrl+S / Cmd+S → save
+      if (mod && e.key === "s") {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+
+      // Ctrl+Z → undo, Ctrl+Shift+Z → redo
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if (mod && e.key === "z" && e.shiftKey) {
+        e.preventDefault()
+        redo()
+        return
+      }
+      // Ctrl+Y → redo (Windows convention)
+      if (mod && e.key === "y") {
+        e.preventDefault()
+        redo()
+        return
+      }
+
+      // Ctrl+C → copy selected nodes
+      if (mod && e.key === "c" && !isTyping) {
+        const { nodes: currentNodes, edges: currentEdges } = graphRef.current
+        const selected = currentNodes.filter((n) => n.selected)
+        if (selected.length === 0) return
+        const selectedIds = new Set(selected.map((n) => n.id))
+        const internalEdges = currentEdges.filter(
+          (ed) => selectedIds.has(ed.source) && selectedIds.has(ed.target)
+        )
+        clipboard.current = { nodes: selected, edges: internalEdges }
+        addToast("info", `Copied ${selected.length} node${selected.length > 1 ? "s" : ""}`)
+        return
+      }
+
+      // Ctrl+V → paste copied nodes
+      if (mod && e.key === "v" && !isTyping) {
+        const { nodes: copiedNodes, edges: copiedEdges } = clipboard.current
+        if (copiedNodes.length === 0) return
+        e.preventDefault()
+        const idMap = new Map<string, string>()
+        const newNodes: Node[] = copiedNodes.map((n) => {
+          nodeIdCounter.current += 1
+          const newId = `${n.type}_${nodeIdCounter.current}`
+          idMap.set(n.id, newId)
+          return {
+            ...n,
+            id: newId,
+            position: { x: n.position.x + 60, y: n.position.y + 60 },
+            selected: true,
+            data: { ...n.data, label: `${n.data.label} copy` },
+          }
+        })
+        const newEdges: Edge[] = copiedEdges.flatMap((ed) => {
+          const newSource = idMap.get(ed.source)
+          const newTarget = idMap.get(ed.target)
+          if (!newSource || !newTarget) return []
+          return [{ ...ed, id: `e-${newSource}-${newTarget}`, source: newSource, target: newTarget }]
+        })
+        setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
+        setEdges((eds) => [...eds, ...newEdges])
+        addToast("info", `Pasted ${newNodes.length} node${newNodes.length > 1 ? "s" : ""}`)
+        return
+      }
+
+      // Ctrl+A → select all nodes
+      if (mod && e.key === "a" && !isTyping) {
+        e.preventDefault()
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
+        return
+      }
+
+      // Ctrl+1 → fit view
+      if (mod && e.key === "1") {
+        e.preventDefault()
+        fitView({ padding: 0.8 })
+        return
+      }
+
+      // Escape → clear trace
+      if (e.key === "Escape") {
+        clearTrace()
+        return
+      }
+
+      // ? → toggle keyboard shortcuts help (unless typing)
+      if (e.key === "?" && !isTyping) {
+        e.preventDefault()
+        setShortcutsOpen((prev) => !prev)
+        return
+      }
+
+      // Ctrl+G → group selected nodes into a submodel
+      if (mod && e.key === "g") {
+        e.preventDefault()
+        const { nodes: currentNodes } = graphRef.current
+        const selectedIds = currentNodes.filter((n) => n.selected).map((n) => n.id)
+        if (selectedIds.length >= 2) {
+          setSubmodelDialog({ nodeIds: selectedIds })
+        } else {
+          addToast("info", "Select at least 2 nodes to create a submodel (Ctrl+G)")
+        }
+        return
+      }
+
+      // G → toggle snap-to-grid (unless typing)
+      if (e.key === "g" && !isTyping && !mod) {
+        toggleSnapToGrid()
+        return
+      }
+
+      // Delete / Backspace → remove selected nodes and/or edges (unless typing)
+      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
+        const { nodes: currentNodes, edges: currentEdges } = graphRef.current
+        const selectedNodeIds = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id))
+        const selectedEdgeIds = new Set(currentEdges.filter((ed) => ed.selected).map((ed) => ed.id))
+        if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) return
+        if (selectedNodeIds.size > 0) {
+          setNodes(currentNodes.filter((n) => !selectedNodeIds.has(n.id)))
+          setEdges(currentEdges.filter((ed) => !selectedNodeIds.has(ed.source) && !selectedNodeIds.has(ed.target)))
+          setSelectedNode(null)
+          setPreviewData(null)
+        } else {
+          setEdges(currentEdges.filter((ed) => !selectedEdgeIds.has(ed.id)))
+        }
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [
+    handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+    graphRef, clipboard, nodeIdCounter,
+    setSelectedNode, setPreviewData, clearTrace,
+    setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+  ])
+}

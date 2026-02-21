@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, useMemo, type DragEvent } from "react"
+import { useEffect, useCallback, useState, useRef, type DragEvent } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -14,142 +14,74 @@ import {
   MarkerType,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import ELK from "elkjs/lib/elk.bundled.js"
 
 import PipelineNode from "./nodes/PipelineNode"
 import SubmodelNode from "./nodes/SubmodelNode"
 import SubmodelPortNode from "./nodes/SubmodelPortNode"
 import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
-import DataPreview, { type PreviewData } from "./panels/DataPreview"
+import DataPreview from "./panels/DataPreview"
 import TracePanel from "./panels/TracePanel"
 import ToastContainer, { type ToastMessage } from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
-import BreadcrumbBar, { type ViewLevel } from "./components/BreadcrumbBar"
+import BreadcrumbBar from "./components/BreadcrumbBar"
+import Toolbar from "./components/Toolbar"
+import SettingsModal from "./components/SettingsModal"
+import SubmodelDialog from "./components/SubmodelDialog"
+
 import useUndoRedo from "./hooks/useUndoRedo"
-import { PanelLeftOpen, Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
+import useWebSocketSync from "./hooks/useWebSocketSync"
+import usePipelineAPI from "./hooks/usePipelineAPI"
+import useTracing from "./hooks/useTracing"
+import useSubmodelNavigation from "./hooks/useSubmodelNavigation"
+import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts"
+
+import { NODE_TYPES } from "./utils/nodeTypes"
+import { getLayoutedElements } from "./utils/layout"
+import { nodeData } from "./types/node"
+import { PanelLeftOpen } from "lucide-react"
 
 // ---------------------------------------------------------------------------
-// Trace types (mirrors backend TraceResult)
+// ReactFlow node type → component registry
 // ---------------------------------------------------------------------------
-
-interface TraceSchemaDiff {
-  columns_added: string[]
-  columns_removed: string[]
-  columns_modified: string[]
-  columns_passed: string[]
-}
-
-export interface TraceStep {
-  node_id: string
-  node_name: string
-  node_type: string
-  schema_diff: TraceSchemaDiff
-  input_values: Record<string, unknown>
-  output_values: Record<string, unknown>
-  column_relevant: boolean
-  execution_ms: number
-}
-
-export interface TraceResult {
-  target_node_id: string
-  row_index: number
-  column: string | null
-  output_value: unknown
-  steps: TraceStep[]
-  row_id_column: string | null
-  row_id_value: unknown
-  total_nodes_in_pipeline: number
-  nodes_in_trace: number
-  execution_ms: number
-}
 
 const nodeTypes = {
-  apiInput: PipelineNode,
-  dataSource: PipelineNode,
-  transform: PipelineNode,
-  modelScore: PipelineNode,
-  ratingStep: PipelineNode,
-  banding: PipelineNode,
-  output: PipelineNode,
-  dataSink: PipelineNode,
-  externalFile: PipelineNode,
-  liveSwitch: PipelineNode,
-  submodel: SubmodelNode,
-  submodelPort: SubmodelPortNode,
+  [NODE_TYPES.API_INPUT]: PipelineNode,
+  [NODE_TYPES.DATA_SOURCE]: PipelineNode,
+  [NODE_TYPES.TRANSFORM]: PipelineNode,
+  [NODE_TYPES.MODEL_SCORE]: PipelineNode,
+  [NODE_TYPES.RATING_STEP]: PipelineNode,
+  [NODE_TYPES.BANDING]: PipelineNode,
+  [NODE_TYPES.OUTPUT]: PipelineNode,
+  [NODE_TYPES.DATA_SINK]: PipelineNode,
+  [NODE_TYPES.EXTERNAL_FILE]: PipelineNode,
+  [NODE_TYPES.LIVE_SWITCH]: PipelineNode,
+  [NODE_TYPES.SUBMODEL]: SubmodelNode,
+  [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
 
 const labelMap: Record<string, string> = {
-  apiInput: "API Input",
-  dataSource: "Data Source",
-  transform: "Polars",
-  modelScore: "Model Score",
-  ratingStep: "Rating Step",
-  banding: "Banding",
-  output: "Output",
-  dataSink: "Data Sink",
-  externalFile: "External File",
-  liveSwitch: "Live Switch",
-  submodel: "Submodel",
-  submodelPort: "Port",
+  [NODE_TYPES.API_INPUT]: "API Input",
+  [NODE_TYPES.DATA_SOURCE]: "Data Source",
+  [NODE_TYPES.TRANSFORM]: "Polars",
+  [NODE_TYPES.MODEL_SCORE]: "Model Score",
+  [NODE_TYPES.RATING_STEP]: "Rating Step",
+  [NODE_TYPES.BANDING]: "Banding",
+  [NODE_TYPES.OUTPUT]: "Output",
+  [NODE_TYPES.DATA_SINK]: "Data Sink",
+  [NODE_TYPES.EXTERNAL_FILE]: "External File",
+  [NODE_TYPES.LIVE_SWITCH]: "Live Switch",
+  [NODE_TYPES.SUBMODEL]: "Submodel",
+  [NODE_TYPES.SUBMODEL_PORT]: "Port",
 }
 
-function makePreviewData(
-  nodeId: string,
-  nodeLabel: string,
-  overrides: Partial<PreviewData> = {},
-): PreviewData {
-  return {
-    nodeId,
-    nodeLabel,
-    status: "ok",
-    row_count: 0,
-    column_count: 0,
-    columns: [],
-    preview: [],
-    error: null,
-    ...overrides,
-  }
-}
-
-const elk = new ELK()
-
-async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise<Node[]> {
-  const elkGraph = {
-    id: "root",
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
-      "elk.spacing.nodeNode": "60",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "120",
-      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-    },
-    children: nodes.map((n) => ({
-      id: n.id,
-      width: 240,
-      height: 70,
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      sources: [e.source],
-      targets: [e.target],
-    })),
-  }
-
-  const layout = await elk.layout(elkGraph)
-  const posMap = new Map<string, { x: number; y: number }>()
-  for (const child of layout.children || []) {
-    posMap.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 })
-  }
-
-  return nodes.map((n) => ({
-    ...n,
-    position: posMap.get(n.id) || n.position,
-  }))
-}
+// ---------------------------------------------------------------------------
+// FlowEditor — main orchestrator
+// ---------------------------------------------------------------------------
 
 function FlowEditor() {
+  // Core ReactFlow state with undo/redo
   const {
     nodes, edges,
     setNodes, setEdges,
@@ -157,37 +89,38 @@ function FlowEditor() {
     onNodesChange, onEdgesChange,
     undo, redo, canUndo, canRedo,
   } = useUndoRedo()
-  const [loading, setLoading] = useState(true)
+  const { screenToFlowPosition, fitView } = useReactFlow()
+
+  // UI state
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
-  const [previewData, setPreviewData] = useState<PreviewData | null>(null)
-  const [nodeStatuses, setNodeStatuses] = useState<Record<string, "ok" | "error" | "running">>({})
-  const [runStatus, setRunStatus] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
-  const [rowLimit, setRowLimit] = useState(1000)
-  const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
-  const [syncBanner, setSyncBanner] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [preamble, setPreamble] = useState("")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snapToGrid, setSnapToGrid] = useState(false)
-  const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
-  const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
-  const [viewStack, setViewStack] = useState<ViewLevel[]>([{ type: "pipeline", name: "main", file: "" }])
+  const [dirty, setDirty] = useState(false)
+  const [rowLimit, setRowLimit] = useState(1000)
+  const [toasts, setToasts] = useState<ToastMessage[]>([])
+  const [syncBanner, setSyncBanner] = useState<string | null>(null)
   const [submodelDialog, setSubmodelDialog] = useState<{ nodeIds: string[] } | null>(null)
-  const submodelsRef = useRef<Record<string, any>>({})
+
+  // Refs
+  const submodelsRef = useRef<Record<string, unknown>>({})
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
   const graphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
-  const parentGraphRef = useRef<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, any> } | null>(null)
+  const parentGraphRef = useRef<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, unknown> } | null>(null)
   const lastSavedRef = useRef<string>("")
   const preambleRef = useRef("")
   const pipelineNameRef = useRef("main")
   const sourceFileRef = useRef("")
   const nodeIdCounter = useRef(0)
   const toastCounter = useRef(0)
-  const { screenToFlowPosition, fitView } = useReactFlow()
 
+  // Keep graphRef in sync so callbacks never see stale state
+  graphRef.current = { nodes, edges }
+
+  // Toast helpers
   const addToast = useCallback((type: ToastMessage["type"], text: string) => {
     toastCounter.current += 1
     setToasts((prev) => [...prev, { id: String(toastCounter.current), type, text }])
@@ -197,10 +130,7 @@ function FlowEditor() {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
-  // Keep graphRef in sync so callbacks never see stale state
-  graphRef.current = { nodes, edges }
-
-  // Track dirty state (includes preamble so preamble-only changes are tracked)
+  // Track dirty state
   useEffect(() => {
     const snapshot = JSON.stringify({ nodes, edges, preamble })
     if (lastSavedRef.current && snapshot !== lastSavedRef.current) {
@@ -208,121 +138,79 @@ function FlowEditor() {
     }
   }, [nodes, edges, preamble])
 
-  // WebSocket connection for live code ↔ GUI sync
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const wsUrl = `${protocol}//${window.location.host}/ws/sync`
-    let ws: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  // ---------------------------------------------------------------------------
+  // Hooks
+  // ---------------------------------------------------------------------------
 
-    function connect() {
-      ws = new WebSocket(wsUrl)
+  useWebSocketSync({
+    setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
+    nodeIdCounter, setSyncBanner, addToast, fitView,
+  })
 
-      ws.onmessage = async (event) => {
-        try {
-          const msg = JSON.parse(event.data)
+  const {
+    loading, previewData, setPreviewData,
+    nodeStatuses, runStatus,
+    fetchPreview, handleRun, handleSave,
+  } = usePipelineAPI({
+    nodes, edges, selectedNode,
+    graphRef, parentGraphRef, submodelsRef,
+    rowLimit, setNodes,
+    setNodesRaw, setEdgesRaw, setPreamble,
+    preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
+    nodeIdCounter, setDirty, addToast,
+  })
 
-          if (msg.type === "graph_update" && msg.graph) {
-            const g = msg.graph
-            const newNodes = g.nodes || []
-            const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))
+  const {
+    traceResult, tracedCell,
+    handleCellClick, clearTrace,
+    nodesWithStatus, edgesWithTrace,
+  } = useTracing({
+    nodes, edges, selectedNode,
+    graphRef, parentGraphRef, submodelsRef,
+    nodeStatuses, rowLimit, addToast,
+  })
 
-            // If no saved positions, auto-layout with ELK
-            const hasPositions = newNodes.some(
-              (n: Node) => n.position && (n.position.x !== 0 || n.position.y !== 0)
-            )
+  const {
+    viewStack,
+    handleDrillIntoSubmodel, handleBreadcrumbNavigate,
+    handleCreateSubmodel, handleDissolveSubmodel,
+  } = useSubmodelNavigation({
+    graphRef, parentGraphRef, submodelsRef,
+    setNodesRaw, setEdgesRaw,
+    setSelectedNode, setPreviewData: (d: null) => setPreviewData(d),
+    preambleRef, sourceFileRef, pipelineNameRef,
+    fitView, addToast, setDirty,
+  })
 
-            if (hasPositions) {
-              setNodesRaw(newNodes)
-            } else {
-              const layouted = await getLayoutedElements(newNodes, newEdges)
-              setNodesRaw(layouted)
-            }
-            setEdgesRaw(newEdges)
-            if (g.preamble !== undefined) {
-              setPreamble(g.preamble || "")
-              preambleRef.current = g.preamble || ""
-            }
-            nodeIdCounter.current = newNodes.length
-            setSyncBanner(null)
-            addToast("info", "Pipeline updated from file")
-            setTimeout(() => fitView({ padding: 0.8 }), 100)
-          }
+  const toggleSnapToGrid = useCallback(() => {
+    setSnapToGrid((prev) => {
+      addToast("info", !prev ? "Snap to grid ON" : "Snap to grid OFF")
+      return !prev
+    })
+  }, [addToast])
 
-          if (msg.type === "parse_error") {
-            setSyncBanner(msg.error || "Parse error in pipeline file")
-          }
-        } catch (err) {
-          console.error("WebSocket message error:", err)
-        }
-      }
+  useKeyboardShortcuts({
+    handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+    graphRef, clipboard, nodeIdCounter,
+    setSelectedNode, setPreviewData: (d: null) => setPreviewData(d),
+    clearTrace, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+  })
 
-      ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 3000)
-      }
-
-      ws.onerror = () => {
-        ws?.close()
-      }
-    }
-
-    connect()
-
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
-    }
-  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
-
-  useEffect(() => {
-    fetch("/api/pipeline")
-      .then((res) => {
-        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
-        if (res.status === 404) return { nodes: [], edges: [] }
-        return res.json()
-      })
-      .then((data) => {
-        setNodesRaw(data.nodes || [])
-        setEdgesRaw((data.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
-        if (data.preamble !== undefined) {
-          setPreamble(data.preamble || "")
-          preambleRef.current = data.preamble || ""
-        }
-        if (data.pipeline_name) {
-          pipelineNameRef.current = data.pipeline_name
-        }
-        if (data.source_file) {
-          sourceFileRef.current = data.source_file
-        }
-        if (data.submodels) {
-          submodelsRef.current = data.submodels
-        }
-        nodeIdCounter.current = (data.nodes || []).length
-        lastSavedRef.current = JSON.stringify({ nodes: data.nodes || [], edges: data.edges || [], preamble: data.preamble || "" })
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error("Failed to load pipeline:", err)
-        // Start with blank canvas even on error
-        setLoading(false)
-      })
-  }, [setNodesRaw, setEdgesRaw])
+  // ---------------------------------------------------------------------------
+  // Node interaction handlers
+  // ---------------------------------------------------------------------------
 
   const onConnect: OnConnect = useCallback(
     (params) => {
-      // Prevent self-loops
       if (params.source === params.target) return
-      // Prevent duplicate edges
       const { edges: currentEdges, nodes: currentNodes } = graphRef.current
       const exists = currentEdges.some(
         (e) => e.source === params.source && e.target === params.target
       )
       if (exists) return
 
-      // For new connections to a submodel, strip targetHandle so it doesn't
-      // auto-wire to an existing internal port. The user wires it inside.
       const targetNode = currentNodes.find((n) => n.id === params.target)
-      if (targetNode && (targetNode.data as Record<string, unknown>).nodeType === "submodel" && params.targetHandle) {
+      if (targetNode && nodeData(targetNode).nodeType === NODE_TYPES.SUBMODEL && params.targetHandle) {
         setEdges((eds) => addEdge({ ...params, targetHandle: null }, eds))
         return
       }
@@ -331,46 +219,6 @@ function FlowEditor() {
     },
     [setEdges],
   )
-
-  const clearTrace = useCallback(() => {
-    setTraceResult(null)
-    setTracedCell(null)
-  }, [])
-
-  const fetchPreview = useCallback((node: Node) => {
-    setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "loading" }))
-    // When inside a submodel, send the full parent graph so the backend can
-    // flatten it and execute upstream nodes that live outside the submodel.
-    const graph = parentGraphRef.current
-      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
-      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
-    fetch("/api/pipeline/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, nodeId: node.id, rowLimit }),
-    })
-      .then((r) => r.json())
-      .then((result) => {
-        setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), {
-          status: result.status || "ok",
-          row_count: result.row_count || 0,
-          column_count: result.column_count || 0,
-          columns: result.columns || [],
-          preview: result.preview || [],
-          error: result.error || null,
-          timing_ms: result.timing_ms || 0,
-          timings: result.timings || [],
-          schema_warnings: result.schema_warnings || [],
-        }))
-        // Cache columns + schema warnings on node data for instant access
-        if (result.columns) {
-          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _schemaWarnings: result.schema_warnings || [] } } : n))
-        }
-      })
-      .catch((err) => {
-        setPreviewData(makePreviewData(node.id, String(node.data.label || node.id), { status: "error", error: err.message }))
-      })
-  }, [rowLimit])
 
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
     if (selectedNodes.length === 1) {
@@ -383,93 +231,15 @@ function FlowEditor() {
         return node
       })
     } else {
-      // Multi-select or deselect — clear panel and don't fetch preview
       setSelectedNode(null)
       setPreviewData(null)
       clearTrace()
     }
-  }, [fetchPreview, clearTrace])
-
-  const handleRun = useCallback(() => {
-    if (nodes.length === 0) return
-    setRunStatus("Running...")
-    // Mark all nodes as running
-    const running: Record<string, "running"> = {}
-    nodes.forEach((n) => { running[n.id] = "running" })
-    setNodeStatuses(running)
-
-    fetch("/api/pipeline/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: { nodes, edges } }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const statuses: Record<string, "ok" | "error"> = {}
-        const results = data.results || {}
-        for (const [nodeId, result] of Object.entries(results) as [string, { status: string }][]) {
-          statuses[nodeId] = result.status === "ok" ? "ok" : "error"
-        }
-        setNodeStatuses(statuses)
-        setRunStatus("Done")
-        setTimeout(() => setRunStatus(null), 3000)
-
-        // Cache columns on all nodes from run results
-        setNodes((nds) => nds.map((n) => {
-          const r = results[n.id]
-          return r?.columns ? { ...n, data: { ...n.data, _columns: r.columns } } : n
-        }))
-
-        // If a node is selected, update its preview with run results
-        if (selectedNode && results[selectedNode.id]) {
-          const r = results[selectedNode.id]
-          setPreviewData(makePreviewData(selectedNode.id, String(selectedNode.data.label || selectedNode.id), {
-            status: r.status || "ok",
-            row_count: r.row_count || 0,
-            column_count: r.column_count || 0,
-            columns: r.columns || [],
-            preview: r.preview || [],
-            error: r.error || null,
-          }))
-        }
-      })
-      .catch((err) => {
-        setRunStatus("Error")
-        setNodeStatuses({})
-        console.error("Run failed:", err)
-        setTimeout(() => setRunStatus(null), 3000)
-      })
-  }, [nodes, edges, selectedNode])
-
-  const handleSave = useCallback(() => {
-    const { nodes: n, edges: e } = graphRef.current
-    fetch("/api/pipeline/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: pipelineNameRef.current,
-        description: "",
-        graph: { nodes: n, edges: e, submodels: submodelsRef.current },
-        preamble: preambleRef.current,
-        source_file: sourceFileRef.current,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        lastSavedRef.current = JSON.stringify({ nodes: n, edges: e, preamble: preambleRef.current })
-        setDirty(false)
-        addToast("success", `Saved → ${data.file}`)
-      })
-      .catch(() => {
-        addToast("error", "Failed to save pipeline")
-      })
-  }, [addToast])
+  }, [fetchPreview, clearTrace, setPreviewData])
 
   const onUpdateNode = useCallback(
     (id: string, data: Record<string, unknown>) => {
-      setNodes((nds) =>
-        nds.map((n) => (n.id === id ? { ...n, data } : n))
-      )
+      setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data } : n)))
       setSelectedNode((prev) => (prev && prev.id === id ? { ...prev, data } : prev))
     },
     [setNodes],
@@ -479,198 +249,13 @@ function FlowEditor() {
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))
   }, [setEdges])
 
-  // ---------------------------------------------------------------------------
-  // Trace: click a cell in DataPreview → fire trace API → highlight graph
-  // ---------------------------------------------------------------------------
-
-  const handleCellClick = useCallback((rowIndex: number, column: string) => {
-    if (!selectedNode) return
-    const graph = parentGraphRef.current
-      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
-      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
-    setTracedCell({ rowIndex, column })
-    fetch("/api/pipeline/trace", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        graph,
-        rowIndex: rowIndex,
-        targetNodeId: selectedNode.id,
-        column,
-        rowLimit,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.status === "ok" && data.trace) {
-          setTraceResult(data.trace as TraceResult)
-        } else {
-          addToast("error", data.error || "Trace failed")
-          clearTrace()
-        }
-      })
-      .catch((err) => {
-        addToast("error", `Trace error: ${err.message}`)
-        clearTrace()
-      })
-  }, [selectedNode, addToast, clearTrace, rowLimit])
-
-  const toggleSnapToGrid = useCallback(() => {
-    setSnapToGrid((prev) => {
-      addToast("info", !prev ? "Snap to grid ON" : "Snap to grid OFF")
-      return !prev
-    })
-  }, [addToast])
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      const isTyping = tag === "INPUT" || tag === "TEXTAREA"
-      const mod = e.ctrlKey || e.metaKey
-
-      // Ctrl+S / Cmd+S → save
-      if (mod && e.key === "s") {
-        e.preventDefault()
-        handleSave()
-        return
-      }
-
-      // Ctrl+Z → undo, Ctrl+Shift+Z → redo
-      if (mod && e.key === "z" && !e.shiftKey) {
-        e.preventDefault()
-        undo()
-        return
-      }
-      if (mod && e.key === "z" && e.shiftKey) {
-        e.preventDefault()
-        redo()
-        return
-      }
-      // Ctrl+Y → redo (Windows convention)
-      if (mod && e.key === "y") {
-        e.preventDefault()
-        redo()
-        return
-      }
-
-      // Ctrl+C → copy selected nodes
-      if (mod && e.key === "c" && !isTyping) {
-        const { nodes: currentNodes, edges: currentEdges } = graphRef.current
-        const selected = currentNodes.filter((n) => n.selected)
-        if (selected.length === 0) return
-        const selectedIds = new Set(selected.map((n) => n.id))
-        const internalEdges = currentEdges.filter(
-          (ed) => selectedIds.has(ed.source) && selectedIds.has(ed.target)
-        )
-        clipboard.current = { nodes: selected, edges: internalEdges }
-        addToast("info", `Copied ${selected.length} node${selected.length > 1 ? "s" : ""}`)
-        return
-      }
-
-      // Ctrl+V → paste copied nodes
-      if (mod && e.key === "v" && !isTyping) {
-        const { nodes: copiedNodes, edges: copiedEdges } = clipboard.current
-        if (copiedNodes.length === 0) return
-        e.preventDefault()
-        const idMap = new Map<string, string>()
-        const newNodes: Node[] = copiedNodes.map((n) => {
-          nodeIdCounter.current += 1
-          const newId = `${n.type}_${nodeIdCounter.current}`
-          idMap.set(n.id, newId)
-          return {
-            ...n,
-            id: newId,
-            position: { x: n.position.x + 60, y: n.position.y + 60 },
-            selected: true,
-            data: { ...n.data, label: `${n.data.label} copy` },
-          }
-        })
-        const newEdges: Edge[] = copiedEdges.flatMap((ed) => {
-          const newSource = idMap.get(ed.source)
-          const newTarget = idMap.get(ed.target)
-          if (!newSource || !newTarget) return []
-          return [{ ...ed, id: `e-${newSource}-${newTarget}`, source: newSource, target: newTarget }]
-        })
-        setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
-        setEdges((eds) => [...eds, ...newEdges])
-        addToast("info", `Pasted ${newNodes.length} node${newNodes.length > 1 ? "s" : ""}`)
-        return
-      }
-
-      // Ctrl+A → select all nodes
-      if (mod && e.key === "a" && !isTyping) {
-        e.preventDefault()
-        setNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
-        return
-      }
-
-      // Ctrl+1 → fit view
-      if (mod && e.key === "1") {
-        e.preventDefault()
-        fitView({ padding: 0.8 })
-        return
-      }
-
-      // Escape → clear trace
-      if (e.key === "Escape") {
-        clearTrace()
-        return
-      }
-
-      // ? → toggle keyboard shortcuts help (unless typing)
-      if (e.key === "?" && !isTyping) {
-        e.preventDefault()
-        setShortcutsOpen((prev) => !prev)
-        return
-      }
-
-      // Ctrl+G → group selected nodes into a submodel
-      if (mod && e.key === "g") {
-        e.preventDefault()
-        const { nodes: currentNodes } = graphRef.current
-        const selectedIds = currentNodes.filter((n) => n.selected).map((n) => n.id)
-        if (selectedIds.length >= 2) {
-          setSubmodelDialog({ nodeIds: selectedIds })
-        } else {
-          addToast("info", "Select at least 2 nodes to create a submodel (Ctrl+G)")
-        }
-        return
-      }
-
-      // G → toggle snap-to-grid (unless typing)
-      if (e.key === "g" && !isTyping && !mod) {
-        toggleSnapToGrid()
-        return
-      }
-
-      // Delete / Backspace → remove selected nodes and/or edges (unless typing)
-      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
-        const { nodes: currentNodes, edges: currentEdges } = graphRef.current
-        const selectedNodeIds = new Set(currentNodes.filter((n) => n.selected).map((n) => n.id))
-        const selectedEdgeIds = new Set(currentEdges.filter((ed) => ed.selected).map((ed) => ed.id))
-        if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) return
-        if (selectedNodeIds.size > 0) {
-          setNodes(currentNodes.filter((n) => !selectedNodeIds.has(n.id)))
-          setEdges(currentEdges.filter((ed) => !selectedNodeIds.has(ed.source) && !selectedNodeIds.has(ed.target)))
-          setSelectedNode(null)
-          setPreviewData(null)
-        } else {
-          setEdges(currentEdges.filter((ed) => !selectedEdgeIds.has(ed.id)))
-        }
-      }
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [handleSave, setNodes, setEdges, undo, redo, fitView, addToast])
-
   const handleDeleteNode = useCallback((id: string) => {
     const { nodes: n, edges: e } = graphRef.current
     setNodes(n.filter((node) => node.id !== id))
     setEdges(e.filter((edge) => edge.source !== id && edge.target !== id))
     setSelectedNode((prev) => (prev?.id === id ? null : prev))
     setPreviewData((prev) => (prev?.nodeId === id ? null : prev))
-  }, [setNodes, setEdges])
+  }, [setNodes, setEdges, setPreviewData])
 
   const handleDuplicateNode = useCallback((id: string) => {
     const { nodes: n } = graphRef.current
@@ -694,8 +279,8 @@ function FlowEditor() {
     const original = n.find((node) => node.id === id)
     if (!original) return
     nodeIdCounter.current += 1
-    const origData = original.data as Record<string, unknown>
-    const origNodeType = origData.nodeType as string || "transform"
+    const origData = nodeData(original)
+    const origNodeType = origData.nodeType || NODE_TYPES.TRANSFORM
     const newId = `${origNodeType}_${nodeIdCounter.current}`
     const newNode: Node = {
       id: newId,
@@ -733,327 +318,9 @@ function FlowEditor() {
     addToast("info", "Auto-layout applied")
   }, [setNodes, fitView, addToast])
 
-  // ── Submodel handlers ─────────────────────────────────────────────
-
-  const handleCreateSubmodel = useCallback(async (name: string, nodeIds: string[]) => {
-    try {
-      const graph = { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
-      const resp = await fetch("/api/submodel/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          node_ids: nodeIds,
-          graph,
-          preamble: preambleRef.current,
-          source_file: sourceFileRef.current,
-          pipeline_name: pipelineNameRef.current,
-        }),
-      })
-      if (!resp.ok) {
-        const err = await resp.json()
-        addToast("error", err.detail || "Failed to create submodel")
-        return
-      }
-      const data = await resp.json()
-      const newGraph = data.graph
-      if (newGraph) {
-        setNodesRaw(newGraph.nodes || [])
-        setEdgesRaw((newGraph.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
-        submodelsRef.current = newGraph.submodels || {}
-        addToast("success", `Submodel "${name}" created`)
-        setDirty(false)
-        setTimeout(() => fitView({ padding: 0.8 }), 100)
-      }
-    } catch (err: unknown) {
-      addToast("error", `Create submodel failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-    setSubmodelDialog(null)
-  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
-
-  const handleDrillIntoSubmodel = useCallback(async (nodeId: string) => {
-    // Extract submodel name from node id (submodel__<name>)
-    const smName = nodeId.replace("submodel__", "")
-    try {
-      const resp = await fetch(`/api/submodel/${encodeURIComponent(smName)}`)
-      if (!resp.ok) {
-        addToast("error", `Could not load submodel "${smName}"`)
-        return
-      }
-      const data = await resp.json()
-      const smGraph = data.graph
-      if (smGraph) {
-        // Save current graph state before drilling in
-        const parentNodes = [...graphRef.current.nodes]
-        const parentEdges = [...graphRef.current.edges]
-        parentGraphRef.current = { nodes: parentNodes, edges: parentEdges, submodels: { ...submodelsRef.current } }
-        // Store on the viewStack for restoring later
-        setViewStack((prev) => {
-          // Tag the current level with its graph
-          const updated = [...prev]
-          if (updated.length > 0) {
-            updated[updated.length - 1] = { ...updated[updated.length - 1], _savedNodes: parentNodes, _savedEdges: parentEdges }
-          }
-          return [...updated, { type: "submodel" as const, name: smName, file: `modules/${smName}.py` }]
-        })
-        const newNodes: Node[] = smGraph.nodes || []
-        const newEdges: Edge[] = (smGraph.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))
-
-        // Build input/output port nodes from parent cross-boundary edges
-        const smNodeId = `submodel__${smName}`
-        const parentNodeMap = new Map(parentNodes.map((n: Node) => [n.id, n]))
-        const childIds = new Set(newNodes.map((n: Node) => n.id))
-
-        // Input ports: parent edges targeting this submodel node
-        const inputPortEdges = parentEdges.filter(
-          (e: Edge) => e.target === smNodeId
-        )
-        // Group by external source so each source gets one port node
-        const inputsBySource = new Map<string, string[]>()
-        for (const e of inputPortEdges) {
-          const handle = (e as Record<string, unknown>).targetHandle as string | undefined
-          const childId = handle ? handle.replace("in__", "") : "__unconnected__"
-          const targets = inputsBySource.get(e.source) || []
-          targets.push(childId)
-          inputsBySource.set(e.source, targets)
-        }
-        for (const [srcId, targetChildIds] of inputsBySource) {
-          const srcNode = parentNodeMap.get(srcId)
-          const label = srcNode ? String((srcNode.data as Record<string, unknown>).label || srcId) : srcId
-          const portId = `port_in__${srcId}`
-          newNodes.push({
-            id: portId,
-            type: "submodelPort",
-            position: { x: 0, y: 0 },
-            data: { label, portDirection: "input", portName: label },
-          } as Node)
-          // Only add edges to internal child nodes that exist;
-          // new unconnected ports appear without edges so the user can wire them
-          for (const childId of [...new Set(targetChildIds)]) {
-            if (!childIds.has(childId)) continue
-            newEdges.push({
-              id: `e_${portId}_${childId}`,
-              source: portId,
-              target: childId,
-              type: "default",
-              animated: false,
-              style: { strokeDasharray: "6 3", opacity: 0.5 },
-            } as Edge)
-          }
-        }
-
-        // Output ports: parent edges sourced from this submodel node
-        const outputPortEdges = parentEdges.filter(
-          (e: Edge) => e.source === smNodeId && (e as Record<string, unknown>).sourceHandle
-        )
-        const outputsByTarget = new Map<string, string[]>()
-        for (const e of outputPortEdges) {
-          const childId = ((e as Record<string, unknown>).sourceHandle as string).replace("out__", "")
-          if (!childIds.has(childId)) continue
-          const sources = outputsByTarget.get(e.target) || []
-          sources.push(childId)
-          outputsByTarget.set(e.target, sources)
-        }
-        for (const [tgtId, sourceChildIds] of outputsByTarget) {
-          const tgtNode = parentNodeMap.get(tgtId)
-          const label = tgtNode ? String((tgtNode.data as Record<string, unknown>).label || tgtId) : tgtId
-          const portId = `port_out__${tgtId}`
-          newNodes.push({
-            id: portId,
-            type: "submodelPort",
-            position: { x: 0, y: 0 },
-            data: { label, portDirection: "output", portName: label },
-          } as Node)
-          for (const childId of [...new Set(sourceChildIds)]) {
-            newEdges.push({
-              id: `e_${childId}_${portId}`,
-              source: childId,
-              target: portId,
-              type: "default",
-              animated: false,
-              style: { strokeDasharray: "6 3", opacity: 0.5 },
-            } as Edge)
-          }
-        }
-
-        // Layout all nodes (internal + port nodes) together
-        const layouted = await getLayoutedElements(newNodes, newEdges)
-        setNodesRaw(layouted)
-        setEdgesRaw(newEdges)
-        setSelectedNode(null)
-        setPreviewData(null)
-        setTimeout(() => fitView({ padding: 0.8 }), 100)
-      }
-    } catch (err: unknown) {
-      addToast("error", `Drill-down failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
-
-  const handleBreadcrumbNavigate = useCallback((depth: number) => {
-    setViewStack((prev) => {
-      if (depth >= prev.length - 1) return prev // already at this level
-      const target = prev[depth]
-      if (target._savedNodes && target._savedEdges) {
-        setNodesRaw(target._savedNodes)
-        setEdgesRaw(target._savedEdges.map((e: Edge) => ({ ...e, type: "default", animated: false })))
-        setSelectedNode(null)
-        setPreviewData(null)
-        setTimeout(() => fitView({ padding: 0.8 }), 100)
-      }
-      // Clear parent graph ref when returning to root
-      if (depth === 0) parentGraphRef.current = null
-      return prev.slice(0, depth + 1)
-    })
-  }, [setNodesRaw, setEdgesRaw, fitView])
-
-  const handleDissolveSubmodel = useCallback(async (smName: string) => {
-    try {
-      const graph = { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
-      const resp = await fetch("/api/submodel/dissolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          submodel_name: smName,
-          graph,
-          preamble: preambleRef.current,
-          source_file: sourceFileRef.current,
-          pipeline_name: pipelineNameRef.current,
-        }),
-      })
-      if (!resp.ok) {
-        const err = await resp.json()
-        addToast("error", err.detail || "Failed to dissolve submodel")
-        return
-      }
-      const data = await resp.json()
-      const flat = data.graph
-      if (flat) {
-        setNodesRaw(flat.nodes || [])
-        setEdgesRaw((flat.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false })))
-        submodelsRef.current = {}
-        addToast("success", `Submodel "${smName}" dissolved`)
-        setDirty(false)
-        setTimeout(() => fitView({ padding: 0.8 }), 100)
-      }
-    } catch (err: unknown) {
-      addToast("error", `Dissolve failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }, [setNodesRaw, setEdgesRaw, fitView, addToast])
-
-  // Map child node IDs → submodel placeholder node IDs so trace results
-  // (which use flattened child IDs) can highlight submodel nodes on the canvas.
-  // Built from visible canvas nodes which always have config.childNodeIds.
-  const childToSubmodelId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const n of nodes) {
-      const d = n.data as Record<string, unknown>
-      if (d.nodeType === "submodel") {
-        const cfg = (d.config as Record<string, unknown>) || {}
-        const childIds: string[] = (cfg.childNodeIds as string[]) || []
-        for (const cid of childIds) {
-          map.set(cid, n.id)
-        }
-      }
-    }
-    return map
-  }, [nodes])
-
-  // Map external parent node IDs → port node IDs so that trace steps for
-  // nodes outside the submodel resolve to the visible port nodes on canvas.
-  const parentToPortId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const n of nodes) {
-      if (n.id.startsWith("port_in__")) {
-        map.set(n.id.replace("port_in__", ""), n.id)
-      } else if (n.id.startsWith("port_out__")) {
-        map.set(n.id.replace("port_out__", ""), n.id)
-      }
-    }
-    return map
-  }, [nodes])
-
-  // Resolve a trace node ID to the visible canvas node ID
-  const resolveTraceId = useCallback((id: string) => childToSubmodelId.get(id) || parentToPortId.get(id) || id, [childToSubmodelId, parentToPortId])
-
-  // All node IDs in the trace path (used for opacity + edge styling)
-  const allTraceNodeIds = useMemo(() => {
-    if (!traceResult) return new Set<string>()
-    const ids = new Set<string>()
-    for (const s of traceResult.steps) {
-      ids.add(resolveTraceId(s.node_id))
-    }
-    return ids
-  }, [traceResult, resolveTraceId])
-
-  // Derive per-node trace styling + value badges from traceResult
-  const { traceValueMap, relevantNodeIds } = useMemo(() => {
-    if (!traceResult) return { traceValueMap: new Map<string, unknown>(), relevantNodeIds: new Set<string>() }
-    const valMap = new Map<string, unknown>()
-    const relIds = new Set<string>()
-    for (const s of traceResult.steps) {
-      if (!s.column_relevant) continue
-      const visibleId = resolveTraceId(s.node_id)
-      relIds.add(visibleId)
-      if (traceResult.column && s.output_values[traceResult.column] !== undefined) {
-        valMap.set(visibleId, s.output_values[traceResult.column])
-      } else {
-        const k = s.schema_diff.columns_added[0] || s.schema_diff.columns_modified[0]
-        if (k) valMap.set(visibleId, s.output_values[k])
-      }
-    }
-    return { traceValueMap: valMap, relevantNodeIds: relIds }
-  }, [traceResult, resolveTraceId])
-
-  // Memoize nodes with status + trace styling (all derived from traceResult)
-  const nodesWithStatus = useMemo(() => {
-    const hasTrace = traceResult !== null
-    return nodes.map((n) => {
-      const status = nodeStatuses[n.id]
-      const inTrace = allTraceNodeIds.has(n.id)
-      const dimmed = hasTrace && !inTrace
-      return {
-        ...n,
-        data: {
-          ...n.data,
-          _status: status,
-          _traceActive: hasTrace && relevantNodeIds.has(n.id),
-          _traceDimmed: dimmed,
-          _traceValue: traceValueMap.get(n.id),
-        },
-        style: {
-          ...(n.style || {}),
-          opacity: dimmed ? 0.3 : 1,
-          transition: 'opacity 0.2s ease',
-        },
-      }
-    })
-  }, [nodes, nodeStatuses, traceResult, allTraceNodeIds, relevantNodeIds, traceValueMap])
-
-  // Edges styled for trace: bright along entire trace path, dimmed otherwise
-  const edgesWithTrace = useMemo(() => {
-    if (!traceResult) return edges
-    return edges.map((e) => {
-      const srcInTrace = allTraceNodeIds.has(e.source)
-      const tgtInTrace = allTraceNodeIds.has(e.target)
-      if (srcInTrace && tgtInTrace) {
-        return {
-          ...e,
-          style: { stroke: 'var(--accent)', strokeWidth: 2.5, filter: 'drop-shadow(0 0 4px var(--accent))' },
-          markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'var(--accent)' },
-          animated: true,
-        }
-      }
-      return {
-        ...e,
-        style: { stroke: 'rgba(255,255,255,.05)', strokeWidth: 1 },
-        markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.05)' },
-      }
-    })
-  }, [edges, traceResult, allTraceNodeIds])
-
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault()
-    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label), isSubmodel: (node.data as Record<string, unknown>).nodeType === "submodel" })
+    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label), isSubmodel: nodeData(node).nodeType === NODE_TYPES.SUBMODEL })
   }, [])
 
   const onDragOver = useCallback((event: DragEvent) => {
@@ -1064,7 +331,6 @@ function FlowEditor() {
   const onDrop = useCallback(
     (event: DragEvent) => {
       event.preventDefault()
-
       const type = event.dataTransfer.getData("application/reactflow-type")
       if (!type) return
 
@@ -1073,11 +339,7 @@ function FlowEditor() {
         config = JSON.parse(event.dataTransfer.getData("application/reactflow-config") || "{}")
       } catch { /* ignore */ }
 
-      const position = screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      })
-
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
       nodeIdCounter.current += 1
       const id = `${type}_${nodeIdCounter.current}`
 
@@ -1102,6 +364,10 @@ function FlowEditor() {
     [screenToFlowPosition, setNodes],
   )
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   if (loading) {
     return (
       <div className="h-full w-full flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
@@ -1112,119 +378,25 @@ function FlowEditor() {
 
   return (
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      <header className="h-11 flex items-center px-4 shrink-0" style={{ background: 'var(--chrome)', borderBottom: '1px solid var(--chrome-border)' }}>
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Haute</h1>
-          <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>v0.1.0</span>
-          {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-dot" title="Unsaved changes" />}
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="text-[12px] mr-2" style={{ color: 'var(--text-muted)' }}>
-            {nodes.length} nodes · {edges.length} edges
-          </span>
-          {/* Undo / Redo */}
-          <button
-            onClick={undo}
-            disabled={!canUndo}
-            className="p-1.5 rounded-md transition-colors disabled:opacity-20"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo2 size={14} />
-          </button>
-          <button
-            onClick={redo}
-            disabled={!canRedo}
-            className="p-1.5 rounded-md transition-colors disabled:opacity-20"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            title="Redo (Ctrl+Shift+Z)"
-          >
-            <Redo2 size={14} />
-          </button>
-          <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
-          {/* Snap to grid */}
-          <button
-            onClick={toggleSnapToGrid}
-            className="p-1.5 rounded-md transition-colors"
-            style={{ color: snapToGrid ? 'var(--accent)' : 'var(--text-secondary)', background: snapToGrid ? 'var(--accent-soft)' : 'transparent' }}
-            onMouseEnter={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-            onMouseLeave={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
-            title="Toggle snap-to-grid (G)"
-          >
-            <Grid3X3 size={14} />
-          </button>
-          {/* Keyboard shortcuts */}
-          <button
-            onClick={() => setShortcutsOpen(true)}
-            className="p-1.5 rounded-md transition-colors"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            title="Keyboard shortcuts (?)"
-          >
-            <Keyboard size={14} />
-          </button>
-          <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
-          <div className="flex items-center gap-1 mr-1" title="Row limit for preview (0 = no limit)">
-            <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
-            <input
-              type="number"
-              min={0}
-              step={100}
-              value={rowLimit}
-              onChange={(e) => setRowLimit(Math.max(0, parseInt(e.target.value) || 0))}
-              className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
-              style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
-            />
-          </div>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            title="Pipeline settings (imports, helpers)"
-          >
-            <Settings size={13} />
-            Imports
-          </button>
-          <button
-            onClick={handleAutoLayout}
-            disabled={nodes.length === 0}
-            className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            title="Auto-arrange nodes"
-          >
-            Layout
-          </button>
-          <button
-            onClick={handleRun}
-            disabled={nodes.length === 0}
-            className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors disabled:opacity-30"
-            style={{ background: '#22c55e' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#4ade80'}
-            onMouseLeave={(e) => e.currentTarget.style.background = '#22c55e'}
-          >
-            {runStatus === "Running..." ? "Running..." : "Run"}
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors"
-            style={{ background: 'var(--accent)' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
-            title="Ctrl+S"
-          >
-            Save
-          </button>
-        </div>
-      </header>
+      <Toolbar
+        nodeCount={nodes.length}
+        edgeCount={edges.length}
+        dirty={dirty}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
+        snapToGrid={snapToGrid}
+        onToggleSnapToGrid={toggleSnapToGrid}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+        rowLimit={rowLimit}
+        onRowLimitChange={setRowLimit}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onAutoLayout={handleAutoLayout}
+        onRun={handleRun}
+        runStatus={runStatus}
+        onSave={handleSave}
+      />
 
       <div className="flex-1 flex min-h-0">
         {paletteOpen ? (
@@ -1232,6 +404,7 @@ function FlowEditor() {
         ) : (
           <button
             onClick={() => setPaletteOpen(true)}
+            aria-label="Show node palette"
             className="shrink-0 flex items-center justify-center w-10 transition-colors"
             style={{ background: 'var(--chrome)', borderRight: '1px solid var(--chrome-border)' }}
             onMouseEnter={(e) => e.currentTarget.style.background = 'var(--chrome-hover)'}
@@ -1261,7 +434,7 @@ function FlowEditor() {
               onSelectionChange={onSelectionChange}
               onNodeContextMenu={onNodeContextMenu}
               onNodeDoubleClick={(_event, node) => {
-                if ((node.data as Record<string, unknown>)?.nodeType === "submodel") {
+                if (nodeData(node).nodeType === NODE_TYPES.SUBMODEL) {
                   handleDrillIntoSubmodel(node.id)
                 }
               }}
@@ -1329,126 +502,28 @@ function FlowEditor() {
       )}
 
       {settingsOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,.5)' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
-        >
-          <div className="w-[560px] max-h-[80vh] flex flex-col rounded-xl overflow-hidden shadow-2xl" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-            <div className="px-4 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-              <div>
-                <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Pipeline Imports &amp; Helpers</h2>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Extra imports, constants, and helper functions. Preserved across GUI saves.
-                </p>
-              </div>
-              <button
-                onClick={() => setSettingsOpen(false)}
-                className="p-1 rounded transition-colors"
-                style={{ color: 'var(--text-muted)' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 p-4">
-              <div className="text-[11px] font-mono mb-2 px-1" style={{ color: 'var(--text-muted)' }}>
-                <span style={{ color: 'rgba(96,165,250,.5)' }}>import polars as pl</span> and <span style={{ color: 'rgba(96,165,250,.5)' }}>import haute</span> are always included
-              </div>
-              <textarea
-                defaultValue={preamble}
-                onChange={(e) => {
-                  setPreamble(e.target.value)
-                  preambleRef.current = e.target.value
-                  setDirty(true)
-                }}
-                spellCheck={false}
-                placeholder={"import numpy as np\nimport catboost\nfrom sklearn.preprocessing import StandardScaler\n\n# Helper functions\ndef my_helper(x):\n    return x * 2"}
-                className="w-full h-[300px] px-3 py-2.5 text-[12px] font-mono rounded-lg focus:outline-none focus:ring-2 resize-none"
-                style={{
-                  background: 'var(--bg-input)',
-                  border: '1px solid var(--border)',
-                  color: '#a5f3fc',
-                  caretColor: 'var(--accent)',
-                  lineHeight: '1.625',
-                }}
-                onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
-                onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
-              />
-            </div>
-            <div className="px-4 py-3 flex justify-end shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-              <button
-                onClick={() => setSettingsOpen(false)}
-                className="px-4 py-1.5 text-[12px] font-semibold text-white rounded-md transition-colors"
-                style={{ background: 'var(--accent)' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingsModal
+          preamble={preamble}
+          onPreambleChange={(value) => {
+            setPreamble(value)
+            preambleRef.current = value
+            setDirty(true)
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
 
       {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)} />}
 
       {submodelDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,.5)' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setSubmodelDialog(null) }}
-        >
-          <div className="w-[400px] flex flex-col rounded-xl overflow-hidden shadow-2xl" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Create Submodel</h2>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                Group {submodelDialog.nodeIds.length} selected nodes into a submodel
-              </p>
-            </div>
-            <form
-              className="p-4 flex flex-col gap-3"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const formData = new FormData(e.currentTarget)
-                const name = (formData.get("name") as string || "").trim()
-                if (name) handleCreateSubmodel(name, submodelDialog.nodeIds)
-              }}
-            >
-              <div>
-                <label className="text-[11px] font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>Submodel name</label>
-                <input
-                  name="name"
-                  type="text"
-                  autoFocus
-                  placeholder="e.g. model_scoring"
-                  className="w-full px-3 py-1.5 text-[13px] rounded-md focus:outline-none focus:ring-2"
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)', caretColor: 'var(--accent)' }}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSubmodelDialog(null)}
-                  className="px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors"
-                  style={{ color: 'var(--text-secondary)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 text-[12px] font-semibold text-white rounded-md transition-colors"
-                  style={{ background: '#f97316' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#fb923c'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = '#f97316'}
-                >
-                  Create
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <SubmodelDialog
+          nodeCount={submodelDialog.nodeIds.length}
+          onClose={() => setSubmodelDialog(null)}
+          onSubmit={(name) => {
+            handleCreateSubmodel(name, submodelDialog.nodeIds)
+            setSubmodelDialog(null)
+          }}
+        />
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

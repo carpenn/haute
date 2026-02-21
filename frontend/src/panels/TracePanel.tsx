@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { X, ChevronDown, ChevronRight, Clock, Layers, Scan } from "lucide-react"
-import type { TraceResult, TraceStep } from "../App"
+import type { TraceResult, TraceStep } from "../types/trace"
 import { nodeTypeLabels, nodeTypeColors } from "../utils/nodeTypes"
 import { formatValue as _formatValue } from "../utils/formatValue"
 

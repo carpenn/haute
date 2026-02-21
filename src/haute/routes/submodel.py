@@ -35,6 +35,7 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     from haute._types import GraphEdge as _GEdge
     from haute._types import GraphNode as _GNode
     from haute._types import NodeData as _NData
+    from haute._types import NodeType
     from haute.codegen import graph_to_code_multi
     from haute.graph_utils import _sanitize_func_name
 
@@ -97,12 +98,12 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     sm_node_id = f"submodel__{sm_name}"
     sm_node = _GNode(
         id=sm_node_id,
-        type="submodel",
+        type=NodeType.SUBMODEL,
         position={"x": 0, "y": 0},
         data=_NData(
             label=sm_name,
             description="",
-            nodeType="submodel",
+            nodeType=NodeType.SUBMODEL,
             config={
                 "file": sm_file,
                 "childNodeIds": list(child_node_ids),

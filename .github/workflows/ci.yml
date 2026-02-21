@@ -9,10 +9,15 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
       - run: uv sync --group dev
 
@@ -22,5 +27,24 @@ jobs:
       - name: Mypy type check
         run: uv run mypy src/haute/
 
-      - name: Tests
-        run: uv run pytest tests/ -q
+      - name: Tests with coverage
+        run: uv run pytest tests/ -q --cov=src/haute --cov-report=term-missing
+
+      - name: Verify wheel builds
+        run: uv build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint

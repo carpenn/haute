@@ -25,7 +25,7 @@ from haute._parser_helpers import (
     _infer_node_type,
     _is_submodel_node_decorator,
 )
-from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 
 logger = get_logger(component="parser.submodels")
 
@@ -182,12 +182,12 @@ def merge_submodels(
         # Build the submodel placeholder node
         sm_node = GraphNode(
             id=sm_node_id,
-            type="submodel",
+            type=NodeType.SUBMODEL,
             position={"x": 0, "y": 0},
             data=NodeData(
                 label=sm_name,
                 description=sm_graph.pipeline_description or "",
-                nodeType="submodel",
+                nodeType=NodeType.SUBMODEL,
                 config={
                     "file": sm_file,
                     "childNodeIds": child_node_ids,

@@ -2,12 +2,11 @@ import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveD
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
-
-const SINGLETON_TYPES = new Set(["apiInput", "output", "liveSwitch"])
+import { NODE_TYPES, SINGLETON_TYPES } from "../utils/nodeTypes"
 
 const nodeTemplates = [
   {
-    type: "apiInput",
+    type: NODE_TYPES.API_INPUT,
     label: "API Input",
     description: "Live API input for deployment (max 1)",
     icon: Radio,
@@ -15,7 +14,7 @@ const nodeTemplates = [
     defaultConfig: { path: "" },
   },
   {
-    type: "dataSource",
+    type: NODE_TYPES.DATA_SOURCE,
     label: "Data Source",
     description: "Read from parquet, CSV, or Databricks table",
     icon: Database,
@@ -23,7 +22,7 @@ const nodeTemplates = [
     defaultConfig: { path: "" },
   },
   {
-    type: "transform",
+    type: NODE_TYPES.TRANSFORM,
     label: "Polars",
     description: "Polars transform / feature engineering",
     icon: PolarsIcon,
@@ -31,7 +30,7 @@ const nodeTemplates = [
     defaultConfig: {},
   },
   {
-    type: "modelScore",
+    type: NODE_TYPES.MODEL_SCORE,
     label: "Model Score",
     description: "Score using an MLflow model",
     icon: Brain,
@@ -39,7 +38,7 @@ const nodeTemplates = [
     defaultConfig: { model_uri: "" },
   },
   {
-    type: "banding",
+    type: NODE_TYPES.BANDING,
     label: "Banding",
     description: "Group numerical or categorical values into bands",
     icon: SlidersHorizontal,
@@ -47,7 +46,7 @@ const nodeTemplates = [
     defaultConfig: { factors: [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }] },
   },
   {
-    type: "ratingStep",
+    type: NODE_TYPES.RATING_STEP,
     label: "Rating Step",
     description: "Lookup, factor, cap/floor",
     icon: TableProperties,
@@ -55,7 +54,7 @@ const nodeTemplates = [
     defaultConfig: { tables: [{ name: "Table 1", factors: [], outputColumn: "", defaultValue: "1.0", entries: [] }], operation: "multiply", combinedColumn: "" },
   },
   {
-    type: "output",
+    type: NODE_TYPES.OUTPUT,
     label: "Output",
     description: "Final price / prediction",
     icon: CircleDot,
@@ -63,7 +62,7 @@ const nodeTemplates = [
     defaultConfig: { fields: [] },
   },
   {
-    type: "liveSwitch",
+    type: NODE_TYPES.LIVE_SWITCH,
     label: "Live Switch",
     description: "Switch between live API and batch data (max 1)",
     icon: ToggleLeft,
@@ -71,7 +70,7 @@ const nodeTemplates = [
     defaultConfig: { mode: "live" },
   },
   {
-    type: "dataSink",
+    type: NODE_TYPES.DATA_SINK,
     label: "Data Sink",
     description: "Write to parquet, CSV, or directory",
     icon: HardDriveDownload,
@@ -79,7 +78,7 @@ const nodeTemplates = [
     defaultConfig: { path: "", format: "parquet" },
   },
   {
-    type: "externalFile",
+    type: NODE_TYPES.EXTERNAL_FILE,
     label: "External File",
     description: "Load a pickle, JSON, or joblib file and use in code",
     icon: FileArchive,
@@ -100,7 +99,7 @@ export default function NodePalette({ onCollapse, nodes }: { onCollapse?: () => 
   if (nodes) {
     for (const n of nodes) {
       const nt = n.data.nodeType as string
-      if (nt && SINGLETON_TYPES.has(nt)) existingSingletons.add(nt)
+      if (nt && SINGLETON_TYPES.has(nt as typeof NODE_TYPES[keyof typeof NODE_TYPES])) existingSingletons.add(nt)
     }
   }
 

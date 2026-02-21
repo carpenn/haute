@@ -27,6 +27,7 @@ from haute._topo import topo_sort_ids as topo_sort_ids
 from haute._types import GraphEdge as GraphEdge
 from haute._types import GraphNode as GraphNode
 from haute._types import NodeData as NodeData
+from haute._types import NodeType as NodeType
 from haute._types import PipelineGraph as PipelineGraph
 from haute._types import _Frame as _Frame
 from haute._types import _sanitize_func_name as _sanitize_func_name

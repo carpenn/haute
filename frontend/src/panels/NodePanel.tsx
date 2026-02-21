@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDownload, Radio, AlertTriangle, Loader2, ChevronDown, Trash2, Package, Link2, ToggleLeft, SlidersHorizontal, Plus, Trash } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
+import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
 
 type FileItem = {
@@ -1768,7 +1769,7 @@ function normaliseRatingTables(config: Record<string, unknown>): RatingTable[] {
 function extractBandingLevels(allNodes: SimpleNode[]): Record<string, string[]> {
   const levelSets: Record<string, Set<string>> = {}
   for (const n of allNodes) {
-    if (n.data.nodeType !== "banding") continue
+    if (n.data.nodeType !== NODE_TYPES.BANDING) continue
     const cfg = (n.data.config || {}) as Record<string, unknown>
     const factors = cfg.factors as BandingFactor[] | undefined
     if (!Array.isArray(factors)) continue
@@ -2811,16 +2812,16 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
 
   const config = (node.data.config || {}) as Record<string, unknown>
   const isInstance = !!config.instanceOf
-  const isApiInput = node.data.nodeType === "apiInput"
-  const isLiveSwitch = node.data.nodeType === "liveSwitch"
-  const isDataSource = node.data.nodeType === "dataSource"
-  const isDataSink = node.data.nodeType === "dataSink"
-  const isExternalFile = node.data.nodeType === "externalFile"
-  const isOutput = node.data.nodeType === "output"
-  const isBanding = node.data.nodeType === "banding"
-  const isRatingStep = node.data.nodeType === "ratingStep"
-  const isTransform = node.data.nodeType === "transform"
-  const isSubmodel = node.data.nodeType === "submodel"
+  const isApiInput = node.data.nodeType === NODE_TYPES.API_INPUT
+  const isLiveSwitch = node.data.nodeType === NODE_TYPES.LIVE_SWITCH
+  const isDataSource = node.data.nodeType === NODE_TYPES.DATA_SOURCE
+  const isDataSink = node.data.nodeType === NODE_TYPES.DATA_SINK
+  const isExternalFile = node.data.nodeType === NODE_TYPES.EXTERNAL_FILE
+  const isOutput = node.data.nodeType === NODE_TYPES.OUTPUT
+  const isBanding = node.data.nodeType === NODE_TYPES.BANDING
+  const isRatingStep = node.data.nodeType === NODE_TYPES.RATING_STEP
+  const isTransform = node.data.nodeType === NODE_TYPES.TRANSFORM
+  const isSubmodel = node.data.nodeType === NODE_TYPES.SUBMODEL
 
   // Compute input sources - variable name = sanitized source node label
   const nodeMap = Object.fromEntries(allNodes.map((n) => [n.id, n]))

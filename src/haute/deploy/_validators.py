@@ -9,6 +9,7 @@ from pathlib import Path
 import polars as pl
 
 from haute._logging import get_logger
+from haute._types import NodeType
 from haute.deploy._config import ResolvedDeploy
 from haute.deploy._scorer import score_graph
 
@@ -61,7 +62,7 @@ def validate_deploy(resolved: ResolvedDeploy) -> list[str]:
     # 5. No unresolved nodes (e.g. Databricks source stubs)
     for node in resolved.pruned_graph.nodes:
         if (
-            node.data.nodeType == "dataSource"
+            node.data.nodeType == NodeType.DATA_SOURCE
             and node.data.config.get("sourceType") == "databricks"
         ):
             errors.append(

@@ -6,6 +6,7 @@ from haute._logging import get_logger
 from haute.graph_utils import (
     GraphEdge,
     GraphNode,
+    NodeType,
     PipelineGraph,
     _sanitize_func_name,
     ancestors,
@@ -26,7 +27,7 @@ def _live_only_edges(
     """
     switch_ids: set[str] = set()
     for n in nodes:
-        if n.data.nodeType == "liveSwitch":
+        if n.data.nodeType == NodeType.LIVE_SWITCH:
             switch_ids.add(n.id)
 
     if not switch_ids:
@@ -106,7 +107,7 @@ def find_output_node(graph: PipelineGraph) -> str:
     """
     candidates: list[str] = []
     for n in graph.nodes:
-        if n.data.nodeType == "output":
+        if n.data.nodeType == NodeType.OUTPUT:
             candidates.append(n.id)
         elif n.data.config.get("output"):
             candidates.append(n.id)
@@ -127,9 +128,12 @@ def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
     Returns:
         List of node IDs (may be empty if none are marked).
     """
-    return [n.id for n in graph.nodes if n.data.nodeType == "apiInput"]
+    return [n.id for n in graph.nodes if n.data.nodeType == NodeType.API_INPUT]
 
 
 def find_source_nodes(graph: PipelineGraph) -> list[str]:
     """Find all source nodes in a graph (dataSource and apiInput)."""
-    return [n.id for n in graph.nodes if n.data.nodeType in ("dataSource", "apiInput")]
+    return [
+        n.id for n in graph.nodes
+        if n.data.nodeType in (NodeType.DATA_SOURCE, NodeType.API_INPUT)
+    ]

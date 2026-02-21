@@ -23,6 +23,7 @@ from haute._logging import get_logger
 from haute._sandbox import safe_globals, validate_user_code
 from haute.graph_utils import (
     GraphNode,
+    NodeType,
     PipelineGraph,
     _execute_eager_core,
     _execute_lazy,
@@ -333,7 +334,7 @@ def _build_node_fn(
     if source_names is None:
         source_names = []
 
-    if node_type == "apiInput":
+    if node_type == NodeType.API_INPUT:
         path = config.get("path", "")
 
         def api_source_fn() -> _Frame:
@@ -341,7 +342,7 @@ def _build_node_fn(
 
         return func_name, api_source_fn, True
 
-    if node_type == "dataSource":
+    if node_type == NodeType.DATA_SOURCE:
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
 
@@ -360,7 +361,7 @@ def _build_node_fn(
 
         return func_name, source_fn, True
 
-    elif node_type == "liveSwitch":
+    elif node_type == NodeType.LIVE_SWITCH:
         mode = config.get("mode", "live")
         input_names = list(source_names)
         param_names = config.get("inputs", [])
@@ -376,7 +377,7 @@ def _build_node_fn(
 
         return func_name, switch_fn, False
 
-    elif node_type == "dataSink":
+    elif node_type == NodeType.DATA_SINK:
         # During normal run/preview, dataSink is a pass-through.
         # Actual writing happens via execute_sink() on explicit user action.
         def sink_passthrough(*dfs: _Frame) -> _Frame:
@@ -384,7 +385,7 @@ def _build_node_fn(
 
         return func_name, sink_passthrough, False
 
-    elif node_type == "externalFile":
+    elif node_type == NodeType.EXTERNAL_FILE:
         code = config.get("code", "").strip()
         path = config.get("path", "")
         file_type = config.get("fileType", "pickle")
@@ -412,7 +413,7 @@ def _build_node_fn(
 
             return func_name, external_passthrough, False
 
-    elif node_type == "output":
+    elif node_type == NodeType.OUTPUT:
         fields = config.get("fields", []) or []
 
         def output_fn(*dfs: _Frame) -> _Frame:
@@ -423,7 +424,7 @@ def _build_node_fn(
 
         return func_name, output_fn, False
 
-    elif node_type == "banding":
+    elif node_type == NodeType.BANDING:
         factors = _normalise_banding_factors(config)
 
         def banding_fn(*dfs: _Frame, _factors: list = list(factors)) -> _Frame:
@@ -442,7 +443,7 @@ def _build_node_fn(
 
         return func_name, banding_fn, False
 
-    elif node_type == "ratingStep":
+    elif node_type == NodeType.RATING_STEP:
         tables: list[dict[str, Any]] = config.get("tables", []) or []
         # GUI config may send None for these fields, so `or` ensures a usable default
         _rs_operation: str = config.get("operation", "multiply") or "multiply"
@@ -473,7 +474,7 @@ def _build_node_fn(
 
         return func_name, rating_fn, False
 
-    elif node_type in ("transform", "modelScore"):
+    elif node_type in (NodeType.TRANSFORM, NodeType.MODEL_SCORE):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
         _orig_src = list(orig_source_names) if orig_source_names else None

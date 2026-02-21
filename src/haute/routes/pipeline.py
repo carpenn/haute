@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
+from haute._types import NodeType
 from haute.graph_utils import PipelineGraph
 from haute.routes._helpers import (
     discover_pipelines,
@@ -110,7 +111,11 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     graph = body.graph
 
     # Validate singleton node types (max 1 each)
-    singletons = [("apiInput", "API Input"), ("output", "Output"), ("liveSwitch", "Live Switch")]
+    singletons = [
+        (NodeType.API_INPUT, "API Input"),
+        (NodeType.OUTPUT, "Output"),
+        (NodeType.LIVE_SWITCH, "Live Switch"),
+    ]
     for singleton_type, label in singletons:
         count = sum(1 for n in graph.nodes if n.data.nodeType == singleton_type)
         if count > 1:
@@ -181,8 +186,12 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        results = await asyncio.to_thread(execute_graph, graph)
+        results = await asyncio.wait_for(
+            asyncio.to_thread(execute_graph, graph), timeout=300.0,
+        )
         return RunPipelineResponse(status="ok", results=results)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Pipeline execution timed out (300s limit)")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -198,18 +207,23 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        result = await asyncio.to_thread(
-            execute_trace,
-            graph,
-            row_index=body.rowIndex,
-            target_node_id=body.targetNodeId,
-            column=body.column,
-            row_limit=body.rowLimit,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_trace,
+                graph,
+                row_index=body.rowIndex,
+                target_node_id=body.targetNodeId,
+                column=body.column,
+                row_limit=body.rowLimit,
+            ),
+            timeout=120.0,
         )
         return TraceResponse(
             status="ok",
             trace=trace_result_to_dict(result),
         )
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Trace execution timed out (120s limit)")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -229,11 +243,14 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        results = await asyncio.to_thread(
-            execute_graph,
-            graph,
-            target_node_id=body.nodeId,
-            row_limit=body.rowLimit,
+        results = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_graph,
+                graph,
+                target_node_id=body.nodeId,
+                row_limit=body.rowLimit,
+            ),
+            timeout=120.0,
         )
         node_result = results.get(body.nodeId)
         if not node_result:
@@ -254,6 +271,8 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         ]
 
         return PreviewNodeResponse(nodeId=body.nodeId, timings=timings, **node_result)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Preview execution timed out (120s limit)")
     except HTTPException:
         raise
     except Exception as e:
@@ -278,9 +297,12 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
         raise HTTPException(status_code=400, detail="Empty graph")
 
     try:
-        result = await asyncio.to_thread(
-            execute_sink, graph, sink_node_id=body.nodeId,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(execute_sink, graph, sink_node_id=body.nodeId),
+            timeout=300.0,
         )
         return result
+    except TimeoutError:
+        return SinkResponse(status="error", message="Sink execution timed out (300s limit)")
     except Exception as e:
         return SinkResponse(status="error", message=str(e))

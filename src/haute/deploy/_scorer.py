@@ -1,7 +1,8 @@
 """Runtime scoring engine for deployed pipelines.
 
 Uses the same ``_execute_lazy`` / ``_build_node_fn`` infrastructure as
-the development executor, with a thin wrapper that:
+the development executor, with ``NodeBuildHooks`` to override specific
+node types for live scoring:
 
 - Injects live input DataFrames at apiInput source nodes
 - Remaps artifact paths for externalFile and static dataSource nodes
@@ -10,20 +11,20 @@ the development executor, with a thin wrapper that:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import PurePosixPath
 
 import polars as pl
 
-from haute.graph_utils import (
+from haute._execute_lazy import _execute_lazy
+from haute._io import load_external_object, read_source
+from haute._node_builder import NodeBuildHooks, NodeFnResult, node_fn_name, wrap_builder
+from haute._types import (
     GraphNode,
+    NodeType,
     PipelineGraph,
-    _execute_lazy,
     _Frame,
-    _sanitize_func_name,
-    load_external_object,
-    read_source,
 )
+from haute.executor import _build_node_fn, _exec_user_code
 
 
 def score_graph(
@@ -56,25 +57,14 @@ def score_graph(
     input_lf = input_df.lazy()
     remap = artifact_paths or {}
 
-    def _build_scoring_fn(
-        node: GraphNode,
-        source_names: list[str] | None = None,
-    ) -> tuple[str, Callable, bool]:
-        """Modified _build_node_fn that intercepts apiInput sources."""
-        from haute.executor import _build_node_fn, _exec_user_code
-
+    def _intercept(node: GraphNode, source_names: list[str]) -> NodeFnResult | None:
         nid = node.id
-        data = node.data
-        node_type = data.nodeType
-        config = data.config
-        label = data.label
-        func_name = _sanitize_func_name(label)
-
-        if source_names is None:
-            source_names = []
+        node_type = node.data.nodeType
+        config = node.data.config
+        func_name = node_fn_name(node)
 
         # Intercept: apiInput source → inject live DataFrame
-        if node_type == "apiInput" and nid in input_set:
+        if node_type == NodeType.API_INPUT and nid in input_set:
 
             def inject_input() -> _Frame:
                 return input_lf
@@ -82,7 +72,7 @@ def score_graph(
             return func_name, inject_input, True
 
         # Intercept: externalFile with remapped artifact path
-        if node_type == "externalFile" and remap:
+        if node_type == NodeType.EXTERNAL_FILE and remap:
             artifact_key = f"{nid}__{PurePosixPath(config.get('path', '')).name}"
             if artifact_key in remap:
                 remapped_path = remap[artifact_key]
@@ -113,7 +103,7 @@ def score_graph(
                     return func_name, external_passthrough, False
 
         # Intercept: static dataSource with remapped artifact path
-        if node_type == "dataSource" and nid not in input_set and remap:
+        if node_type == NodeType.DATA_SOURCE and nid not in input_set and remap:
             raw_path = config.get("path", "")
             artifact_key = f"{nid}__{PurePosixPath(raw_path).name}"
             if artifact_key in remap:
@@ -124,12 +114,16 @@ def score_graph(
 
                 return func_name, static_source, True
 
-        # Default: use the standard executor's _build_node_fn
-        return _build_node_fn(node, source_names=source_names)
+        return None  # fall through to base builder
+
+    builder = wrap_builder(
+        _build_node_fn,
+        NodeBuildHooks(before_build=_intercept),
+    )
 
     lazy_outputs, order, _parents, _names = _execute_lazy(
         graph,
-        _build_scoring_fn,
+        builder,
         target_node_id=output_node_id,
     )
 

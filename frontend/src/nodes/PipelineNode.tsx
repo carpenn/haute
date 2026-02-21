@@ -2,7 +2,7 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
-import { nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
+import { NODE_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
 
 const statusColors: Record<string, string> = {
@@ -24,13 +24,13 @@ export type PipelineNodeData = {
 
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
-  const nodeType = nodeData.nodeType || "transform"
+  const nodeType = nodeData.nodeType || NODE_TYPES.TRANSFORM
   const Icon = nodeTypeIcons[nodeType] || PolarsIcon
-  const accent = nodeTypeColors[nodeType] || nodeTypeColors.transform
+  const accent = nodeTypeColors[nodeType] || nodeTypeColors[NODE_TYPES.TRANSFORM]
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
-  const isDeployInput = nodeType === "apiInput"
+  const isDeployInput = nodeType === NODE_TYPES.API_INPUT
   const missingRowId = isDeployInput && !nodeData.config?.row_id_column
-  const isLiveSwitch = nodeType === "liveSwitch"
+  const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH
   const switchMode = isLiveSwitch ? ((nodeData.config?.mode as string) || "live") : null
   const isInstance = !!(nodeData.config?.instanceOf)
   const traceActive = !!nodeData._traceActive

@@ -132,13 +132,18 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
 
         from haute._databricks_io import fetch_and_cache
 
-        result = await asyncio.to_thread(
-            fetch_and_cache,
-            table=body.table,
-            http_path=body.http_path,
-            query=body.query,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                fetch_and_cache,
+                table=body.table,
+                http_path=body.http_path,
+                query=body.query,
+            ),
+            timeout=600.0,
         )
         return FetchTableResponse(**result)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Databricks fetch timed out (600s limit)")
     except ImportError:
         raise HTTPException(
             status_code=400,

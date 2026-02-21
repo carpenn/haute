@@ -245,11 +245,21 @@ class TestBuildNodeFn:
         df = fn(lf).collect()
         assert df["x"].to_list() == [7]
 
-    def test_unknown_node_type_passthrough(self):
-        """Unknown nodeType should act as passthrough."""
+    def test_unknown_node_type_rejected(self):
+        """Unknown nodeType should be rejected by NodeType enum validation."""
+        import pytest
+
+        with pytest.raises(Exception):
+            _n({
+                "id": "unk",
+                "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
+            })
+
+    def test_unhandled_node_type_passthrough(self):
+        """Node type without dedicated handler falls through to passthrough."""
         node = _n({
-            "id": "unk",
-            "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
+            "id": "port1",
+            "data": {"label": "port1", "nodeType": "submodelPort", "config": {}},
         })
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False

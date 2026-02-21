@@ -31,6 +31,9 @@ export default function KeyboardShortcuts({ onClose }: { onClose: () => void }) 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
       style={{ background: "rgba(0,0,0,.5)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
@@ -42,6 +45,7 @@ export default function KeyboardShortcuts({ onClose }: { onClose: () => void }) 
           <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Keyboard Shortcuts</h2>
           <button
             onClick={onClose}
+            aria-label="Close keyboard shortcuts"
             className="p-1 rounded transition-colors"
             style={{ color: "var(--text-muted)" }}
             onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}

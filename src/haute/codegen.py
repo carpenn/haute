@@ -6,6 +6,7 @@ from haute._logging import get_logger
 from haute.graph_utils import (
     GraphEdge,
     GraphNode,
+    NodeType,
     PipelineGraph,
     _sanitize_func_name,
     build_instance_mapping,
@@ -205,7 +206,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
     if source_names is None:
         source_names = []
 
-    if node_type == "apiInput":
+    if node_type == NodeType.API_INPUT:
         path = config.get("path", "")
         row_id_kw = ""
         if config.get("row_id_column"):
@@ -218,7 +219,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             row_id_kw=row_id_kw,
         )
 
-    elif node_type == "liveSwitch":
+    elif node_type == NodeType.LIVE_SWITCH:
         params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
         first_param = source_names[0] if source_names else "df"
         return _LIVE_SWITCH.format(
@@ -228,7 +229,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             first_param=first_param,
         )
 
-    elif node_type == "dataSource":
+    elif node_type == NodeType.DATA_SOURCE:
         path = config.get("path", "")
         source_type = config.get("sourceType", "flat_file")
         if source_type == "databricks":
@@ -257,13 +258,13 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 path=path,
             )
 
-    elif node_type == "modelScore":
+    elif node_type == NodeType.MODEL_SCORE:
         model_uri = config.get("model_uri", "models:/model/Production")
         return _MODEL_SCORE.format(
             func_name=func_name, description=description, model_uri=model_uri
         )
 
-    elif node_type == "banding":
+    elif node_type == NodeType.BANDING:
         factors = config.get("factors", []) or []
         params = _build_params(source_names)
         if len(factors) == 1:
@@ -305,7 +306,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 params=params,
             )
 
-    elif node_type == "ratingStep":
+    elif node_type == NodeType.RATING_STEP:
         tables = config.get("tables", []) or []
         params = _build_params(source_names)
         emit_tables = []
@@ -335,7 +336,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             extra_kwargs=extra_kwargs,
         )
 
-    elif node_type == "externalFile":
+    elif node_type == NodeType.EXTERNAL_FILE:
         path = config.get("path", "model.pkl")
         file_type = config.get("fileType", "pickle")
         code = config.get("code", "").strip()
@@ -367,7 +368,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             body=body,
         )
 
-    elif node_type == "dataSink":
+    elif node_type == NodeType.DATA_SINK:
         path = config.get("path", "output.parquet")
         fmt = config.get("format", "parquet")
         params = _build_params(source_names)
@@ -381,7 +382,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             first=first,
         )
 
-    elif node_type == "output":
+    elif node_type == NodeType.OUTPUT:
         fields = config.get("fields", []) or []
         params = _build_params(source_names)
         first = source_names[0] if source_names else "df"

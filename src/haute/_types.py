@@ -8,7 +8,8 @@ FastAPI endpoint validation.
 
 from __future__ import annotations
 
-from typing import Any
+from enum import StrEnum
+from typing import Any, TypedDict
 
 import polars as pl
 from pydantic import BaseModel, Field
@@ -17,12 +18,150 @@ from pydantic import BaseModel, Field
 _Frame = pl.LazyFrame
 
 
+class NodeType(StrEnum):
+    """Canonical node-type identifiers shared with the React Flow frontend.
+
+    Inherits from ``StrEnum`` so ``NodeType.API_INPUT == "apiInput"`` is ``True``
+    and JSON serialization produces the plain string value.
+    """
+
+    API_INPUT = "apiInput"
+    DATA_SOURCE = "dataSource"
+    TRANSFORM = "transform"
+    MODEL_SCORE = "modelScore"
+    BANDING = "banding"
+    RATING_STEP = "ratingStep"
+    OUTPUT = "output"
+    DATA_SINK = "dataSink"
+    EXTERNAL_FILE = "externalFile"
+    LIVE_SWITCH = "liveSwitch"
+    SUBMODEL = "submodel"
+    SUBMODEL_PORT = "submodelPort"
+
+
+# ---------------------------------------------------------------------------
+# Typed config shapes (documentation + IDE autocomplete, no runtime change)
+# ---------------------------------------------------------------------------
+
+
+class ApiInputConfig(TypedDict, total=False):
+    """Config for apiInput nodes."""
+
+    path: str
+    row_id_column: str
+
+
+class DataSourceConfig(TypedDict, total=False):
+    """Config for dataSource nodes."""
+
+    path: str
+    sourceType: str  # "flat_file" | "databricks"
+    table: str
+    http_path: str
+    query: str
+
+
+class TransformConfig(TypedDict, total=False):
+    """Config for transform nodes."""
+
+    code: str
+    instanceOf: str
+    inputMapping: dict[str, str]
+
+
+class ModelScoreConfig(TypedDict, total=False):
+    """Config for modelScore nodes."""
+
+    model_uri: str
+    code: str
+    instanceOf: str
+    inputMapping: dict[str, str]
+
+
+class BandingFactor(TypedDict, total=False):
+    """A single factor in a banding node config."""
+
+    banding: str  # "continuous" | "discrete"
+    column: str
+    outputColumn: str
+    rules: list[dict[str, Any]]
+    default: str | None
+
+
+class BandingConfig(TypedDict, total=False):
+    """Config for banding nodes."""
+
+    factors: list[BandingFactor]
+
+
+class RatingTableEntry(TypedDict, total=False):
+    """A single entry (row) in a rating table."""
+
+    # Keys are dynamic factor names; values are strings/numbers
+
+
+class RatingTable(TypedDict, total=False):
+    """A single table in a ratingStep config."""
+
+    name: str
+    factors: list[str]
+    outputColumn: str
+    defaultValue: str | None
+    entries: list[dict[str, Any]]
+
+
+class RatingStepConfig(TypedDict, total=False):
+    """Config for ratingStep nodes."""
+
+    tables: list[RatingTable]
+    operation: str  # "multiply" | "add" | "subtract" | "divide"
+    combinedColumn: str
+
+
+class OutputConfig(TypedDict, total=False):
+    """Config for output nodes."""
+
+    fields: list[str]
+
+
+class DataSinkConfig(TypedDict, total=False):
+    """Config for dataSink nodes."""
+
+    path: str
+    format: str  # "parquet" | "csv"
+
+
+class ExternalFileConfig(TypedDict, total=False):
+    """Config for externalFile nodes."""
+
+    path: str
+    fileType: str  # "pickle" | "json" | "joblib" | "catboost"
+    modelClass: str  # "classifier" | "regressor" (catboost only)
+    code: str
+
+
+class LiveSwitchConfig(TypedDict, total=False):
+    """Config for liveSwitch nodes."""
+
+    mode: str  # "live" | <input_name>
+    inputs: list[str]
+
+
+class SubmodelConfig(TypedDict, total=False):
+    """Config for submodel placeholder nodes."""
+
+    file: str
+    childNodeIds: list[str]
+    inputPorts: list[str]
+    outputPorts: list[str]
+
+
 class NodeData(BaseModel):
     """Data payload for a single pipeline node."""
 
     label: str = "Unnamed"
     description: str = ""
-    nodeType: str = "transform"  # noqa: N815 — matches React Flow frontend convention
+    nodeType: NodeType = NodeType.TRANSFORM  # noqa: N815 — matches React Flow frontend convention
     config: dict[str, Any] = Field(default_factory=dict)
 
 

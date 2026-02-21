@@ -13,40 +13,40 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from haute.graph_utils import GraphEdge, GraphNode, NodeData
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType
 
 # ---------------------------------------------------------------------------
 # Node type inference
 # ---------------------------------------------------------------------------
 
 
-def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
+def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeType:
     """Infer the GUI node type from decorator config and param count."""
     if "instance_of" in decorator_kwargs:
         # Instance nodes borrow their type from the original at runtime;
         # default to transform here — the executor resolves the real type.
-        return "transform"
+        return NodeType.TRANSFORM
     if "external" in decorator_kwargs:
-        return "externalFile"
+        return NodeType.EXTERNAL_FILE
     if "sink" in decorator_kwargs:
-        return "dataSink"
+        return NodeType.DATA_SINK
     if decorator_kwargs.get("api_input"):
-        return "apiInput"
+        return NodeType.API_INPUT
     if decorator_kwargs.get("live_switch"):
-        return "liveSwitch"
+        return NodeType.LIVE_SWITCH
     if decorator_kwargs.get("output"):
-        return "output"
+        return NodeType.OUTPUT
     if "model_uri" in decorator_kwargs:
-        return "modelScore"
+        return NodeType.MODEL_SCORE
     if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
-        return "banding"
+        return NodeType.BANDING
     if "tables" in decorator_kwargs:
-        return "ratingStep"
+        return NodeType.RATING_STEP
     if "table" in decorator_kwargs and "key" in decorator_kwargs:
-        return "ratingStep"
+        return NodeType.RATING_STEP
     if "path" in decorator_kwargs or n_params == 0:
-        return "dataSource"
-    return "transform"
+        return NodeType.DATA_SOURCE
+    return NodeType.TRANSFORM
 
 
 # ---------------------------------------------------------------------------
@@ -331,11 +331,11 @@ def _build_node_config(
 ) -> dict[str, Any]:
     """Build the config dict for a node given its type and decorator kwargs."""
     config: dict[str, Any] = {}
-    if node_type == "apiInput":
+    if node_type == NodeType.API_INPUT:
         config["path"] = decorator_kwargs.get("path", "")
         if decorator_kwargs.get("row_id_column"):
             config["row_id_column"] = decorator_kwargs["row_id_column"]
-    elif node_type == "dataSource":
+    elif node_type == NodeType.DATA_SOURCE:
         config["path"] = decorator_kwargs.get("path", "")
         if "table" in decorator_kwargs:
             config["sourceType"] = "databricks"
@@ -346,12 +346,12 @@ def _build_node_config(
                 config["query"] = decorator_kwargs["query"]
         else:
             config["sourceType"] = "flat_file"
-    elif node_type == "liveSwitch":
+    elif node_type == NodeType.LIVE_SWITCH:
         config["mode"] = decorator_kwargs.get("mode", "live")
         config["inputs"] = param_names
-    elif node_type == "modelScore":
+    elif node_type == NodeType.MODEL_SCORE:
         config["model_uri"] = decorator_kwargs.get("model_uri", "")
-    elif node_type == "banding":
+    elif node_type == NodeType.BANDING:
         if "factors" in decorator_kwargs:
             # Multi-factor format: factors=[{...}, {...}]
             raw_factors = decorator_kwargs["factors"]
@@ -374,7 +374,7 @@ def _build_node_config(
                 "rules": decorator_kwargs.get("rules", []),
                 "default": decorator_kwargs.get("default"),
             }]
-    elif node_type == "ratingStep":
+    elif node_type == NodeType.RATING_STEP:
         if "tables" in decorator_kwargs:
             raw_tables = decorator_kwargs["tables"]
             config["tables"] = [
@@ -402,16 +402,16 @@ def _build_node_config(
         )
         if combined:
             config["combinedColumn"] = str(combined)
-    elif node_type == "dataSink":
+    elif node_type == NodeType.DATA_SINK:
         config["path"] = decorator_kwargs.get("sink", "")
         config["format"] = decorator_kwargs.get("format", "parquet")
-    elif node_type == "externalFile":
+    elif node_type == NodeType.EXTERNAL_FILE:
         config["path"] = decorator_kwargs.get("external", "")
         config["fileType"] = decorator_kwargs.get("file_type", "pickle")
         if config["fileType"] == "catboost":
             config["modelClass"] = decorator_kwargs.get("model_class", "classifier")
         config["code"] = _extract_external_user_code(body, param_names) if body else ""
-    elif node_type == "output":
+    elif node_type == NodeType.OUTPUT:
         config["fields"] = decorator_kwargs.get("fields", [])
     else:
         # transform

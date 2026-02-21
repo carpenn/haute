@@ -32,6 +32,7 @@ from haute._logging import get_logger
 from haute.executor import _build_node_fn
 from haute.graph_utils import (
     GraphNode,
+    NodeType,
     PipelineGraph,
     _execute_eager_core,
     graph_fingerprint,
@@ -365,7 +366,7 @@ def execute_trace(
     row_id_column: str | None = None
     row_id_value: Any = None
     for n in nodes:
-        if n.data.nodeType == "apiInput" and n.data.config.get("row_id_column"):
+        if n.data.nodeType == NodeType.API_INPUT and n.data.config.get("row_id_column"):
             row_id_column = n.data.config["row_id_column"]
             row_id_value = target_row.get(row_id_column)
             break

@@ -10,7 +10,7 @@ from typing import Self
 import polars as pl
 
 from haute._logging import get_logger
-from haute._types import GraphEdge
+from haute._types import GraphEdge, NodeType
 from haute.graph_utils import topo_sort_ids
 
 logger = get_logger(component="pipeline")
@@ -231,11 +231,11 @@ class Pipeline(NodeRegistry):
         for i, n in enumerate(self._nodes):
             is_last = i == len(self._nodes) - 1
             if n.is_source:
-                rf_type = "dataSource"
+                rf_type = NodeType.DATA_SOURCE
             elif is_last:
-                rf_type = "output"
+                rf_type = NodeType.OUTPUT
             else:
-                rf_type = "transform"
+                rf_type = NodeType.TRANSFORM
 
             nodes.append(
                 {
