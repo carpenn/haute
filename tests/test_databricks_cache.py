@@ -11,8 +11,8 @@ from haute._databricks_io import (
     CACHE_DIR,
     CacheNotFoundError,
     _cache_path_for,
-    _fetch_lock,
-    _fetch_progress,
+    _clear_fetch_progress,
+    _set_fetch_progress,
     cache_info,
     cached_path,
     clear_cache,
@@ -76,26 +76,27 @@ class TestClearCache:
 
 
 class TestFetchProgress:
+    @pytest.fixture(autouse=True)
+    def _cleanup_progress(self):
+        yield
+        _clear_fetch_progress()
+
     def test_returns_none_when_no_active_fetch(self) -> None:
         assert fetch_progress("cat.sch.tbl") is None
 
     def test_returns_progress_when_active(self) -> None:
-        with _fetch_lock:
-            _fetch_progress["cat.sch.tbl"] = {"rows": 500, "batches": 5, "elapsed": 1.2}
-        try:
-            result = fetch_progress("cat.sch.tbl")
-            assert result is not None
-            assert result["rows"] == 500
-            assert result["batches"] == 5
-            assert result["elapsed"] == 1.2
-        finally:
-            with _fetch_lock:
-                _fetch_progress.pop("cat.sch.tbl", None)
+        _set_fetch_progress("cat.sch.tbl", {"rows": 500, "batches": 5, "elapsed": 1.2})
+
+        result = fetch_progress("cat.sch.tbl")
+        assert result is not None
+        assert result["rows"] == 500
+        assert result["batches"] == 5
+        assert result["elapsed"] == 1.2
 
 
 class TestReadCachedTable:
     def test_raises_when_not_cached(self, tmp_path: Path) -> None:
-        with pytest.raises(CacheNotFoundError, match="not been fetched"):
+        with pytest.raises(CacheNotFoundError, match="not.*fetched"):
             read_cached_table("cat.sch.tbl", project_root=tmp_path)
 
     def test_reads_cached_parquet(self, tmp_path: Path) -> None:

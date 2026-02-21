@@ -5,8 +5,9 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute._types import GraphNode, NodeData, PipelineGraph
 from haute.executor import _apply_banding, _build_node_fn, execute_graph
+from tests.conftest import make_edge as _edge, make_source_node as _source_node
 
 
 # ---------------------------------------------------------------------------
@@ -42,17 +43,6 @@ def _multi_banding_node(nid: str, factors: list[dict]) -> GraphNode:
         id=nid,
         data=NodeData(label=nid, nodeType="banding", config={"factors": factors}),
     )
-
-
-def _source_node(nid: str, path: str) -> GraphNode:
-    return GraphNode(
-        id=nid,
-        data=NodeData(label=nid, nodeType="dataSource", config={"path": path}),
-    )
-
-
-def _edge(src: str, tgt: str) -> GraphEdge:
-    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +100,46 @@ class TestApplyBandingContinuous:
         ]
         result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
         assert result["band"].to_list() == ["low", "high"]
+
+
+    def test_all_rows_matched(self):
+        """When every row matches a rule, no default values appear."""
+        lf = pl.DataFrame({"x": [1, 5, 10]}).lazy()
+        rules = [
+            {"op1": "<=", "val1": 5, "assignment": "low"},
+            {"op1": ">", "val1": 5, "assignment": "high"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].null_count() == 0
+
+    def test_single_row(self):
+        """Banding works on a single-row DataFrame."""
+        lf = pl.DataFrame({"x": [42]}).lazy()
+        rules = [{"op1": ">=", "val1": 0, "assignment": "pos"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["pos"]
+
+    def test_column_with_spaces_in_name(self):
+        """Column names with spaces should work in banding."""
+        lf = pl.DataFrame({"age group": [10, 30]}).lazy()
+        rules = [
+            {"op1": "<=", "val1": 20, "assignment": "young"},
+            {"op1": ">", "val1": 20, "assignment": "old"},
+        ]
+        result = _apply_banding(lf, "age group", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["young", "old"]
+
+    def test_null_input_values(self):
+        """Null values in input column should not match any rule."""
+        lf = pl.DataFrame({"x": [1, None, 10]}).lazy()
+        rules = [
+            {"op1": "<=", "val1": 5, "assignment": "low"},
+            {"op1": ">", "val1": 5, "assignment": "high"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules, default="dflt").collect()
+        bands = result["band"].to_list()
+        assert bands[0] == "low"
+        assert bands[2] == "high"
 
 
 class TestApplyBandingCategorical:

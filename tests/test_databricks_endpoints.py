@@ -27,14 +27,15 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 class TestListWarehouses:
     def test_returns_warehouse_list(self, client: TestClient) -> None:
-        mock_wh = MagicMock()
-        mock_wh.id = "abc123"
-        mock_wh.name = "Starter Warehouse"
-        mock_wh.state = MagicMock(value="RUNNING")
-        mock_wh.cluster_size = "Small"
+        from databricks.sdk.service.sql import EndpointInfo, State
+
+        wh = EndpointInfo(
+            id="abc123", name="Starter Warehouse",
+            state=State.RUNNING, cluster_size="Small",
+        )
 
         mock_ws = MagicMock()
-        mock_ws.warehouses.list.return_value = [mock_wh]
+        mock_ws.warehouses.list.return_value = [wh]
 
         with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/warehouses")
@@ -72,12 +73,12 @@ class TestListWarehouses:
 
 class TestListCatalogs:
     def test_returns_catalog_list(self, client: TestClient) -> None:
-        mock_cat = MagicMock()
-        mock_cat.name = "main"
-        mock_cat.comment = "Default catalog"
+        from databricks.sdk.service.catalog import CatalogInfo
+
+        cat = CatalogInfo(name="main", comment="Default catalog")
 
         mock_ws = MagicMock()
-        mock_ws.catalogs.list.return_value = [mock_cat]
+        mock_ws.catalogs.list.return_value = [cat]
 
         with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/catalogs")
@@ -96,12 +97,12 @@ class TestListCatalogs:
 
 class TestListSchemas:
     def test_returns_schema_list(self, client: TestClient) -> None:
-        mock_sch = MagicMock()
-        mock_sch.name = "pricing"
-        mock_sch.comment = ""
+        from databricks.sdk.service.catalog import SchemaInfo
+
+        sch = SchemaInfo(name="pricing", comment="")
 
         mock_ws = MagicMock()
-        mock_ws.schemas.list.return_value = [mock_sch]
+        mock_ws.schemas.list.return_value = [sch]
 
         with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get("/api/databricks/schemas", params={"catalog": "main"})
@@ -123,14 +124,17 @@ class TestListSchemas:
 
 class TestListTables:
     def test_returns_table_list(self, client: TestClient) -> None:
-        mock_tbl = MagicMock()
-        mock_tbl.name = "policies"
-        mock_tbl.full_name = "main.pricing.policies"
-        mock_tbl.table_type = MagicMock(value="MANAGED")
-        mock_tbl.comment = "Policy data"
+        from databricks.sdk.service.catalog import TableInfo, TableType
+
+        tbl = TableInfo(
+            name="policies",
+            full_name="main.pricing.policies",
+            table_type=TableType.MANAGED,
+            comment="Policy data",
+        )
 
         mock_ws = MagicMock()
-        mock_ws.tables.list.return_value = [mock_tbl]
+        mock_ws.tables.list.return_value = [tbl]
 
         with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
             resp = client.get(
@@ -210,27 +214,30 @@ class TestCacheStatus:
 
 
 class TestFetchProgress:
+    @pytest.fixture(autouse=True)
+    def _cleanup_progress(self):
+        yield
+        from haute._databricks_io import _clear_fetch_progress
+
+        _clear_fetch_progress()
+
     def test_no_active_fetch(self, client: TestClient) -> None:
         resp = client.get("/api/databricks/fetch/progress", params={"table": "cat.sch.tbl"})
         assert resp.status_code == 200
         assert resp.json()["active"] is False
 
     def test_active_fetch(self, client: TestClient) -> None:
-        from haute._databricks_io import _fetch_lock, _fetch_progress
+        from haute._databricks_io import _set_fetch_progress
 
-        with _fetch_lock:
-            _fetch_progress["cat.sch.tbl"] = {"rows": 200_000, "batches": 2, "elapsed": 3.5}
-        try:
-            resp = client.get("/api/databricks/fetch/progress", params={"table": "cat.sch.tbl"})
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["active"] is True
-            assert data["rows"] == 200_000
-            assert data["batches"] == 2
-            assert data["elapsed"] == 3.5
-        finally:
-            with _fetch_lock:
-                _fetch_progress.pop("cat.sch.tbl", None)
+        _set_fetch_progress("cat.sch.tbl", {"rows": 200_000, "batches": 2, "elapsed": 3.5})
+
+        resp = client.get("/api/databricks/fetch/progress", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active"] is True
+        assert data["rows"] == 200_000
+        assert data["batches"] == 2
+        assert data["elapsed"] == 3.5
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,20 @@ _fetch_progress: dict[str, dict[str, object]] = {}
 _fetch_lock = threading.Lock()
 
 
+# -- Test helpers for fetch progress state -----------------------------------
+
+def _set_fetch_progress(table: str, data: dict[str, object]) -> None:
+    """Set fetch progress for *table* (test helper)."""
+    with _fetch_lock:
+        _fetch_progress[table] = data
+
+
+def _clear_fetch_progress() -> None:
+    """Clear all fetch progress entries (test helper)."""
+    with _fetch_lock:
+        _fetch_progress.clear()
+
+
 class DatabricksConfigError(Exception):
     """Raised when required Databricks data credentials are missing."""
 

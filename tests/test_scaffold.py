@@ -1,5 +1,7 @@
 """Tests for haute._scaffold - template generation for ``haute init``."""
 
+import tomllib
+
 from haute._scaffold import (
     env_example,
     github_ci_yml,
@@ -438,6 +440,71 @@ class TestAzureDevopsYml:
         assert "- data/" in result
         assert "- models/" in result
 
+
+# ---------------------------------------------------------------------------
+# Structural YAML validation — ensures generated YAML is parseable and has
+# expected top-level keys and job/stage structure.
+# ---------------------------------------------------------------------------
+
+import yaml
+
+
+class TestYamlStructure:
+    """Validate that generated CI/CD YAML is syntactically valid and has required keys."""
+
+    def test_github_ci_yml_parses(self) -> None:
+        doc = yaml.safe_load(github_ci_yml())
+        assert isinstance(doc, dict)
+        # YAML parses bare `on:` as boolean True
+        assert True in doc or "on" in doc
+        assert "jobs" in doc
+        jobs = doc["jobs"]
+        assert "lint" in jobs
+        assert "test" in jobs
+
+    def test_github_deploy_yml_header_parses(self) -> None:
+        """The deploy YAML header (triggers, name) is valid YAML.
+
+        Full parsing fails because embedded bash steps contain unquoted colons
+        which is valid in GitHub Actions but not strict YAML.  We extract and
+        validate the trigger/name section instead.
+        """
+        raw = github_deploy_yml("databricks")
+        # Extract everything before the first `jobs:` line
+        header = raw.split("\njobs:")[0] + "\njobs: {}"
+        doc = yaml.safe_load(header)
+        assert isinstance(doc, dict)
+        assert True in doc or "on" in doc
+        assert "name" in doc
+
+    def test_github_deploy_yml_has_expected_jobs(self) -> None:
+        """String-level verification of job names in deploy YAML."""
+        raw = github_deploy_yml("databricks")
+        assert "deploy-staging:" in raw
+        assert "smoke-test:" in raw
+        assert "impact-analysis:" in raw
+        # smoke-test should depend on deploy-staging
+        assert "needs:" in raw
+
+    def test_github_deploy_prod_yml_header_parses(self) -> None:
+        from haute._scaffold import github_deploy_prod_yml
+
+        raw = github_deploy_prod_yml("databricks")
+        header = raw.split("\njobs:")[0] + "\njobs: {}"
+        doc = yaml.safe_load(header)
+        assert isinstance(doc, dict)
+        assert "deploy-production:" in raw
+
+    def test_gitlab_ci_yml_parses(self) -> None:
+        from haute._scaffold import gitlab_ci_yml
+
+        doc = yaml.safe_load(gitlab_ci_yml("databricks"))
+        assert isinstance(doc, dict)
+        assert "stages" in doc
+        stages = doc["stages"]
+        assert "validate" in stages
+        assert "deploy-staging" in stages
+
     def test_databricks_secrets(self) -> None:
         from haute._scaffold import azure_devops_yml
 
@@ -452,6 +519,120 @@ class TestAzureDevopsYml:
         assert "$(AWS_ACCESS_KEY_ID)" in result
         assert "$(SAGEMAKER_ROLE_ARN)" in result
         assert "$(DATABRICKS_HOST)" not in result
+
+
+# ---------------------------------------------------------------------------
+# Structural TOML validation — ensures generated TOML is parseable and has
+# expected top-level keys and section structure.
+# ---------------------------------------------------------------------------
+
+
+class TestTomlStructure:
+    """Validate that generated TOML is syntactically valid and has required keys."""
+
+    def test_databricks_toml_parses(self) -> None:
+        raw = haute_toml("motor", "databricks", "github")
+        doc = tomllib.loads(raw)
+        assert "project" in doc
+        assert doc["project"]["name"] == "motor"
+        assert "deploy" in doc
+        assert "databricks" in doc["deploy"]
+
+    def test_container_toml_parses(self) -> None:
+        raw = haute_toml("motor", "container", "github")
+        doc = tomllib.loads(raw)
+        assert "deploy" in doc
+        assert "container" in doc["deploy"]
+        assert "databricks" not in doc["deploy"]
+
+    def test_sagemaker_toml_parses(self) -> None:
+        raw = haute_toml("motor", "sagemaker", "gitlab")
+        doc = tomllib.loads(raw)
+        assert "deploy" in doc
+        assert "sagemaker" in doc["deploy"]
+
+    def test_azure_ml_toml_parses(self) -> None:
+        raw = haute_toml("motor", "azure-ml", "github")
+        doc = tomllib.loads(raw)
+        assert "deploy" in doc
+        assert "azure-ml" in doc["deploy"]
+
+    def test_azure_container_apps_toml_parses(self) -> None:
+        raw = haute_toml("motor", "azure-container-apps", "github")
+        doc = tomllib.loads(raw)
+        assert "container" in doc["deploy"]
+        assert "azure-container-apps" in doc["deploy"]
+
+    def test_aws_ecs_toml_parses(self) -> None:
+        raw = haute_toml("motor", "aws-ecs", "github")
+        doc = tomllib.loads(raw)
+        assert "container" in doc["deploy"]
+        assert "aws-ecs" in doc["deploy"]
+
+    def test_gcp_run_toml_parses(self) -> None:
+        raw = haute_toml("motor", "gcp-run", "github")
+        doc = tomllib.loads(raw)
+        assert "container" in doc["deploy"]
+        assert "gcp-run" in doc["deploy"]
+
+    def test_project_name_in_parsed_toml(self) -> None:
+        raw = haute_toml("my_pipeline", "databricks", "github")
+        doc = tomllib.loads(raw)
+        assert doc["project"]["name"] == "my_pipeline"
+        assert doc["deploy"]["model_name"] == "my_pipeline"
+        assert doc["deploy"]["endpoint_name"] == "my_pipeline"
+
+    def test_safety_section_in_parsed_toml(self) -> None:
+        raw = haute_toml("motor", "databricks", "github")
+        doc = tomllib.loads(raw)
+        assert "safety" in doc
+        assert "impact_dataset" in doc["safety"]
+
+    def test_ci_section_in_parsed_toml(self) -> None:
+        raw = haute_toml("motor", "databricks", "github")
+        doc = tomllib.loads(raw)
+        assert "ci" in doc
+        assert "staging" in doc["ci"]
+
+
+# ---------------------------------------------------------------------------
+# Structural Dockerfile validation
+# ---------------------------------------------------------------------------
+
+
+class TestDockerfileStructure:
+    """Validate that generated Dockerfiles have valid structure."""
+
+    def test_dockerfile_has_required_instructions(self) -> None:
+        from pathlib import Path
+
+        from haute._types import PipelineGraph
+        from haute.deploy._config import DeployConfig, ResolvedDeploy
+        from haute.deploy._container import _generate_dockerfile
+
+        resolved = ResolvedDeploy(
+            config=DeployConfig(pipeline_file=Path("main.py"), model_name="test"),
+            full_graph=PipelineGraph(),
+            pruned_graph=PipelineGraph(),
+            input_node_ids=[],
+            output_node_id="out",
+            artifacts={},
+            input_schema={},
+            output_schema={},
+        )
+        df = _generate_dockerfile("python:3.11-slim", 8080, resolved)
+        lines = df.strip().splitlines()
+        instructions = [
+            line.split()[0] for line in lines
+            if line.strip() and not line.startswith("#")
+        ]
+        assert "FROM" in instructions
+        assert "COPY" in instructions
+        assert "RUN" in instructions
+        assert "EXPOSE" in instructions
+        assert "CMD" in instructions
+        # FROM must be the first instruction
+        assert instructions[0] == "FROM"
 
 
 class TestStarterFiles:

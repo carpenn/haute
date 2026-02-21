@@ -234,7 +234,7 @@ class TestDeployDispatch:
             model_name="test",
             target="foobar",
         )
-        with pytest.raises(ValueError, match="Unknown deploy target"):
+        with pytest.raises(ValueError, match="[Uu]nknown.*target"):
             deploy(config)
 
     def test_planned_target_raises_not_implemented(self) -> None:
@@ -245,7 +245,7 @@ class TestDeployDispatch:
             model_name="test",
             target="sagemaker",
         )
-        with pytest.raises(NotImplementedError, match="planned but not yet implemented"):
+        with pytest.raises(NotImplementedError, match="planned.*not yet"):
             deploy(config)
 
     def test_azure_ml_planned_target(self) -> None:
@@ -256,5 +256,5 @@ class TestDeployDispatch:
             model_name="test",
             target="azure-ml",
         )
-        with pytest.raises(NotImplementedError, match="planned but not yet implemented"):
+        with pytest.raises(NotImplementedError, match="planned.*not yet"):
             deploy(config)

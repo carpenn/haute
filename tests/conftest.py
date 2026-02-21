@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from haute._sandbox import _get_project_root, set_project_root
-from haute._types import GraphEdge, GraphNode, NodeData
+from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def _widen_sandbox_root():
     """Allow tests to load files from temp directories.
 
@@ -29,7 +29,7 @@ def _widen_sandbox_root():
 # ---------------------------------------------------------------------------
 
 
-def make_source_node(nid: str, path: str) -> GraphNode:
+def make_source_node(nid: str, path: str = "data.parquet") -> GraphNode:
     """Build a minimal dataSource node."""
     return GraphNode(
         id=nid,
@@ -56,3 +56,13 @@ def make_output_node(nid: str, fields: list[str] | None = None) -> GraphNode:
 def make_edge(src: str, tgt: str) -> GraphEdge:
     """Build a minimal edge."""
     return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
+
+
+def make_node(d: dict) -> GraphNode:
+    """Build a GraphNode from a raw dict (model_validate shorthand)."""
+    return GraphNode.model_validate(d)
+
+
+def make_graph(d: dict) -> PipelineGraph:
+    """Build a PipelineGraph from a raw dict (model_validate shorthand)."""
+    return PipelineGraph.model_validate(d)

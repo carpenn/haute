@@ -32,6 +32,23 @@ class DeployResult:
     manifest_path: Path
 
 
+def build_uc_model_name(config: DeployConfig) -> str:
+    """Build the Unity Catalog three-level namespace model name.
+
+    Format: ``catalog.schema.model_name[-suffix]``
+    """
+    effective = config.model_name + (config.endpoint_suffix or "")
+    return f"{config.databricks.catalog}.{config.databricks.schema}.{effective}"
+
+
+def build_experiment_name(config: DeployConfig) -> str:
+    """Build the MLflow experiment name, appending suffix if present."""
+    name = config.databricks.experiment_name
+    if config.endpoint_suffix:
+        name = name + config.endpoint_suffix
+    return name
+
+
 def deploy_to_mlflow(
     resolved: ResolvedDeploy,
     progress: Callable[[str], None] | None = None,
@@ -69,9 +86,7 @@ def deploy_to_mlflow(
     mlflow.set_registry_uri("databricks-uc")
 
     # Use Unity Catalog three-level namespace: catalog.schema.model_name
-    # Append endpoint suffix so staging and prod are separate registered models
-    effective_model_name = model_name + (config.endpoint_suffix or "")
-    uc_model_name = f"{config.databricks.catalog}.{config.databricks.schema}.{effective_model_name}"
+    uc_model_name = build_uc_model_name(config)
 
     # 1. Build deployment manifest
     manifest = _build_manifest(resolved)
@@ -93,9 +108,7 @@ def deploy_to_mlflow(
     signature = _build_signature(resolved)
 
     # 5. Set experiment - append endpoint suffix for staging isolation
-    experiment_name = config.databricks.experiment_name
-    if config.endpoint_suffix:
-        experiment_name = experiment_name + config.endpoint_suffix
+    experiment_name = build_experiment_name(config)
     _log(f"Setting experiment: {experiment_name}")
     mlflow.set_experiment(experiment_name)
 

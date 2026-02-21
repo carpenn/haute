@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute._types import GraphNode, NodeData, PipelineGraph
 from haute.graph_utils import (
     _execute_lazy,
     _object_cache,
@@ -15,10 +15,7 @@ from haute.graph_utils import (
     load_external_object,
     topo_sort_ids,
 )
-
-
-def _e(src: str, tgt: str) -> GraphEdge:
-    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
+from tests.conftest import make_edge as _e
 
 # ---------------------------------------------------------------------------
 # _sanitize_func_name
@@ -45,6 +42,29 @@ class TestSanitizeFuncName:
 
     def test_preserves_case(self):
         assert _sanitize_func_name("MyNode") == "MyNode"
+
+    def test_collisions_between_hyphens_and_underscores(self):
+        """Different labels can produce the same sanitized name."""
+        assert _sanitize_func_name("foo-bar") == _sanitize_func_name("foo_bar")
+
+    def test_collisions_between_special_chars_and_plain(self):
+        """Special characters are stripped, creating potential collisions."""
+        assert _sanitize_func_name("foo@bar") == _sanitize_func_name("foobar")
+
+    def test_unicode_preserved(self):
+        """Unicode alphanumeric chars (é, ñ) pass isalnum() and are kept."""
+        assert _sanitize_func_name("café") == "café"
+
+    def test_all_special_chars_returns_unnamed(self):
+        """Label of only special characters becomes unnamed_node."""
+        assert _sanitize_func_name("@#$%") == "unnamed_node"
+
+    def test_output_is_valid_python_identifier(self):
+        """Sanitized name must always be a valid Python identifier."""
+        labels = ["my node", "123", "foo-bar", "@!#", ""]
+        for label in labels:
+            name = _sanitize_func_name(label)
+            assert name.isidentifier(), f"{label!r} -> {name!r} is not a valid identifier"
 
 
 # ---------------------------------------------------------------------------
@@ -264,17 +284,22 @@ class TestExecuteLazy:
         with pytest.raises(ValueError, match="No input data available"):
             _execute_lazy(g, build_fn)
 
+@pytest.mark.usefixtures("_widen_sandbox_root")
 class TestLoadExternalObjectCache:
+    @pytest.fixture(autouse=True)
+    def _clear_object_cache(self):
+        _object_cache.clear()
+        yield
+        _object_cache.clear()
+
     def test_json_cached_on_second_call(self, tmp_path):
         p = tmp_path / "data.json"
         p.write_text('{"a": 1}')
 
-        _object_cache.clear()
         obj1 = load_external_object(str(p), "json")
         obj2 = load_external_object(str(p), "json")
         assert obj1 is obj2
         assert obj1 == {"a": 1}
-        _object_cache.clear()
 
     def test_mtime_change_invalidates_cache(self, tmp_path):
         import os
@@ -283,18 +308,17 @@ class TestLoadExternalObjectCache:
         p = tmp_path / "data.json"
         p.write_text('{"v": 1}')
 
-        _object_cache.clear()
         obj1 = load_external_object(str(p), "json")
         assert obj1 == {"v": 1}
 
-        _time.sleep(0.05)
         p.write_text('{"v": 2}')
-        os.utime(str(p), None)
+        # Force mtime 2 seconds in the future to avoid filesystem granularity issues
+        future = _time.time() + 2
+        os.utime(str(p), (future, future))
 
         obj2 = load_external_object(str(p), "json")
         assert obj2 == {"v": 2}
         assert obj1 is not obj2
-        _object_cache.clear()
 
     def test_pickle_cached(self, tmp_path):
         import pickle
@@ -303,12 +327,10 @@ class TestLoadExternalObjectCache:
         with open(p, "wb") as f:
             pickle.dump([1, 2, 3], f)
 
-        _object_cache.clear()
         obj1 = load_external_object(str(p), "pickle")
         obj2 = load_external_object(str(p), "pickle")
         assert obj1 is obj2
         assert obj1 == [1, 2, 3]
-        _object_cache.clear()
 
 
 class TestExecuteLazyMultiInput:

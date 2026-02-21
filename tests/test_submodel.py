@@ -7,14 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from haute._types import PipelineGraph
 from haute.codegen import graph_to_code, graph_to_code_multi
 from haute.graph_utils import flatten_graph
 from haute.parser import parse_pipeline_file
-
-
-def _g(d: dict) -> PipelineGraph:
-    return PipelineGraph.model_validate(d)
+from tests.conftest import make_graph as _g
 
 
 # ---------------------------------------------------------------------------

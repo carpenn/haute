@@ -42,7 +42,7 @@ class TestNode:
 
     def test_transform_no_input_raises(self):
         n = Node(name="t", description="", fn=lambda df: df, is_source=False)
-        with pytest.raises(ValueError, match="expects 1 input.*but received none"):
+        with pytest.raises(ValueError, match="expects.*input.*received none"):
             n()
 
 

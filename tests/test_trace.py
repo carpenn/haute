@@ -5,7 +5,6 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from haute._types import GraphNode, PipelineGraph
 from haute.trace import (
     SchemaDiff,
     TraceResult,
@@ -17,21 +16,11 @@ from haute.trace import (
 )
 from tests.conftest import (
     make_edge as _edge,
-)
-from tests.conftest import (
+    make_graph as _g,
+    make_node as _n,
     make_source_node as _source_node,
-)
-from tests.conftest import (
     make_transform_node as _transform_node,
 )
-
-
-def _n(d: dict) -> GraphNode:
-    return GraphNode.model_validate(d)
-
-
-def _g(d: dict) -> PipelineGraph:
-    return PipelineGraph.model_validate(d)
 
 # ---------------------------------------------------------------------------
 # _jsonify_row

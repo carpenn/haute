@@ -43,6 +43,7 @@ dev = [
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.27.0",
     "haute[databricks]",
+    "hypothesis>=6.151.9",
 ]
 
 [project.scripts]

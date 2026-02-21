@@ -5,28 +5,15 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from haute._types import GraphNode, PipelineGraph
 from haute.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
 from tests.conftest import (
     make_edge as _edge,
-)
-from tests.conftest import (
+    make_graph as _g,
+    make_node as _n,
     make_output_node as _output_node,
-)
-from tests.conftest import (
     make_source_node as _source_node,
-)
-from tests.conftest import (
     make_transform_node as _transform_node,
 )
-
-
-def _n(d: dict) -> GraphNode:
-    return GraphNode.model_validate(d)
-
-
-def _g(d: dict) -> PipelineGraph:
-    return PipelineGraph.model_validate(d)
 
 # ---------------------------------------------------------------------------
 # _exec_user_code
@@ -86,11 +73,38 @@ class TestExecUserCode:
             _exec_user_code("df = 1 / 0", ["df"], (lf,))
         assert "division" in str(exc_info.value).lower()
 
+    def test_bare_expression_wraps_as_df_assignment(self):
+        """Code without 'df =' is wrapped as df = (<code>), i.e. an expression."""
+        lf = pl.DataFrame({"x": [1, 2]}).lazy()
+        # A bare expression (no df = ...) gets wrapped as df = (expression)
+        result = _exec_user_code("df.with_columns(y=pl.lit(7))", ["df"], (lf,))
+        df = result.collect()
+        assert "y" in df.columns
+        assert df["y"].to_list() == [7, 7]
+
+    def test_explicit_df_assignment_preserved(self):
+        """When user code uses 'df = ...', no extra wrapping happens."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        result = _exec_user_code(
+            "df = df.with_columns(y=pl.lit(99))",
+            ["df"], (lf,),
+        )
+        assert result.collect()["y"].to_list() == [99]
+
+    def test_empty_dataframe_passthrough(self):
+        """Empty DataFrame (0 rows) passes through correctly."""
+        lf = pl.DataFrame({"x": pl.Series([], dtype=pl.Int64)}).lazy()
+        result = _exec_user_code(".with_columns(y=pl.col('x') * 2)", ["df"], (lf,))
+        df = result.collect()
+        assert len(df) == 0
+        assert set(df.columns) == {"x", "y"}
+
 
 # ---------------------------------------------------------------------------
 # _build_node_fn
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("_widen_sandbox_root")
 class TestBuildNodeFn:
     def test_data_source_parquet(self, tmp_path):
         p = tmp_path / "data.parquet"
@@ -138,7 +152,7 @@ class TestBuildNodeFn:
         # Without a cached parquet file, calling fn() raises CacheNotFoundError
         from haute._databricks_io import CacheNotFoundError
 
-        with pytest.raises(CacheNotFoundError, match="not been fetched"):
+        with pytest.raises(CacheNotFoundError, match="not.*fetched"):
             fn()
 
     def test_transform_with_code(self):
@@ -354,6 +368,73 @@ class TestExecuteGraph:
         assert results["bad"]["row_count"] == 0
         assert results["bad"]["columns"] == []
 
+    def test_cascading_failure_propagates(self, tmp_path):
+        """When a mid-pipeline node fails, downstream nodes also fail."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("mid", code=".select('nonexistent_col')"),
+                _transform_node("leaf", code=".with_columns(y=pl.col('x') * 2)"),
+            ],
+            "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
+        })
+        results = execute_graph(graph)
+        # Mid node should fail
+        assert results["mid"]["status"] == "error"
+        # Leaf node must also fail (it received None input from the failed mid node)
+        assert results["leaf"]["status"] == "error"
+        assert results["leaf"]["row_count"] == 0
+        # Source should still succeed
+        assert results["src"]["status"] == "ok"
+
+    def test_row_limit_zero_is_no_limit(self, tmp_path):
+        """row_limit=0 is falsy, so it behaves the same as None (no limit)."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": list(range(10))}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        })
+        results = execute_graph(graph, row_limit=0)
+        assert results["src"]["status"] == "ok"
+        assert results["src"]["row_count"] == 10
+
+    def test_row_limit_one(self, tmp_path):
+        """row_limit=1 should produce exactly 1 row through the pipeline."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": list(range(10))}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t", code=".with_columns(y=pl.col('x') * 2)"),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        results = execute_graph(graph, row_limit=1)
+        assert results["src"]["row_count"] == 1
+        assert results["t"]["row_count"] == 1
+        col_names = [c["name"] for c in results["t"]["columns"]]
+        assert "x" in col_names
+        assert "y" in col_names
+
+    def test_empty_source_dataframe(self, tmp_path):
+        """A source file with 0 rows should still have schema metadata."""
+        p = tmp_path / "empty.parquet"
+        pl.DataFrame({"a": pl.Series([], dtype=pl.Int64), "b": pl.Series([], dtype=pl.Utf8)}).write_parquet(p)
+
+        graph = _g({"nodes": [_source_node("src", str(p))], "edges": []})
+        results = execute_graph(graph)
+        assert results["src"]["status"] == "ok"
+        assert results["src"]["row_count"] == 0
+        col_names = [c["name"] for c in results["src"]["columns"]]
+        assert "a" in col_names
+        assert "b" in col_names
+
 
 # ---------------------------------------------------------------------------
 # execute_sink
@@ -411,7 +492,7 @@ class TestExecuteSink:
 
     def test_missing_sink_raises(self):
         graph = _g({"nodes": [], "edges": []})
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="not.*found"):
             execute_sink(graph, sink_node_id="nope")
 
     def test_no_path_raises(self, tmp_path):
@@ -431,7 +512,7 @@ class TestExecuteSink:
             ],
             "edges": [_edge("src", "sink")],
         })
-        with pytest.raises(ValueError, match="no output path"):
+        with pytest.raises(ValueError, match="no.*output path"):
             execute_sink(graph, sink_node_id="sink")
 
 

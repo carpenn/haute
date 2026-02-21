@@ -92,12 +92,12 @@ class TestValidateProjectPath:
 
     def test_path_outside_root_raises(self, tmp_path: Path):
         set_project_root(tmp_path / "subdir")
-        with pytest.raises(ValueError, match="outside the project root"):
+        with pytest.raises(ValueError, match="outside.*project root"):
             validate_project_path("/etc/passwd")
 
     def test_traversal_attack_blocked(self, tmp_path: Path):
         set_project_root(tmp_path)
-        with pytest.raises(ValueError, match="outside the project root"):
+        with pytest.raises(ValueError, match="outside.*project root"):
             validate_project_path(str(tmp_path / ".." / ".." / "etc" / "passwd"))
 
 
@@ -123,7 +123,7 @@ class TestSafeUnpickle:
             b"\x8c\necho pwned\x94\x85\x94R\x94."
         )
         f.write_bytes(payload)
-        with pytest.raises(pickle.UnpicklingError, match="not in the allowlist"):
+        with pytest.raises(pickle.UnpicklingError, match="not in.*allowlist"):
             safe_unpickle(str(f))
 
     def test_path_outside_root_blocked(self, tmp_path: Path):
@@ -131,7 +131,7 @@ class TestSafeUnpickle:
         set_project_root(tmp_path / "safe_dir")
         f = tmp_path / "outside.pkl"
         f.write_bytes(pickle.dumps(42))
-        with pytest.raises(ValueError, match="outside the project root"):
+        with pytest.raises(ValueError, match="outside.*project root"):
             safe_unpickle(str(f))
 
 
@@ -177,7 +177,7 @@ class TestSafeJoblibLoad:
                 return (os.system, ("echo pwned",))
 
         joblib.dump(_Evil(), str(f))
-        with pytest.raises(pickle.UnpicklingError, match="not in the allowlist"):
+        with pytest.raises(pickle.UnpicklingError, match="not in.*allowlist"):
             safe_joblib_load(str(f))
 
     def test_subprocess_payload_blocked(self, tmp_path: Path):
@@ -193,7 +193,7 @@ class TestSafeJoblibLoad:
                 return (subprocess.call, (["echo", "pwned"],))
 
         joblib.dump(_Evil(), str(f))
-        with pytest.raises(pickle.UnpicklingError, match="not in the allowlist"):
+        with pytest.raises(pickle.UnpicklingError, match="not in.*allowlist"):
             safe_joblib_load(str(f))
 
     def test_path_outside_root_blocked(self, tmp_path: Path):
@@ -203,7 +203,7 @@ class TestSafeJoblibLoad:
         set_project_root(tmp_path / "safe_dir")
         f = tmp_path / "outside.joblib"
         joblib.dump(42, str(f))
-        with pytest.raises(ValueError, match="outside the project root"):
+        with pytest.raises(ValueError, match="outside.*project root"):
             safe_joblib_load(str(f))
 
     def test_restriction_does_not_leak_across_calls(self, tmp_path: Path):

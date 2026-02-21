@@ -2,18 +2,8 @@
 
 from __future__ import annotations
 
-from haute._types import GraphNode, PipelineGraph
 from haute.codegen import _build_params, _node_to_code, graph_to_code
-
-
-def _n(d: dict) -> GraphNode:
-    """Shorthand: dict → GraphNode."""
-    return GraphNode.model_validate(d)
-
-
-def _g(d: dict) -> PipelineGraph:
-    """Shorthand: dict → PipelineGraph."""
-    return PipelineGraph.model_validate(d)
+from tests.conftest import make_graph as _g, make_node as _n
 
 
 # ---------------------------------------------------------------------------

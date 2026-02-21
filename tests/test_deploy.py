@@ -6,7 +6,11 @@ config). MLflow-specific tests are integration-level and require mlflow installe
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
@@ -14,9 +18,9 @@ import pytest
 from haute._types import PipelineGraph
 from haute.parser import parse_pipeline_file
 
-
-def _g(d: dict) -> PipelineGraph:
-    return PipelineGraph.model_validate(d)
+if TYPE_CHECKING:
+    from haute.deploy._config import DeployConfig, ResolvedDeploy
+from tests.conftest import make_graph as _g
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -31,6 +35,89 @@ DATA_DIR = FIXTURE_DIR / "data"
 def full_graph() -> PipelineGraph:
     """Parse the fixture pipeline into a PipelineGraph."""
     return parse_pipeline_file(PIPELINE_FILE)
+
+
+@dataclass
+class MLflowMocks:
+    """Named references to every mock in the MLflow deploy patch block."""
+
+    set_tracking_uri: MagicMock
+    set_registry_uri: MagicMock
+    set_experiment: MagicMock
+    start_run: MagicMock
+    log_dict: MagicMock
+    log_model: MagicMock
+    client: MagicMock
+    check_connectivity: MagicMock
+    build_signature: MagicMock
+    create_or_update_endpoint: MagicMock
+
+
+@contextmanager
+def mock_mlflow_deploy():
+    """Patch all 10 MLflow/deploy targets used by deploy_to_mlflow().
+
+    Yields an MLflowMocks dataclass so callers can assert on specific mocks.
+    """
+    with (
+        patch("mlflow.set_tracking_uri") as m_tracking,
+        patch("mlflow.set_registry_uri") as m_registry,
+        patch("mlflow.set_experiment") as m_experiment,
+        patch("mlflow.start_run") as m_run,
+        patch("mlflow.log_dict") as m_log_dict,
+        patch("mlflow.pyfunc.log_model") as m_log_model,
+        patch("mlflow.tracking.MlflowClient") as m_client,
+        patch("haute.deploy._mlflow._check_databricks_connectivity") as m_conn,
+        patch("haute.deploy._mlflow._build_signature") as m_sig,
+        patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as m_ep,
+    ):
+        m_client.return_value.search_model_versions.return_value = []
+        m_run.return_value.__enter__ = MagicMock()
+        m_run.return_value.__exit__ = MagicMock(return_value=False)
+
+        yield MLflowMocks(
+            set_tracking_uri=m_tracking,
+            set_registry_uri=m_registry,
+            set_experiment=m_experiment,
+            start_run=m_run,
+            log_dict=m_log_dict,
+            log_model=m_log_model,
+            client=m_client,
+            check_connectivity=m_conn,
+            build_signature=m_sig,
+            create_or_update_endpoint=m_ep,
+        )
+
+
+def _make_resolved(
+    config: DeployConfig | None = None, **overrides: object,
+) -> ResolvedDeploy:
+    """Build a lightweight ResolvedDeploy with sensible defaults.
+
+    Accepts either a pre-built DeployConfig or keyword overrides applied to a
+    minimal config.  All graph/schema fields default to empty so tests that
+    only exercise the MLflow API layer don't need to build real graphs.
+    """
+    from haute.deploy._config import DeployConfig, ResolvedDeploy
+
+    if config is None:
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+        )
+
+    defaults = dict(
+        config=config,
+        full_graph=PipelineGraph(),
+        pruned_graph=PipelineGraph(),
+        input_node_ids=["policies"],
+        output_node_id="output",
+        artifacts={},
+        input_schema={"col": "Int64"},
+        output_schema={"col": "Int64"},
+    )
+    defaults.update(overrides)
+    return ResolvedDeploy(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +192,7 @@ class TestPruner:
     def test_prune_missing_output_raises(self, full_graph: dict) -> None:
         from haute.deploy._pruner import prune_for_deploy
 
-        with pytest.raises(ValueError, match="not found in graph"):
+        with pytest.raises(ValueError, match="not found.*graph"):
             prune_for_deploy(full_graph, "nonexistent_node")
 
     def test_find_output_no_output_raises(self) -> None:
@@ -116,7 +203,7 @@ class TestPruner:
                 {"id": "a", "data": {"nodeType": "dataSource", "config": {}}},
             ]
         })
-        with pytest.raises(ValueError, match="No output node"):
+        with pytest.raises(ValueError, match="[Nn]o output node"):
             find_output_node(graph)
 
 
@@ -154,7 +241,7 @@ class TestBundler:
             ]
         })
 
-        with pytest.raises(FileNotFoundError, match="Artifact not found"):
+        with pytest.raises(FileNotFoundError, match="[Aa]rtifact.*not found"):
             collect_artifacts(graph, [], Path("."))
 
 
@@ -180,8 +267,12 @@ class TestScorer:
         )
 
         assert isinstance(result, pl.DataFrame)
-        assert len(result) >= 1
-        assert len(result.columns) > 0
+        assert len(result) == 1
+        # The pipeline adds area_factor and premium columns
+        assert "premium" in result.columns
+        assert "area_factor" in result.columns
+        # All output values should be non-null for valid input
+        assert result["premium"].null_count() == 0
 
     def test_score_multiple_rows(self, full_graph: dict) -> None:
         from haute.deploy._pruner import find_output_node, prune_for_deploy
@@ -200,6 +291,13 @@ class TestScorer:
 
         assert isinstance(result, pl.DataFrame)
         assert len(result) == 5
+        # Verify computed columns are present and populated
+        assert "premium" in result.columns
+        assert "area_factor" in result.columns
+        assert result["premium"].null_count() == 0
+        # Input columns should survive through to output
+        assert "VehPower" in result.columns
+        assert "Area" in result.columns
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +446,91 @@ class TestConfig:
 
 
 # ---------------------------------------------------------------------------
+# Pure deploy logic — extracted functions
+# ---------------------------------------------------------------------------
+
+
+class TestBuildUcModelName:
+    """Tests for the pure UC model name construction."""
+
+    def test_default_config(self) -> None:
+        from haute.deploy._config import DeployConfig
+        from haute.deploy._mlflow import build_uc_model_name
+
+        config = DeployConfig(pipeline_file=PIPELINE_FILE, model_name="my-model")
+        # Default DatabricksConfig: catalog="main", schema="pricing"
+        assert build_uc_model_name(config) == "main.pricing.my-model"
+
+    def test_custom_catalog_schema(self) -> None:
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import build_uc_model_name
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            databricks=DatabricksConfig(catalog="workspace", schema="pricing"),
+        )
+        assert build_uc_model_name(config) == "workspace.pricing.my-model"
+
+    def test_suffix_appended(self) -> None:
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import build_uc_model_name
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_suffix="-staging",
+            databricks=DatabricksConfig(catalog="ws", schema="default"),
+        )
+        assert build_uc_model_name(config) == "ws.default.my-model-staging"
+
+    def test_no_suffix(self) -> None:
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import build_uc_model_name
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            databricks=DatabricksConfig(catalog="ws", schema="default"),
+        )
+        assert build_uc_model_name(config) == "ws.default.my-model"
+
+
+class TestBuildExperimentName:
+    """Tests for the pure experiment name construction."""
+
+    def test_default_experiment(self) -> None:
+        from haute.deploy._config import DeployConfig
+        from haute.deploy._mlflow import build_experiment_name
+
+        config = DeployConfig(pipeline_file=PIPELINE_FILE, model_name="my-model")
+        assert build_experiment_name(config) == config.databricks.experiment_name
+
+    def test_suffix_appended(self) -> None:
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import build_experiment_name
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            endpoint_suffix="-staging",
+            databricks=DatabricksConfig(experiment_name="/Shared/haute/test"),
+        )
+        assert build_experiment_name(config) == "/Shared/haute/test-staging"
+
+    def test_no_suffix(self) -> None:
+        from haute.deploy._config import DatabricksConfig, DeployConfig
+        from haute.deploy._mlflow import build_experiment_name
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
+            databricks=DatabricksConfig(experiment_name="/Shared/haute/test"),
+        )
+        assert build_experiment_name(config) == "/Shared/haute/test"
+
+
+# ---------------------------------------------------------------------------
 # Parser apiInput round-trip test
 # ---------------------------------------------------------------------------
 
@@ -357,53 +540,24 @@ class TestDatabricksTracking:
 
     def test_deploy_sets_tracking_uri(self) -> None:
         """deploy_to_mlflow() must call mlflow.set_tracking_uri('databricks')."""
-        from unittest.mock import MagicMock, patch
+        from haute.deploy._mlflow import DeployResult, deploy_to_mlflow
 
-        from haute.deploy._config import DeployConfig, ResolvedDeploy
-        from haute.deploy._mlflow import deploy_to_mlflow
+        resolved = _make_resolved()
 
-        config = DeployConfig(
-            pipeline_file=PIPELINE_FILE,
-            model_name="test-model",
-        )
-        resolved = ResolvedDeploy(
-            config=config,
-            full_graph=PipelineGraph(),
-            pruned_graph=PipelineGraph(),
-            input_node_ids=["policies"],
-            output_node_id="output",
-            artifacts={},
-            input_schema={"col": "Int64"},
-            output_schema={"col": "Int64"},
-            removed_node_ids=[],
-        )
+        with mock_mlflow_deploy() as mocks:
+            result = deploy_to_mlflow(resolved)
 
-        with (
-            patch("mlflow.set_tracking_uri") as mock_set_tracking,
-            patch("mlflow.set_registry_uri") as mock_set_registry,
-            patch("mlflow.set_experiment"),
-            patch("mlflow.start_run") as mock_run,
-            patch("mlflow.log_dict"),
-            patch("mlflow.pyfunc.log_model"),
-            patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute.deploy._mlflow._check_databricks_connectivity"),
-            patch("haute.deploy._mlflow._build_signature"),
-            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
-        ):
-            mock_client.return_value.search_model_versions.return_value = []
-            mock_run.return_value.__enter__ = MagicMock()
-            mock_run.return_value.__exit__ = MagicMock(return_value=False)
-
-            deploy_to_mlflow(resolved)
-
-            mock_set_tracking.assert_called_once_with("databricks")
-            mock_set_registry.assert_called_once_with("databricks-uc")
+            mocks.set_tracking_uri.assert_called_once_with("databricks")
+            mocks.set_registry_uri.assert_called_once_with("databricks-uc")
+            # Behavioral: result is a well-formed DeployResult
+            assert isinstance(result, DeployResult)
+            assert result.model_name == "test-model"
+            assert result.model_version >= 1
+            assert result.manifest_path.name == "deploy_manifest.json"
 
     def test_deploy_uses_uc_model_name(self) -> None:
         """Model must be registered with catalog.schema.model_name format."""
-        from unittest.mock import MagicMock, patch
-
-        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._config import DatabricksConfig, DeployConfig
         from haute.deploy._mlflow import deploy_to_mlflow
 
         config = DeployConfig(
@@ -411,37 +565,13 @@ class TestDatabricksTracking:
             model_name="my-model",
             databricks=DatabricksConfig(catalog="workspace", schema="default"),
         )
-        resolved = ResolvedDeploy(
-            config=config,
-            full_graph=PipelineGraph(),
-            pruned_graph=PipelineGraph(),
-            input_node_ids=["policies"],
-            output_node_id="output",
-            artifacts={},
-            input_schema={"col": "Int64"},
-            output_schema={"col": "Int64"},
-        )
+        resolved = _make_resolved(config)
 
-        with (
-            patch("mlflow.set_tracking_uri"),
-            patch("mlflow.set_registry_uri"),
-            patch("mlflow.set_experiment"),
-            patch("mlflow.start_run") as mock_run,
-            patch("mlflow.log_dict"),
-            patch("mlflow.pyfunc.log_model") as mock_log_model,
-            patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute.deploy._mlflow._check_databricks_connectivity"),
-            patch("haute.deploy._mlflow._build_signature"),
-            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
-        ):
-            mock_client.return_value.search_model_versions.return_value = []
-            mock_run.return_value.__enter__ = MagicMock()
-            mock_run.return_value.__exit__ = MagicMock(return_value=False)
-
+        with mock_mlflow_deploy() as mocks:
             result = deploy_to_mlflow(resolved)
 
             # Verify the UC three-level namespace was used in log_model
-            log_call = mock_log_model.call_args
+            log_call = mocks.log_model.call_args
             assert log_call.kwargs["registered_model_name"] == "workspace.default.my-model"
 
             # Verify the model URI uses the UC name
@@ -449,9 +579,7 @@ class TestDatabricksTracking:
 
     def test_experiment_name_includes_suffix_for_staging(self) -> None:
         """Staging deploys must use a suffixed experiment and model name."""
-        from unittest.mock import MagicMock, patch
-
-        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._config import DatabricksConfig, DeployConfig
         from haute.deploy._mlflow import deploy_to_mlflow
 
         config = DeployConfig(
@@ -464,39 +592,18 @@ class TestDatabricksTracking:
                 schema="default",
             ),
         )
-        resolved = ResolvedDeploy(
-            config=config,
-            full_graph=PipelineGraph(),
-            pruned_graph=PipelineGraph(),
-            input_node_ids=["policies"],
-            output_node_id="output",
-            artifacts={},
-            input_schema={"col": "Int64"},
-            output_schema={"col": "Int64"},
-        )
+        resolved = _make_resolved(config)
 
-        with (
-            patch("mlflow.set_tracking_uri"),
-            patch("mlflow.set_registry_uri"),
-            patch("mlflow.set_experiment") as mock_set_exp,
-            patch("mlflow.start_run") as mock_run,
-            patch("mlflow.log_dict"),
-            patch("mlflow.pyfunc.log_model") as mock_log_model,
-            patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute.deploy._mlflow._check_databricks_connectivity"),
-            patch("haute.deploy._mlflow._build_signature"),
-            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
-        ):
-            mock_client.return_value.search_model_versions.return_value = []
-            mock_run.return_value.__enter__ = MagicMock()
-            mock_run.return_value.__exit__ = MagicMock(return_value=False)
-
+        with mock_mlflow_deploy() as mocks:
             deploy_to_mlflow(resolved)
 
-            mock_set_exp.assert_called_once_with("/Shared/haute/test-staging")
+            mocks.set_experiment.assert_called_once_with("/Shared/haute/test-staging")
             # Model must also be registered with the suffix
-            log_call = mock_log_model.call_args
-            assert log_call.kwargs["registered_model_name"] == "workspace.default.test-model-staging"
+            log_call = mocks.log_model.call_args
+            assert (
+                log_call.kwargs["registered_model_name"]
+                == "workspace.default.test-model-staging"
+            )
 
 
 class TestServingEndpoint:
@@ -504,9 +611,7 @@ class TestServingEndpoint:
 
     def test_deploy_calls_create_or_update_endpoint(self) -> None:
         """deploy_to_mlflow() must call _create_or_update_serving_endpoint."""
-        from unittest.mock import MagicMock, patch
-
-        from haute.deploy._config import DatabricksConfig, DeployConfig, ResolvedDeploy
+        from haute.deploy._config import DatabricksConfig, DeployConfig
         from haute.deploy._mlflow import deploy_to_mlflow
 
         config = DeployConfig(
@@ -515,42 +620,21 @@ class TestServingEndpoint:
             endpoint_name="my-endpoint",
             databricks=DatabricksConfig(catalog="ws", schema="default"),
         )
-        resolved = ResolvedDeploy(
-            config=config,
-            full_graph=PipelineGraph(),
-            pruned_graph=PipelineGraph(),
-            input_node_ids=["policies"],
-            output_node_id="output",
-            artifacts={},
-            input_schema={"col": "Int64"},
-            output_schema={"col": "Int64"},
-        )
+        resolved = _make_resolved(config)
 
-        with (
-            patch("mlflow.set_tracking_uri"),
-            patch("mlflow.set_registry_uri"),
-            patch("mlflow.set_experiment"),
-            patch("mlflow.start_run") as mock_run,
-            patch("mlflow.log_dict"),
-            patch("mlflow.pyfunc.log_model"),
-            patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute.deploy._mlflow._check_databricks_connectivity"),
-            patch("haute.deploy._mlflow._build_signature"),
-            patch("haute.deploy._mlflow._create_or_update_serving_endpoint") as mock_ep,
-        ):
-            mock_client.return_value.search_model_versions.return_value = []
-            mock_run.return_value.__enter__ = MagicMock()
-            mock_run.return_value.__exit__ = MagicMock(return_value=False)
-            mock_ep.return_value = "https://host/serving-endpoints/my-endpoint/invocations"
+        with mock_mlflow_deploy() as mocks:
+            mocks.create_or_update_endpoint.return_value = (
+                "https://host/serving-endpoints/my-endpoint/invocations"
+            )
 
             result = deploy_to_mlflow(resolved)
 
-            mock_ep.assert_called_once_with(
+            mocks.create_or_update_endpoint.assert_called_once_with(
                 config=config,
                 uc_model_name="ws.default.my-model",
                 model_version=1,
             )
-            assert result.endpoint_url == ("https://host/serving-endpoints/my-endpoint/invocations")
+            assert result.endpoint_url == "https://host/serving-endpoints/my-endpoint/invocations"
 
     def test_endpoint_returns_none_when_no_endpoint_name(self) -> None:
         """If endpoint_name is not set, _create_or_update_serving_endpoint returns None."""
@@ -666,45 +750,14 @@ class TestModelsFromCode:
 
     def test_log_model_receives_file_path(self) -> None:
         """log_model(python_model=...) must receive a file path, not an object."""
-        from unittest.mock import MagicMock, patch
-
-        from haute.deploy._config import DeployConfig, ResolvedDeploy
         from haute.deploy._mlflow import deploy_to_mlflow
 
-        config = DeployConfig(
-            pipeline_file=PIPELINE_FILE,
-            model_name="test-model",
-        )
-        resolved = ResolvedDeploy(
-            config=config,
-            full_graph=PipelineGraph(),
-            pruned_graph=PipelineGraph(),
-            input_node_ids=["policies"],
-            output_node_id="output",
-            artifacts={},
-            input_schema={"col": "Int64"},
-            output_schema={"col": "Int64"},
-        )
+        resolved = _make_resolved()
 
-        with (
-            patch("mlflow.set_tracking_uri"),
-            patch("mlflow.set_registry_uri"),
-            patch("mlflow.set_experiment"),
-            patch("mlflow.start_run") as mock_run,
-            patch("mlflow.log_dict"),
-            patch("mlflow.pyfunc.log_model") as mock_log,
-            patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute.deploy._mlflow._check_databricks_connectivity"),
-            patch("haute.deploy._mlflow._build_signature"),
-            patch("haute.deploy._mlflow._create_or_update_serving_endpoint"),
-        ):
-            mock_client.return_value.search_model_versions.return_value = []
-            mock_run.return_value.__enter__ = MagicMock()
-            mock_run.return_value.__exit__ = MagicMock(return_value=False)
-
+        with mock_mlflow_deploy() as mocks:
             deploy_to_mlflow(resolved)
 
-            log_call = mock_log.call_args
+            log_call = mocks.log_model.call_args
             python_model_arg = log_call.kwargs["python_model"]
             assert isinstance(python_model_arg, str), (
                 f"Expected file path (str), got {type(python_model_arg)}"

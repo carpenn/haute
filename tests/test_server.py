@@ -331,3 +331,399 @@ class TestGetSchema:
         (pipeline_dir / "data" / "test.txt").write_text("hello")
         resp = client.get("/api/schema", params={"path": "data/test.txt"})
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Submodel routes — POST /api/submodel/create, GET /api/submodel/{name},
+#                   POST /api/submodel/dissolve
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def three_node_graph(pipeline_dir: Path) -> dict:
+    """Parse the test pipeline and return its graph as a dict payload."""
+    from haute.parser import parse_pipeline_file
+
+    graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+    return graph.model_dump()
+
+
+class TestCreateSubmodel:
+    def _create_payload(self, graph_dict: dict, node_ids: list[str]) -> dict:
+        return {
+            "name": "my_submodel",
+            "node_ids": node_ids,
+            "graph": graph_dict,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        }
+
+    def test_create_submodel_success(
+        self, client: TestClient, pipeline_dir: Path, three_node_graph: dict,
+    ):
+        # Select the two nodes (source + transform) for grouping
+        node_ids = [n["id"] for n in three_node_graph["nodes"]]
+        assert len(node_ids) >= 2
+        selected = node_ids[:2]
+
+        payload = self._create_payload(three_node_graph, selected)
+        resp = client.post("/api/submodel/create", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["submodel_file"] == "modules/my_submodel.py"
+        assert data["parent_file"] == "test_pipeline.py"
+        assert "nodes" in data["graph"]
+
+        # Verify the submodel node exists in the returned graph
+        returned_node_ids = {n["id"] for n in data["graph"]["nodes"]}
+        assert "submodel__my_submodel" in returned_node_ids
+        # Original selected nodes should be gone from parent
+        for nid in selected:
+            assert nid not in returned_node_ids
+
+        # Verify files were written to disk
+        assert (pipeline_dir / "modules" / "my_submodel.py").exists()
+        assert (pipeline_dir / "test_pipeline.py").exists()
+
+    def test_create_submodel_too_few_nodes_returns_400(
+        self, client: TestClient, three_node_graph: dict,
+    ):
+        # Only 1 node — must be at least 2
+        node_ids = [three_node_graph["nodes"][0]["id"]]
+        payload = self._create_payload(three_node_graph, node_ids)
+        resp = client.post("/api/submodel/create", json=payload)
+        assert resp.status_code == 400
+        assert "at least 2" in resp.json()["detail"]
+
+    def test_create_submodel_missing_source_file_returns_400(
+        self, client: TestClient, three_node_graph: dict,
+    ):
+        node_ids = [n["id"] for n in three_node_graph["nodes"][:2]]
+        payload = {
+            "name": "my_submodel",
+            "node_ids": node_ids,
+            "graph": three_node_graph,
+            "source_file": "",
+            "pipeline_name": "test_pipeline",
+        }
+        resp = client.post("/api/submodel/create", json=payload)
+        assert resp.status_code == 400
+        assert "source_file" in resp.json()["detail"]
+
+
+class TestGetSubmodel:
+    def test_get_submodel_success(
+        self, client: TestClient, pipeline_dir: Path, three_node_graph: dict,
+    ):
+        # First, create a submodel
+        node_ids = [n["id"] for n in three_node_graph["nodes"][:2]]
+        create_resp = client.post("/api/submodel/create", json={
+            "name": "lookup",
+            "node_ids": node_ids,
+            "graph": three_node_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert create_resp.status_code == 200
+
+        # Now fetch it
+        resp = client.get("/api/submodel/lookup")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["submodel_name"]
+        assert "nodes" in data["graph"]
+        # The internal graph should contain the grouped nodes
+        internal_ids = {n["id"] for n in data["graph"]["nodes"]}
+        for nid in node_ids:
+            assert nid in internal_ids
+
+    def test_get_submodel_not_found_returns_404(self, client: TestClient):
+        resp = client.get("/api/submodel/nonexistent")
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+
+class TestDissolveSubmodel:
+    def test_dissolve_submodel_success(
+        self, client: TestClient, pipeline_dir: Path, three_node_graph: dict,
+    ):
+        # Create a submodel first
+        node_ids = [n["id"] for n in three_node_graph["nodes"][:2]]
+        create_resp = client.post("/api/submodel/create", json={
+            "name": "temp_group",
+            "node_ids": node_ids,
+            "graph": three_node_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert create_resp.status_code == 200
+        updated_graph = create_resp.json()["graph"]
+
+        # Dissolve it
+        resp = client.post("/api/submodel/dissolve", json={
+            "submodel_name": "temp_group",
+            "graph": updated_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+        # The flattened graph should have the original nodes back
+        flat_ids = {n["id"] for n in data["graph"]["nodes"]}
+        assert "submodel__temp_group" not in flat_ids
+        for nid in node_ids:
+            assert nid in flat_ids
+
+        # The submodel file should be deleted
+        assert not (pipeline_dir / "modules" / "temp_group.py").exists()
+
+    def test_dissolve_nonexistent_submodel_returns_404(
+        self, client: TestClient, three_node_graph: dict,
+    ):
+        resp = client.post("/api/submodel/dissolve", json={
+            "submodel_name": "ghost",
+            "graph": three_node_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — /ws/sync connect/disconnect and broadcast
+# ---------------------------------------------------------------------------
+
+
+class TestWebSocket:
+    def test_connect_and_disconnect(self, client: TestClient):
+        with client.websocket_connect("/ws/sync") as ws:
+            # Connection should be accepted — sending a keep-alive message works
+            ws.send_text("ping")
+        # No error means connect + clean disconnect succeeded
+
+    def test_broadcast_reaches_connected_client(
+        self, client: TestClient, pipeline_dir: Path,
+    ):
+        """Save endpoint writes files and triggers sidecar — verify the
+        full HTTP flow still works with an active WebSocket connection."""
+        from haute.routes._helpers import ws_clients
+
+        with client.websocket_connect("/ws/sync"):
+            assert len(ws_clients) >= 1
+
+            # Use a save call to exercise the full stack (which calls mark_self_write)
+            graph = {
+                "nodes": [
+                    {"id": "s", "type": "pipelineNode",
+                     "position": {"x": 0, "y": 0},
+                     "data": {"label": "S", "nodeType": "dataSource",
+                              "config": {"path": "d.parquet"}}},
+                ],
+                "edges": [],
+            }
+            resp = client.post("/api/pipeline/save", json={
+                "name": "ws_test",
+                "description": "",
+                "graph": graph,
+                "source_file": "ws_test.py",
+            })
+            assert resp.status_code == 200
+
+        # After disconnect, client should be removed
+        assert len(ws_clients) == 0
+
+
+class TestBroadcast:
+    def test_broadcast_removes_dead_clients(self):
+        """Dead WebSocket clients should be pruned during broadcast."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from haute.routes._helpers import broadcast, ws_clients
+
+        dead_ws = MagicMock()
+        dead_ws.send_text = AsyncMock(side_effect=RuntimeError("closed"))
+
+        ws_clients.add(dead_ws)
+        try:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(broadcast({"type": "test"}))
+            finally:
+                loop.close()
+        finally:
+            ws_clients.discard(dead_ws)
+
+        assert dead_ws not in ws_clients
+
+    def test_broadcast_delivers_to_live_client(self):
+        """A live mock client should receive the broadcast message."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from haute.routes._helpers import broadcast, ws_clients
+
+        live_ws = MagicMock()
+        live_ws.send_text = AsyncMock()
+
+        ws_clients.add(live_ws)
+        try:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(broadcast({"type": "graph_update", "graph": {}}))
+            finally:
+                loop.close()
+
+            live_ws.send_text.assert_called_once()
+            payload = live_ws.send_text.call_args[0][0]
+            assert '"type": "graph_update"' in payload
+        finally:
+            ws_clients.discard(live_ws)
+
+
+# ---------------------------------------------------------------------------
+# Self-write tracking
+# ---------------------------------------------------------------------------
+
+
+class TestSelfWriteTracking:
+    def test_mark_and_check(self):
+        from haute.routes._helpers import is_self_write, mark_self_write
+
+        mark_self_write()
+        assert is_self_write() is True
+
+    def test_expires_after_cooldown(self, monkeypatch: pytest.MonkeyPatch):
+        import time as _time
+
+        import haute.routes._helpers as helpers
+
+        # Freeze time, mark, then advance past cooldown
+        fake_time = [100.0]
+        monkeypatch.setattr(_time, "monotonic", lambda: fake_time[0])
+
+        helpers.mark_self_write()
+        assert helpers.is_self_write() is True
+
+        fake_time[0] = 101.5  # 1.5s later, past the 1.0s cooldown
+        assert helpers.is_self_write() is False
+
+
+# ---------------------------------------------------------------------------
+# File watcher logic (unit test with mocked awatch)
+# ---------------------------------------------------------------------------
+
+
+class TestFileWatcher:
+    def test_py_change_triggers_broadcast(
+        self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A .py file change should parse and broadcast a graph_update."""
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        py_file = str(pipeline_dir / "test_pipeline.py")
+        fake_changes = [(Change.modified, py_file)]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        # awatch is imported locally inside _file_watcher via
+        # ``from watchfiles import awatch``, so patch it on the watchfiles module.
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+        ):
+            from haute.server import _file_watcher
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_file_watcher())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) >= 1
+        assert broadcast_calls[0]["type"] == "graph_update"
+        assert "graph" in broadcast_calls[0]
+
+    def test_non_py_files_ignored(self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """Non-.py files should be ignored by the watcher."""
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        fake_changes = [(Change.modified, str(pipeline_dir / "readme.txt"))]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+        ):
+            from haute.server import _file_watcher
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_file_watcher())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) == 0
+
+    def test_self_write_skips_broadcast(self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """Changes during self-write cooldown should be skipped."""
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        fake_changes = [(Change.modified, str(pipeline_dir / "test_pipeline.py"))]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=True),
+        ):
+            from haute.server import _file_watcher
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_file_watcher())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) == 0

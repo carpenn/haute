@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import polars as pl
-import pytest
 
+from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.codegen import graph_to_code
-from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.executor import _build_node_fn
 from haute.parser import parse_pipeline_source
-
+from tests.conftest import make_source_node as _source_node
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,17 +31,6 @@ def _rating_node(
             label=nid,
             nodeType="ratingStep",
             config=cfg,
-        ),
-    )
-
-
-def _source_node(nid: str = "src") -> GraphNode:
-    return GraphNode(
-        id=nid,
-        data=NodeData(
-            label=nid,
-            nodeType="dataSource",
-            config={"path": "data.parquet"},
         ),
     )
 
@@ -333,7 +321,7 @@ class TestRatingStepCodegen:
             "entries": [{"band": "A", "value": 2.0}],
         }]
         node = _rating_node("rating", tables)
-        src = _source_node()
+        src = _source_node("src")
         graph = PipelineGraph(
             nodes=[src, node],
             edges=[GraphEdge(id="e1", source="src", target="rating")],
@@ -355,7 +343,7 @@ class TestRatingStepCodegen:
             ],
         }]
         node = _rating_node("rating", tables)
-        src = _source_node()
+        src = _source_node("src")
         graph = PipelineGraph(
             nodes=[src, node],
             edges=[GraphEdge(id="e1", source="src", target="rating")],
@@ -382,7 +370,7 @@ class TestRatingStepCodegen:
              "defaultValue": 1.0, "entries": [{"b": "A", "value": 3.0}]},
         ]
         node = _rating_node("rating", tables, operation="add", combined_column="total")
-        src = _source_node()
+        src = _source_node("src")
         graph = PipelineGraph(
             nodes=[src, node],
             edges=[GraphEdge(id="e1", source="src", target="rating")],
@@ -404,7 +392,7 @@ class TestRatingStepCodegen:
              "entries": [{"b": "A", "value": 2.0}]},
         ]
         node = _rating_node("rating", tables, combined_column="c")
-        src = _source_node()
+        src = _source_node("src")
         graph = PipelineGraph(
             nodes=[src, node],
             edges=[GraphEdge(id="e1", source="src", target="rating")],

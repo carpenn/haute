@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pandas as pd
 import mlflow.pyfunc
 from mlflow.models import set_model
-
-if TYPE_CHECKING:
-    import pandas as pd
-    from mlflow.pyfunc import PythonModelContext
+from mlflow.pyfunc import PythonModelContext
 
 
 class HauteModel(mlflow.pyfunc.PythonModel):

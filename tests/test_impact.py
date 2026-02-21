@@ -171,63 +171,94 @@ class TestScoreEndpointBatched:
     def test_batches_correctly(self) -> None:
         from unittest.mock import MagicMock
 
+        def _side_effect(*, name, dataframe_records):
+            """Return one prediction per input record so merged result is verifiable."""
+            resp = MagicMock()
+            resp.predictions = [{"price": float(r["x"])} for r in dataframe_records]
+            return resp
+
         mock_ws = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.predictions = [{"price": 100.0}]
-        mock_ws.serving_endpoints.query.return_value = mock_resp
+        mock_ws.serving_endpoints.query.side_effect = _side_effect
 
         records = [{"x": i} for i in range(5)]
         preds = score_endpoint_batched(mock_ws, "ep", records, batch_size=2)
 
-        # 5 records / 2 per batch = 3 calls
+        # 5 records / 2 per batch = ceil(5/2) = 3 calls
         assert mock_ws.serving_endpoints.query.call_count == 3
-        assert len(preds) == 3  # 1 pred per batch (mocked)
+        # All 5 input records must produce 5 predictions
+        assert len(preds) == 5
+        # Verify predictions correspond to correct input values (order preserved)
+        assert preds[0]["price"] == 0.0
+        assert preds[1]["price"] == 1.0
+        assert preds[4]["price"] == 4.0
+
+    def test_non_list_predictions_appended(self) -> None:
+        """When predictions is not a list, it should be appended as a single item."""
+        from unittest.mock import MagicMock
+
+        def _side_effect(*, name, dataframe_records):
+            resp = MagicMock()
+            resp.predictions = 42.0  # scalar, not a list
+            return resp
+
+        mock_ws = MagicMock()
+        mock_ws.serving_endpoints.query.side_effect = _side_effect
+
+        records = [{"x": i} for i in range(3)]
+        preds = score_endpoint_batched(mock_ws, "ep", records, batch_size=2)
+
+        assert mock_ws.serving_endpoints.query.call_count == 2
+        assert preds == [42.0, 42.0]
+
+
+def _make_impact_report(**overrides) -> ImpactReport:
+    """Build an ImpactReport with sensible defaults for formatting tests."""
+    defaults = dict(
+        pipeline_name="test-model",
+        staging_endpoint="test-model-staging",
+        prod_endpoint="test-model",
+        dataset_path="data/policies.parquet",
+        total_rows=100000,
+        sampled_rows=10000,
+        scored_rows=10000,
+        failed_rows=0,
+        column_stats=[
+            ColumnStats(
+                name="price",
+                n_rows=10000,
+                n_changed=8000,
+                mean_change_pct=2.3,
+                median_change_pct=1.8,
+                max_increase_pct=18.7,
+                max_decrease_pct=-4.2,
+                p5=-2.1,
+                p25=0.5,
+                p75=3.4,
+                p95=7.2,
+                staging_mean=548.57,
+                prod_mean=536.12,
+                total_premium_change_pct=2.3,
+            )
+        ],
+        segments={},
+        is_first_deploy=False,
+    )
+    defaults.update(overrides)
+    return ImpactReport(**defaults)
 
 
 class TestFormatTerminal:
     """Terminal report formatting."""
 
-    def _make_report(self, **overrides) -> ImpactReport:
-        defaults = dict(
-            pipeline_name="test-model",
-            staging_endpoint="test-model-staging",
-            prod_endpoint="test-model",
-            dataset_path="data/policies.parquet",
-            total_rows=100000,
-            sampled_rows=10000,
-            scored_rows=10000,
-            failed_rows=0,
-            column_stats=[
-                ColumnStats(
-                    name="price",
-                    n_rows=10000,
-                    n_changed=8000,
-                    mean_change_pct=2.3,
-                    median_change_pct=1.8,
-                    max_increase_pct=18.7,
-                    max_decrease_pct=-4.2,
-                    p5=-2.1,
-                    p25=0.5,
-                    p75=3.4,
-                    p95=7.2,
-                    staging_mean=548.57,
-                    prod_mean=536.12,
-                    total_premium_change_pct=2.3,
-                )
-            ],
+    def test_contains_key_metrics(self) -> None:
+        report = _make_impact_report(
             segments={
                 "Region": [
                     SegmentRow("Ile-de-France", 2341, 4.1, 572.34, 549.87),
                     SegmentRow("Picardie", 423, -0.3, 501.23, 502.78),
                 ]
             },
-            is_first_deploy=False,
         )
-        defaults.update(overrides)
-        return ImpactReport(**defaults)
-
-    def test_contains_key_metrics(self) -> None:
-        report = self._make_report()
         text = format_terminal(report)
         assert "IMPACT REPORT" in text
         assert "test-model" in text
@@ -237,62 +268,28 @@ class TestFormatTerminal:
         assert "Ile-de-France" in text
 
     def test_first_deploy(self) -> None:
-        report = self._make_report(is_first_deploy=True, column_stats=[], segments={})
+        report = _make_impact_report(is_first_deploy=True, column_stats=[], segments={})
         text = format_terminal(report)
         assert "First deployment" in text
 
 class TestFormatMarkdown:
     """Markdown report formatting (GitHub Step Summary)."""
 
-    def _make_report(self, **overrides) -> ImpactReport:
-        defaults = dict(
-            pipeline_name="test-model",
-            staging_endpoint="test-model-staging",
-            prod_endpoint="test-model",
-            dataset_path="data/policies.parquet",
-            total_rows=100000,
-            sampled_rows=10000,
-            scored_rows=10000,
-            failed_rows=0,
-            column_stats=[
-                ColumnStats(
-                    name="price",
-                    n_rows=10000,
-                    n_changed=8000,
-                    mean_change_pct=2.3,
-                    median_change_pct=1.8,
-                    max_increase_pct=18.7,
-                    max_decrease_pct=-4.2,
-                    p5=-2.1,
-                    p25=0.5,
-                    p75=3.4,
-                    p95=7.2,
-                    staging_mean=548.57,
-                    prod_mean=536.12,
-                    total_premium_change_pct=2.3,
-                )
-            ],
-            segments={},
-            is_first_deploy=False,
-        )
-        defaults.update(overrides)
-        return ImpactReport(**defaults)
-
     def test_contains_markdown_tables(self) -> None:
-        report = self._make_report()
+        report = _make_impact_report()
         md = format_markdown(report)
         assert "# Impact Report" in md
         assert "| Metric | Value |" in md
         assert "| P5 | P25 | P50 | P75 | P95 |" in md
 
     def test_first_deploy_markdown(self) -> None:
-        report = self._make_report(is_first_deploy=True, column_stats=[], segments={})
+        report = _make_impact_report(is_first_deploy=True, column_stats=[], segments={})
         md = format_markdown(report)
         assert "First deployment" in md
         assert "| Metric" not in md
 
     def test_segment_table(self) -> None:
-        report = self._make_report(
+        report = _make_impact_report(
             segments={
                 "Region": [
                     SegmentRow("North", 500, 3.2, 110.0, 106.6),
