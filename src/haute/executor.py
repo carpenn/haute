@@ -474,6 +474,13 @@ def _build_node_fn(
 
         return func_name, rating_fn, False
 
+    elif node_type == NodeType.MODELLING:
+        # Pass-through in preview mode. Training happens via /api/modelling/train.
+        def modelling_passthrough(*dfs: _Frame) -> _Frame:
+            return dfs[0] if dfs else pl.LazyFrame()
+
+        return func_name, modelling_passthrough, False
+
     elif node_type in (NodeType.TRANSFORM, NodeType.MODEL_SCORE):
         code = config.get("code", "").strip()
         _src_names = list(source_names)

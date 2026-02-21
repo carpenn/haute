@@ -170,6 +170,12 @@ def severity_set(exposure: pl.LazyFrame, claims: pl.LazyFrame, policies: pl.Lazy
     return df
 
 
+@pipeline.node(modelling=True, target='ClaimAmount', exclude=['IDpol'], algorithm='catboost', task='regression', params={'iterations': 1000, 'learning_rate': 0.05, 'depth': 6}, split={'strategy': 'random', 'test_size': 0.2, 'seed': 42}, metrics=['rmse'])
+def Model_Training_17(severity_set: pl.LazyFrame) -> pl.LazyFrame:
+    """Model Training 17 node"""
+    return df
+
+
 @pipeline.node(sink="output/severity.parquet", format="parquet")
 def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
     """severity_write node"""
@@ -197,3 +203,4 @@ pipeline.connect("severity_model", "calculate_premium")
 pipeline.connect("frequency_model", "calculate_premium")
 pipeline.connect("policies", "Banding_15")
 pipeline.connect("Banding_15", "Rating_Step_16")
+pipeline.connect("severity_set", "Model_Training_17")

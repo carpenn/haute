@@ -133,8 +133,13 @@ def env_example(target: str) -> str:
         return (
             header.format(label="Databricks")
             + """
+# General credentials — data warehouse + MLflow tracking
 DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
 DATABRICKS_TOKEN=your_databricks_token_here
+
+# Production serving endpoint credentials
+DATABRICKS_RATING_HOST=https://adb-1234567890123456.12.azuredatabricks.net
+DATABRICKS_RATING_TOKEN=your_databricks_token_here
 """
         )
     if target == "sagemaker":
@@ -463,8 +468,8 @@ def _github_secrets_env(target: str) -> str:
     indent = "          "
     if target == "databricks":
         return (
-            f"{indent}DATABRICKS_HOST: ${{{{ secrets.DATABRICKS_HOST }}}}\n"
-            f"{indent}DATABRICKS_TOKEN: ${{{{ secrets.DATABRICKS_TOKEN }}}}"
+            f"{indent}DATABRICKS_RATING_HOST: ${{{{ secrets.DATABRICKS_RATING_HOST }}}}\n"
+            f"{indent}DATABRICKS_RATING_TOKEN: ${{{{ secrets.DATABRICKS_RATING_TOKEN }}}}"
         )
     if target == "sagemaker":
         return (
@@ -622,8 +627,8 @@ def _gitlab_secrets_env(target: str) -> str:
     indent = "    "
     if target == "databricks":
         return (
-            f"{indent}DATABRICKS_HOST: $DATABRICKS_HOST\n"
-            f"{indent}DATABRICKS_TOKEN: $DATABRICKS_TOKEN"
+            f"{indent}DATABRICKS_RATING_HOST: $DATABRICKS_RATING_HOST\n"
+            f"{indent}DATABRICKS_RATING_TOKEN: $DATABRICKS_RATING_TOKEN"
         )
     if target == "sagemaker":
         return (
@@ -892,8 +897,8 @@ def _azure_devops_secrets_env(target: str) -> str:
     indent = "              "
     if target == "databricks":
         return (
-            f"{indent}DATABRICKS_HOST: $(DATABRICKS_HOST)\n"
-            f"{indent}DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)"
+            f"{indent}DATABRICKS_RATING_HOST: $(DATABRICKS_RATING_HOST)\n"
+            f"{indent}DATABRICKS_RATING_TOKEN: $(DATABRICKS_RATING_TOKEN)"
         )
     if target == "sagemaker":
         return (

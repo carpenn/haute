@@ -95,6 +95,8 @@ class TestEnvExample:
         result = env_example("databricks")
         assert "DATABRICKS_HOST" in result
         assert "DATABRICKS_TOKEN" in result
+        assert "DATABRICKS_RATING_HOST" in result
+        assert "DATABRICKS_RATING_TOKEN" in result
         assert "AWS_ACCESS_KEY" not in result
         assert "AZURE_" not in result
 
@@ -166,15 +168,15 @@ class TestGithubDeployYml:
 
     def test_databricks_secrets(self) -> None:
         result = github_deploy_yml("databricks")
-        assert "secrets.DATABRICKS_HOST" in result
-        assert "secrets.DATABRICKS_TOKEN" in result
+        assert "secrets.DATABRICKS_RATING_HOST" in result
+        assert "secrets.DATABRICKS_RATING_TOKEN" in result
         assert "secrets.AWS_ACCESS_KEY_ID" not in result
 
     def test_sagemaker_secrets(self) -> None:
         result = github_deploy_yml("sagemaker")
         assert "secrets.AWS_ACCESS_KEY_ID" in result
         assert "secrets.SAGEMAKER_ROLE_ARN" in result
-        assert "secrets.DATABRICKS_HOST" not in result
+        assert "secrets.DATABRICKS_RATING_HOST" not in result
 
     def test_contains_staging_and_impact(self) -> None:
         result = github_deploy_yml("databricks")
@@ -189,7 +191,7 @@ class TestGithubDeployYml:
         result = github_deploy_prod_yml("databricks")
         assert "deploy-production:" in result
         assert "workflow_dispatch" in result
-        assert "secrets.DATABRICKS_HOST" in result
+        assert "secrets.DATABRICKS_RATING_HOST" in result
 
     def test_deploy_prod_yml_tags_release(self) -> None:
         from haute._scaffold import github_deploy_prod_yml
@@ -301,17 +303,17 @@ class TestGitlabCiYml:
             if in_top_variables and not line.startswith(" ") and line.strip():
                 in_top_variables = False
             if in_top_variables:
-                assert "DATABRICKS_HOST" not in line
+                assert "DATABRICKS_RATING_HOST" not in line
 
     def test_secrets_in_deploy_jobs_only(self) -> None:
         from haute._scaffold import gitlab_ci_yml
 
         result = gitlab_ci_yml("databricks")
         # Secrets should appear in the deploy-staging, smoke-test, impact, production sections
-        assert "DATABRICKS_HOST" in result
+        assert "DATABRICKS_RATING_HOST" in result
         # The lint section should NOT have variables with secrets
         lint_section = result.split("# ── Validate")[1].split("# ── Staging")[0]
-        assert "DATABRICKS_HOST" not in lint_section
+        assert "DATABRICKS_RATING_HOST" not in lint_section
 
     def test_concurrency_control(self) -> None:
         from haute._scaffold import gitlab_ci_yml
@@ -342,8 +344,8 @@ class TestGitlabCiYml:
         from haute._scaffold import gitlab_ci_yml
 
         result = gitlab_ci_yml("databricks")
-        assert "$DATABRICKS_HOST" in result
-        assert "$DATABRICKS_TOKEN" in result
+        assert "$DATABRICKS_RATING_HOST" in result
+        assert "$DATABRICKS_RATING_TOKEN" in result
 
     def test_container_secrets(self) -> None:
         from haute._scaffold import gitlab_ci_yml
@@ -509,8 +511,8 @@ class TestYamlStructure:
         from haute._scaffold import azure_devops_yml
 
         result = azure_devops_yml("databricks")
-        assert "$(DATABRICKS_HOST)" in result
-        assert "$(DATABRICKS_TOKEN)" in result
+        assert "$(DATABRICKS_RATING_HOST)" in result
+        assert "$(DATABRICKS_RATING_TOKEN)" in result
 
     def test_sagemaker_secrets(self) -> None:
         from haute._scaffold import azure_devops_yml
@@ -518,7 +520,7 @@ class TestYamlStructure:
         result = azure_devops_yml("sagemaker")
         assert "$(AWS_ACCESS_KEY_ID)" in result
         assert "$(SAGEMAKER_ROLE_ARN)" in result
-        assert "$(DATABRICKS_HOST)" not in result
+        assert "$(DATABRICKS_RATING_HOST)" not in result
 
 
 # ---------------------------------------------------------------------------

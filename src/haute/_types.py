@@ -35,6 +35,7 @@ class NodeType(StrEnum):
     DATA_SINK = "dataSink"
     EXTERNAL_FILE = "externalFile"
     LIVE_SWITCH = "liveSwitch"
+    MODELLING = "modelling"
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
 
@@ -145,6 +146,23 @@ class LiveSwitchConfig(TypedDict, total=False):
 
     mode: str  # "live" | <input_name>
     inputs: list[str]
+
+
+class ModellingConfig(TypedDict, total=False):
+    """Config for modelling (model training) nodes."""
+
+    name: str
+    target: str
+    weight: str
+    exclude: list[str]
+    algorithm: str  # "catboost"
+    task: str  # "regression" | "classification"
+    params: dict[str, Any]
+    split: dict[str, Any]
+    metrics: list[str]
+    mlflow_experiment: str
+    model_name: str
+    output_dir: str
 
 
 class SubmodelConfig(TypedDict, total=False):

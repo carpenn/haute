@@ -3,6 +3,7 @@ import { X, Folder, FileText, ChevronLeft, Check, Database, Table2, HardDriveDow
 import { getDtypeColor } from "../utils/dtypeColors"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
+import ModellingConfig from "./ModellingConfig"
 
 type FileItem = {
   name: string
@@ -2821,6 +2822,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
   const isBanding = node.data.nodeType === NODE_TYPES.BANDING
   const isRatingStep = node.data.nodeType === NODE_TYPES.RATING_STEP
   const isTransform = node.data.nodeType === NODE_TYPES.TRANSFORM
+  const isModelling = node.data.nodeType === NODE_TYPES.MODELLING
   const isSubmodel = node.data.nodeType === NODE_TYPES.SUBMODEL
 
   // Compute input sources - variable name = sanitized source node label
@@ -3039,6 +3041,24 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           })()} />
       ) : isRatingStep ? (
         <RatingStepConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} allNodes={allNodes} />
+      ) : isModelling ? (
+        <ModellingConfig config={{...config, _nodeId: node.id}} onUpdate={handleConfigUpdate}
+          allNodes={allNodes} edges={edges} submodels={submodels}
+          upstreamColumns={(() => {
+            const cols: { name: string; dtype: string }[] = []
+            const seen = new Set<string>()
+            edges.filter(e => e.target === node.id).forEach(e => {
+              const src = nodeMap[e.source]
+              const srcCols = (src?.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined
+              if (srcCols) srcCols.forEach(c => { if (!seen.has(c.name)) { seen.add(c.name); cols.push(c) } })
+            })
+            // Modelling is a pass-through — its own _columns (set by preview) ARE the upstream columns
+            if (cols.length === 0) {
+              const ownCols = (node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined
+              if (ownCols) return ownCols
+            }
+            return cols
+          })()} />
       ) : isTransform ? (
         <TransformConfig config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
       ) : isSubmodel ? (

@@ -670,7 +670,10 @@ class TestServingEndpoint:
 
         with (
             patch("databricks.sdk.WorkspaceClient") as mock_ws_cls,
-            patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}),
+            patch.dict("os.environ", {
+                "DATABRICKS_RATING_HOST": "https://myhost",
+                "DATABRICKS_RATING_TOKEN": "test-token",
+            }),
         ):
             mock_ws = mock_ws_cls.return_value
             from databricks.sdk.errors import NotFound
@@ -705,7 +708,10 @@ class TestServingEndpoint:
 
         with (
             patch("databricks.sdk.WorkspaceClient") as mock_ws_cls,
-            patch.dict("os.environ", {"DATABRICKS_HOST": "https://myhost"}),
+            patch.dict("os.environ", {
+                "DATABRICKS_RATING_HOST": "https://myhost",
+                "DATABRICKS_RATING_TOKEN": "test-token",
+            }),
         ):
             mock_ws = mock_ws_cls.return_value
             mock_ws.serving_endpoints.get.return_value = MagicMock()

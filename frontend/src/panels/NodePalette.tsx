@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
@@ -84,6 +84,14 @@ const nodeTemplates = [
     icon: FileArchive,
     accent: "#ec4899",
     defaultConfig: { path: "", fileType: "pickle", code: "" },
+  },
+  {
+    type: NODE_TYPES.MODELLING,
+    label: "Model Training",
+    description: "Train and evaluate a CatBoost model",
+    icon: FlaskConical,
+    accent: "#a855f7",
+    defaultConfig: { algorithm: "catboost", task: "regression", target: "", weight: "", exclude: [], params: { iterations: 1000, learning_rate: 0.05, depth: 6 }, split: { strategy: "random", test_size: 0.2, seed: 42 }, metrics: ["gini", "rmse"] },
   },
 ]
 

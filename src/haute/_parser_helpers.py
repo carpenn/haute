@@ -36,6 +36,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeTyp
         return NodeType.LIVE_SWITCH
     if decorator_kwargs.get("output"):
         return NodeType.OUTPUT
+    if decorator_kwargs.get("modelling"):
+        return NodeType.MODELLING
     if "model_uri" in decorator_kwargs:
         return NodeType.MODEL_SCORE
     if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
@@ -402,6 +404,15 @@ def _build_node_config(
         )
         if combined:
             config["combinedColumn"] = str(combined)
+    elif node_type == NodeType.MODELLING:
+        _MODELLING_KEYS = (
+            "name", "target", "weight", "exclude", "algorithm", "task",
+            "params", "split", "metrics", "mlflow_experiment", "model_name",
+            "output_dir",
+        )
+        for key in _MODELLING_KEYS:
+            if key in decorator_kwargs:
+                config[key] = decorator_kwargs[key]
     elif node_type == NodeType.DATA_SINK:
         config["path"] = decorator_kwargs.get("sink", "")
         config["format"] = decorator_kwargs.get("format", "parquet")

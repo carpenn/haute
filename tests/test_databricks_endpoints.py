@@ -56,8 +56,6 @@ class TestListWarehouses:
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("DATABRICKS_HOST", raising=False)
         monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        monkeypatch.delenv("DATABRICKS_DATA_HOST", raising=False)
-        monkeypatch.delenv("DATABRICKS_DATA_TOKEN", raising=False)
         from haute.server import app
 
         c = TestClient(app)

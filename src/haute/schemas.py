@@ -328,3 +328,75 @@ class SubmodelGraphResponse(BaseModel):
     status: str = "ok"
     submodel_name: str = ""
     graph: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# /api/modelling/*
+# ---------------------------------------------------------------------------
+
+
+class TrainRequest(BaseModel):
+    graph: Graph
+    nodeId: str
+
+
+class TrainResponse(BaseModel):
+    status: str  # "started" | "completed" | "error"
+    job_id: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+    feature_importance: list[dict[str, Any]] = Field(default_factory=list)
+    model_path: str = ""
+    train_rows: int = 0
+    test_rows: int = 0
+    error: str | None = None
+    best_iteration: int | None = None
+    loss_history: list[dict[str, float]] = Field(default_factory=list)
+    double_lift: list[dict[str, Any]] = Field(default_factory=list)
+    shap_summary: list[dict[str, Any]] = Field(default_factory=list)
+    feature_importance_loss: list[dict[str, Any]] = Field(default_factory=list)
+    cv_results: dict[str, Any] | None = None
+    ave_per_feature: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TrainStatusResponse(BaseModel):
+    status: str  # "running" | "completed" | "error"
+    progress: float = 0.0
+    message: str = ""
+    iteration: int = 0
+    total_iterations: int = 0
+    train_loss: dict[str, float] = Field(default_factory=dict)
+    elapsed_seconds: float = 0.0
+    result: TrainResponse | None = None
+
+
+class ExportScriptRequest(BaseModel):
+    nodeId: str
+    graph: Graph
+    data_path: str = ""
+
+
+class ExportScriptResponse(BaseModel):
+    script: str
+    filename: str
+
+
+class LogExperimentRequest(BaseModel):
+    job_id: str
+    experiment_name: str | None = None
+    model_name: str | None = None
+
+
+class LogExperimentResponse(BaseModel):
+    status: str  # "ok" | "error"
+    backend: str = ""
+    experiment_name: str = ""
+    run_id: str = ""
+    run_url: str | None = None
+    tracking_uri: str = ""
+    error: str | None = None
+
+
+class MlflowCheckResponse(BaseModel):
+    mlflow_installed: bool
+    backend: str = ""
+    databricks_host: str = ""

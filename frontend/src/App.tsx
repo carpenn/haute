@@ -57,6 +57,7 @@ const nodeTypes = {
   [NODE_TYPES.DATA_SINK]: PipelineNode,
   [NODE_TYPES.EXTERNAL_FILE]: PipelineNode,
   [NODE_TYPES.LIVE_SWITCH]: PipelineNode,
+  [NODE_TYPES.MODELLING]: PipelineNode,
   [NODE_TYPES.SUBMODEL]: SubmodelNode,
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
@@ -72,6 +73,7 @@ const labelMap: Record<string, string> = {
   [NODE_TYPES.DATA_SINK]: "Data Sink",
   [NODE_TYPES.EXTERNAL_FILE]: "External File",
   [NODE_TYPES.LIVE_SWITCH]: "Live Switch",
+  [NODE_TYPES.MODELLING]: "Model Training",
   [NODE_TYPES.SUBMODEL]: "Submodel",
   [NODE_TYPES.SUBMODEL_PORT]: "Port",
 }

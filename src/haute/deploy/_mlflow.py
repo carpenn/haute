@@ -79,7 +79,7 @@ def deploy_to_mlflow(
     model_name = config.model_name
     logger.info("deploy_started", model_name=model_name, target="mlflow")
 
-    # Point MLflow at the Databricks workspace (uses DATABRICKS_HOST/TOKEN env vars)
+    # Point MLflow at the Databricks workspace (uses DATABRICKS_RATING_HOST/TOKEN env vars)
     _log("Connecting to Databricks MLflow...")
     _check_databricks_connectivity(_log)
     mlflow.set_tracking_uri("databricks")
@@ -324,9 +324,12 @@ def _create_or_update_serving_endpoint(
         ServedEntityInput,
     )
 
-    host = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    host = os.environ.get("DATABRICKS_RATING_HOST", "").rstrip("/")
 
-    ws = WorkspaceClient()
+    ws = WorkspaceClient(
+        host=os.environ.get("DATABRICKS_RATING_HOST", ""),
+        token=os.environ.get("DATABRICKS_RATING_TOKEN", ""),
+    )
 
     served_entity = ServedEntityInput(
         entity_name=uc_model_name,
@@ -367,13 +370,13 @@ def _check_databricks_connectivity(
     import os
     import urllib.request
 
-    host = os.environ.get("DATABRICKS_HOST", "")
-    token = os.environ.get("DATABRICKS_TOKEN", "")
+    host = os.environ.get("DATABRICKS_RATING_HOST", "")
+    token = os.environ.get("DATABRICKS_RATING_TOKEN", "")
 
     if not host:
-        raise RuntimeError("DATABRICKS_HOST is not set. Add it to .env or set it as a CI secret.")
+        raise RuntimeError("DATABRICKS_RATING_HOST is not set. Add it to .env or set it as a CI secret.")
     if not token:
-        raise RuntimeError("DATABRICKS_TOKEN is not set. Add it to .env or set it as a CI secret.")
+        raise RuntimeError("DATABRICKS_RATING_TOKEN is not set. Add it to .env or set it as a CI secret.")
 
     url = f"{host.rstrip('/')}/api/2.0/clusters/list-zones"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
@@ -384,7 +387,7 @@ def _check_databricks_connectivity(
         if exc.code == 403:
             raise RuntimeError(
                 f"Databricks returned 403 Forbidden. "
-                f"Check that your DATABRICKS_TOKEN is valid and has workspace access. "
+                f"Check that your DATABRICKS_RATING_TOKEN is valid and has workspace access. "
                 f"Host: {host}"
             ) from exc
         # Other HTTP errors (e.g. 404) are fine - it means the host is reachable
@@ -392,7 +395,7 @@ def _check_databricks_connectivity(
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(
             f"Cannot reach Databricks workspace at {host} "
-            f"(timed out after {timeout}s). Check DATABRICKS_HOST is correct "
+            f"(timed out after {timeout}s). Check DATABRICKS_RATING_HOST is correct "
             f"and that the workspace allows connections from this network "
             f"(e.g. GitHub Actions IP ranges may need allowlisting)."
         ) from exc

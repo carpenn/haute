@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/databricks", tags=["databricks"])
 
 
 def _get_databricks_client() -> Any:
-    """Return a Databricks WorkspaceClient using data credentials from .env."""
+    """Return a Databricks WorkspaceClient using credentials from .env."""
     try:
         from databricks.sdk import WorkspaceClient
     except ImportError:
@@ -35,8 +35,8 @@ def _get_databricks_client() -> Any:
             "Install with: pip install haute[databricks]",
         )
 
-    host = os.getenv("DATABRICKS_DATA_HOST") or os.getenv("DATABRICKS_HOST", "")
-    token = os.getenv("DATABRICKS_DATA_TOKEN") or os.getenv("DATABRICKS_TOKEN", "")
+    host = os.getenv("DATABRICKS_HOST", "")
+    token = os.getenv("DATABRICKS_TOKEN", "")
 
     if not host or not token:
         raise HTTPException(

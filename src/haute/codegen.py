@@ -118,6 +118,13 @@ def {func_name}({params}) -> pl.LazyFrame:
     return {first}
 '''
 
+_MODELLING = '''\
+@pipeline.node(modelling=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return df
+'''
+
 _EXTERNAL_PICKLE = '''\
 @pipeline.node(external="{path}", file_type="pickle")
 def {func_name}({params}) -> pl.LazyFrame:
@@ -332,6 +339,26 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             func_name=func_name,
             description=description,
             tables_repr=repr(emit_tables),
+            params=params,
+            extra_kwargs=extra_kwargs,
+        )
+
+    elif node_type == NodeType.MODELLING:
+        params = _build_params(source_names)
+        _MODELLING_KEYS = (
+            "name", "target", "weight", "exclude", "algorithm", "task",
+            "params", "split", "metrics", "mlflow_experiment", "model_name",
+            "output_dir",
+        )
+        extra_parts: list[str] = []
+        for key in _MODELLING_KEYS:
+            val = config.get(key)
+            if val is not None and val != "" and val != []:
+                extra_parts.append(f"{key}={val!r}")
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        return _MODELLING.format(
+            func_name=func_name,
+            description=description,
             params=params,
             extra_kwargs=extra_kwargs,
         )

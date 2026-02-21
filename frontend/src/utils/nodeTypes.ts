@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const NODE_TYPES = {
@@ -12,6 +12,7 @@ export const NODE_TYPES = {
   DATA_SINK: "dataSink",
   EXTERNAL_FILE: "externalFile",
   LIVE_SWITCH: "liveSwitch",
+  MODELLING: "modelling",
   SUBMODEL: "submodel",
   SUBMODEL_PORT: "submodelPort",
 } as const
@@ -29,7 +30,7 @@ export const SOURCE_ONLY_TYPES = new Set<string>([
 
 /** Nodes that only consume data — no output handle. */
 export const SINK_ONLY_TYPES = new Set<string>([
-  NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK,
+  NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK, NODE_TYPES.MODELLING,
 ])
 
 export const nodeTypeIcons: Record<string, React.ElementType> = {
@@ -43,6 +44,7 @@ export const nodeTypeIcons: Record<string, React.ElementType> = {
   [NODE_TYPES.DATA_SINK]: HardDriveDownload,
   [NODE_TYPES.EXTERNAL_FILE]: FileArchive,
   [NODE_TYPES.LIVE_SWITCH]: ToggleLeft,
+  [NODE_TYPES.MODELLING]: FlaskConical,
   [NODE_TYPES.SUBMODEL]: Package,
   [NODE_TYPES.SUBMODEL_PORT]: ArrowRight,
 }
@@ -58,6 +60,7 @@ export const nodeTypeColors: Record<string, string> = {
   [NODE_TYPES.DATA_SINK]: "#f59e0b",
   [NODE_TYPES.EXTERNAL_FILE]: "#ec4899",
   [NODE_TYPES.LIVE_SWITCH]: "#f59e0b",
+  [NODE_TYPES.MODELLING]: "#a855f7",
   [NODE_TYPES.SUBMODEL]: "#f97316",
   [NODE_TYPES.SUBMODEL_PORT]: "#94a3b8",
 }
@@ -73,6 +76,7 @@ export const nodeTypeLabels: Record<string, string> = {
   [NODE_TYPES.DATA_SINK]: "SINK",
   [NODE_TYPES.EXTERNAL_FILE]: "EXTERNAL",
   [NODE_TYPES.LIVE_SWITCH]: "SWITCH",
+  [NODE_TYPES.MODELLING]: "TRAINING",
   [NODE_TYPES.SUBMODEL]: "SUBMODEL",
   [NODE_TYPES.SUBMODEL_PORT]: "PORT",
 }

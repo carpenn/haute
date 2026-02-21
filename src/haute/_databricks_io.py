@@ -6,9 +6,9 @@ pipeline runs read from that cached file with :func:`read_cached_table`,
 giving full Polars ``scan_parquet`` speed with predicate pushdown.
 
 Connection details live on the data source node (``http_path`` in config).
-Secrets are resolved from the environment with fallback:
-    DATABRICKS_DATA_HOST  → DATABRICKS_HOST
-    DATABRICKS_DATA_TOKEN → DATABRICKS_TOKEN
+Secrets are resolved from the environment:
+    DATABRICKS_HOST
+    DATABRICKS_TOKEN
 """
 
 from __future__ import annotations
@@ -62,23 +62,23 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
 
     Args:
         http_path: SQL Warehouse HTTP path from the node config.
-            Falls back to ``DATABRICKS_DATA_HTTP_PATH`` env var.
+            Falls back to ``DATABRICKS_HTTP_PATH`` env var.
 
     Returns (host, token, http_path).
     """
-    host = os.getenv("DATABRICKS_DATA_HOST") or os.getenv("DATABRICKS_HOST", "")
-    token = os.getenv("DATABRICKS_DATA_TOKEN") or os.getenv("DATABRICKS_TOKEN", "")
-    resolved_http_path = http_path or os.getenv("DATABRICKS_DATA_HTTP_PATH", "")
+    host = os.getenv("DATABRICKS_HOST", "")
+    token = os.getenv("DATABRICKS_TOKEN", "")
+    resolved_http_path = http_path or os.getenv("DATABRICKS_HTTP_PATH", "")
 
     missing: list[str] = []
     if not host:
-        missing.append("DATABRICKS_DATA_HOST (or DATABRICKS_HOST)")
+        missing.append("DATABRICKS_HOST")
     if not token:
-        missing.append("DATABRICKS_DATA_TOKEN (or DATABRICKS_TOKEN)")
+        missing.append("DATABRICKS_TOKEN")
     if not resolved_http_path:
         missing.append(
             "http_path on the data source node "
-            "(or DATABRICKS_DATA_HTTP_PATH env var)"
+            "(or DATABRICKS_HTTP_PATH env var)"
         )
 
     if missing:
