@@ -52,7 +52,7 @@ const nodeTemplates = [
     description: "Lookup, factor, cap/floor",
     icon: TableProperties,
     accent: "#10b981",
-    defaultConfig: { table: "", key: "" },
+    defaultConfig: { tables: [{ name: "Table 1", factors: [], outputColumn: "", defaultValue: "1.0", entries: [] }], operation: "multiply", combinedColumn: "" },
   },
   {
     type: "output",

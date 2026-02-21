@@ -95,10 +95,9 @@ def {func_name}({params}) -> pl.LazyFrame:
 '''
 
 _RATING_STEP = '''\
-@pipeline.node(table="{table}", key="{key}")
-def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
+@pipeline.node(tables={tables_repr}{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    # TODO: implement rating step lookup
     return df
 '''
 
@@ -307,10 +306,33 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             )
 
     elif node_type == "ratingStep":
-        table = config.get("table", "")
-        key = config.get("key", "")
+        tables = config.get("tables", []) or []
+        params = _build_params(source_names)
+        emit_tables = []
+        for t in tables:
+            et: dict = {
+                "name": t.get("name", ""),
+                "factors": t.get("factors", []),
+                "output_column": t.get("outputColumn", ""),
+                "entries": t.get("entries", []),
+            }
+            if t.get("defaultValue") is not None:
+                et["default_value"] = t["defaultValue"]
+            emit_tables.append(et)
+        extra_parts: list[str] = []
+        op = config.get("operation")
+        if op and op != "multiply":
+            extra_parts.append(f"operation={op!r}")
+        combined = config.get("combinedColumn")
+        if combined:
+            extra_parts.append(f"combined_column={combined!r}")
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
         return _RATING_STEP.format(
-            func_name=func_name, description=description, table=table, key=key
+            func_name=func_name,
+            description=description,
+            tables_repr=repr(emit_tables),
+            params=params,
+            extra_kwargs=extra_kwargs,
         )
 
     elif node_type == "externalFile":

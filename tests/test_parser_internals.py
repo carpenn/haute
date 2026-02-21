@@ -255,9 +255,15 @@ class TestBuildNodeConfig:
         assert config["model_uri"] == "m/1"
 
     def test_rating_step(self):
-        config = _build_node_config("ratingStep", {"table": "t", "key": "k"}, "", ["df"])
-        assert config["table"] == "t"
-        assert config["key"] == "k"
+        config = _build_node_config(
+            "ratingStep",
+            {"tables": [{"name": "T", "factors": ["x"], "output_column": "out",
+                         "entries": [{"x": "a", "value": 1.0}]}]},
+            "", ["df"],
+        )
+        assert len(config["tables"]) == 1
+        assert config["tables"][0]["factors"] == ["x"]
+        assert config["tables"][0]["outputColumn"] == "out"
 
     def test_data_sink(self):
         config = _build_node_config("dataSink", {"sink": "out.csv", "format": "csv"}, "", ["df"])

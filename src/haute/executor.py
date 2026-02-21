@@ -166,6 +166,94 @@ def _normalise_banding_factors(config: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _apply_rating_table(
+    lf: _Frame,
+    table: dict[str, Any],
+) -> _Frame:
+    """Apply a single rating table lookup via a Polars left join.
+
+    *table* must contain ``factors`` (list of column names to join on),
+    ``outputColumn``, ``entries`` (list of dicts with one key per factor
+    plus a ``value`` key), and optionally ``defaultValue``.
+    """
+    factors: list[str] = table.get("factors", []) or []
+    entries: list[dict[str, Any]] = table.get("entries", []) or []
+    output_col: str = table.get("outputColumn", "")
+    default_raw = table.get("defaultValue")
+
+    if not factors or not entries or not output_col:
+        return lf
+
+    # Build lookup DataFrame — cast value to Float64
+    lookup = pl.DataFrame(entries)
+    if "value" not in lookup.columns:
+        return lf
+    lookup = lookup.with_columns(pl.col("value").cast(pl.Float64))
+
+    # Cast factor columns in lookup to Utf8 so the join matches string bands
+    for f in factors:
+        if f in lookup.columns:
+            lookup = lookup.with_columns(pl.col(f).cast(pl.Utf8))
+
+    # Cast factor columns in the main frame to Utf8 too
+    cast_exprs = [
+        pl.col(f).cast(pl.Utf8).alias(f) for f in factors
+        if f in (lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns)
+    ]
+    if cast_exprs:
+        lf = lf.with_columns(cast_exprs)
+
+    # Left join
+    lf = lf.join(lookup.lazy(), on=factors, how="left")
+
+    # Rename value → outputColumn, apply default
+    has_default = default_raw is not None and str(default_raw).strip()
+    default_val = float(default_raw) if has_default else None
+    if default_val is not None:
+        lf = lf.with_columns(
+            pl.col("value").fill_null(default_val).alias(output_col),
+        )
+    else:
+        lf = lf.with_columns(pl.col("value").alias(output_col))
+
+    # Drop the temporary "value" column if it differs from outputColumn
+    if output_col != "value":
+        lf = lf.drop("value")
+
+    return lf
+
+
+def _combine_rating_columns(
+    lf: _Frame,
+    columns: list[str],
+    operation: str,
+    output_col: str,
+) -> _Frame:
+    """Combine multiple rating table output columns into a single column.
+
+    Supported operations: multiply (default), add, min, max.
+    """
+    if not columns:
+        return lf
+    if len(columns) == 1:
+        return lf.with_columns(pl.col(columns[0]).alias(output_col))
+
+    if operation == "add":
+        expr = pl.col(columns[0])
+        for c in columns[1:]:
+            expr = expr + pl.col(c)
+    elif operation == "min":
+        expr = pl.min_horizontal(*[pl.col(c) for c in columns])
+    elif operation == "max":
+        expr = pl.max_horizontal(*[pl.col(c) for c in columns])
+    else:  # multiply (default)
+        expr = pl.col(columns[0])
+        for c in columns[1:]:
+            expr = expr * pl.col(c)
+
+    return lf.with_columns(expr.alias(output_col))
+
+
 _OP_MAP: dict[str, str] = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "=": "eq", "==": "eq"}
 
 
@@ -354,7 +442,38 @@ def _build_node_fn(
 
         return func_name, banding_fn, False
 
-    elif node_type in ("transform", "modelScore", "ratingStep"):
+    elif node_type == "ratingStep":
+        tables: list[dict[str, Any]] = config.get("tables", []) or []
+        # GUI config may send None for these fields, so `or` ensures a usable default
+        _rs_operation: str = config.get("operation", "multiply") or "multiply"
+        _rs_combined: str = config.get("combinedColumn", "") or ""
+
+        def rating_fn(
+            *dfs: _Frame,
+            _tables: list = list(tables),
+            _op: str = _rs_operation,
+            _combined: str = _rs_combined,
+        ) -> _Frame:
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            out_cols: list[str] = []
+            for t in _tables:
+                lf = _apply_rating_table(lf, t)
+                oc = t.get("outputColumn", "")
+                if oc:
+                    out_cols.append(oc)
+            if _combined and len(out_cols) >= 2:
+                logger.info(
+                    "combining_rating_columns",
+                    columns=out_cols,
+                    operation=_op,
+                    output=_combined,
+                )
+                lf = _combine_rating_columns(lf, out_cols, _op, _combined)
+            return lf
+
+        return func_name, rating_fn, False
+
+    elif node_type in ("transform", "modelScore"):
         code = config.get("code", "").strip()
         _src_names = list(source_names)
         _orig_src = list(orig_source_names) if orig_source_names else None

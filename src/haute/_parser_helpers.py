@@ -40,6 +40,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> str:
         return "modelScore"
     if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
         return "banding"
+    if "tables" in decorator_kwargs:
+        return "ratingStep"
     if "table" in decorator_kwargs and "key" in decorator_kwargs:
         return "ratingStep"
     if "path" in decorator_kwargs or n_params == 0:
@@ -373,8 +375,33 @@ def _build_node_config(
                 "default": decorator_kwargs.get("default"),
             }]
     elif node_type == "ratingStep":
-        config["table"] = decorator_kwargs.get("table", "")
-        config["key"] = decorator_kwargs.get("key", "")
+        if "tables" in decorator_kwargs:
+            raw_tables = decorator_kwargs["tables"]
+            config["tables"] = [
+                {
+                    "name": t.get("name", ""),
+                    "factors": t.get("factors", []),
+                    "outputColumn": t.get("output_column", t.get("outputColumn", "")),
+                    "defaultValue": t.get("default_value", t.get("defaultValue")),
+                    "entries": t.get("entries", []),
+                }
+                for t in (raw_tables if isinstance(raw_tables, list) else [])
+            ]
+        else:
+            config["tables"] = []
+        for t in config["tables"]:
+            if not isinstance(t.get("entries"), list):
+                t["entries"] = []
+            if not isinstance(t.get("factors"), list):
+                t["factors"] = []
+        op = decorator_kwargs.get("operation", decorator_kwargs.get("op"))
+        if op:
+            config["operation"] = str(op)
+        combined = decorator_kwargs.get(
+            "combined_column", decorator_kwargs.get("combinedColumn"),
+        )
+        if combined:
+            config["combinedColumn"] = str(combined)
     elif node_type == "dataSink":
         config["path"] = decorator_kwargs.get("sink", "")
         config["format"] = decorator_kwargs.get("format", "parquet")

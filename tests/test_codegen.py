@@ -202,12 +202,18 @@ class TestNodeToCode:
             "data": {
                 "label": "Lookup",
                 "nodeType": "ratingStep",
-                "config": {"table": "rates", "key": "region"},
+                "config": {"tables": [{
+                    "name": "Region",
+                    "factors": ["region"],
+                    "outputColumn": "region_factor",
+                    "defaultValue": 1.0,
+                    "entries": [{"region": "North", "value": 1.1}],
+                }]},
             },
         })
         code = _node_to_code(node)
-        assert 'table="rates"' in code
-        assert 'key="region"' in code
+        assert "tables=" in code
+        assert "output_column" in code
         _compile_node_code(code)
 
     def test_external_file_pickle(self):
