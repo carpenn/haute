@@ -69,7 +69,8 @@ def load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
     if sidecar.exists():
         try:
             data = _json.loads(sidecar.read_text())
-            return data.get("positions", {})
+            positions: dict[str, dict[str, float]] = data.get("positions", {})
+            return positions
         except Exception as e:
             logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}

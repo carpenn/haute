@@ -225,9 +225,9 @@ def _execute_eager_core(
             else:
                 input_ids = parents_of.get(nid, [])
                 input_lfs = [
-                    eager_outputs[pid].lazy()
+                    df.lazy()
                     for pid in input_ids
-                    if pid in eager_outputs and eager_outputs[pid] is not None
+                    if pid in eager_outputs and (df := eager_outputs[pid]) is not None
                 ]
                 if not input_lfs:
                     raise ValueError(

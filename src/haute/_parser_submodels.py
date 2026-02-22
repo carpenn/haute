@@ -46,7 +46,7 @@ def extract_submodel_calls(tree: ast.Module) -> list[str]:
             and isinstance(func.value, ast.Name)
         ):
             if call.args and isinstance(call.args[0], ast.Constant):
-                paths.append(call.args[0].value)
+                paths.append(str(call.args[0].value))
     return paths
 
 

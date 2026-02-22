@@ -133,7 +133,7 @@ def deploy_to_mlflow(
     if versions:
         latest_version = max(v.version for v in versions)
     else:
-        latest_version = 1
+        latest_version = "1"
 
     model_uri = f"models:/{uc_model_name}/{latest_version}"
 
@@ -200,7 +200,7 @@ def get_deploy_status(
         "latest_version": int(latest.version),
         "latest_stage": getattr(latest, "current_stage", "None"),
         "status": latest.status,
-        "run_id": latest.run_id,
+        "run_id": latest.run_id or "",
     }
 
 
@@ -243,8 +243,8 @@ def _build_signature(resolved: ResolvedDeploy) -> object:
             specs.append(ColSpec(type=mlflow_type, name=col_name))
         return specs
 
-    input_schema = Schema(_to_colspecs(resolved.input_schema))
-    output_schema = Schema(_to_colspecs(resolved.output_schema))
+    input_schema = Schema(_to_colspecs(resolved.input_schema))  # type: ignore[arg-type]
+    output_schema = Schema(_to_colspecs(resolved.output_schema))  # type: ignore[arg-type]
     return ModelSignature(inputs=input_schema, outputs=output_schema)
 
 

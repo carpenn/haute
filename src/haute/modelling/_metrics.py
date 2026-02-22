@@ -83,7 +83,7 @@ def _gini(
     if perfect_gini == 0:
         return 0.0
 
-    return raw_gini / perfect_gini
+    return float(raw_gini / perfect_gini)
 
 
 def _rmse(

@@ -113,8 +113,8 @@ def init(target: str, ci: str) -> None:
     name = project_dir.name.replace("-", "_").replace(" ", "_").lower()
 
     if pyproject_path.exists():
-        with open(pyproject_path, "rb") as f:
-            pyproject = tomllib.load(f)
+        with open(pyproject_path, "rb") as fh:
+            pyproject = tomllib.load(fh)
         if "project" in pyproject and "name" in pyproject["project"]:
             name = pyproject["project"]["name"]
 
@@ -203,8 +203,8 @@ def init(target: str, ci: str) -> None:
         existing = gitignore_path.read_text()
         missing = [line for line in haute_entries.splitlines() if line and line not in existing]
         if missing:
-            with open(gitignore_path, "a", encoding="utf-8") as f:
-                f.write("\n# Haute\n" + "\n".join(missing) + "\n")
+            with open(gitignore_path, "a", encoding="utf-8") as fh:
+                fh.write("\n# Haute\n" + "\n".join(missing) + "\n")
     else:
         gitignore_path.write_text(
             "__pycache__/\n*.pyc\n.venv/\n.env\n*.haute.json\n",
@@ -220,7 +220,7 @@ def init(target: str, ci: str) -> None:
     click.echo("  data/                - put your data files here")
     click.echo("  tests/               - starter test + example quote payloads")
     click.echo("  .githooks/pre-commit - auto-format on commit (ruff)")
-    for f in ci_files:
+    for f in ci_files:  # noqa: F841
         click.echo(f"  {f}")
     if git_hooks_dir.is_dir():
         click.echo("  .git/hooks/pre-commit  (installed)")
@@ -390,7 +390,7 @@ def serve(host: str, port: int, no_browser: bool) -> None:
             stderr=sys.stderr,
         )
 
-        def _cleanup(signum, frame):
+        def _cleanup(signum: int, frame: object) -> None:
             vite_proc.terminate()
             sys.exit(0)
 
@@ -818,7 +818,7 @@ def smoke(endpoint_suffix: str | None) -> None:
     all_ok = True
 
     if config.target == "databricks":
-        all_ok = _smoke_databricks(endpoint_name, json_files)
+        all_ok = _smoke_databricks(endpoint_name or "", json_files)
     elif config.target in _CONTAINER_BASED_TARGETS:
         endpoint_url = config.ci.staging_endpoint_url
         if not endpoint_url:

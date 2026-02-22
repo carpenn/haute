@@ -132,7 +132,7 @@ def list_models(
     try:
         result = client.search_registered_models(
             max_results=max_results,
-            **({"page_token": page_token} if page_token else {}),
+            page_token=page_token if page_token else None,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
@@ -169,7 +169,7 @@ def list_model_versions(
     return [
         MlflowModelVersionSummary(
             version=v.version,
-            run_id=v.run_id,
+            run_id=v.run_id or "",
             status=v.status,
             creation_timestamp=v.creation_timestamp,
             description=getattr(v, "description", ""),

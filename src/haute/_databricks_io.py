@@ -95,6 +95,7 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
     elif host.startswith("http://"):
         host = host[len("http://"):]
 
+    assert resolved_http_path is not None
     return host, token, resolved_http_path
 
 

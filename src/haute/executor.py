@@ -106,7 +106,7 @@ def _exec_user_code(
     result = local_ns.get("df", dfs[0] if dfs else pl.LazyFrame())
     if isinstance(result, pl.DataFrame):
         result = result.lazy()
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def _apply_banding(
@@ -140,22 +140,22 @@ def _apply_banding(
                 remap[str(val)] = str(assignment)
         if not remap:
             return lf
-        expr = col.cast(pl.Utf8).replace_strict(remap, default=default_lit).alias(output_column)
-        return lf.with_columns(expr)
+        cat_expr = col.cast(pl.Utf8).replace_strict(remap, default=default_lit).alias(output_column)
+        return lf.with_columns(cat_expr)
 
     # Continuous: build a when/then chain
-    expr: pl.Expr | None = None
+    chain: Any = None
     for rule in rules:
         cond = _banding_condition(col, rule)
         if cond is None:
             continue
         assignment = str(rule.get("assignment", ""))
         branch = pl.when(cond).then(pl.lit(assignment))
-        expr = branch if expr is None else expr.when(cond).then(pl.lit(assignment))
+        chain = branch if chain is None else chain.when(cond).then(pl.lit(assignment))
 
-    if expr is None:
+    if chain is None:
         return lf
-    final_expr = expr.otherwise(default_lit).alias(output_column)
+    final_expr = chain.otherwise(default_lit).alias(output_column)
     return lf.with_columns(final_expr)
 
 
@@ -209,7 +209,7 @@ def _apply_rating_table(
 
     # Rename value → outputColumn, apply default
     has_default = default_raw is not None and str(default_raw).strip()
-    default_val = float(default_raw) if has_default else None
+    default_val = float(str(default_raw)) if has_default else None
     if default_val is not None:
         lf = lf.with_columns(
             pl.col("value").fill_null(default_val).alias(output_col),
@@ -349,12 +349,12 @@ def _build_node_fn(
         if source_type == "databricks":
             table = config.get("table", "")
 
-            def source_fn(_table: str = table) -> _Frame:
+            def _databricks_source(_table: str = table) -> _Frame:
                 from haute._databricks_io import read_cached_table
 
                 return read_cached_table(_table)
 
-            return func_name, source_fn, True
+            return func_name, _databricks_source, True
 
         def source_fn() -> _Frame:
             return read_source(path)
@@ -647,9 +647,10 @@ def execute_graph(
                 errors = _preview_cache.errors
                 timings = _preview_cache.timings
             else:
-                eager_outputs, order, errors, timings = _eager_execute(
+                raw_outputs, order, errors, timings = _eager_execute(
                     graph, target_node_id, row_limit,
                 )
+                eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
                 merged = {**cached, **eager_outputs}
                 _preview_cache.eager_outputs = merged
                 _preview_cache.errors = {**_preview_cache.errors, **errors}
@@ -662,9 +663,10 @@ def execute_graph(
                 timings = _preview_cache.timings
                 order = _preview_cache.order
         else:
-            eager_outputs, order, errors, timings = _eager_execute(
+            raw_outputs, order, errors, timings = _eager_execute(
                 graph, target_node_id, row_limit,
             )
+            eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
             _preview_cache.fingerprint = fp
             _preview_cache.eager_outputs = eager_outputs
             _preview_cache.errors = errors

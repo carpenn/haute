@@ -189,7 +189,7 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
         results = await asyncio.wait_for(
             asyncio.to_thread(execute_graph, graph), timeout=300.0,
         )
-        return RunPipelineResponse(status="ok", results=results)
+        return RunPipelineResponse(status="ok", results=results)  # type: ignore[arg-type]
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Pipeline execution timed out (300s limit)")
     except Exception as e:
@@ -220,7 +220,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
         )
         return TraceResponse(
             status="ok",
-            trace=trace_result_to_dict(result),
+            trace=trace_result_to_dict(result),  # type: ignore[arg-type]
         )
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Trace execution timed out (120s limit)")
@@ -270,7 +270,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             if nid in node_map
         ]
 
-        return PreviewNodeResponse(nodeId=body.nodeId, timings=timings, **node_result)
+        return PreviewNodeResponse(nodeId=body.nodeId, timings=timings, **node_result)  # type: ignore[arg-type]
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Preview execution timed out (120s limit)")
     except HTTPException:

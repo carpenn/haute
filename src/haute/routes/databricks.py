@@ -61,7 +61,7 @@ async def list_databricks_warehouses() -> WarehouseListResponse:
                 "state": wh.state.value if wh.state else "UNKNOWN",
                 "size": wh.cluster_size or "",
             })
-        return {"warehouses": warehouses}
+        return WarehouseListResponse(warehouses=warehouses)  # type: ignore[arg-type]
     except HTTPException:
         raise
     except Exception as e:
@@ -78,7 +78,7 @@ async def list_databricks_catalogs() -> CatalogListResponse:
             for c in w.catalogs.list()
             if c.name
         ]
-        return {"catalogs": catalogs}
+        return CatalogListResponse(catalogs=catalogs)  # type: ignore[arg-type]
     except HTTPException:
         raise
     except Exception as e:
@@ -95,7 +95,7 @@ async def list_databricks_schemas(catalog: str) -> SchemaListResponse:
             for s in w.schemas.list(catalog_name=catalog)
             if s.name
         ]
-        return {"schemas": schemas}
+        return SchemaListResponse(schemas=schemas)  # type: ignore[arg-type]
     except HTTPException:
         raise
     except Exception as e:
@@ -117,7 +117,7 @@ async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse
             for t in w.tables.list(catalog_name=catalog, schema_name=schema)
             if t.name
         ]
-        return {"tables": tables}
+        return TableListResponse(tables=tables)  # type: ignore[arg-type]
     except HTTPException:
         raise
     except Exception as e:
@@ -162,7 +162,7 @@ async def get_fetch_progress(table: str) -> FetchProgressResponse:
     progress = fetch_progress(table)
     if progress is None:
         return FetchProgressResponse(active=False)
-    return FetchProgressResponse(active=True, **progress)
+    return FetchProgressResponse(active=True, **progress)  # type: ignore[arg-type]
 
 
 @router.get("/cache", response_model=CacheStatusResponse)

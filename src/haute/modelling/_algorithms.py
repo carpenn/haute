@@ -39,6 +39,9 @@ class BaseAlgorithm(ABC):
         task: str,
         on_iteration: IterationCallback | None = None,
         eval_df: pl.DataFrame | None = None,
+        offset: str | None = None,
+        monotone_constraints: dict[str, int] | None = None,
+        feature_weights: dict[str, float] | None = None,
     ) -> FitResult:
         """Train a model and return a FitResult."""
 
@@ -222,7 +225,8 @@ class CatBoostAlgorithm(BaseAlgorithm):
         self, model: Any, df: pl.DataFrame, features: list[str],
     ) -> np.ndarray:
         x_data = df.select(features).to_pandas()
-        return model.predict(x_data).flatten()
+        preds: np.ndarray = model.predict(x_data).flatten()
+        return preds
 
     def feature_importance(self, model: Any) -> list[dict[str, Any]]:
         names = model.feature_names_
@@ -255,7 +259,7 @@ class CatBoostAlgorithm(BaseAlgorithm):
     def shap_summary(
         self, model: Any, df: pl.DataFrame, features: list[str],
         max_rows: int = 1000,
-    ) -> list[dict[str, float]]:
+    ) -> list[dict[str, Any]]:
         """Compute mean |SHAP| per feature using CatBoost's native SHAP.
 
         Subsamples to max_rows for performance. Returns

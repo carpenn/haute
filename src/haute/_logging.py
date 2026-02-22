@@ -86,4 +86,4 @@ def configure_logging() -> None:
 
 def get_logger(**initial_ctx: object) -> structlog.stdlib.BoundLogger:
     """Return a structlog logger, optionally pre-bound with context."""
-    return structlog.get_logger(**initial_ctx)
+    return structlog.get_logger(**initial_ctx)  # type: ignore[no-any-return]

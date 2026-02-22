@@ -174,20 +174,24 @@ def _column_stats(stg: pl.Series, prd: pl.Series, name: str) -> ColumnStats:
     p_sum = float(prd.sum())
     total_pct = (s_sum - p_sum) / max(abs(p_sum), 1e-12) * 100
 
+    def _f(v: object) -> float:
+        """Coerce a Polars scalar to float (handles None from empty series)."""
+        return 0.0 if v is None else float(v)  # type: ignore[arg-type]
+
     return ColumnStats(
         name=name,
         n_rows=n,
         n_changed=int((change.abs() > _CHANGE_EPSILON).sum()) if n else 0,
-        mean_change_pct=float(change.mean()) if n else 0.0,
-        median_change_pct=float(change.median()) if n else 0.0,
-        max_increase_pct=float(change.max()) if n else 0.0,
-        max_decrease_pct=float(change.min()) if n else 0.0,
-        p5=float(change.quantile(0.05)) if n else 0.0,
-        p25=float(change.quantile(0.25)) if n else 0.0,
-        p75=float(change.quantile(0.75)) if n else 0.0,
-        p95=float(change.quantile(0.95)) if n else 0.0,
-        staging_mean=float(stg.mean()) if n else 0.0,
-        prod_mean=float(prd.mean()) if n else 0.0,
+        mean_change_pct=_f(change.mean()) if n else 0.0,
+        median_change_pct=_f(change.median()) if n else 0.0,
+        max_increase_pct=_f(change.max()) if n else 0.0,
+        max_decrease_pct=_f(change.min()) if n else 0.0,
+        p5=_f(change.quantile(0.05)) if n else 0.0,
+        p25=_f(change.quantile(0.25)) if n else 0.0,
+        p75=_f(change.quantile(0.75)) if n else 0.0,
+        p95=_f(change.quantile(0.95)) if n else 0.0,
+        staging_mean=_f(stg.mean()) if n else 0.0,
+        prod_mean=_f(prd.mean()) if n else 0.0,
         total_premium_change_pct=total_pct,
     )
 

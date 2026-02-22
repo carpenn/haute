@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Self
+from typing import Any, Self
 
 import polars as pl
 
@@ -46,16 +46,19 @@ class Node:
 
     def __call__(self, *dfs: pl.DataFrame) -> pl.DataFrame:
         if self.is_source:
-            return self.fn()
+            result: pl.DataFrame = self.fn()
+            return result
         if len(dfs) == 0:
             raise ValueError(
                 f"Node '{self.name}' expects {self.n_inputs} input(s) but received none"
             )
         # If function accepts multiple params, pass separately
         if self.n_inputs > 1:
-            return self.fn(*dfs[: self.n_inputs])
+            result = self.fn(*dfs[: self.n_inputs])
+            return result
         # Single-param function gets first df
-        return self.fn(dfs[0])
+        result = self.fn(dfs[0])
+        return result
 
 
 class NodeRegistry:
@@ -73,7 +76,7 @@ class NodeRegistry:
         self._edges: list[tuple[str, str]] = []
         self._submodel_files: list[str] = []
 
-    def node(self, fn: Callable | None = None, **config) -> Callable:
+    def node(self, fn: Callable | None = None, **config: Any) -> Callable:
         """Decorator to register a function as a node.
 
         Can be used bare or with config::

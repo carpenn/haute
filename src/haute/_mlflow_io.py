@@ -87,7 +87,7 @@ def load_mlflow_model(
             raise ValueError("registered_model is required when sourceType is 'registered'")
         resolved_version = _resolve_version(client, registered_model, version)
         mv = client.get_model_version(registered_model, resolved_version)
-        resolved_run_id = mv.run_id
+        resolved_run_id = mv.run_id or ""
         if not resolved_artifact:
             resolved_artifact = _find_cbm_artifact(client, resolved_run_id)
     elif source_type == "run":
@@ -151,14 +151,14 @@ def _find_cbm_artifact(client: MlflowClient, run_id: str) -> str:
     artifacts = client.list_artifacts(run_id)
     for art in artifacts:
         if art.path.endswith(".cbm"):
-            return art.path
+            return str(art.path)
     # Check one level deep (artifacts may be in subdirectories)
     for art in artifacts:
         if art.is_dir:
             sub_artifacts = client.list_artifacts(run_id, art.path)
             for sub in sub_artifacts:
                 if sub.path.endswith(".cbm"):
-                    return sub.path
+                    return str(sub.path)
     raise FileNotFoundError(
         f"No .cbm artifact found in run '{run_id}'. "
         "Ensure the model was logged with mlflow.log_artifact()."

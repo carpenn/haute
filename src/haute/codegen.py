@@ -435,7 +435,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             "params", "split", "metrics", "mlflow_experiment", "model_name",
             "output_dir",
         )
-        extra_parts: list[str] = []
+        extra_parts = []
         for key in modelling_keys:
             val = config.get(key)
             if val is not None and val != "" and val != []:

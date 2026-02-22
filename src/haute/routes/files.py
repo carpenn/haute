@@ -75,8 +75,10 @@ async def get_schema(path: str) -> SchemaResponse:
 
         lf = read_source(str(target))
 
+        from haute.schemas import ColumnInfo
+
         schema = lf.collect_schema()
-        columns = [{"name": c, "dtype": str(d)} for c, d in schema.items()]
+        columns = [ColumnInfo(name=c, dtype=str(d)) for c, d in schema.items()]
         preview_df = lf.head(5).collect()
         row_count = lf.select(pl.len()).collect().item()
 
@@ -113,8 +115,10 @@ async def get_databricks_schema(table: str) -> SchemaResponse:
     try:
         import pyarrow.parquet as pq
 
+        from haute.schemas import ColumnInfo
+
         df = pl.scan_parquet(p).head(1000).collect()
-        columns = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns]
+        columns = [ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns]
         preview_df = df.head(5)
         row_count = pq.read_metadata(str(p)).num_rows
 

@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -61,7 +62,7 @@ app = FastAPI(title="Haute", version="0.1.0", lifespan=_lifespan)
 class _RequestIdMiddleware(BaseHTTPMiddleware):
     """Bind a unique request_id to structlog context for every HTTP request."""
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
         rid = request.headers.get("x-request-id", uuid.uuid4().hex[:12])
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=rid)
@@ -202,7 +203,7 @@ if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
     @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
+    async def serve_spa(full_path: str) -> FileResponse:
         """Serve the React SPA - all non-API routes return index.html."""
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():

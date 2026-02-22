@@ -391,6 +391,9 @@ class TrainingJob:
         except ImportError:
             return
 
+        if not self.mlflow_experiment:
+            return
+
         log_experiment(
             experiment_name=self.mlflow_experiment,
             run_name=self.name,

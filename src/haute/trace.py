@@ -260,7 +260,7 @@ def execute_trace(
             swallow_errors=False,
         )
         # Trace never swallows errors so all values are DataFrames here.
-        eager_outputs: dict[str, pl.DataFrame] = {
+        eager_outputs = {
             nid: df for nid, df in result.outputs.items() if df is not None
         }
         order = result.order
@@ -297,12 +297,13 @@ def execute_trace(
 
         output_row = cached_rows[nid]
 
+        input_row: dict[str, Any] | None
         if is_source:
             input_row = None
         else:
             input_ids = parents_of.get(nid, [])
             if input_ids:
-                input_row: dict[str, Any] = {}
+                input_row = {}
                 for pid in input_ids:
                     input_row.update(cached_rows[pid])
             else:

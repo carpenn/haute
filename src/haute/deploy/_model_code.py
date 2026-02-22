@@ -11,7 +11,7 @@ from mlflow.models import set_model
 from mlflow.pyfunc import PythonModelContext
 
 
-class HauteModel(mlflow.pyfunc.PythonModel):
+class HauteModel(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined]
     """MLflow PythonModel wrapper for a deployed haute pipeline."""
 
     def load_context(self, context: PythonModelContext) -> None:
