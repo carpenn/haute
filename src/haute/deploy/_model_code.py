@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pandas as pd
 import mlflow.pyfunc
+import pandas as pd
 from mlflow.models import set_model
 from mlflow.pyfunc import PythonModelContext
 

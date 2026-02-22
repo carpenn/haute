@@ -277,6 +277,7 @@ async def mlflow_check() -> MlflowCheckResponse:
         return MlflowCheckResponse(mlflow_installed=False)
 
     import os
+
     from haute.modelling._mlflow_log import resolve_tracking_backend
 
     _uri, backend = resolve_tracking_backend()

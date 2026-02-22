@@ -518,12 +518,12 @@ def _build_node_fn(
             df_eager = lf.collect()
 
             features = [f for f in model.feature_names_ if f in df_eager.columns]
-            X = df_eager.select(features).to_pandas()
-            preds = model.predict(X).flatten()
+            x_data = df_eager.select(features).to_pandas()
+            preds = model.predict(x_data).flatten()
             df_eager = df_eager.with_columns(pl.Series(_output_col, preds))
 
             if _task == "classification" and hasattr(model, "predict_proba"):
-                probas = model.predict_proba(X)
+                probas = model.predict_proba(x_data)
                 if probas.ndim == 2:
                     probas = probas[:, 1]
                 df_eager = df_eager.with_columns(

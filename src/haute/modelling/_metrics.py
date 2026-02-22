@@ -178,9 +178,14 @@ def _tweedie_deviance(
         return _poisson_deviance(y_true, y_pred, weight)
     elif abs(p - 2.0) < 1e-8:
         # Gamma case
-        dev = 2.0 * (-np.log(np.maximum(y_true_safe, 1e-10) / y_pred_safe) + (y_true_safe - y_pred_safe) / y_pred_safe)
+        log_ratio = np.log(np.maximum(y_true_safe, 1e-10) / y_pred_safe)
+        diff_ratio = (y_true_safe - y_pred_safe) / y_pred_safe
+        dev = 2.0 * (-log_ratio + diff_ratio)
     else:
-        term1 = np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p)) if np.any(y_true_safe > 0) else 0.0
+        term1 = (
+            np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p))
+            if np.any(y_true_safe > 0) else 0.0
+        )
         term2 = y_true_safe * np.power(y_pred_safe, 1 - p) / (1 - p)
         term3 = np.power(y_pred_safe, 2 - p) / (2 - p)
         dev = 2.0 * (term1 - term2 + term3)

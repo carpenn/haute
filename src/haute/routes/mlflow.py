@@ -44,6 +44,7 @@ def _ensure_tracking() -> tuple[_types.ModuleType, MlflowClient]:
         )
 
     from mlflow.tracking import MlflowClient
+
     from haute.modelling._mlflow_log import resolve_tracking_backend
 
     tracking_uri, _backend = resolve_tracking_backend()

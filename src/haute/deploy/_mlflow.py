@@ -374,9 +374,15 @@ def _check_databricks_connectivity(
     token = os.environ.get("DATABRICKS_RATING_TOKEN", "")
 
     if not host:
-        raise RuntimeError("DATABRICKS_RATING_HOST is not set. Add it to .env or set it as a CI secret.")
+        raise RuntimeError(
+            "DATABRICKS_RATING_HOST is not set."
+            " Add it to .env or set it as a CI secret."
+        )
     if not token:
-        raise RuntimeError("DATABRICKS_RATING_TOKEN is not set. Add it to .env or set it as a CI secret.")
+        raise RuntimeError(
+            "DATABRICKS_RATING_TOKEN is not set."
+            " Add it to .env or set it as a CI secret."
+        )
 
     url = f"{host.rstrip('/')}/api/2.0/clusters/list-zones"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})

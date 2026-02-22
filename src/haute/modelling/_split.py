@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Literal
 
 import polars as pl
 
@@ -65,7 +65,10 @@ def _random_split(
     # Add row index, sample train indices, derive test via anti-join
     indexed = df.with_row_index("__split_idx__")
     train = indexed.sample(n=train_n, seed=seed).sort("__split_idx__")
-    test = indexed.join(train.select("__split_idx__"), on="__split_idx__", how="anti").sort("__split_idx__")
+    test = (
+        indexed.join(train.select("__split_idx__"), on="__split_idx__", how="anti")
+        .sort("__split_idx__")
+    )
     return train.drop("__split_idx__"), test.drop("__split_idx__")
 
 

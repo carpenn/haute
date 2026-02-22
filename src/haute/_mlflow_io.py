@@ -55,10 +55,10 @@ def load_mlflow_model(
         FileNotFoundError: If the model artifact cannot be found.
         ValueError: If configuration is invalid.
     """
-    _VALID_TASKS = ("regression", "classification")
-    if task not in _VALID_TASKS:
+    valid_tasks = ("regression", "classification")
+    if task not in valid_tasks:
         raise ValueError(
-            f"Invalid task {task!r}. Expected one of: {', '.join(_VALID_TASKS)}"
+            f"Invalid task {task!r}. Expected one of: {', '.join(valid_tasks)}"
         )
 
     try:
@@ -69,6 +69,7 @@ def load_mlflow_model(
         ) from None
 
     from mlflow.tracking import MlflowClient
+
     from haute.modelling._mlflow_log import resolve_tracking_backend
 
     if not tracking_uri:

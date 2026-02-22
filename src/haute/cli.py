@@ -653,7 +653,6 @@ def train(training_script: str) -> None:
       haute train train_severity.py
     """
     import importlib.util
-    import types
 
     filepath = Path(training_script)
     if not filepath.exists():

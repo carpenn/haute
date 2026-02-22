@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-import numpy as np
 import polars as pl
 
 from haute.modelling._algorithms import ALGORITHM_REGISTRY, IterationCallback, resolve_loss_function
@@ -225,11 +225,13 @@ class TrainingJob:
         if hasattr(algo, "feature_importance_typed"):
             try:
                 from catboost import Pool as _Pool
-                test_X = test_df.select(features).to_pandas()
+                test_x = test_df.select(features).to_pandas()
                 test_y = test_df[self.target].to_numpy()
                 cat_indices = [features.index(f) for f in cat_features if f in features]
-                _test_pool = _Pool(data=test_X, label=test_y, cat_features=cat_indices)
-                feature_importance_loss = algo.feature_importance_typed(model, _test_pool, "LossFunctionChange")
+                _test_pool = _Pool(data=test_x, label=test_y, cat_features=cat_indices)
+                feature_importance_loss = algo.feature_importance_typed(
+                    model, _test_pool, "LossFunctionChange",
+                )
             except Exception:
                 pass
 

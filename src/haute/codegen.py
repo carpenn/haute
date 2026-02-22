@@ -297,7 +297,8 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 f"        probas = model.predict_proba(X)\n"
                 f"        if probas.ndim == 2:\n"
                 f"            probas = probas[:, 1]\n"
-                f'        df_eager = df_eager.with_columns(pl.Series("{output_column}_proba", probas))\n'
+                f'        df_eager = df_eager.with_columns(\n'
+                f'            pl.Series("{output_column}_proba", probas))\n'
             )
 
         user_code_block = ""
@@ -429,13 +430,13 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
 
     elif node_type == NodeType.MODELLING:
         params = _build_params(source_names)
-        _MODELLING_KEYS = (
+        modelling_keys = (
             "name", "target", "weight", "exclude", "algorithm", "task",
             "params", "split", "metrics", "mlflow_experiment", "model_name",
             "output_dir",
         )
         extra_parts: list[str] = []
-        for key in _MODELLING_KEYS:
+        for key in modelling_keys:
             val = config.get(key)
             if val is not None and val != "" and val != []:
                 extra_parts.append(f"{key}={val!r}")

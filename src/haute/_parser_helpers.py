@@ -208,12 +208,12 @@ def _extract_model_score_user_code(body_source: str) -> str:
     ``return result`` is genuine user code.  If no sentinel is found the
     body is entirely auto-generated and we return an empty string.
     """
-    _SENTINEL = "# -- user code --"
-    if _SENTINEL not in body_source:
+    sentinel = "# -- user code --"
+    if sentinel not in body_source:
         return ""
 
     # Take everything after the sentinel
-    _, _, after = body_source.partition(_SENTINEL)
+    _, _, after = body_source.partition(sentinel)
     lines = after.strip().splitlines()
     if not lines:
         return ""
@@ -384,12 +384,12 @@ def _build_node_config(
         config["mode"] = decorator_kwargs.get("mode", "live")
         config["inputs"] = param_names
     elif node_type == NodeType.MODEL_SCORE:
-        _MODEL_SCORE_KEYS = (
+        model_score_keys = (
             "source_type", "run_id", "artifact_path", "run_name",
             "registered_model", "version", "task", "output_column",
             "experiment_name", "experiment_id",
         )
-        for key in _MODEL_SCORE_KEYS:
+        for key in model_score_keys:
             if key in decorator_kwargs:
                 # Map snake_case decorator key to camelCase config key where needed
                 config_key = "sourceType" if key == "source_type" else key
@@ -449,12 +449,12 @@ def _build_node_config(
         if combined:
             config["combinedColumn"] = str(combined)
     elif node_type == NodeType.MODELLING:
-        _MODELLING_KEYS = (
+        modelling_keys = (
             "name", "target", "weight", "exclude", "algorithm", "task",
             "params", "split", "metrics", "mlflow_experiment", "model_name",
             "output_dir",
         )
-        for key in _MODELLING_KEYS:
+        for key in modelling_keys:
             if key in decorator_kwargs:
                 config[key] = decorator_kwargs[key]
     elif node_type == NodeType.DATA_SINK:

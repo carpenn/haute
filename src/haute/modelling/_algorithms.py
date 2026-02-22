@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -57,7 +58,10 @@ class BaseAlgorithm(ABC):
 
 
 class _CatBoostProgressCallback:
-    """CatBoost after_iteration callback that reports to an IterationCallback and collects loss history."""
+    """CatBoost after_iteration callback that reports to an IterationCallback.
+
+    Also collects loss history.
+    """
 
     def __init__(
         self,
@@ -75,7 +79,10 @@ class _CatBoostProgressCallback:
         if info.metrics:
             for dataset_name, metric_dict in info.metrics.items():
                 for metric_name, values in metric_dict.items():
-                    label = metric_name if dataset_name == "learn" else f"{dataset_name}_{metric_name}"
+                    label = (
+                        metric_name if dataset_name == "learn"
+                        else f"{dataset_name}_{metric_name}"
+                    )
                     if values:
                         metrics[label] = values[-1]
                     # Store in loss history with explicit train_/eval_ prefixes
@@ -138,7 +145,7 @@ class CatBoostAlgorithm(BaseAlgorithm):
     ) -> FitResult:
         from catboost import CatBoostClassifier, CatBoostRegressor, Pool
 
-        X = train_df.select(features).to_pandas()
+        x_train = train_df.select(features).to_pandas()
         y = train_df[target].to_numpy()
         w = train_df[weight].to_numpy() if weight else None
         baseline = train_df[offset].to_numpy() if offset else None
@@ -146,17 +153,17 @@ class CatBoostAlgorithm(BaseAlgorithm):
         # Build cat_feature indices for CatBoost
         cat_indices = [features.index(f) for f in cat_features if f in features]
 
-        pool = Pool(data=X, label=y, weight=w, cat_features=cat_indices, baseline=baseline)
+        pool = Pool(data=x_train, label=y, weight=w, cat_features=cat_indices, baseline=baseline)
 
         # Build eval pool if eval_df provided
         eval_pool = None
         if eval_df is not None:
-            eval_X = eval_df.select(features).to_pandas()
+            eval_x = eval_df.select(features).to_pandas()
             eval_y = eval_df[target].to_numpy()
             eval_w = eval_df[weight].to_numpy() if weight else None
             eval_baseline = eval_df[offset].to_numpy() if offset else None
             eval_pool = Pool(
-                data=eval_X, label=eval_y, weight=eval_w,
+                data=eval_x, label=eval_y, weight=eval_w,
                 cat_features=cat_indices, baseline=eval_baseline,
             )
 
@@ -214,8 +221,8 @@ class CatBoostAlgorithm(BaseAlgorithm):
     def predict(
         self, model: Any, df: pl.DataFrame, features: list[str],
     ) -> np.ndarray:
-        X = df.select(features).to_pandas()
-        return model.predict(X).flatten()
+        x_data = df.select(features).to_pandas()
+        return model.predict(x_data).flatten()
 
     def feature_importance(self, model: Any) -> list[dict[str, Any]]:
         names = model.feature_names_
@@ -257,8 +264,8 @@ class CatBoostAlgorithm(BaseAlgorithm):
         from catboost import Pool
 
         sample = df.sample(min(len(df), max_rows), seed=42) if len(df) > max_rows else df
-        X = sample.select(features).to_pandas()
-        pool = Pool(data=X, cat_features=[])
+        x_data = sample.select(features).to_pandas()
+        pool = Pool(data=x_data, cat_features=[])
 
         # CatBoost ShapValues returns shape (n_samples, n_features + 1), last col is base value
         shap_values = model.get_feature_importance(data=pool, type="ShapValues")
@@ -292,12 +299,12 @@ class CatBoostAlgorithm(BaseAlgorithm):
         """
         from catboost import Pool, cv
 
-        X = train_df.select(features).to_pandas()
+        x_train = train_df.select(features).to_pandas()
         y = train_df[target].to_numpy()
         w = train_df[weight].to_numpy() if weight else None
         cat_indices = [features.index(f) for f in cat_features if f in features]
 
-        pool = Pool(data=X, label=y, weight=w, cat_features=cat_indices)
+        pool = Pool(data=x_train, label=y, weight=w, cat_features=cat_indices)
 
         cv_params = {**params}
         if "verbose" not in cv_params:
