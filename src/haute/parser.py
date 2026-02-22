@@ -104,7 +104,7 @@ def parse_pipeline_source(
     pipeline_name, pipeline_desc = _extract_pipeline_meta(tree)
 
     # Find @pipeline.node decorated functions
-    func_bodies = _extract_function_bodies(source)
+    func_bodies = _extract_function_bodies(source, tree=tree)
     raw_nodes: list[dict] = []
 
     for stmt in ast.iter_child_nodes(tree):

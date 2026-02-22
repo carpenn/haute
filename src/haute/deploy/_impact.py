@@ -275,17 +275,18 @@ def build_report(
     total_rows: int,
 ) -> ImpactReport:
     """Compare staging and production predictions and build an impact report."""
-    stg_df = _preds_to_df(staging_preds)
-    prd_df = _preds_to_df(prod_preds)
-
-    scored = min(len(stg_df), len(prd_df))
+    # Truncate raw prediction lists to matching length BEFORE building
+    # DataFrames to avoid materialising rows that will be discarded.
+    scored = min(len(staging_preds), len(prod_preds))
     failed = len(input_df) - scored
 
-    if len(stg_df) != len(prd_df):
-        m = min(len(stg_df), len(prd_df))
-        stg_df = stg_df.head(m)
-        prd_df = prd_df.head(m)
-        input_df = input_df.head(m)
+    if len(staging_preds) != len(prod_preds):
+        staging_preds = staging_preds[:scored]
+        prod_preds = prod_preds[:scored]
+        input_df = input_df.head(scored)
+
+    stg_df = _preds_to_df(staging_preds)
+    prd_df = _preds_to_df(prod_preds)
 
     num_cols = [
         c for c in stg_df.columns if stg_df[c].dtype in _NUMERIC_DTYPES and c in prd_df.columns

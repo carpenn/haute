@@ -168,6 +168,8 @@ def cache_info(
 
 
 _FETCH_BATCH_SIZE = 100_000
+_FETCH_MAX_RETRIES = 3
+_FETCH_INITIAL_BACKOFF = 1.0  # seconds
 
 
 class FetchResultDict(CacheInfoDict):
@@ -234,7 +236,18 @@ def fetch_and_cache(
                 cursor.execute(sql_query)
                 batch_count = 0
                 while True:
-                    batch = cursor.fetchmany_arrow(batch_size)
+                    # Retry with exponential backoff on transient errors
+                    batch = None
+                    for attempt in range(_FETCH_MAX_RETRIES):
+                        try:
+                            batch = cursor.fetchmany_arrow(batch_size)
+                            break
+                        except Exception:
+                            if attempt == _FETCH_MAX_RETRIES - 1:
+                                raise
+                            backoff = _FETCH_INITIAL_BACKOFF * (2 ** attempt)
+                            time.sleep(backoff)
+                    assert batch is not None
                     if batch.num_rows == 0:
                         break
                     if writer is None:

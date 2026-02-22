@@ -27,8 +27,18 @@ logger = get_logger(component="server.modelling")
 
 router = APIRouter(prefix="/api/modelling", tags=["modelling"])
 
-# In-memory job store — fine for single-server dev tool
+# In-memory job store — fine for single-server dev tool.
+# Jobs older than _JOB_TTL_SECONDS are evicted on each new write.
 _jobs: dict[str, dict[str, Any]] = {}
+_JOB_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+
+
+def _evict_stale_jobs() -> None:
+    """Remove jobs older than TTL to bound memory usage."""
+    cutoff = time.time() - _JOB_TTL_SECONDS
+    stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
+    for jid in stale:
+        del _jobs[jid]
 
 
 def _find_modelling_node(graph: Any, node_id: str) -> Any:
@@ -110,6 +120,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
             ),
         )
 
+    _evict_stale_jobs()
     job_id = uuid.uuid4().hex[:12]
     _jobs[job_id] = {
         "status": "running",
@@ -117,6 +128,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
         "message": "Starting",
         "config": dict(config),
         "node_label": node.data.label,
+        "created_at": time.time(),
     }
 
     # --- Execute pipeline to get training DataFrame ---

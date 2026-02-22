@@ -233,13 +233,30 @@ def validate_user_code(code: str) -> None:
     Called by ``_exec_user_code`` before ``exec()`` so dangerous code
     is rejected at the structural level — not just at runtime via
     restricted builtins.
+
+    Results for safe code are cached by code string so repeated
+    executions of the same node (preview, trace) skip the AST parse.
     """
+    _validate_user_code_cached(code)
+
+
+def _validate_user_code_cached(code: str, _cache: dict[str, bool] = {}) -> None:  # noqa: B006
+    """Inner validation with per-code-string caching.
+
+    Uses a mutable default dict as a simple cache.  Safe-code results
+    (``True``) are cached; unsafe code always raises before caching.
+    """
+    if code in _cache:
+        return
+
     try:
         tree = ast.parse(code)
     except SyntaxError:
         # Let exec() produce the proper SyntaxError with line numbers
+        _cache[code] = True
         return
     _validator.visit(tree)
+    _cache[code] = True
 
 
 # ---------------------------------------------------------------------------

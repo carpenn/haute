@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react"
+import { useState, useCallback, useRef, useMemo, useEffect } from "react"
 import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2, Timer } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { formatValue } from "../utils/formatValue"
@@ -41,11 +41,40 @@ interface DataPreviewProps {
 }
 
 
+const ROW_HEIGHT = 28
+const VIRTUALIZE_THRESHOLD = 50
+const OVERSCAN = 10
+
 export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [height, setHeight] = useState(256)
   const [showTimings, setShowTimings] = useState(false)
   const dragging = useRef(false)
+
+  // Virtual scrolling state
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewHeight, setViewHeight] = useState(0)
+  const rafRef = useRef(0)
+
+  const handleTableScroll = useCallback(() => {
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        setScrollTop(scrollRef.current.scrollTop)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      setViewHeight(entry.contentRect.height)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [data])
 
   const timings = data?.timings
   const timingData = useMemo(() => {
@@ -227,62 +256,82 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-auto">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-elevated)' }}>
-              <tr>
-                <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider w-10"
-                  style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                  #
-                </th>
-                {data.columns.map((col) => (
-                  <th
-                    key={col.name}
-                    className="px-3 py-1.5 text-left whitespace-nowrap"
-                    style={{ borderBottom: '1px solid var(--border)' }}
-                  >
-                    <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{col.name}</div>
-                    <div className={`text-[11px] font-normal ${getDtypeColor(col.dtype)}`}>
-                      {col.dtype}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.preview.map((row, i) => (
-                <tr
-                  key={i}
-                  style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.02)' }}
-                >
-                  <td className="px-3 py-1 font-mono" style={{ color: 'var(--text-muted)', borderRight: '1px solid var(--border)' }}>
-                    {i + 1}
-                  </td>
-                  {data.columns.map((col) => {
-                    const isTraced = tracedCell?.rowIndex === i && tracedCell?.column === col.name
-                    return (
-                      <td
+        <div ref={scrollRef} className="flex-1 overflow-auto" onScroll={handleTableScroll}>
+          {(() => {
+            const totalRows = data.preview.length
+            const shouldVirtualize = totalRows > VIRTUALIZE_THRESHOLD && viewHeight > 0
+            let startIdx = 0
+            let endIdx = totalRows
+            if (shouldVirtualize) {
+              startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN)
+              endIdx = Math.min(totalRows, Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN)
+            }
+            const topPad = startIdx * ROW_HEIGHT
+            const bottomPad = (totalRows - endIdx) * ROW_HEIGHT
+
+            return (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-elevated)' }}>
+                  <tr>
+                    <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider w-10"
+                      style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                      #
+                    </th>
+                    {data.columns.map((col) => (
+                      <th
                         key={col.name}
-                        className="px-3 py-1 font-mono whitespace-nowrap max-w-[200px] truncate transition-colors"
-                        style={{
-                          color: 'var(--text-secondary)',
-                          cursor: onCellClick ? 'pointer' : undefined,
-                          background: isTraced ? 'var(--accent-soft)' : undefined,
-                          boxShadow: isTraced ? 'inset 0 0 0 1.5px var(--accent)' : undefined,
-                          borderRadius: isTraced ? '3px' : undefined,
-                        }}
-                        onClick={() => onCellClick?.(i, col.name)}
+                        className="px-3 py-1.5 text-left whitespace-nowrap"
+                        style={{ borderBottom: '1px solid var(--border)' }}
                       >
-                        <span style={row[col.name] === null ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined}>
-                          {formatValue(row[col.name])}
-                        </span>
-                      </td>
+                        <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{col.name}</div>
+                        <div className={`text-[11px] font-normal ${getDtypeColor(col.dtype)}`}>
+                          {col.dtype}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {topPad > 0 && <tr style={{ height: topPad }} />}
+                  {data.preview.slice(startIdx, endIdx).map((row, vi) => {
+                    const i = startIdx + vi
+                    return (
+                      <tr
+                        key={i}
+                        style={{ height: ROW_HEIGHT, background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.02)' }}
+                      >
+                        <td className="px-3 py-1 font-mono" style={{ color: 'var(--text-muted)', borderRight: '1px solid var(--border)' }}>
+                          {i + 1}
+                        </td>
+                        {data.columns.map((col) => {
+                          const isTraced = tracedCell?.rowIndex === i && tracedCell?.column === col.name
+                          return (
+                            <td
+                              key={col.name}
+                              className="px-3 py-1 font-mono whitespace-nowrap max-w-[200px] truncate transition-colors"
+                              style={{
+                                color: 'var(--text-secondary)',
+                                cursor: onCellClick ? 'pointer' : undefined,
+                                background: isTraced ? 'var(--accent-soft)' : undefined,
+                                boxShadow: isTraced ? 'inset 0 0 0 1.5px var(--accent)' : undefined,
+                                borderRadius: isTraced ? '3px' : undefined,
+                              }}
+                              onClick={() => onCellClick?.(i, col.name)}
+                            >
+                              <span style={row[col.name] === null ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined}>
+                                {formatValue(row[col.name])}
+                              </span>
+                            </td>
+                          )
+                        })}
+                      </tr>
                     )
                   })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  {bottomPad > 0 && <tr style={{ height: bottomPad }} />}
+                </tbody>
+              </table>
+            )
+          })()}
 
           {data.row_count > data.preview.length && (
             <div className="px-3 py-1.5 text-[11px] text-center" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>

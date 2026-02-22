@@ -271,12 +271,19 @@ export function CodeEditor({
 
   const lineCount = Math.max((code || "").split("\n").length, 1)
 
+  // Debounce parent onChange — local state updates instantly, parent
+  // update is deferred by 150ms to avoid re-render storms on fast typing.
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => onChange(code), 150)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [code, onChange])
+
   const insertText = useCallback((ta: HTMLTextAreaElement, text: string) => {
     ta.focus()
     document.execCommand("insertText", false, text)
     setCode(ta.value)
-    onChange(ta.value)
-  }, [onChange])
+  }, [])
 
   const replaceRange = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, cursorPos?: number) => {
     ta.focus()
@@ -286,8 +293,7 @@ export function CodeEditor({
       ta.setSelectionRange(cursorPos, cursorPos)
     }
     setCode(ta.value)
-    onChange(ta.value)
-  }, [onChange])
+  }, [])
 
   const replaceRangeSelect = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, selStart: number, selEnd: number) => {
     ta.focus()
@@ -295,15 +301,13 @@ export function CodeEditor({
     document.execCommand("insertText", false, text)
     ta.setSelectionRange(selStart, selEnd)
     setCode(ta.value)
-    onChange(ta.value)
-  }, [onChange])
+  }, [])
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setCode(e.target.value)
-      onChange(e.target.value)
     },
-    [onChange],
+    [],
   )
 
   const handleKeyDown = useCallback(

@@ -65,7 +65,7 @@ def parse_submodel_source(source: str, source_file: str = "") -> PipelineGraph:
 
     submodel_name, submodel_desc = _extract_submodel_meta(tree)
 
-    func_bodies = _extract_function_bodies(source)
+    func_bodies = _extract_function_bodies(source, tree=tree)
     raw_nodes: list[dict] = []
 
     for stmt in ast.iter_child_nodes(tree):

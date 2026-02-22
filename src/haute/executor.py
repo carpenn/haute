@@ -347,10 +347,12 @@ def _build_node_fn(
                 task=_task,
             )
             lf = dfs[0] if dfs else pl.LazyFrame()
+            # Determine feature intersection before collecting so Polars
+            # can (in theory) apply projection pushdown on upstream scans.
+            available_cols = set(lf.collect_schema().names())
+            features = [f for f in model.feature_names_ if f in available_cols]
             # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
             df_eager = lf.collect()
-
-            features = [f for f in model.feature_names_ if f in df_eager.columns]
             x_data = df_eager.select(features).to_pandas()
             preds = model.predict(x_data).flatten()
             df_eager = df_eager.with_columns(pl.Series(_output_col, preds))

@@ -22,11 +22,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from haute._logging import configure_logging, get_logger
+from haute._cache import graph_fingerprint
 from haute.routes._helpers import (
     broadcast,
     discover_pipelines,
+    invalidate_pipeline_index,
     is_self_write,
     parse_pipeline_to_graph,
+    pipelines_importing_module,
     ws_clients,
 )
 from haute.routes.databricks import router as databricks_router
@@ -123,6 +126,8 @@ async def ws_sync(websocket: WebSocket) -> None:
 
 
 _DEBOUNCE_SECONDS = 0.3
+# Track last-broadcast graph fingerprint per pipeline file to skip redundant broadcasts
+_last_broadcast_fp: dict[str, str] = {}
 
 
 async def _file_watcher() -> None:
@@ -158,23 +163,24 @@ async def _file_watcher() -> None:
 
         # Collect changed files from pending set
         changed_files: list[Path] = []
-        has_module_change = False
+        module_stems: list[str] = []
         for change_type, changed_path in pending_changes:
             p = Path(changed_path)
             if p.suffix != ".py" or p.name.startswith("__"):
                 continue
             if change_type not in (Change.modified, Change.added):
                 continue
-            changed_files.append(p)
             if p.parent == modules_dir:
-                has_module_change = True
+                module_stems.append(p.stem)
+            else:
+                changed_files.append(p)
 
         pending_changes.clear()
+        invalidate_pipeline_index()
 
-        # If a module file changed, re-parse the parent pipeline instead
-        if has_module_change:
-            for f in discover_pipelines():
-                changed_files.append(f)
+        # For changed modules, only re-parse pipelines that import them
+        for stem in module_stems:
+            changed_files.extend(pipelines_importing_module(stem))
 
         # Deduplicate and parse
         seen: set[str] = set()
@@ -187,6 +193,12 @@ async def _file_watcher() -> None:
             logger.info("file_changed", file=p.name)
             try:
                 graph = parse_pipeline_to_graph(p)
+                fp = graph_fingerprint(graph)
+                fp_key = str(p.resolve())
+                if _last_broadcast_fp.get(fp_key) == fp:
+                    logger.info("graph_unchanged", file=p.name)
+                    continue
+                _last_broadcast_fp[fp_key] = fp
                 await broadcast(
                     {
                         "type": "graph_update",

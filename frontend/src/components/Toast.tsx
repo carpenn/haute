@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react"
+import useUIStore from "../stores/useUIStore"
 
 export interface ToastMessage {
   id: string
@@ -41,13 +42,9 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
   )
 }
 
-export default function ToastContainer({
-  toasts,
-  onDismiss,
-}: {
-  toasts: ToastMessage[]
-  onDismiss: (id: string) => void
-}) {
+export default function ToastContainer() {
+  const toasts = useUIStore((s) => s.toasts)
+  const onDismiss = useUIStore((s) => s.dismissToast)
   if (toasts.length === 0) return null
 
   return (

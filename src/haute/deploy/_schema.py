@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import json as _json
+from pathlib import Path
+
+from haute._cache import graph_fingerprint
 from haute._logging import get_logger
 from haute.graph_utils import GraphNode, PipelineGraph, read_source
 
 logger = get_logger(component="deploy.schema")
+
+_SCHEMA_CACHE_FILE = ".haute_cache/output_schema.json"
 
 
 def infer_input_schema(graph: PipelineGraph, input_node_id: str) -> dict[str, str]:
@@ -53,6 +59,9 @@ def infer_output_schema(
     Executes the pruned graph with a single sample row injected at each
     input node, and reads the output node's columns + types.
 
+    Results are cached in ``.haute_cache/output_schema.json`` keyed by
+    graph fingerprint so unchanged pipelines skip the dry-run.
+
     Args:
         graph: Pruned graph.
         output_node_id: The output node to read results from.
@@ -61,6 +70,19 @@ def infer_output_schema(
     Returns:
         Dict of column_name → polars dtype string.
     """
+    fp = graph_fingerprint(graph, output_node_id, *input_node_ids)
+
+    # Check cache
+    cache_path = Path(_SCHEMA_CACHE_FILE)
+    if cache_path.exists():
+        try:
+            cached = _json.loads(cache_path.read_text())
+            if cached.get("fingerprint") == fp:
+                logger.info("output_schema_cache_hit", fingerprint=fp[:8])
+                return cached["schema"]
+        except Exception:
+            pass  # corrupt cache — recompute
+
     from haute.deploy._scorer import score_graph
 
     # Build a 1-row sample from the first input node's data
@@ -85,7 +107,16 @@ def infer_output_schema(
         output_node_id=output_node_id,
     )
 
-    return {col: str(result[col].dtype) for col in result.columns}
+    schema = {col: str(result[col].dtype) for col in result.columns}
+
+    # Write cache
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(_json.dumps({"fingerprint": fp, "schema": schema}))
+    except Exception:
+        pass  # non-critical — cache write failure shouldn't block deploy
+
+    return schema
 
 
 def _find_node(graph: PipelineGraph, node_id: str) -> GraphNode:

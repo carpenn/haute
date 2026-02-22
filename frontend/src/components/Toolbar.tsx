@@ -1,5 +1,6 @@
 import { Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
 import type { WsStatus } from "../hooks/useWebSocketSync"
+import useUIStore from "../stores/useUIStore"
 
 const WS_STATUS_CONFIG: Record<WsStatus, { color: string; title: string }> = {
   connected: { color: "#22c55e", title: "Live sync connected" },
@@ -18,8 +19,6 @@ interface ToolbarProps {
   snapToGrid: boolean
   onToggleSnapToGrid: () => void
   onShowShortcuts: () => void
-  rowLimit: number
-  onRowLimitChange: (limit: number) => void
   onOpenSettings: () => void
   onAutoLayout: () => void
   onRun: () => void
@@ -33,11 +32,12 @@ export default function Toolbar({
   canUndo, canRedo, onUndo, onRedo,
   snapToGrid, onToggleSnapToGrid,
   onShowShortcuts,
-  rowLimit, onRowLimitChange,
   onOpenSettings, onAutoLayout,
   onRun, runStatus, onSave,
   wsStatus,
 }: ToolbarProps) {
+  const rowLimit = useUIStore((s) => s.rowLimit)
+  const setRowLimit = useUIStore((s) => s.setRowLimit)
   const wsConfig = WS_STATUS_CONFIG[wsStatus]
 
   return (
@@ -112,7 +112,7 @@ export default function Toolbar({
             min={0}
             step={100}
             value={rowLimit}
-            onChange={(e) => onRowLimitChange(Math.max(0, parseInt(e.target.value) || 0))}
+            onChange={(e) => setRowLimit(Math.max(0, parseInt(e.target.value) || 0))}
             className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
             style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
           />

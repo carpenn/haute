@@ -94,18 +94,22 @@ function FlowEditor() {
   } = useUndoRedo()
   const { screenToFlowPosition, fitView } = useReactFlow()
 
-  // UI state from Zustand store
-  const {
-    toasts, addToast, dismissToast,
-    paletteOpen, setPaletteOpen,
-    settingsOpen, setSettingsOpen,
-    shortcutsOpen, setShortcutsOpen,
-    submodelDialog, setSubmodelDialog,
-    snapToGrid, toggleSnapToGrid,
-    rowLimit, setRowLimit,
-    syncBanner, setSyncBanner,
-    dirty, setDirty,
-  } = useUIStore()
+  // UI state from Zustand store (leaf-subscribed values live in their own components)
+  const addToast = useUIStore((s) => s.addToast)
+  const paletteOpen = useUIStore((s) => s.paletteOpen)
+  const setPaletteOpen = useUIStore((s) => s.setPaletteOpen)
+  const settingsOpen = useUIStore((s) => s.settingsOpen)
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen)
+  const shortcutsOpen = useUIStore((s) => s.shortcutsOpen)
+  const setShortcutsOpen = useUIStore((s) => s.setShortcutsOpen)
+  const submodelDialog = useUIStore((s) => s.submodelDialog)
+  const setSubmodelDialog = useUIStore((s) => s.setSubmodelDialog)
+  const snapToGrid = useUIStore((s) => s.snapToGrid)
+  const toggleSnapToGrid = useUIStore((s) => s.toggleSnapToGrid)
+  const syncBanner = useUIStore((s) => s.syncBanner)
+  const setSyncBanner = useUIStore((s) => s.setSyncBanner)
+  const dirty = useUIStore((s) => s.dirty)
+  const setDirty = useUIStore((s) => s.setDirty)
 
   // Local UI state (not worth globalizing)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
@@ -128,12 +132,16 @@ function FlowEditor() {
     graphRef.current = { nodes, edges }
   }, [nodes, edges])
 
-  // Track dirty state
+  // Track dirty state via reference equality (avoids JSON.stringify overhead)
+  const prevStateRef = useRef<{ nodes: Node[]; edges: Edge[]; preamble: string } | null>(null)
   useEffect(() => {
-    const snapshot = JSON.stringify({ nodes, edges, preamble })
-    if (lastSavedRef.current && snapshot !== lastSavedRef.current) {
-      setDirty(true)
+    if (lastSavedRef.current) {
+      const prev = prevStateRef.current
+      if (prev && (prev.nodes !== nodes || prev.edges !== edges || prev.preamble !== preamble)) {
+        setDirty(true)
+      }
     }
+    prevStateRef.current = { nodes, edges, preamble }
   }, [nodes, edges, preamble, setDirty])
 
   // ---------------------------------------------------------------------------
@@ -385,8 +393,6 @@ function FlowEditor() {
           addToast("info", useUIStore.getState().snapToGrid ? "Snap to grid ON" : "Snap to grid OFF")
         }}
         onShowShortcuts={() => setShortcutsOpen(true)}
-        rowLimit={rowLimit}
-        onRowLimitChange={setRowLimit}
         onOpenSettings={() => setSettingsOpen(true)}
         onAutoLayout={handleAutoLayout}
         onRun={handleRun}
@@ -523,7 +529,7 @@ function FlowEditor() {
         />
       )}
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ToastContainer />
     </div>
   )
 }

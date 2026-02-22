@@ -301,12 +301,22 @@ def _extract_external_user_code(body_source: str, param_names: list[str]) -> str
 # ---------------------------------------------------------------------------
 
 
-def _extract_function_bodies(source: str) -> dict[str, str]:
-    """Extract raw source of each function body, keyed by function name."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return {}
+def _extract_function_bodies(
+    source: str,
+    tree: ast.Module | None = None,
+) -> dict[str, str]:
+    """Extract raw source of each function body, keyed by function name.
+
+    Args:
+        source: The raw source code (needed for line extraction).
+        tree: Pre-parsed AST tree.  If *None*, the source is parsed
+            internally.  Passing a tree avoids a redundant ``ast.parse()``.
+    """
+    if tree is None:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return {}
 
     source_lines = source.splitlines()
     bodies: dict[str, str] = {}

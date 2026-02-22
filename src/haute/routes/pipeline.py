@@ -12,6 +12,7 @@ from haute._types import NodeType
 from haute.graph_utils import PipelineGraph
 from haute.routes._helpers import (
     discover_pipelines,
+    lookup_pipeline_by_name,
     mark_self_write,
     parse_pipeline_to_graph,
     save_sidecar,
@@ -41,41 +42,55 @@ async def list_pipelines() -> list[PipelineSummary]:
     from haute.parser import parse_pipeline_file
 
     files = discover_pipelines()
-    result: list[PipelineSummary] = []
-    for f in files:
+    cwd = Path.cwd()
+
+    async def _parse_one(f: Path) -> PipelineSummary:
         try:
-            graph = parse_pipeline_file(f)
-            result.append(
-                PipelineSummary(
-                    name=graph.pipeline_name or f.stem,
-                    description=graph.pipeline_description or "",
-                    file=str(f.relative_to(Path.cwd())),
-                    node_count=len(graph.nodes),
-                )
+            graph = await asyncio.to_thread(parse_pipeline_file, f)
+            return PipelineSummary(
+                name=graph.pipeline_name or f.stem,
+                description=graph.pipeline_description or "",
+                file=str(f.relative_to(cwd)),
+                node_count=len(graph.nodes),
             )
         except Exception as e:
-            result.append(
-                PipelineSummary(
-                    name=f.stem,
-                    file=str(f),
-                    error=str(e),
-                )
+            return PipelineSummary(
+                name=f.stem,
+                file=str(f),
+                error=str(e),
             )
-    return result
+
+    return list(await asyncio.gather(*[_parse_one(f) for f in files]))
 
 
 @router.get("/pipeline/{name}", response_model=PipelineGraph)
 async def get_pipeline(name: str) -> PipelineGraph:
     """Return the graph for a specific pipeline."""
-    for f in discover_pipelines():
-        try:
-            graph = parse_pipeline_to_graph(f)
-            if graph.pipeline_name == name:
-                return graph
-        except Exception as e:
-            logger.warning("parse_failed", file=f.name, error=str(e))
-            continue
-    raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
+
+    def _find() -> PipelineGraph | None:
+        # O(1) lookup via cached index
+        f = lookup_pipeline_by_name(name)
+        if f is not None:
+            try:
+                return parse_pipeline_to_graph(f)
+            except Exception as e:
+                logger.warning("parse_failed", file=f.name, error=str(e))
+
+        # Fallback: linear scan (index may be stale)
+        for f in discover_pipelines():
+            try:
+                graph = parse_pipeline_to_graph(f)
+                if graph.pipeline_name == name:
+                    return graph
+            except Exception as e:
+                logger.warning("parse_failed", file=f.name, error=str(e))
+                continue
+        return None
+
+    graph = await asyncio.to_thread(_find)
+    if graph is None:
+        raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
+    return graph
 
 
 @router.get("/pipeline", response_model=PipelineGraph)
@@ -86,17 +101,19 @@ async def get_first_pipeline() -> PipelineGraph:
     """
     cwd = Path.cwd()
 
-    for f in discover_pipelines():
-        try:
-            graph = parse_pipeline_to_graph(f)
-            if graph.nodes:
-                graph.source_file = str(f.relative_to(cwd))
-                return graph
-        except Exception as e:
-            logger.warning("parse_failed", file=f.name, error=str(e))
-            continue
+    def _find_first() -> PipelineGraph:
+        for f in discover_pipelines():
+            try:
+                graph = parse_pipeline_to_graph(f)
+                if graph.nodes:
+                    graph.source_file = str(f.relative_to(cwd))
+                    return graph
+            except Exception as e:
+                logger.warning("parse_failed", file=f.name, error=str(e))
+                continue
+        return PipelineGraph()
 
-    return PipelineGraph()
+    return await asyncio.to_thread(_find_first)
 
 
 @router.post("/pipeline/save", response_model=SavePipelineResponse)
