@@ -7,7 +7,7 @@
 <br>
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Elastic License 2.0](https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square)](LICENSE)
+[![AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 [![Databricks](https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white)](https://databricks.com)
 [![Azure Container Apps](https://img.shields.io/badge/deploy-Azure_Container_Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/container-apps)
 [![AWS ECS](https://img.shields.io/badge/deploy-AWS_ECS-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/ecs/)
@@ -175,7 +175,7 @@ Every change saves to a Python file on disk. If a developer opens that file in t
 
 Haute is free to use. Free for your team, your models, your infrastructure, your production workloads. There is no usage limit, no seat count, no premium tier.
 
-The only restriction is that you can't take Haute and sell it as a hosted service. Use it internally, deploy it on your own infrastructure, build your entire pricing stack on it - that's what it's for. See [LICENSE](LICENSE) for details.
+Haute is licensed under the [GNU Affero General Public License v3.0](LICENSE). See [LICENSE](LICENSE) for details.
 
 ---
 
