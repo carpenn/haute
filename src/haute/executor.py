@@ -481,7 +481,66 @@ def _build_node_fn(
 
         return func_name, modelling_passthrough, False
 
-    elif node_type in (NodeType.TRANSFORM, NodeType.MODEL_SCORE):
+    elif node_type == NodeType.MODEL_SCORE:
+        source_type = config.get("sourceType", "")
+        _run_id = config.get("run_id", "")
+        _artifact_path = config.get("artifact_path", "")
+        _registered_model = config.get("registered_model", "")
+        _version = config.get("version", "latest")
+        _task = config.get("task", "regression")
+        _output_col = config.get("output_column", "prediction")
+        code = config.get("code", "").strip()
+        _src_names = list(source_names)
+
+        # If no model source configured, passthrough
+        if not source_type or (source_type == "run" and not _run_id) or (
+            source_type == "registered" and not _registered_model
+        ):
+
+            def model_score_passthrough(*dfs: _Frame) -> _Frame:
+                return dfs[0] if dfs else pl.LazyFrame()
+
+            return func_name, model_score_passthrough, False
+
+        def model_score_fn(*dfs: _Frame) -> _Frame:
+            from haute._mlflow_io import load_mlflow_model
+
+            model = load_mlflow_model(
+                source_type=source_type,
+                run_id=_run_id,
+                artifact_path=_artifact_path,
+                registered_model=_registered_model,
+                version=_version,
+                task=_task,
+            )
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
+            df_eager = lf.collect()
+
+            features = [f for f in model.feature_names_ if f in df_eager.columns]
+            X = df_eager.select(features).to_pandas()
+            preds = model.predict(X).flatten()
+            df_eager = df_eager.with_columns(pl.Series(_output_col, preds))
+
+            if _task == "classification" and hasattr(model, "predict_proba"):
+                probas = model.predict_proba(X)
+                if probas.ndim == 2:
+                    probas = probas[:, 1]
+                df_eager = df_eager.with_columns(
+                    pl.Series(f"{_output_col}_proba", probas)
+                )
+
+            result_lf = df_eager.lazy()
+            if code:
+                result_lf = _exec_user_code(
+                    code, _src_names, (result_lf,),
+                    extra_ns={"model": model},
+                )
+            return result_lf
+
+        return func_name, model_score_fn, False
+
+    elif node_type == NodeType.TRANSFORM:
         code = config.get("code", "").strip()
         _src_names = list(source_names)
         _orig_src = list(orig_source_names) if orig_source_names else None

@@ -73,8 +73,20 @@ class TransformConfig(TypedDict, total=False):
 class ModelScoreConfig(TypedDict, total=False):
     """Config for modelScore nodes."""
 
-    model_uri: str
-    code: str
+    sourceType: str          # "run" | "registered"
+    # run-based selection
+    experiment_name: str     # UI-only: display name for panel re-open
+    experiment_id: str       # UI-only: MLflow experiment ID for API calls
+    run_id: str
+    run_name: str            # UI-only: display name for panel re-open
+    artifact_path: str       # e.g. "model.cbm"
+    # registered model selection
+    registered_model: str    # e.g. "catalog.schema.model" or "my-model"
+    version: str             # "1", "2", etc. or "latest"
+    # common
+    task: str                # "regression" | "classification"
+    output_column: str       # prediction column name, default "prediction"
+    code: str                # optional post-processing code
     instanceOf: str
     inputMapping: dict[str, str]
 

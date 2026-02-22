@@ -35,7 +35,7 @@ const nodeTemplates = [
     description: "Score using an MLflow model",
     icon: Brain,
     accent: "#8b5cf6",
-    defaultConfig: { model_uri: "" },
+    defaultConfig: { sourceType: "registered", registered_model: "", version: "latest", task: "regression", output_column: "prediction", code: "" },
   },
   {
     type: NODE_TYPES.BANDING,

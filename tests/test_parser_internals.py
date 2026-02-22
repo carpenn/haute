@@ -12,6 +12,7 @@ from haute._parser_helpers import (
     _build_node_config,
     _dedent,
     _extract_external_user_code,
+    _extract_model_score_user_code,
     _extract_preamble,
     _extract_user_code,
     _infer_node_type,
@@ -35,7 +36,7 @@ class TestInferNodeType:
         assert _infer_node_type({"output": True}, 1) == "output"
 
     def test_model_score(self):
-        assert _infer_node_type({"model_uri": "models:/m/1"}, 1) == "modelScore"
+        assert _infer_node_type({"model_score": True}, 1) == "modelScore"
 
     def test_rating_step(self):
         assert _infer_node_type({"table": "t", "key": "k"}, 1) == "ratingStep"
@@ -216,6 +217,66 @@ class TestExtractExternalUserCode:
 
 
 # ---------------------------------------------------------------------------
+# _extract_model_score_user_code
+# ---------------------------------------------------------------------------
+
+class TestExtractModelScoreUserCode:
+    def test_no_sentinel_returns_empty(self):
+        """Body without sentinel is entirely auto-generated → empty string."""
+        body = (
+            '    """doc"""\n'
+            "    from haute.graph_utils import load_mlflow_model\n"
+            '    model = load_mlflow_model(source_type="run", run_id="abc")\n'
+            "    df_eager = df.collect()\n"
+            "    result = df_eager.lazy()\n"
+            "    return result"
+        )
+        assert _extract_model_score_user_code(body) == ""
+
+    def test_extracts_code_after_sentinel(self):
+        """User code after sentinel is extracted and dedented."""
+        body = (
+            '    """doc"""\n'
+            "    df_eager = df.collect()\n"
+            "    result = df_eager.lazy()\n"
+            "    # -- user code --\n"
+            '    df = df.with_columns(doubled=pl.col("prediction") * 2)\n'
+            "    return result"
+        )
+        result = _extract_model_score_user_code(body)
+        assert "doubled" in result
+        assert "return result" not in result
+
+    def test_sentinel_but_only_return(self):
+        """Sentinel present but only 'return result' after → empty string."""
+        body = (
+            "    result = df_eager.lazy()\n"
+            "    # -- user code --\n"
+            "    return result"
+        )
+        assert _extract_model_score_user_code(body) == ""
+
+    def test_empty_body(self):
+        assert _extract_model_score_user_code("") == ""
+
+    def test_multiline_user_code(self):
+        """Multiple lines of user code are all extracted."""
+        body = (
+            "    result = df_eager.lazy()\n"
+            "    # -- user code --\n"
+            "    x = 1\n"
+            "    y = x + 2\n"
+            '    df = df.with_columns(z=pl.lit(y))\n'
+            "    return result"
+        )
+        result = _extract_model_score_user_code(body)
+        assert "x = 1" in result
+        assert "y = x + 2" in result
+        assert "z=pl.lit(y)" in result
+        assert "return result" not in result
+
+
+# ---------------------------------------------------------------------------
 # _build_node_config
 # ---------------------------------------------------------------------------
 
@@ -251,8 +312,15 @@ class TestBuildNodeConfig:
         assert config["table"] == "catalog.schema.tbl"
 
     def test_model_score(self):
-        config = _build_node_config("modelScore", {"model_uri": "m/1"}, "", ["df"])
-        assert config["model_uri"] == "m/1"
+        config = _build_node_config(
+            "modelScore",
+            {"model_score": True, "source_type": "run", "run_id": "abc123",
+             "artifact_path": "model.cbm", "task": "regression", "output_column": "prediction"},
+            "", ["df"],
+        )
+        assert config["sourceType"] == "run"
+        assert config["run_id"] == "abc123"
+        assert config["task"] == "regression"
 
     def test_rating_step(self):
         config = _build_node_config(

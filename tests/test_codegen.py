@@ -178,11 +178,19 @@ class TestNodeToCode:
             "data": {
                 "label": "Score",
                 "nodeType": "modelScore",
-                "config": {"model_uri": "models:/my_model/1"},
+                "config": {
+                    "sourceType": "run",
+                    "run_id": "abc123",
+                    "artifact_path": "model.cbm",
+                    "task": "regression",
+                    "output_column": "prediction",
+                },
             },
         })
         code = _node_to_code(node)
-        assert 'model_uri="models:/my_model/1"' in code
+        assert 'source_type="run"' in code
+        assert 'run_id="abc123"' in code
+        assert "load_mlflow_model" in code
         assert "def Score(df: pl.LazyFrame)" in code
         _compile_node_code(code)
 

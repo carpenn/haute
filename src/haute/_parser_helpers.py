@@ -38,7 +38,11 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeTyp
         return NodeType.OUTPUT
     if decorator_kwargs.get("modelling"):
         return NodeType.MODELLING
-    if "model_uri" in decorator_kwargs:
+    if decorator_kwargs.get("model_score"):
+        return NodeType.MODEL_SCORE
+    if "registered_model" in decorator_kwargs or (
+        "source_type" in decorator_kwargs and "run_id" in decorator_kwargs
+    ):
         return NodeType.MODEL_SCORE
     if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
         return NodeType.BANDING
@@ -194,6 +198,34 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
             stripped_lines.append(line)
 
     return _dedent("\n".join(stripped_lines)).strip()
+
+
+def _extract_model_score_user_code(body_source: str) -> str:
+    """Extract user post-processing code from a MODEL_SCORE function body.
+
+    The codegen template wraps user code after a ``# -- user code --``
+    sentinel comment.  Everything between that sentinel and the trailing
+    ``return result`` is genuine user code.  If no sentinel is found the
+    body is entirely auto-generated and we return an empty string.
+    """
+    _SENTINEL = "# -- user code --"
+    if _SENTINEL not in body_source:
+        return ""
+
+    # Take everything after the sentinel
+    _, _, after = body_source.partition(_SENTINEL)
+    lines = after.strip().splitlines()
+    if not lines:
+        return ""
+
+    # Strip trailing "return result" (auto-generated)
+    while lines and lines[-1].strip() in ("return result", ""):
+        lines.pop()
+
+    if not lines:
+        return ""
+
+    return _dedent("\n".join(lines)).strip()
 
 
 def _extract_external_user_code(body_source: str, param_names: list[str]) -> str:
@@ -352,7 +384,19 @@ def _build_node_config(
         config["mode"] = decorator_kwargs.get("mode", "live")
         config["inputs"] = param_names
     elif node_type == NodeType.MODEL_SCORE:
-        config["model_uri"] = decorator_kwargs.get("model_uri", "")
+        _MODEL_SCORE_KEYS = (
+            "source_type", "run_id", "artifact_path", "run_name",
+            "registered_model", "version", "task", "output_column",
+            "experiment_name", "experiment_id",
+        )
+        for key in _MODEL_SCORE_KEYS:
+            if key in decorator_kwargs:
+                # Map snake_case decorator key to camelCase config key where needed
+                config_key = "sourceType" if key == "source_type" else key
+                config[config_key] = decorator_kwargs[key]
+        # Only extract user post-processing code (after sentinel), not the
+        # auto-generated scoring scaffolding that codegen produces.
+        config["code"] = _extract_model_score_user_code(body) if body else ""
     elif node_type == NodeType.BANDING:
         if "factors" in decorator_kwargs:
             # Multi-factor format: factors=[{...}, {...}]

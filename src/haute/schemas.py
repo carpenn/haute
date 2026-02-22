@@ -400,3 +400,42 @@ class MlflowCheckResponse(BaseModel):
     mlflow_installed: bool
     backend: str = ""
     databricks_host: str = ""
+
+
+# ---------------------------------------------------------------------------
+# /api/mlflow/* (discovery for Model Score node)
+# ---------------------------------------------------------------------------
+
+
+class MlflowExperimentSummary(BaseModel):
+    experiment_id: str
+    name: str
+
+
+class MlflowRunSummary(BaseModel):
+    run_id: str
+    run_name: str
+    status: str
+    start_time: int | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+    params: dict[str, str] = Field(default_factory=dict)
+    artifacts: list[str] = Field(default_factory=list)
+
+
+class MlflowVersionBrief(BaseModel):
+    version: str
+    status: str
+    run_id: str
+
+
+class MlflowModelSummary(BaseModel):
+    name: str
+    latest_versions: list[MlflowVersionBrief] = Field(default_factory=list)
+
+
+class MlflowModelVersionSummary(BaseModel):
+    version: str
+    run_id: str
+    status: str
+    creation_timestamp: int | None = None
+    description: str = ""

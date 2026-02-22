@@ -21,6 +21,7 @@ from haute._execute_lazy import _prepare_graph as _prepare_graph
 from haute._flatten import flatten_graph as flatten_graph
 from haute._io import _object_cache as _object_cache
 from haute._io import load_external_object as load_external_object
+from haute._mlflow_io import load_mlflow_model as load_mlflow_model
 from haute._io import read_source as read_source
 from haute._topo import ancestors as ancestors
 from haute._topo import topo_sort_ids as topo_sort_ids

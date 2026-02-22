@@ -113,6 +113,22 @@ def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
     return frequency_set
 
 
+@pipeline.node(model_score=True, source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression", output_column="prediction", run_name="Model_Training_17", experiment_name="/Shared/haute/Model_Training_17", experiment_id="2825776902945395")
+def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
+    """Model Score 19 node"""
+    df = policies
+    from haute.graph_utils import load_mlflow_model
+    model = load_mlflow_model(source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression")
+    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
+    df_eager = df.collect()
+    features = [f for f in model.feature_names_ if f in df_eager.columns]
+    X = df_eager.select(features).to_pandas()
+    preds = model.predict(X).flatten()
+    df_eager = df_eager.with_columns(pl.Series("prediction", preds))
+    result = df_eager.lazy()
+    return result
+
+
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
@@ -204,3 +220,4 @@ pipeline.connect("frequency_model", "calculate_premium")
 pipeline.connect("policies", "Banding_15")
 pipeline.connect("Banding_15", "Rating_Step_16")
 pipeline.connect("severity_set", "Model_Training_17")
+pipeline.connect("policies", "Model_Score_19")

@@ -27,8 +27,7 @@ Haute deploys pipelines as **live pricing APIs**. The team picks the target that
 - An opinionated framework that makes it hard to do the wrong thing
 
 ### Haute IS NOT:
-- A model training framework (use MLflow, scikit-learn, XGBoost, LightGBM, etc.)
-- An ML platform (it deploys pricing APIs, not ML models in the MLOps sense)
+- A general-purpose ML platform — it trains and deploys **pricing models**, not arbitrary ML workloads. Model training is integrated (CatBoost, split strategies, SHAP, cross-validation, MLflow logging) but scoped to the pricing workflow.
 - A proprietary black box - everything is `.py` files on disk
 
 ---
@@ -253,7 +252,18 @@ src/haute/
 │   ├── databricks.py        #   Unity Catalog browsing, data fetching
 │   ├── files.py             #   File browsing, schema inspection
 │   ├── submodel.py          #   Submodel create, get, dissolve
+│   ├── modelling.py         #   Train, export, MLflow log endpoints
 │   └── _helpers.py          #   Shared route helpers (broadcast, discovery)
+├── modelling/               # Model training & diagnostics subsystem
+│   ├── __init__.py          #   Public API: TrainingJob, generate_training_script
+│   ├── _algorithms.py       #   Algorithm registry (CatBoost), fit/predict/SHAP
+│   ├── _split.py            #   SplitConfig + split_data (random, temporal, group)
+│   ├── _metrics.py          #   Metric registry, double lift, AvE per feature
+│   ├── _training_job.py     #   TrainingJob orchestrator: split → fit → evaluate → log
+│   ├── _mlflow_log.py       #   Standalone MLflow experiment logging
+│   ├── _model_card.py       #   Self-contained HTML model card generation
+│   ├── _charts.py           #   Pure-SVG chart generation (zero external deps)
+│   └── _export.py           #   Standalone training script code generation
 ├── deploy/                  # Deployment subsystem
 │   ├── _config.py           #   haute.toml + .env resolution
 │   ├── _mlflow.py           #   MLflow model packaging + Databricks serving

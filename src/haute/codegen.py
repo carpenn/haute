@@ -73,12 +73,23 @@ def {func_name}() -> pl.LazyFrame:
 '''
 
 _MODEL_SCORE = '''\
-@pipeline.node(model_uri="{model_uri}")
-def {func_name}(df: pl.LazyFrame) -> pl.LazyFrame:
+@pipeline.node({decorator_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    # TODO: implement model scoring
-    return df
+    df = {first_param}
+    from haute.graph_utils import load_mlflow_model
+    model = load_mlflow_model({load_kwargs})
+    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
+    df_eager = df.collect()
+    features = [f for f in model.feature_names_ if f in df_eager.columns]
+    X = df_eager.select(features).to_pandas()
+    preds = model.predict(X).flatten()
+    df_eager = df_eager.with_columns(pl.Series("{output_column}", preds))
+{proba_block}    result = df_eager.lazy()
+{user_code_block}    return result
 '''
+
+_MODEL_SCORE_USER_CODE_SENTINEL = "# -- user code --"
 
 _BANDING_SINGLE = '''\
 @pipeline.node(banding="{banding}", column="{column}",
@@ -266,9 +277,76 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             )
 
     elif node_type == NodeType.MODEL_SCORE:
-        model_uri = config.get("model_uri", "models:/model/Production")
+        source_type = config.get("sourceType", "run")
+        task_val = config.get("task", "regression")
+        output_column = config.get("output_column", "prediction")
+        user_code = config.get("code", "").strip()
+        params = _build_params(source_names)
+        first_param = source_names[0] if source_names else "df"
+
+        proba_block = ""
+        if task_val == "classification":
+            proba_block = (
+                f'    if hasattr(model, "predict_proba"):\n'
+                f"        probas = model.predict_proba(X)\n"
+                f"        if probas.ndim == 2:\n"
+                f"            probas = probas[:, 1]\n"
+                f'        df_eager = df_eager.with_columns(pl.Series("{output_column}_proba", probas))\n'
+            )
+
+        user_code_block = ""
+        if user_code:
+            wrapped = _wrap_external_code(user_code).rstrip("\n") + "\n"
+            # Replace the trailing "    return df" that _wrap_external_code appends
+            if wrapped.rstrip().endswith("return df"):
+                wrapped = wrapped.rstrip()
+                wrapped = wrapped[: wrapped.rfind("return df")].rstrip() + "\n"
+            user_code_block = f"    {_MODEL_SCORE_USER_CODE_SENTINEL}\n{wrapped}"
+
+        if source_type == "registered":
+            reg_model = config.get("registered_model", "")
+            ver = config.get("version", "latest")
+            decorator_kwargs = (
+                f'model_score=True, source_type="registered", '
+                f'registered_model="{reg_model}", version="{ver}", '
+                f'task="{task_val}", output_column="{output_column}"'
+            )
+            load_kwargs = (
+                f'source_type="registered", registered_model="{reg_model}", '
+                f'version="{ver}", task="{task_val}"'
+            )
+        else:
+            rid = config.get("run_id", "")
+            apath = config.get("artifact_path", "")
+            rname = config.get("run_name", "")
+            exp_name = config.get("experiment_name", "")
+            exp_id = config.get("experiment_id", "")
+            decorator_kwargs = (
+                f'model_score=True, source_type="run", '
+                f'run_id="{rid}", artifact_path="{apath}", '
+                f'task="{task_val}", output_column="{output_column}"'
+            )
+            if rname:
+                decorator_kwargs += f', run_name="{rname}"'
+            if exp_name:
+                decorator_kwargs += f', experiment_name="{exp_name}"'
+            if exp_id:
+                decorator_kwargs += f', experiment_id="{exp_id}"'
+            load_kwargs = (
+                f'source_type="run", run_id="{rid}", '
+                f'artifact_path="{apath}", task="{task_val}"'
+            )
+
         return _MODEL_SCORE.format(
-            func_name=func_name, description=description, model_uri=model_uri
+            func_name=func_name,
+            description=description,
+            params=params,
+            first_param=first_param,
+            decorator_kwargs=decorator_kwargs,
+            load_kwargs=load_kwargs,
+            output_column=output_column,
+            proba_block=proba_block,
+            user_code_block=user_code_block,
         )
 
     elif node_type == NodeType.BANDING:
