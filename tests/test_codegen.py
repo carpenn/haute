@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+import pytest
+
 from haute.codegen import _build_params, _node_to_code, graph_to_code
+from haute.parser import parse_pipeline_source
 from tests.conftest import make_graph as _g, make_node as _n
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +336,115 @@ class TestGraphToCode:
         # Verify edges are emitted
         assert 'pipeline.connect("Read", "Clean")' in code
         assert 'pipeline.connect("Clean", "Out")' in code
+
+
+# ---------------------------------------------------------------------------
+# Live switch codegen
+# ---------------------------------------------------------------------------
+
+
+class TestLiveSwitchCodegen:
+    def _switch_node(self, mode="live"):
+        return _n({
+            "id": "switch",
+            "data": {
+                "label": "Switch",
+                "nodeType": "liveSwitch",
+                "config": {"mode": mode, "inputs": ["live_src", "batch_src"]},
+            },
+        })
+
+    def test_live_mode_emits_mode_kwarg(self):
+        code = _node_to_code(self._switch_node("live"), source_names=["live_src", "batch_src"])
+        assert 'mode="live"' in code
+        assert "return live_src" in code
+        _compile_node_code(code)
+
+    def test_non_live_mode_emits_mode_kwarg(self):
+        code = _node_to_code(self._switch_node("batch_src"), source_names=["live_src", "batch_src"])
+        assert 'mode="batch_src"' in code
+        assert "return batch_src" in code
+        _compile_node_code(code)
+
+    def test_round_trip_preserves_live_mode(self):
+        """Codegen → parse round-trip must preserve mode='live'."""
+        node = self._switch_node("live")
+        code = _node_to_code(node, source_names=["live_src", "batch_src"])
+        full_code = (
+            "import polars as pl\nimport haute\n"
+            'pipeline = haute.Pipeline("test")\n\n'
+            '@pipeline.node(path="a.parquet")\n'
+            "def live_src() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("a.parquet")\n\n'
+            '@pipeline.node(path="b.parquet")\n'
+            "def batch_src() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("b.parquet")\n\n'
+            f"{code}\n"
+            'pipeline.connect("live_src", "Switch")\n'
+            'pipeline.connect("batch_src", "Switch")\n'
+        )
+        graph = parse_pipeline_source(full_code)
+        switch_nodes = [n for n in graph.nodes if n.data.nodeType == "liveSwitch"]
+        assert len(switch_nodes) == 1
+        assert switch_nodes[0].data.config["mode"] == "live"
+
+    def test_round_trip_preserves_non_live_mode(self):
+        """Codegen → parse round-trip must preserve non-live mode."""
+        node = self._switch_node("batch_src")
+        code = _node_to_code(node, source_names=["live_src", "batch_src"])
+        full_code = (
+            "import polars as pl\nimport haute\n"
+            'pipeline = haute.Pipeline("test")\n\n'
+            '@pipeline.node(path="a.parquet")\n'
+            "def live_src() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("a.parquet")\n\n'
+            '@pipeline.node(path="b.parquet")\n'
+            "def batch_src() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("b.parquet")\n\n'
+            f"{code}\n"
+            'pipeline.connect("live_src", "Switch")\n'
+            'pipeline.connect("batch_src", "Switch")\n'
+        )
+        graph = parse_pipeline_source(full_code)
+        switch_nodes = [n for n in graph.nodes if n.data.nodeType == "liveSwitch"]
+        assert len(switch_nodes) == 1
+        assert switch_nodes[0].data.config["mode"] == "batch_src"
+
+
+# ---------------------------------------------------------------------------
+# Safety net: committed pipeline files must have live switch set to "live"
+# ---------------------------------------------------------------------------
+
+def _find_pipeline_files() -> list[Path]:
+    """Find .py files containing live_switch=True (excluding tests and venv)."""
+    results = []
+    for py_file in PROJECT_ROOT.rglob("*.py"):
+        rel = py_file.relative_to(PROJECT_ROOT)
+        if rel.parts[0] in (".venv", "tests"):
+            continue
+        try:
+            text = py_file.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if re.search(r"live_switch\s*=\s*True", text):
+            results.append(py_file)
+    return results
+
+
+class TestLiveSwitchSafety:
+    """Ensure no pipeline file is accidentally committed with mode != 'live'.
+
+    If this test fails, a liveSwitch node is pointing at a non-live data
+    source. Change the mode back to 'live' before committing.
+    """
+
+    @pytest.mark.parametrize("pipeline_file", _find_pipeline_files(), ids=lambda p: str(p.relative_to(PROJECT_ROOT)))
+    def test_live_switch_mode_is_live(self, pipeline_file: Path):
+        graph = parse_pipeline_source(pipeline_file.read_text(), source_file=str(pipeline_file))
+        for node in graph.nodes:
+            if node.data.nodeType == "liveSwitch":
+                mode = node.data.config.get("mode", "live")
+                assert mode == "live", (
+                    f"{pipeline_file.relative_to(PROJECT_ROOT)}: liveSwitch node "
+                    f"'{node.data.label}' has mode='{mode}' — must be 'live' before committing."
+                )

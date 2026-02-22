@@ -49,16 +49,32 @@ def quotes() -> pl.LazyFrame:
     return pl.read_json("data/IDpol_1052049.json").lazy()
 
 
-@pipeline.node(live_switch=True)
+@pipeline.node(live_switch=True, mode="batch_quotes")
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
-    return quotes
+    return batch_quotes
 
 
 @pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '<=', 'val2': '20', 'assignment': '0-20'}, {'op1': '>', 'val1': '20', 'op2': '<=', 'val2': '30', 'assignment': '20-30'}, {'op1': '>', 'val1': '30', 'op2': '<=', 'val2': '40', 'assignment': '30-40'}, {'op1': '>', 'val1': '40', 'op2': '<=', 'val2': '50', 'assignment': '50-60'}, {'op1': '>', 'val1': '50', 'op2': '', 'val2': '', 'assignment': '60+'}]}, {'banding': 'categorical', 'column': 'Region', 'output_column': 'RegionBand', 'rules': [{'value': 'Centre', 'assignment': 'Centre'}, {'value': 'London', 'assignment': 'London'}, {'value': 'Paris', 'assignment': 'Paris'}], 'default': 'Other'}, {'banding': 'continuous', 'column': 'VehPower', 'output_column': 'VehPowerBand', 'rules': [{'op1': '>=', 'val1': '0', 'op2': '<', 'val2': '3', 'assignment': '0-3'}, {'op1': '>=', 'val1': '3', 'op2': '<', 'val2': '6', 'assignment': '3-6'}, {'op1': '>=', 'val1': '6', 'op2': '', 'val2': '', 'assignment': '6+'}]}])
 def Banding_15(policies: pl.LazyFrame) -> pl.LazyFrame:
     """Banding 15 node"""
     return df
+
+
+@pipeline.node(model_score=True, source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression", output_column="prediction", run_name="Model_Training_17", experiment_name="/Shared/haute/Model_Training_17", experiment_id="2825776902945395")
+def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
+    """Model Score 19 node"""
+    df = policies
+    from haute.graph_utils import load_mlflow_model
+    model = load_mlflow_model(source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression")
+    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
+    df_eager = df.collect()
+    features = [f for f in model.feature_names_ if f in df_eager.columns]
+    X = df_eager.select(features).to_pandas()
+    preds = model.predict(X).flatten()
+    df_eager = df_eager.with_columns(pl.Series("prediction", preds))
+    result = df_eager.lazy()
+    return result
 
 
 @pipeline.node(tables=[{'name': 'Multit', 'factors': ['DrivAgeBand', 'RegionBand', 'VehPowerBand'], 'output_column': 'Multi', 'entries': [{'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 2}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}], 'default_value': '1.0'}])
@@ -111,22 +127,6 @@ def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
     """frequency_write node"""
     frequency_set.collect().write_parquet("output/frequency.parquet")
     return frequency_set
-
-
-@pipeline.node(model_score=True, source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression", output_column="prediction", run_name="Model_Training_17", experiment_name="/Shared/haute/Model_Training_17", experiment_id="2825776902945395")
-def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """Model Score 19 node"""
-    df = policies
-    from haute.graph_utils import load_mlflow_model
-    model = load_mlflow_model(source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression")
-    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
-    df_eager = df.collect()
-    features = [f for f in model.feature_names_ if f in df_eager.columns]
-    X = df_eager.select(features).to_pandas()
-    preds = model.predict(X).flatten()
-    df_eager = df_eager.with_columns(pl.Series("prediction", preds))
-    result = df_eager.lazy()
-    return result
 
 
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")

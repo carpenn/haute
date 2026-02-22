@@ -44,10 +44,10 @@ def {func_name}() -> pl.LazyFrame:
 '''
 
 _LIVE_SWITCH = '''\
-@pipeline.node(live_switch=True)
+@pipeline.node(live_switch=True, mode="{mode}")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    return {first_param}
+    return {active_param}
 '''
 
 _SOURCE_FLAT_FILE = '''\
@@ -239,12 +239,18 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
 
     elif node_type == NodeType.LIVE_SWITCH:
         params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
+        mode = config.get("mode", "live")
         first_param = source_names[0] if source_names else "df"
+        if mode == "live" or mode not in source_names:
+            active_param = first_param
+        else:
+            active_param = mode
         return _LIVE_SWITCH.format(
             func_name=func_name,
             description=description,
             params=params,
-            first_param=first_param,
+            mode=mode,
+            active_param=active_param,
         )
 
     elif node_type == NodeType.DATA_SOURCE:
