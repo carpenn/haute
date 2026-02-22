@@ -49,10 +49,10 @@ def quotes() -> pl.LazyFrame:
     return pl.read_json("data/IDpol_1052049.json").lazy()
 
 
-@pipeline.node(live_switch=True, mode="batch_quotes")
+@pipeline.node(live_switch=True, mode="live")
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
-    return batch_quotes
+    return quotes
 
 
 @pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '<=', 'val2': '20', 'assignment': '0-20'}, {'op1': '>', 'val1': '20', 'op2': '<=', 'val2': '30', 'assignment': '20-30'}, {'op1': '>', 'val1': '30', 'op2': '<=', 'val2': '40', 'assignment': '30-40'}, {'op1': '>', 'val1': '40', 'op2': '<=', 'val2': '50', 'assignment': '50-60'}, {'op1': '>', 'val1': '50', 'op2': '', 'val2': '', 'assignment': '60+'}]}, {'banding': 'categorical', 'column': 'Region', 'output_column': 'RegionBand', 'rules': [{'value': 'Centre', 'assignment': 'Centre'}, {'value': 'London', 'assignment': 'London'}, {'value': 'Paris', 'assignment': 'Paris'}], 'default': 'Other'}, {'banding': 'continuous', 'column': 'VehPower', 'output_column': 'VehPowerBand', 'rules': [{'op1': '>=', 'val1': '0', 'op2': '<', 'val2': '3', 'assignment': '0-3'}, {'op1': '>=', 'val1': '3', 'op2': '<', 'val2': '6', 'assignment': '3-6'}, {'op1': '>=', 'val1': '6', 'op2': '', 'val2': '', 'assignment': '6+'}]}])
