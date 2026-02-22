@@ -573,11 +573,23 @@ def _topo_sort(nodes: list[GraphNode], edges: list[GraphEdge]) -> list[GraphNode
     return [node_map[nid] for nid in order if nid in node_map]
 
 
+def _emit_preserved_blocks(preserved_blocks: list[str]) -> list[str]:
+    """Wrap each preserved block in start/end markers and return as lines."""
+    lines: list[str] = []
+    for block in preserved_blocks:
+        lines.append("# haute:preserve-start")
+        lines.append(block)
+        lines.append("# haute:preserve-end")
+        lines.append("")
+    return lines
+
+
 def graph_to_code(
     graph: PipelineGraph,
     pipeline_name: str = "main",
     description: str = "",
     preamble: str = "",
+    preserved_blocks: list[str] | None = None,
 ) -> str:
     """Convert a React Flow graph to a valid haute pipeline .py file."""
     nodes = graph.nodes
@@ -608,6 +620,12 @@ def graph_to_code(
         "",
         "",
     ]
+
+    # Preserved blocks (user code that survives GUI regeneration)
+    all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
+    if all_preserved:
+        lines.extend(_emit_preserved_blocks(all_preserved))
+        lines.append("")
 
     # Build source names per node from edges (ordered list of upstream func names)
     node_sources: dict[str, list[str]] = {}
@@ -673,6 +691,7 @@ def graph_to_code_multi(
     description: str = "",
     preamble: str = "",
     source_file: str = "",
+    preserved_blocks: list[str] | None = None,
 ) -> dict[str, str]:
     """Generate code for a pipeline with submodels.
 
@@ -686,7 +705,8 @@ def graph_to_code_multi(
     if not submodels:
         # No submodels — single-file output
         main_key = source_file or f"{pipeline_name}.py"
-        return {main_key: graph_to_code(graph, pipeline_name, description, preamble)}
+        code = graph_to_code(graph, pipeline_name, description, preamble, preserved_blocks)
+        return {main_key: code}
 
     # ── Separate nodes into root-level vs submodel children ──────────
     all_child_ids: set[str] = set()
@@ -811,6 +831,12 @@ def graph_to_code_multi(
         "",
         "",
     ]
+
+    # Preserved blocks (user code that survives GUI regeneration)
+    all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
+    if all_preserved:
+        main_lines.extend(_emit_preserved_blocks(all_preserved))
+        main_lines.append("")
 
     # Build source names per root node from root-level edges AND
     # cross-boundary edges (resolving submodel handles to child node names).

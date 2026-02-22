@@ -122,8 +122,15 @@ async def ws_sync(websocket: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 
 
+_DEBOUNCE_SECONDS = 0.3
+
+
 async def _file_watcher() -> None:
-    """Watch pipeline directories for .py changes and broadcast to GUI."""
+    """Watch pipeline directories for .py changes and broadcast to GUI.
+
+    Uses a 300ms debounce window to batch rapid edits (e.g. IDE auto-save)
+    into a single parse + broadcast cycle.
+    """
     try:
         from watchfiles import Change, awatch
     except ImportError:
@@ -138,14 +145,21 @@ async def _file_watcher() -> None:
 
     logger.info("file_watcher_started", watch_dirs=[str(d) for d in watch_dirs])
 
-    async for changes in awatch(*watch_dirs, recursive=False):
-        if is_self_write():
-            continue
+    pending_changes: set[tuple[Change, str]] = set()
+    debounce_task: asyncio.Task[None] | None = None
 
-        # Collect changed files
+    async def _flush() -> None:
+        """Parse and broadcast after debounce window expires."""
+        await asyncio.sleep(_DEBOUNCE_SECONDS)
+
+        if is_self_write():
+            pending_changes.clear()
+            return
+
+        # Collect changed files from pending set
         changed_files: list[Path] = []
         has_module_change = False
-        for change_type, changed_path in changes:
+        for change_type, changed_path in pending_changes:
             p = Path(changed_path)
             if p.suffix != ".py" or p.name.startswith("__"):
                 continue
@@ -154,6 +168,8 @@ async def _file_watcher() -> None:
             changed_files.append(p)
             if p.parent == modules_dir:
                 has_module_change = True
+
+        pending_changes.clear()
 
         # If a module file changed, re-parse the parent pipeline instead
         if has_module_change:
@@ -193,6 +209,13 @@ async def _file_watcher() -> None:
                         "source_file": str(p),
                     }
                 )
+
+    async for changes in awatch(*watch_dirs, recursive=False):
+        # Accumulate changes and (re)start the debounce timer
+        pending_changes.update(changes)
+        if debounce_task and not debounce_task.done():
+            debounce_task.cancel()
+        debounce_task = asyncio.create_task(_flush())
 
 
 # ---------------------------------------------------------------------------

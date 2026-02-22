@@ -633,3 +633,42 @@ def _extract_preamble(source: str) -> str:
         preamble_lines.pop()
 
     return "\n".join(preamble_lines)
+
+
+# ---------------------------------------------------------------------------
+# Preserved block extraction
+# ---------------------------------------------------------------------------
+
+_PRESERVE_START = "# haute:preserve-start"
+_PRESERVE_END = "# haute:preserve-end"
+
+
+def _extract_preserved_blocks(source: str) -> list[str]:
+    """Extract code between ``# haute:preserve-start`` / ``# haute:preserve-end`` markers.
+
+    Returns a list of strings, one per matched block, with the marker
+    lines themselves stripped.  Blocks are returned in source order.
+    Unmatched start markers (no corresponding end) are silently ignored.
+    """
+    blocks: list[str] = []
+    lines = source.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == _PRESERVE_START:
+            # Collect lines until the matching end marker
+            block_lines: list[str] = []
+            i += 1
+            while i < len(lines) and lines[i].strip() != _PRESERVE_END:
+                block_lines.append(lines[i])
+                i += 1
+            if i < len(lines):
+                # Found the end marker — store the block
+                # Strip leading/trailing blank lines but keep internal structure
+                while block_lines and not block_lines[0].strip():
+                    block_lines.pop(0)
+                while block_lines and not block_lines[-1].strip():
+                    block_lines.pop()
+                blocks.append("\n".join(block_lines))
+            # else: unmatched start marker — skip
+        i += 1
+    return blocks

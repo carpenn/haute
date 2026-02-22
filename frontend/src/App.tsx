@@ -22,7 +22,7 @@ import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview from "./panels/DataPreview"
 import TracePanel from "./panels/TracePanel"
-import ToastContainer, { type ToastMessage } from "./components/Toast"
+import ToastContainer from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import BreadcrumbBar from "./components/BreadcrumbBar"
@@ -36,6 +36,7 @@ import usePipelineAPI from "./hooks/usePipelineAPI"
 import useTracing from "./hooks/useTracing"
 import useSubmodelNavigation from "./hooks/useSubmodelNavigation"
 import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts"
+import useUIStore from "./stores/useUIStore"
 
 import { NODE_TYPES } from "./utils/nodeTypes"
 import { getLayoutedElements } from "./utils/layout"
@@ -93,19 +94,23 @@ function FlowEditor() {
   } = useUndoRedo()
   const { screenToFlowPosition, fitView } = useReactFlow()
 
-  // UI state
+  // UI state from Zustand store
+  const {
+    toasts, addToast, dismissToast,
+    paletteOpen, setPaletteOpen,
+    settingsOpen, setSettingsOpen,
+    shortcutsOpen, setShortcutsOpen,
+    submodelDialog, setSubmodelDialog,
+    snapToGrid, toggleSnapToGrid,
+    rowLimit, setRowLimit,
+    syncBanner, setSyncBanner,
+    dirty, setDirty,
+  } = useUIStore()
+
+  // Local UI state (not worth globalizing)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
-  const [paletteOpen, setPaletteOpen] = useState(true)
   const [preamble, setPreamble] = useState("")
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [shortcutsOpen, setShortcutsOpen] = useState(false)
-  const [snapToGrid, setSnapToGrid] = useState(false)
-  const [dirty, setDirty] = useState(false)
-  const [rowLimit, setRowLimit] = useState(1000)
-  const [toasts, setToasts] = useState<ToastMessage[]>([])
-  const [syncBanner, setSyncBanner] = useState<string | null>(null)
-  const [submodelDialog, setSubmodelDialog] = useState<{ nodeIds: string[] } | null>(null)
 
   // Refs
   const submodelsRef = useRef<Record<string, unknown>>({})
@@ -117,22 +122,11 @@ function FlowEditor() {
   const pipelineNameRef = useRef("main")
   const sourceFileRef = useRef("")
   const nodeIdCounter = useRef(0)
-  const toastCounter = useRef(0)
 
   // Keep graphRef in sync so callbacks never see stale state
   useEffect(() => {
     graphRef.current = { nodes, edges }
   }, [nodes, edges])
-
-  // Toast helpers
-  const addToast = useCallback((type: ToastMessage["type"], text: string) => {
-    toastCounter.current += 1
-    setToasts((prev) => [...prev, { id: String(toastCounter.current), type, text }])
-  }, [])
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }, [])
 
   // Track dirty state
   useEffect(() => {
@@ -140,15 +134,15 @@ function FlowEditor() {
     if (lastSavedRef.current && snapshot !== lastSavedRef.current) {
       setDirty(true)
     }
-  }, [nodes, edges, preamble])
+  }, [nodes, edges, preamble, setDirty])
 
   // ---------------------------------------------------------------------------
   // Hooks
   // ---------------------------------------------------------------------------
 
-  useWebSocketSync({
+  const wsStatus = useWebSocketSync({
     setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
-    nodeIdCounter, setSyncBanner, addToast, fitView,
+    nodeIdCounter, fitView,
   })
 
   const {
@@ -157,11 +151,10 @@ function FlowEditor() {
     fetchPreview, handleRun, handleSave,
   } = usePipelineAPI({
     nodes, edges, selectedNode,
-    graphRef, parentGraphRef, submodelsRef,
-    rowLimit, setNodes,
+    graphRef, parentGraphRef, submodelsRef, setNodes,
     setNodesRaw, setEdgesRaw, setPreamble,
     preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
-    nodeIdCounter, setDirty, addToast,
+    nodeIdCounter,
   })
 
   const {
@@ -171,7 +164,7 @@ function FlowEditor() {
   } = useTracing({
     nodes, edges, selectedNode,
     graphRef, parentGraphRef, submodelsRef,
-    nodeStatuses, rowLimit, addToast,
+    nodeStatuses,
   })
 
   const {
@@ -183,21 +176,14 @@ function FlowEditor() {
     setNodesRaw, setEdgesRaw,
     setSelectedNode, setPreviewData: (d: null) => setPreviewData(d),
     preambleRef, sourceFileRef, pipelineNameRef,
-    fitView, addToast, setDirty,
+    fitView,
   })
 
-  const toggleSnapToGrid = useCallback(() => {
-    setSnapToGrid((prev) => {
-      addToast("info", !prev ? "Snap to grid ON" : "Snap to grid OFF")
-      return !prev
-    })
-  }, [addToast])
-
   useKeyboardShortcuts({
-    handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+    handleSave, setNodes, setEdges, undo, redo, fitView,
     graphRef, clipboard, nodeIdCounter,
     setSelectedNode, setPreviewData: (d: null) => setPreviewData(d),
-    clearTrace, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+    clearTrace,
   })
 
   // ---------------------------------------------------------------------------
@@ -394,7 +380,10 @@ function FlowEditor() {
         onUndo={undo}
         onRedo={redo}
         snapToGrid={snapToGrid}
-        onToggleSnapToGrid={toggleSnapToGrid}
+        onToggleSnapToGrid={() => {
+          toggleSnapToGrid()
+          addToast("info", useUIStore.getState().snapToGrid ? "Snap to grid ON" : "Snap to grid OFF")
+        }}
         onShowShortcuts={() => setShortcutsOpen(true)}
         rowLimit={rowLimit}
         onRowLimitChange={setRowLimit}
@@ -403,6 +392,7 @@ function FlowEditor() {
         onRun={handleRun}
         runStatus={runStatus}
         onSave={handleSave}
+        wsStatus={wsStatus}
       />
 
       <div className="flex-1 flex min-h-0">

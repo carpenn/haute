@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import { MarkerType } from "@xyflow/react"
 import type { TraceResult } from "../types/trace"
-import type { ToastMessage } from "../components/Toast"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { nodeData } from "../types/node"
 import { traceCell } from "../api/client"
+import useUIStore from "../stores/useUIStore"
 
 interface TracingParams {
   nodes: Node[]
@@ -15,8 +15,6 @@ interface TracingParams {
   parentGraphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, unknown> } | null>
   submodelsRef: React.MutableRefObject<Record<string, unknown>>
   nodeStatuses: Record<string, "ok" | "error" | "running">
-  rowLimit: number
-  addToast: (type: ToastMessage["type"], text: string) => void
 }
 
 export interface TracingReturn {
@@ -31,8 +29,9 @@ export interface TracingReturn {
 export default function useTracing({
   nodes, edges, selectedNode,
   graphRef, parentGraphRef, submodelsRef,
-  nodeStatuses, rowLimit, addToast,
+  nodeStatuses,
 }: TracingParams): TracingReturn {
+  const { rowLimit, addToast } = useUIStore()
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
   const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
 

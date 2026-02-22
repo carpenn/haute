@@ -650,9 +650,13 @@ class TestFileWatcher:
         ):
             from haute.server import _file_watcher
 
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)  # allow debounce task to complete
+
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(_file_watcher())
+                loop.run_until_complete(_run())
             finally:
                 loop.close()
 
@@ -686,9 +690,13 @@ class TestFileWatcher:
         ):
             from haute.server import _file_watcher
 
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(_file_watcher())
+                loop.run_until_complete(_run())
             finally:
                 loop.close()
 
@@ -720,9 +728,13 @@ class TestFileWatcher:
         ):
             from haute.server import _file_watcher
 
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(_file_watcher())
+                loop.run_until_complete(_run())
             finally:
                 loop.close()
 

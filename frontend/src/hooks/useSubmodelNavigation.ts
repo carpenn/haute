@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import type { ViewLevel } from "../components/BreadcrumbBar"
-import type { ToastMessage } from "../components/Toast"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { getLayoutedElements } from "../utils/layout"
 import { nodeData } from "../types/node"
 import { createSubmodel, loadSubmodel, dissolveSubmodel } from "../api/client"
+import useUIStore from "../stores/useUIStore"
 
 interface SubmodelNavParams {
   graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
@@ -19,8 +19,6 @@ interface SubmodelNavParams {
   sourceFileRef: React.MutableRefObject<string>
   pipelineNameRef: React.MutableRefObject<string>
   fitView: (options?: { padding?: number }) => void
-  addToast: (type: ToastMessage["type"], text: string) => void
-  setDirty: (dirty: boolean) => void
 }
 
 export interface SubmodelNavReturn {
@@ -40,8 +38,9 @@ export default function useSubmodelNavigation({
   setNodesRaw, setEdgesRaw,
   setSelectedNode, setPreviewData,
   preambleRef, sourceFileRef, pipelineNameRef,
-  fitView, addToast, setDirty,
+  fitView,
 }: SubmodelNavParams): SubmodelNavReturn {
+  const { addToast, setDirty } = useUIStore()
   const [viewStack, setViewStack] = useState<ViewLevel[]>([{ type: "pipeline", name: "main", file: "" }])
 
   const handleCreateSubmodel = useCallback(async (name: string, nodeIds: string[]) => {

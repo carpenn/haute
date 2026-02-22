@@ -94,7 +94,11 @@ async def get_schema(path: str) -> SchemaResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("schema_read_failed", path=path, error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read schema for '{path}'. Check the server logs for details.",
+        )
 
 
 @router.get("/schema/databricks", response_model=SchemaResponse)
@@ -130,4 +134,8 @@ async def get_databricks_schema(table: str) -> SchemaResponse:
             preview=preview_df.to_dicts(),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("databricks_schema_read_failed", table=table, error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read schema for table '{table}'. Check the server logs for details.",
+        )

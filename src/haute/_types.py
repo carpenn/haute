@@ -226,6 +226,7 @@ class PipelineGraph(BaseModel):
     pipeline_name: str | None = None
     pipeline_description: str | None = None
     preamble: str | None = None
+    preserved_blocks: list[str] = Field(default_factory=list)
     source_file: str | None = None
     submodels: dict[str, Any] | None = None
     warning: str | None = None

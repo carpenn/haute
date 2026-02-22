@@ -26,39 +26,24 @@ from haute.parser import parse_pipeline_file, parse_pipeline_source
 # ---------------------------------------------------------------------------
 
 class TestInferNodeType:
-    def test_external_file(self):
-        assert _infer_node_type({"external": "model.pkl"}, 1) == "externalFile"
-
-    def test_data_sink(self):
-        assert _infer_node_type({"sink": "out.parquet"}, 1) == "dataSink"
-
-    def test_output(self):
-        assert _infer_node_type({"output": True}, 1) == "output"
-
-    def test_model_score(self):
-        assert _infer_node_type({"model_score": True}, 1) == "modelScore"
-
-    def test_rating_step(self):
-        assert _infer_node_type({"table": "t", "key": "k"}, 1) == "ratingStep"
-
-    def test_data_source_by_path(self):
-        assert _infer_node_type({"path": "data.parquet"}, 0) == "dataSource"
-
-    def test_data_source_by_zero_params(self):
-        assert _infer_node_type({}, 0) == "dataSource"
-
-    def test_transform_default(self):
-        assert _infer_node_type({}, 1) == "transform"
-
-    def test_live_switch(self):
-        assert _infer_node_type({"live_switch": True}, 2) == "liveSwitch"
-
-    def test_api_input(self):
-        assert _infer_node_type({"api_input": True, "path": "d.json"}, 0) == "apiInput"
-
-    def test_priority_external_over_path(self):
-        """external takes priority even if path is present."""
-        assert _infer_node_type({"external": "m.pkl", "path": "x"}, 1) == "externalFile"
+    @pytest.mark.parametrize(
+        "kwargs, n_params, expected",
+        [
+            pytest.param({"external": "model.pkl"}, 1, "externalFile", id="external_file"),
+            pytest.param({"sink": "out.parquet"}, 1, "dataSink", id="data_sink"),
+            pytest.param({"output": True}, 1, "output", id="output"),
+            pytest.param({"model_score": True}, 1, "modelScore", id="model_score"),
+            pytest.param({"table": "t", "key": "k"}, 1, "ratingStep", id="rating_step"),
+            pytest.param({"path": "data.parquet"}, 0, "dataSource", id="source_by_path"),
+            pytest.param({}, 0, "dataSource", id="source_zero_params"),
+            pytest.param({}, 1, "transform", id="transform_default"),
+            pytest.param({"live_switch": True}, 2, "liveSwitch", id="live_switch"),
+            pytest.param({"api_input": True, "path": "d.json"}, 0, "apiInput", id="api_input"),
+            pytest.param({"external": "m.pkl", "path": "x"}, 1, "externalFile", id="external_over_path"),
+        ],
+    )
+    def test_infers_correct_type(self, kwargs, n_params, expected):
+        assert _infer_node_type(kwargs, n_params) == expected
 
 
 # ---------------------------------------------------------------------------

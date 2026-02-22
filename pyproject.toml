@@ -86,6 +86,9 @@ select = ["E", "F", "I", "N", "W", "UP"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
+[tool.coverage.report]
+fail_under = 80
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true

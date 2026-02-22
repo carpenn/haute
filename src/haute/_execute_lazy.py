@@ -235,7 +235,7 @@ def _execute_eager_core(
                     )
                 result = fn(*input_lfs)
 
-            df = result.collect() if isinstance(result, pl.LazyFrame) else result
+            df = result.collect(engine="streaming") if isinstance(result, pl.LazyFrame) else result
             eager_outputs[nid] = df
         except Exception as exc:
             if not swallow_errors:

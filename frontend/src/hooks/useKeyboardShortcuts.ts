@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import type { Node, Edge } from "@xyflow/react"
-import type { ToastMessage } from "../components/Toast"
+import useUIStore from "../stores/useUIStore"
 
 interface KeyboardShortcutsParams {
   handleSave: () => void
@@ -9,24 +9,20 @@ interface KeyboardShortcutsParams {
   undo: () => void
   redo: () => void
   fitView: (options?: { padding?: number }) => void
-  addToast: (type: ToastMessage["type"], text: string) => void
   graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
   clipboard: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
   nodeIdCounter: React.MutableRefObject<number>
   setSelectedNode: (node: Node | null) => void
   setPreviewData: (data: null) => void
   clearTrace: () => void
-  setShortcutsOpen: React.Dispatch<React.SetStateAction<boolean>>
-  setSubmodelDialog: React.Dispatch<React.SetStateAction<{ nodeIds: string[] } | null>>
-  toggleSnapToGrid: () => void
 }
 
 export default function useKeyboardShortcuts({
-  handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+  handleSave, setNodes, setEdges, undo, redo, fitView,
   graphRef, clipboard, nodeIdCounter,
   setSelectedNode, setPreviewData, clearTrace,
-  setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
 }: KeyboardShortcutsParams) {
+  const { addToast, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid } = useUIStore()
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
@@ -145,6 +141,7 @@ export default function useKeyboardShortcuts({
       // G → toggle snap-to-grid (unless typing)
       if (e.key === "g" && !isTyping && !mod) {
         toggleSnapToGrid()
+        addToast("info", useUIStore.getState().snapToGrid ? "Snap to grid ON" : "Snap to grid OFF")
         return
       }
 
@@ -167,9 +164,9 @@ export default function useKeyboardShortcuts({
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
   }, [
-    handleSave, setNodes, setEdges, undo, redo, fitView, addToast,
+    handleSave, setNodes, setEdges, undo, redo, fitView,
     graphRef, clipboard, nodeIdCounter,
     setSelectedNode, setPreviewData, clearTrace,
-    setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+    addToast, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
   ])
 }

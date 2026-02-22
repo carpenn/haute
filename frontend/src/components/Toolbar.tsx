@@ -1,4 +1,11 @@
 import { Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
+import type { WsStatus } from "../hooks/useWebSocketSync"
+
+const WS_STATUS_CONFIG: Record<WsStatus, { color: string; title: string }> = {
+  connected: { color: "#22c55e", title: "Live sync connected" },
+  reconnecting: { color: "#f59e0b", title: "Reconnecting to server\u2026" },
+  disconnected: { color: "#ef4444", title: "Server unreachable \u2014 restart haute serve" },
+}
 
 interface ToolbarProps {
   nodeCount: number
@@ -18,6 +25,7 @@ interface ToolbarProps {
   onRun: () => void
   runStatus: string | null
   onSave: () => void
+  wsStatus: WsStatus
 }
 
 export default function Toolbar({
@@ -28,13 +36,21 @@ export default function Toolbar({
   rowLimit, onRowLimitChange,
   onOpenSettings, onAutoLayout,
   onRun, runStatus, onSave,
+  wsStatus,
 }: ToolbarProps) {
+  const wsConfig = WS_STATUS_CONFIG[wsStatus]
+
   return (
     <header role="toolbar" aria-label="Pipeline toolbar" className="h-11 flex items-center px-4 shrink-0" style={{ background: 'var(--chrome)', borderBottom: '1px solid var(--chrome-border)' }}>
       <div className="flex items-center gap-2.5">
         <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Haute</h1>
         <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>v0.1.0</span>
         {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-dot" title="Unsaved changes" />}
+        <span
+          className={`w-2 h-2 rounded-full shrink-0${wsStatus === "reconnecting" ? " animate-pulse-dot" : ""}`}
+          style={{ background: wsConfig.color }}
+          title={wsConfig.title}
+        />
       </div>
       <div className="ml-auto flex items-center gap-1.5">
         <span className="text-[12px] mr-2" style={{ color: 'var(--text-muted)' }}>

@@ -1,7 +1,9 @@
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import { getLayoutedElements } from "../utils/layout"
-import type { ToastMessage } from "../components/Toast"
+import useUIStore from "../stores/useUIStore"
+
+export type WsStatus = "connected" | "reconnecting" | "disconnected"
 
 interface WebSocketSyncParams {
   setNodesRaw: (nodes: Node[]) => void
@@ -9,15 +11,21 @@ interface WebSocketSyncParams {
   setPreamble: (p: string) => void
   preambleRef: React.MutableRefObject<string>
   nodeIdCounter: React.MutableRefObject<number>
-  setSyncBanner: (banner: string | null) => void
-  addToast: (type: ToastMessage["type"], text: string) => void
   fitView: (options?: { padding?: number }) => void
 }
 
+const MAX_RETRIES = 50
+const INITIAL_BACKOFF_MS = 1_000
+const MAX_BACKOFF_MS = 30_000
+
 export default function useWebSocketSync({
   setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
-  nodeIdCounter, setSyncBanner, addToast, fitView,
-}: WebSocketSyncParams) {
+  nodeIdCounter, fitView,
+}: WebSocketSyncParams): WsStatus {
+  const { setSyncBanner, addToast } = useUIStore()
+  const [status, setStatus] = useState<WsStatus>("reconnecting")
+  const retriesRef = useRef(0)
+
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     const wsUrl = `${protocol}//${window.location.host}/ws/sync`
@@ -28,6 +36,12 @@ export default function useWebSocketSync({
     function connect() {
       if (!mounted) return
       ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        if (!mounted) return
+        retriesRef.current = 0
+        setStatus("connected")
+      }
 
       ws.onmessage = async (event) => {
         try {
@@ -68,7 +82,17 @@ export default function useWebSocketSync({
       }
 
       ws.onclose = () => {
-        if (mounted) reconnectTimer = setTimeout(connect, 3000)
+        if (!mounted) return
+        retriesRef.current += 1
+
+        if (retriesRef.current > MAX_RETRIES) {
+          setStatus("disconnected")
+          return
+        }
+
+        setStatus("reconnecting")
+        const backoff = Math.min(INITIAL_BACKOFF_MS * 2 ** (retriesRef.current - 1), MAX_BACKOFF_MS)
+        reconnectTimer = setTimeout(connect, backoff)
       }
 
       ws.onerror = () => {
@@ -83,5 +107,7 @@ export default function useWebSocketSync({
       if (reconnectTimer) clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, nodeIdCounter, setSyncBanner, addToast, fitView])
+  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, nodeIdCounter, fitView, setSyncBanner, addToast])
+
+  return status
 }

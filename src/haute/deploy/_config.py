@@ -85,6 +85,78 @@ class CIConfig:
     production_endpoint_url: str = ""
 
 
+# ---------------------------------------------------------------------------
+# TOML schema validation — reject unknown keys early
+# ---------------------------------------------------------------------------
+
+_VALID_TOML_SCHEMA: dict[str, set[str] | dict[str, set[str]]] = {
+    "project": {"name", "pipeline"},
+    "deploy": {
+        "_self": {"target", "model_name", "endpoint_name", "output_fields"},
+        "databricks": {
+            "experiment_name", "catalog", "schema",
+            "serving_workload_size", "serving_scale_to_zero",
+        },
+        "container": {"registry", "port", "base_image"},
+        "azure-container-apps": {
+            "resource_group", "container_app_name", "environment_name",
+        },
+        "aws-ecs": {"region", "cluster", "service"},
+        "gcp-run": {"project", "region", "service"},
+    },
+    "test_quotes": {"dir"},
+    "safety": {
+        "_self": {"impact_dataset"},
+        "approval": {"min_approvers"},
+    },
+    "ci": {
+        "_self": {"provider"},
+        "staging": {"endpoint_suffix", "endpoint_url"},
+        "production": {"endpoint_url"},
+    },
+}
+
+
+def _validate_toml_keys(data: dict[str, Any], path: Path) -> None:
+    """Raise ValueError if haute.toml contains unknown keys."""
+    errors: list[str] = []
+
+    def _check(
+        section_path: str,
+        actual: dict[str, Any],
+        schema: set[str] | dict[str, Any],
+    ) -> None:
+        if isinstance(schema, set):
+            unknown = set(actual) - schema
+            for k in sorted(unknown):
+                errors.append(f"  [{section_path}] unknown key '{k}'")
+        else:
+            # Dict schema: _self holds top-level keys, rest are sub-sections
+            top_keys = schema.get("_self", set())
+            sub_sections = {k for k in schema if k != "_self"}
+            allowed = top_keys | sub_sections if isinstance(top_keys, set) else sub_sections
+            unknown = set(actual) - allowed
+            for k in sorted(unknown):
+                errors.append(f"  [{section_path}] unknown key '{k}'")
+            for sub in sub_sections:
+                if sub in actual and isinstance(actual[sub], dict):
+                    _check(f"{section_path}.{sub}", actual[sub], schema[sub])
+
+    top_unknown = set(data) - set(_VALID_TOML_SCHEMA)
+    for k in sorted(top_unknown):
+        errors.append(f"  unknown top-level section [{k}]")
+
+    for section, schema in _VALID_TOML_SCHEMA.items():
+        if section in data and isinstance(data[section], dict):
+            _check(section, data[section], schema)
+
+    if errors:
+        raise ValueError(
+            f"Invalid haute.toml ({path}):\n" + "\n".join(errors)
+            + "\n\nCheck for typos in your configuration keys."
+        )
+
+
 @dataclass
 class DeployConfig:
     """User-provided deployment configuration (from haute.toml + CLI)."""
@@ -122,11 +194,17 @@ class DeployConfig:
 
     @classmethod
     def from_toml(cls, path: Path) -> DeployConfig:
-        """Load from haute.toml, merging [project], [deploy], [safety], [ci]."""
+        """Load from haute.toml, merging [project], [deploy], [safety], [ci].
+
+        Validates that all TOML keys are recognised — unknown keys raise
+        ``ValueError`` with a clear message listing the offending keys.
+        """
         import tomllib
 
         text = path.read_text()
         data = tomllib.loads(text)
+
+        _validate_toml_keys(data, path)
 
         project = data.get("project", {})
         deploy = data.get("deploy", {})

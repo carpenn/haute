@@ -22,6 +22,7 @@ from haute._parser_helpers import (
     _extract_function_bodies,
     _extract_pipeline_meta,
     _extract_preamble,
+    _extract_preserved_blocks,
     _get_decorator_kwargs,
     _get_docstring,
     _infer_node_type,
@@ -153,6 +154,7 @@ def parse_pipeline_source(
     edges = _build_edges(raw_nodes, explicit_connects)
     rf_nodes = _build_rf_nodes(raw_nodes)
     preamble = _extract_preamble(source)
+    preserved_blocks = _extract_preserved_blocks(source)
 
     graph = PipelineGraph(
         nodes=rf_nodes,
@@ -160,6 +162,7 @@ def parse_pipeline_source(
         pipeline_name=pipeline_name,
         pipeline_description=pipeline_desc,
         preamble=preamble,
+        preserved_blocks=preserved_blocks,
         source_file=source_file,
     )
 

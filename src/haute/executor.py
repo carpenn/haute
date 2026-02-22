@@ -20,6 +20,12 @@ from typing import Any
 import polars as pl
 
 from haute._logging import get_logger
+from haute._rating import (
+    _apply_banding,
+    _apply_rating_table,
+    _combine_rating_columns,
+    _normalise_banding_factors,
+)
 from haute._sandbox import safe_globals, validate_user_code
 from haute.graph_utils import (
     GraphNode,
@@ -107,179 +113,6 @@ def _exec_user_code(
     if isinstance(result, pl.DataFrame):
         result = result.lazy()
     return result  # type: ignore[no-any-return]
-
-
-def _apply_banding(
-    lf: _Frame,
-    column: str,
-    output_column: str,
-    banding_type: str,
-    rules: list[dict[str, Any]],
-    default: Any = None,
-) -> _Frame:
-    """Apply banding rules to a column, producing a new output column.
-
-    Continuous rules use operator/value pairs to define ranges::
-
-        {"op1": ">", "val1": 0, "op2": "<=", "val2": 25, "assignment": "0-25"}
-
-    Categorical rules map exact values to groups::
-
-        {"value": "Semi-detached House", "assignment": "House"}
-    """
-    col = pl.col(column)
-    default_lit = pl.lit(default) if default is not None else pl.lit(None, dtype=pl.Utf8)
-
-    if banding_type == "categorical":
-        # Build a remap dict: value → assignment
-        remap: dict[str, str] = {}
-        for rule in rules:
-            val = rule.get("value", "")
-            assignment = rule.get("assignment", "")
-            if val and assignment:
-                remap[str(val)] = str(assignment)
-        if not remap:
-            return lf
-        cat_expr = col.cast(pl.Utf8).replace_strict(remap, default=default_lit).alias(output_column)
-        return lf.with_columns(cat_expr)
-
-    # Continuous: build a when/then chain
-    chain: Any = None
-    for rule in rules:
-        cond = _banding_condition(col, rule)
-        if cond is None:
-            continue
-        assignment = str(rule.get("assignment", ""))
-        branch = pl.when(cond).then(pl.lit(assignment))
-        chain = branch if chain is None else chain.when(cond).then(pl.lit(assignment))
-
-    if chain is None:
-        return lf
-    final_expr = chain.otherwise(default_lit).alias(output_column)
-    return lf.with_columns(final_expr)
-
-
-def _normalise_banding_factors(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return the ``factors`` list from banding config."""
-    factors = config.get("factors")
-    if isinstance(factors, list):
-        return factors
-    return []
-
-
-def _apply_rating_table(
-    lf: _Frame,
-    table: dict[str, Any],
-) -> _Frame:
-    """Apply a single rating table lookup via a Polars left join.
-
-    *table* must contain ``factors`` (list of column names to join on),
-    ``outputColumn``, ``entries`` (list of dicts with one key per factor
-    plus a ``value`` key), and optionally ``defaultValue``.
-    """
-    factors: list[str] = table.get("factors", []) or []
-    entries: list[dict[str, Any]] = table.get("entries", []) or []
-    output_col: str = table.get("outputColumn", "")
-    default_raw = table.get("defaultValue")
-
-    if not factors or not entries or not output_col:
-        return lf
-
-    # Build lookup DataFrame — cast value to Float64
-    lookup = pl.DataFrame(entries)
-    if "value" not in lookup.columns:
-        return lf
-    lookup = lookup.with_columns(pl.col("value").cast(pl.Float64))
-
-    # Cast factor columns in lookup to Utf8 so the join matches string bands
-    for f in factors:
-        if f in lookup.columns:
-            lookup = lookup.with_columns(pl.col(f).cast(pl.Utf8))
-
-    # Cast factor columns in the main frame to Utf8 too
-    cast_exprs = [
-        pl.col(f).cast(pl.Utf8).alias(f) for f in factors
-        if f in (lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns)
-    ]
-    if cast_exprs:
-        lf = lf.with_columns(cast_exprs)
-
-    # Left join
-    lf = lf.join(lookup.lazy(), on=factors, how="left")
-
-    # Rename value → outputColumn, apply default
-    has_default = default_raw is not None and str(default_raw).strip()
-    default_val = float(str(default_raw)) if has_default else None
-    if default_val is not None:
-        lf = lf.with_columns(
-            pl.col("value").fill_null(default_val).alias(output_col),
-        )
-    else:
-        lf = lf.with_columns(pl.col("value").alias(output_col))
-
-    # Drop the temporary "value" column if it differs from outputColumn
-    if output_col != "value":
-        lf = lf.drop("value")
-
-    return lf
-
-
-def _combine_rating_columns(
-    lf: _Frame,
-    columns: list[str],
-    operation: str,
-    output_col: str,
-) -> _Frame:
-    """Combine multiple rating table output columns into a single column.
-
-    Supported operations: multiply (default), add, min, max.
-    """
-    if not columns:
-        return lf
-    if len(columns) == 1:
-        return lf.with_columns(pl.col(columns[0]).alias(output_col))
-
-    if operation == "add":
-        expr = pl.col(columns[0])
-        for c in columns[1:]:
-            expr = expr + pl.col(c)
-    elif operation == "min":
-        expr = pl.min_horizontal(*[pl.col(c) for c in columns])
-    elif operation == "max":
-        expr = pl.max_horizontal(*[pl.col(c) for c in columns])
-    else:  # multiply (default)
-        expr = pl.col(columns[0])
-        for c in columns[1:]:
-            expr = expr * pl.col(c)
-
-    return lf.with_columns(expr.alias(output_col))
-
-
-_OP_MAP: dict[str, str] = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "=": "eq", "==": "eq"}
-
-
-def _banding_condition(col: pl.Expr, rule: dict[str, Any]) -> pl.Expr | None:
-    """Build a Polars boolean expression from a continuous banding rule."""
-    parts: list[pl.Expr] = []
-    for suffix in ("1", "2"):
-        op = str(rule.get(f"op{suffix}", "") or "").strip()
-        val = rule.get(f"val{suffix}")
-        if not op or val is None or val == "":
-            continue
-        try:
-            num = float(val)
-        except (ValueError, TypeError):
-            continue
-        method = _OP_MAP.get(op)
-        if method is None:
-            continue
-        parts.append(getattr(col, method)(num))
-    if not parts:
-        return None
-    result = parts[0]
-    for p in parts[1:]:
-        result = result & p
-    return result
 
 
 def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> GraphNode:
@@ -778,6 +611,12 @@ def _eager_execute(
 def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
     """Execute the pipeline up to a sink node and write its input to disk.
 
+    Uses Polars streaming sinks (``sink_parquet`` / ``sink_csv``) so the
+    full dataset is never materialised in memory at once.  Falls back to
+    ``collect(engine="streaming")`` + eager write if the streaming sink raises
+    (e.g. when the plan contains an operation that doesn't support the
+    streaming engine).
+
     This is called on-demand (not during normal run/preview).
     Returns a ``SinkResponse`` with row count and output path.
     """
@@ -806,20 +645,33 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
     if lf is None:
         raise RuntimeError("Failed to compute sink input")
 
-    df = lf.collect()
-
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    try:
+        if fmt == "csv":
+            lf.sink_csv(out)
+        else:
+            lf.sink_parquet(out)
+    except Exception:
+        # Fallback: collect with streaming hint, then write eagerly.
+        logger.info("sink_streaming_fallback", path=path, format=fmt)
+        df = lf.collect(engine="streaming")
+        if fmt == "csv":
+            df.write_csv(out)
+        else:
+            df.write_parquet(out)
+
+    # Read back row count cheaply from file metadata.
     if fmt == "csv":
-        df.write_csv(out)
+        row_count = pl.scan_csv(out).select(pl.len()).collect().item()
     else:
-        df.write_parquet(out)
+        row_count = pl.scan_parquet(out).select(pl.len()).collect().item()
 
     return SinkResponse(
         status="ok",
-        message=f"Wrote {len(df):,} rows to {path}",
-        row_count=len(df),
+        message=f"Wrote {row_count:,} rows to {path}",
+        row_count=row_count,
         path=path,
         format=fmt,
     )

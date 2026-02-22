@@ -19,6 +19,27 @@ export const NODE_TYPES = {
 
 export type NodeTypeValue = typeof NODE_TYPES[keyof typeof NODE_TYPES]
 
+/** Single source of truth for all node type metadata. */
+export const NODE_TYPE_META: Record<NodeTypeValue, {
+  icon: React.ElementType
+  color: string
+  label: string
+}> = {
+  [NODE_TYPES.API_INPUT]:     { icon: Radio,              color: "#22c55e", label: "API INPUT" },
+  [NODE_TYPES.DATA_SOURCE]:   { icon: Database,           color: "#3b82f6", label: "SOURCE" },
+  [NODE_TYPES.TRANSFORM]:     { icon: PolarsIcon,         color: "#06b6d4", label: "POLARS" },
+  [NODE_TYPES.MODEL_SCORE]:   { icon: Brain,              color: "#8b5cf6", label: "MODEL" },
+  [NODE_TYPES.BANDING]:       { icon: SlidersHorizontal,  color: "#14b8a6", label: "BANDING" },
+  [NODE_TYPES.RATING_STEP]:   { icon: TableProperties,    color: "#10b981", label: "RATING" },
+  [NODE_TYPES.OUTPUT]:        { icon: CircleDot,          color: "#f43f5e", label: "OUTPUT" },
+  [NODE_TYPES.DATA_SINK]:     { icon: HardDriveDownload,  color: "#f59e0b", label: "SINK" },
+  [NODE_TYPES.EXTERNAL_FILE]: { icon: FileArchive,        color: "#ec4899", label: "EXTERNAL" },
+  [NODE_TYPES.LIVE_SWITCH]:   { icon: ToggleLeft,         color: "#f59e0b", label: "SWITCH" },
+  [NODE_TYPES.MODELLING]:     { icon: FlaskConical,       color: "#a855f7", label: "TRAINING" },
+  [NODE_TYPES.SUBMODEL]:      { icon: Package,            color: "#f97316", label: "SUBMODEL" },
+  [NODE_TYPES.SUBMODEL_PORT]: { icon: ArrowRight,         color: "#94a3b8", label: "PORT" },
+}
+
 export const SINGLETON_TYPES = new Set<NodeTypeValue>([
   NODE_TYPES.API_INPUT, NODE_TYPES.OUTPUT, NODE_TYPES.LIVE_SWITCH,
 ])
@@ -33,50 +54,12 @@ export const SINK_ONLY_TYPES = new Set<string>([
   NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK, NODE_TYPES.MODELLING,
 ])
 
-export const nodeTypeIcons: Record<string, React.ElementType> = {
-  [NODE_TYPES.API_INPUT]: Radio,
-  [NODE_TYPES.DATA_SOURCE]: Database,
-  [NODE_TYPES.TRANSFORM]: PolarsIcon,
-  [NODE_TYPES.MODEL_SCORE]: Brain,
-  [NODE_TYPES.RATING_STEP]: TableProperties,
-  [NODE_TYPES.BANDING]: SlidersHorizontal,
-  [NODE_TYPES.OUTPUT]: CircleDot,
-  [NODE_TYPES.DATA_SINK]: HardDriveDownload,
-  [NODE_TYPES.EXTERNAL_FILE]: FileArchive,
-  [NODE_TYPES.LIVE_SWITCH]: ToggleLeft,
-  [NODE_TYPES.MODELLING]: FlaskConical,
-  [NODE_TYPES.SUBMODEL]: Package,
-  [NODE_TYPES.SUBMODEL_PORT]: ArrowRight,
-}
+/** Derived lookups — backward compatible, prefer NODE_TYPE_META for new code. */
+export const nodeTypeIcons: Record<string, React.ElementType> =
+  Object.fromEntries(Object.entries(NODE_TYPE_META).map(([k, v]) => [k, v.icon]))
 
-export const nodeTypeColors: Record<string, string> = {
-  [NODE_TYPES.API_INPUT]: "#22c55e",
-  [NODE_TYPES.DATA_SOURCE]: "#3b82f6",
-  [NODE_TYPES.TRANSFORM]: "#06b6d4",
-  [NODE_TYPES.MODEL_SCORE]: "#8b5cf6",
-  [NODE_TYPES.RATING_STEP]: "#10b981",
-  [NODE_TYPES.BANDING]: "#14b8a6",
-  [NODE_TYPES.OUTPUT]: "#f43f5e",
-  [NODE_TYPES.DATA_SINK]: "#f59e0b",
-  [NODE_TYPES.EXTERNAL_FILE]: "#ec4899",
-  [NODE_TYPES.LIVE_SWITCH]: "#f59e0b",
-  [NODE_TYPES.MODELLING]: "#a855f7",
-  [NODE_TYPES.SUBMODEL]: "#f97316",
-  [NODE_TYPES.SUBMODEL_PORT]: "#94a3b8",
-}
+export const nodeTypeColors: Record<string, string> =
+  Object.fromEntries(Object.entries(NODE_TYPE_META).map(([k, v]) => [k, v.color]))
 
-export const nodeTypeLabels: Record<string, string> = {
-  [NODE_TYPES.API_INPUT]: "API INPUT",
-  [NODE_TYPES.DATA_SOURCE]: "SOURCE",
-  [NODE_TYPES.TRANSFORM]: "POLARS",
-  [NODE_TYPES.MODEL_SCORE]: "MODEL",
-  [NODE_TYPES.RATING_STEP]: "RATING",
-  [NODE_TYPES.BANDING]: "BANDING",
-  [NODE_TYPES.OUTPUT]: "OUTPUT",
-  [NODE_TYPES.DATA_SINK]: "SINK",
-  [NODE_TYPES.EXTERNAL_FILE]: "EXTERNAL",
-  [NODE_TYPES.LIVE_SWITCH]: "SWITCH",
-  [NODE_TYPES.MODELLING]: "TRAINING",
-  [NODE_TYPES.SUBMODEL]: "SUBMODEL",
-  [NODE_TYPES.SUBMODEL_PORT]: "PORT",
-}
+export const nodeTypeLabels: Record<string, string> =
+  Object.fromEntries(Object.entries(NODE_TYPE_META).map(([k, v]) => [k, v.label]))

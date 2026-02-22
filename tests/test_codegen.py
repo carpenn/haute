@@ -45,47 +45,37 @@ def _compile_node_code(code: str) -> None:
 
 
 class TestNodeToCode:
-    def test_data_source_parquet(self):
+    @pytest.mark.parametrize(
+        "label, config, expected_strings",
+        [
+            pytest.param(
+                "Load Data",
+                {"path": "data/input.parquet"},
+                ["def Load_Data()", 'scan_parquet("data/input.parquet")', '@pipeline.node(path="data/input.parquet")'],
+                id="parquet",
+            ),
+            pytest.param(
+                "CSV Source",
+                {"path": "data/input.csv"},
+                ['scan_csv("data/input.csv")', "def CSV_Source()"],
+                id="csv",
+            ),
+            pytest.param(
+                "DB Source",
+                {"sourceType": "databricks", "table": "catalog.schema.tbl"},
+                ["read_cached_table", "catalog.schema.tbl"],
+                id="databricks",
+            ),
+        ],
+    )
+    def test_data_source(self, label, config, expected_strings):
         node = _n({
             "id": "src",
-            "data": {
-                "label": "Load Data",
-                "nodeType": "dataSource",
-                "config": {"path": "data/input.parquet"},
-            },
+            "data": {"label": label, "nodeType": "dataSource", "config": config},
         })
         code = _node_to_code(node)
-        assert "def Load_Data()" in code
-        assert 'scan_parquet("data/input.parquet")' in code
-        assert '@pipeline.node(path="data/input.parquet")' in code
-        _compile_node_code(code)
-
-    def test_data_source_csv(self):
-        node = _n({
-            "id": "src",
-            "data": {
-                "label": "CSV Source",
-                "nodeType": "dataSource",
-                "config": {"path": "data/input.csv"},
-            },
-        })
-        code = _node_to_code(node)
-        assert 'scan_csv("data/input.csv")' in code
-        assert "def CSV_Source()" in code
-        _compile_node_code(code)
-
-    def test_data_source_databricks(self):
-        node = _n({
-            "id": "src",
-            "data": {
-                "label": "DB Source",
-                "nodeType": "dataSource",
-                "config": {"sourceType": "databricks", "table": "catalog.schema.tbl"},
-            },
-        })
-        code = _node_to_code(node)
-        assert "read_cached_table" in code
-        assert "catalog.schema.tbl" in code
+        for s in expected_strings:
+            assert s in code, f"Expected {s!r} in generated code"
         _compile_node_code(code)
 
     def test_transform_with_code(self):
@@ -222,36 +212,33 @@ class TestNodeToCode:
         assert "output_column" in code
         _compile_node_code(code)
 
-    def test_external_file_pickle(self):
+    @pytest.mark.parametrize(
+        "label, config, source_names, expected_strings",
+        [
+            pytest.param(
+                "Model",
+                {"path": "model.pkl", "fileType": "pickle", "code": "df = obj.predict(df)"},
+                ["features"],
+                ['external="model.pkl"', "load_external_object", "obj"],
+                id="pickle",
+            ),
+            pytest.param(
+                "CB Model",
+                {"path": "model.cbm", "fileType": "catboost", "modelClass": "regressor", "code": "df = obj.predict(df)"},
+                [],
+                ["load_external_object", 'model_class="regressor"'],
+                id="catboost",
+            ),
+        ],
+    )
+    def test_external_file(self, label, config, source_names, expected_strings):
         node = _n({
             "id": "ext",
-            "data": {
-                "label": "Model",
-                "nodeType": "externalFile",
-                "config": {"path": "model.pkl", "fileType": "pickle", "code": "df = obj.predict(df)"},
-            },
+            "data": {"label": label, "nodeType": "externalFile", "config": config},
         })
-        code = _node_to_code(node, source_names=["features"])
-        assert 'external="model.pkl"' in code
-        assert "load_external_object" in code
-        assert "obj" in code
-        _compile_node_code(code)
-
-    def test_external_file_catboost(self):
-        node = _n({
-            "id": "ext",
-            "data": {
-                "label": "CB Model",
-                "nodeType": "externalFile",
-                "config": {
-                    "path": "model.cbm", "fileType": "catboost",
-                    "modelClass": "regressor", "code": "df = obj.predict(df)",
-                },
-            },
-        })
-        code = _node_to_code(node)
-        assert "load_external_object" in code
-        assert 'model_class="regressor"' in code
+        code = _node_to_code(node, source_names=source_names) if source_names else _node_to_code(node)
+        for s in expected_strings:
+            assert s in code, f"Expected {s!r} in generated code"
         _compile_node_code(code)
 
 

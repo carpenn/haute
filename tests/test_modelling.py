@@ -124,35 +124,28 @@ class TestComputeMetrics:
         with pytest.raises(ValueError, match="Unknown metric"):
             compute_metrics(np.array([1]), np.array([1]), None, ["nonexistent"])
 
-    def test_rmse_perfect_prediction(self):
-        y = np.array([1.0, 2.0, 3.0])
-        result = compute_metrics(y, y, None, ["rmse"])
-        assert result["rmse"] == pytest.approx(0.0, abs=1e-10)
-
-    def test_rmse_known_value(self):
-        y_true = np.array([1.0, 2.0, 3.0])
-        y_pred = np.array([1.0, 2.0, 4.0])
-        result = compute_metrics(y_true, y_pred, None, ["rmse"])
-        expected = np.sqrt(np.mean((y_true - y_pred) ** 2))
-        assert result["rmse"] == pytest.approx(expected)
-
-    def test_mae_known_value(self):
-        y_true = np.array([1.0, 2.0, 3.0])
-        y_pred = np.array([1.5, 2.5, 3.5])
-        result = compute_metrics(y_true, y_pred, None, ["mae"])
-        assert result["mae"] == pytest.approx(0.5)
-
-    def test_mse_known_value(self):
-        y_true = np.array([1.0, 2.0, 3.0])
-        y_pred = np.array([2.0, 2.0, 2.0])
-        result = compute_metrics(y_true, y_pred, None, ["mse"])
-        expected = np.mean((y_true - y_pred) ** 2)
-        assert result["mse"] == pytest.approx(expected)
-
-    def test_r2_perfect(self):
-        y = np.array([1.0, 2.0, 3.0, 4.0])
-        result = compute_metrics(y, y, None, ["r2"])
-        assert result["r2"] == pytest.approx(1.0, abs=1e-10)
+    @pytest.mark.parametrize(
+        "metric, y_true, y_pred, expected, tolerance",
+        [
+            pytest.param("rmse", [1.0, 2.0, 3.0], [1.0, 2.0, 3.0], 0.0, 1e-10, id="rmse_perfect"),
+            pytest.param("rmse", [1.0, 2.0, 3.0], [1.0, 2.0, 4.0], None, None, id="rmse_known"),
+            pytest.param("mae", [1.0, 2.0, 3.0], [1.5, 2.5, 3.5], 0.5, None, id="mae_known"),
+            pytest.param("mse", [1.0, 2.0, 3.0], [2.0, 2.0, 2.0], None, None, id="mse_known"),
+            pytest.param("r2", [1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0], 1.0, 1e-10, id="r2_perfect"),
+        ],
+    )
+    def test_core_metric(self, metric, y_true, y_pred, expected, tolerance):
+        yt = np.array(y_true)
+        yp = np.array(y_pred)
+        result = compute_metrics(yt, yp, None, [metric])
+        if expected is None:
+            # Compute expected from numpy for known-value tests
+            if metric == "rmse":
+                expected = np.sqrt(np.mean((yt - yp) ** 2))
+            elif metric == "mse":
+                expected = np.mean((yt - yp) ** 2)
+        approx_kwargs = {"abs": tolerance} if tolerance else {}
+        assert result[metric] == pytest.approx(expected, **approx_kwargs)
 
     def test_gini_perfect_ranking(self):
         """Perfect ranking gives Gini = 1.0."""

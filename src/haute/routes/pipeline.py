@@ -150,6 +150,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
             description=body.description,
             preamble=body.preamble,
             source_file=body.source_file,
+            preserved_blocks=body.preserved_blocks or None,
         )
         for rel_path, code in files.items():
             out_path = (cwd / rel_path).resolve()
@@ -163,6 +164,7 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
             pipeline_name=body.name,
             description=body.description,
             preamble=body.preamble,
+            preserved_blocks=body.preserved_blocks or None,
         )
         py_path.write_text(code)
 

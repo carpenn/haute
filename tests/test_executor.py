@@ -106,37 +106,27 @@ class TestExecUserCode:
 
 @pytest.mark.usefixtures("_widen_sandbox_root")
 class TestBuildNodeFn:
-    def test_data_source_parquet(self, tmp_path):
-        p = tmp_path / "data.parquet"
-        pl.DataFrame({"a": [1, 2]}).write_parquet(p)
+    @pytest.mark.parametrize(
+        "ext, col, values, write_method",
+        [
+            pytest.param("parquet", "a", [1, 2], "write_parquet", id="parquet"),
+            pytest.param("csv", "b", [3, 4], "write_csv", id="csv"),
+            pytest.param("json", "c", [5, 6], "write_json", id="json"),
+        ],
+    )
+    def test_data_source_file_formats(self, tmp_path, ext, col, values, write_method):
+        p = tmp_path / f"data.{ext}"
+        getattr(pl.DataFrame({col: values}), write_method)(p)
 
         node = _source_node("src", str(p))
         name, fn, is_source = _build_node_fn(node)
-        assert is_source is True
-        assert name == "src"
-        df = fn().collect()
-        assert df["a"].to_list() == [1, 2]
-
-    def test_data_source_csv(self, tmp_path):
-        p = tmp_path / "data.csv"
-        pl.DataFrame({"b": [3, 4]}).write_csv(p)
-
-        node = _source_node("src", str(p))
-        name, fn, is_source = _build_node_fn(node)
-        df = fn().collect()
-        assert df["b"].to_list() == [3, 4]
-
-    def test_data_source_json(self, tmp_path):
-        p = tmp_path / "data.json"
-        pl.DataFrame({"c": [5, 6]}).write_json(p)
-
-        node = _source_node("src", str(p))
-        _, fn, is_source = _build_node_fn(node)
         assert is_source is True
         result = fn()
-        assert isinstance(result, pl.LazyFrame)
-        df = result.collect()
-        assert df["c"].to_list() == [5, 6]
+        if isinstance(result, pl.LazyFrame):
+            df = result.collect()
+        else:
+            df = result
+        assert df[col].to_list() == values
 
     def test_data_source_databricks_is_source(self):
         node = _n({

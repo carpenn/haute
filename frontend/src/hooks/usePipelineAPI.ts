@@ -1,10 +1,10 @@
 import { useEffect, useCallback, useRef, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import type { PreviewData } from "../panels/DataPreview"
-import type { ToastMessage } from "../components/Toast"
 import { makePreviewData } from "../utils/makePreviewData"
 import { loadPipeline, previewNode, runPipeline, savePipeline, ApiError } from "../api/client"
 import type { NodeResult } from "../api/types"
+import useUIStore from "../stores/useUIStore"
 
 interface PipelineAPIParams {
   nodes: Node[]
@@ -13,7 +13,6 @@ interface PipelineAPIParams {
   graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
   parentGraphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, unknown> } | null>
   submodelsRef: React.MutableRefObject<Record<string, unknown>>
-  rowLimit: number
   setNodes: (updater: Node[] | ((nds: Node[]) => Node[])) => void
   setNodesRaw: (nodes: Node[]) => void
   setEdgesRaw: (edges: Edge[]) => void
@@ -23,8 +22,6 @@ interface PipelineAPIParams {
   sourceFileRef: React.MutableRefObject<string>
   lastSavedRef: React.MutableRefObject<string>
   nodeIdCounter: React.MutableRefObject<number>
-  setDirty: (dirty: boolean) => void
-  addToast: (type: ToastMessage["type"], text: string) => void
 }
 
 export interface PipelineAPIReturn {
@@ -59,12 +56,12 @@ function resultToPreview(nodeId: string, label: string, r: NodeResult): PreviewD
 
 export default function usePipelineAPI({
   nodes, edges, selectedNode,
-  graphRef, parentGraphRef, submodelsRef,
-  rowLimit, setNodes,
+  graphRef, parentGraphRef, submodelsRef, setNodes,
   setNodesRaw, setEdgesRaw, setPreamble,
   preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
-  nodeIdCounter, setDirty, addToast,
+  nodeIdCounter,
 }: PipelineAPIParams): PipelineAPIReturn {
+  const { rowLimit, setDirty, addToast } = useUIStore()
   const [loading, setLoading] = useState(true)
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "ok" | "error" | "running">>({})

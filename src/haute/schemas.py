@@ -32,6 +32,7 @@ class SavePipelineRequest(BaseModel):
     description: str = ""
     graph: Graph = Field(default_factory=Graph)
     preamble: str = ""
+    preserved_blocks: list[str] = Field(default_factory=list)
     source_file: str = ""
 
 
@@ -48,6 +49,7 @@ class SavePipelineResponse(BaseModel):
 
 class RunPipelineRequest(BaseModel):
     graph: Graph
+    rowLimit: int = 100_000
 
 
 class NodeResult(BaseModel):
