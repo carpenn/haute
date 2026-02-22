@@ -2755,7 +2755,7 @@ function ModelScoreConfig({
   const [loadingExperiments, setLoadingExperiments] = useState(false)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
-  const [loadingVersions, setLoadingVersions] = useState(false)
+  const [_loadingVersions, setLoadingVersions] = useState(false)
   const [errorExperiments, setErrorExperiments] = useState("")
   const [errorRuns, setErrorRuns] = useState("")
   const [errorModels, setErrorModels] = useState("")

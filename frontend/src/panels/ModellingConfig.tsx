@@ -614,7 +614,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
             >
               {config.cv_folds ? "On" : "Off"}
             </button>
-            {config.cv_folds && (
+            {!!config.cv_folds && (
               <div className="flex items-center gap-1">
                 <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Folds:</label>
                 <input
