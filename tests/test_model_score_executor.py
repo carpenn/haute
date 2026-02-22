@@ -8,7 +8,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.executor import _build_node_fn, execute_graph
 from tests.conftest import make_edge, make_graph
 
@@ -94,10 +94,10 @@ class TestModelScoreAutoPredictRegression:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "prediction" in cols
-        assert results["score"]["row_count"] == 5
+        assert results["score"].row_count == 5
 
     def test_custom_output_column(self, sample_data):
         """Custom output_column name is used."""
@@ -107,7 +107,7 @@ class TestModelScoreAutoPredictRegression:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        cols = [c["name"] for c in results["score"]["columns"]]
+        cols = [c.name for c in results["score"].columns]
         assert "my_pred" in cols
 
 
@@ -127,8 +127,8 @@ class TestModelScoreClassification:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "prediction" in cols
         assert "prediction_proba" in cols
 
@@ -155,9 +155,9 @@ class TestModelScorePassthrough:
             "edges": [make_edge("source", "score").model_dump()],
         })
         results = execute_graph(graph, target_node_id="score", row_limit=100)
-        assert results["score"]["status"] == "ok"
+        assert results["score"].status == "ok"
         # Same columns as source (passthrough)
-        cols = [c["name"] for c in results["score"]["columns"]]
+        cols = [c.name for c in results["score"].columns]
         assert "x1" in cols
         assert "prediction" not in cols
 
@@ -167,8 +167,8 @@ class TestModelScorePassthrough:
             data_path=sample_data, source_type="run", run_id="",
         )
         results = execute_graph(graph, target_node_id="score", row_limit=100)
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "prediction" not in cols
 
     def test_registered_without_model_passthrough(self, sample_data):
@@ -178,8 +178,8 @@ class TestModelScorePassthrough:
             registered_model="", run_id="",
         )
         results = execute_graph(graph, target_node_id="score", row_limit=100)
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "prediction" not in cols
 
 
@@ -198,7 +198,7 @@ class TestModelScoreMissingFeatures:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        assert results["score"]["status"] == "ok"
+        assert results["score"].status == "ok"
         # Verify predict was called with only the available features
         call_args = mock_model.predict.call_args
         X = call_args[0][0]
@@ -222,8 +222,8 @@ class TestModelScorePostProcessing:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "prediction" in cols
         assert "doubled" in cols
 
@@ -238,8 +238,8 @@ class TestModelScorePostProcessing:
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
-        assert results["score"]["status"] == "ok"
-        cols = [c["name"] for c in results["score"]["columns"]]
+        assert results["score"].status == "ok"
+        cols = [c.name for c in results["score"].columns]
         assert "n_features" in cols
 
 

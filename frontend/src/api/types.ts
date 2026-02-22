@@ -1,5 +1,9 @@
 /** Shared API response/request types for the Haute backend. */
 
+// Re-export canonical types from their source locations
+export type { ColumnInfo } from "../types/node"
+export type { TraceResult, TraceStep, TraceSchemaDiff } from "../types/trace"
+
 export interface PipelineGraph {
   nodes: import("@xyflow/react").Node[]
   edges: import("@xyflow/react").Edge[]
@@ -20,7 +24,7 @@ export interface NodeResult {
   status: string
   row_count?: number
   column_count?: number
-  columns?: ColumnInfo[]
+  columns?: { name: string; dtype: string }[]
   preview?: Record<string, unknown>[]
   error?: string | null
   timing_ms?: number
@@ -28,13 +32,8 @@ export interface NodeResult {
   schema_warnings?: SchemaWarning[]
 }
 
-export interface ColumnInfo {
-  name: string
-  dtype: string
-}
-
 export interface NodeTiming {
-  nodeId: string
+  node_id: string
   label: string
   timing_ms: number
 }
@@ -47,37 +46,6 @@ export interface RunPipelineResponse {
 export interface SavePipelineResponse {
   file: string
   pipeline_name: string
-}
-
-export interface TraceStep {
-  node_id: string
-  label: string
-  node_type: string
-  input_schema: ColumnInfo[]
-  output_schema: ColumnInfo[]
-  schema_diff: {
-    columns_added: string[]
-    columns_removed: string[]
-    columns_modified: string[]
-    columns_passed: string[]
-  }
-  row_values: Record<string, unknown>
-}
-
-export interface TraceResult {
-  status: string
-  trace?: {
-    target_node_id: string
-    column: string | null
-    output_value: unknown
-    steps: TraceStep[]
-    row_id_column: string | null
-    row_id_value: unknown
-    total_nodes_in_pipeline: number
-    nodes_in_trace: number
-    execution_ms: number
-  }
-  error?: string
 }
 
 export interface SubmodelCreateResponse {
@@ -95,9 +63,26 @@ export interface DissolveSubmodelResponse {
   graph?: PipelineGraph
 }
 
+/** HTTP response envelope for /api/pipeline/trace (wraps TraceResult). */
+export interface TraceResponse {
+  status: string
+  trace?: import("../types/trace").TraceResult
+  error?: string
+}
+
 export interface SinkResponse {
   status: string
   message?: string
-  rows_written?: number
+  row_count?: number
   path?: string
+  format?: string
+}
+
+/** Schema info returned by /api/schema and /api/schema/databricks. */
+export interface SchemaResult {
+  path: string
+  columns: { name: string; dtype: string }[]
+  row_count: number
+  column_count: number
+  preview: Record<string, unknown>[]
 }

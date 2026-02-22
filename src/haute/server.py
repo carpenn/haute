@@ -21,11 +21,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from haute._logging import configure_logging, get_logger
 from haute._cache import graph_fingerprint
+from haute._logging import configure_logging, get_logger
 from haute.routes._helpers import (
     broadcast,
-    discover_pipelines,
     invalidate_pipeline_index,
     is_self_write,
     parse_pipeline_to_graph,

@@ -49,7 +49,7 @@ class SavePipelineResponse(BaseModel):
 
 class RunPipelineRequest(BaseModel):
     graph: Graph
-    rowLimit: int = 100_000
+    row_limit: int = 100_000
 
 
 class NodeResult(BaseModel):
@@ -59,6 +59,8 @@ class NodeResult(BaseModel):
     columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+    timing_ms: float = 0
+    schema_warnings: list[SchemaWarning] = Field(default_factory=list)
 
 
 class RunPipelineResponse(BaseModel):
@@ -73,12 +75,12 @@ class RunPipelineResponse(BaseModel):
 
 class PreviewNodeRequest(BaseModel):
     graph: Graph
-    nodeId: str
-    rowLimit: int = 1000
+    node_id: str
+    row_limit: int = 1000
 
 
 class NodeTimingInfo(BaseModel):
-    nodeId: str
+    node_id: str
     label: str
     timing_ms: float
 
@@ -89,7 +91,7 @@ class SchemaWarning(BaseModel):
 
 
 class PreviewNodeResponse(BaseModel):
-    nodeId: str
+    node_id: str
     status: str
     row_count: int = 0
     column_count: int = 0
@@ -108,10 +110,10 @@ class PreviewNodeResponse(BaseModel):
 
 class TraceRequest(BaseModel):
     graph: Graph
-    rowIndex: int = 0
-    targetNodeId: str | None = None
+    row_index: int = 0
+    target_node_id: str | None = None
     column: str | None = None
-    rowLimit: int = 1000
+    row_limit: int = 1000
 
 
 class SchemaDiffResponse(BaseModel):
@@ -157,7 +159,7 @@ class TraceResponse(BaseModel):
 
 class SinkRequest(BaseModel):
     graph: Graph
-    nodeId: str
+    node_id: str
 
 
 class SinkResponse(BaseModel):
@@ -310,7 +312,7 @@ class CreateSubmodelResponse(BaseModel):
     status: str = "ok"
     submodel_file: str = ""
     parent_file: str = ""
-    graph: dict[str, Any] = Field(default_factory=dict)
+    graph: Graph = Field(default_factory=Graph)
 
 
 class DissolveSubmodelRequest(BaseModel):
@@ -323,13 +325,13 @@ class DissolveSubmodelRequest(BaseModel):
 
 class DissolveSubmodelResponse(BaseModel):
     status: str = "ok"
-    graph: dict[str, Any] = Field(default_factory=dict)
+    graph: Graph = Field(default_factory=Graph)
 
 
 class SubmodelGraphResponse(BaseModel):
     status: str = "ok"
     submodel_name: str = ""
-    graph: dict[str, Any] = Field(default_factory=dict)
+    graph: Graph = Field(default_factory=Graph)
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +341,7 @@ class SubmodelGraphResponse(BaseModel):
 
 class TrainRequest(BaseModel):
     graph: Graph
-    nodeId: str
+    node_id: str
 
 
 class TrainResponse(BaseModel):
@@ -372,7 +374,7 @@ class TrainStatusResponse(BaseModel):
 
 
 class ExportScriptRequest(BaseModel):
-    nodeId: str
+    node_id: str
     graph: Graph
     data_path: str = ""
 

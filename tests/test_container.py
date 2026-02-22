@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from haute._types import GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from haute.deploy._config import ContainerConfig, DeployConfig, ResolvedDeploy
 from haute.deploy._container import (
     _ARTIFACT_EXT_TO_DEP,

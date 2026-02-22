@@ -9,13 +9,18 @@ FastAPI endpoint validation.
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import cached_property
 from typing import Any, TypedDict
 
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Type alias - nodes pass lazy frames between each other
 _Frame = pl.LazyFrame
+
+
+class HauteError(Exception):
+    """Base exception for all Haute-specific errors."""
 
 
 class NodeType(StrEnum):
@@ -221,6 +226,8 @@ class PipelineGraph(BaseModel):
     parser, executor, codegen, deploy, and the server API layer.
     """
 
+    model_config = ConfigDict(ignored_types=(cached_property,))
+
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     pipeline_name: str | None = None
@@ -231,12 +238,29 @@ class PipelineGraph(BaseModel):
     submodels: dict[str, Any] | None = None
     warning: str | None = None
 
+    @cached_property
+    def node_map(self) -> dict[str, GraphNode]:
+        """Map node ID to node, cached for repeated access."""
+        return {n.id: n for n in self.nodes}
+
+    @cached_property
+    def parents_of(self) -> dict[str, list[str]]:
+        """Map each node to its parent node IDs (built from edges)."""
+        result: dict[str, list[str]] = {}
+        for e in self.edges:
+            result.setdefault(e.target, []).append(e.source)
+        return result
+
 
 def _sanitize_func_name(label: str) -> str:
-    """Convert a human label to a valid Python function name (preserves casing)."""
+    """Convert a human label to a valid Python function name (preserves casing).
+
+    Uses ASCII-only matching to stay in sync with the frontend implementation
+    in frontend/src/utils/sanitizeName.ts.
+    """
     name = label.strip()
     name = name.replace(" ", "_").replace("-", "_")
-    name = "".join(c for c in name if c.isalnum() or c == "_")
+    name = "".join(c for c in name if c.isascii() and (c.isalnum() or c == "_"))
     if name and name[0].isdigit():
         name = f"node_{name}"
     return name or "unnamed_node"

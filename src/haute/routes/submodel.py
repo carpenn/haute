@@ -32,12 +32,11 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     Creates a new ``modules/<name>.py`` file, updates the main pipeline file,
     and returns the updated parent graph with the submodel node.
     """
-    from haute._types import GraphEdge as _GEdge
-    from haute._types import GraphNode as _GNode
-    from haute._types import NodeData as _NData
-    from haute._types import NodeType
     from haute.codegen import graph_to_code_multi
-    from haute.graph_utils import _sanitize_func_name
+    from haute.graph_utils import GraphEdge as _GEdge
+    from haute.graph_utils import GraphNode as _GNode
+    from haute.graph_utils import NodeData as _NData
+    from haute.graph_utils import NodeType, _sanitize_func_name
 
     graph = body.graph
     cwd = Path.cwd()
@@ -178,7 +177,7 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
         status="ok",
         submodel_file=sm_file,
         parent_file=parent_file,
-        graph=new_graph.model_dump(),
+        graph=new_graph,
     )
 
 
@@ -207,7 +206,7 @@ async def get_submodel(name: str) -> SubmodelGraphResponse:
     return SubmodelGraphResponse(
         status="ok",
         submodel_name=sm_graph.pipeline_name or name,
-        graph=sm_graph.model_dump(),
+        graph=sm_graph,
     )
 
 
@@ -265,4 +264,4 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
         if sm_path.is_file() and sm_path.is_relative_to(cwd):
             sm_path.unlink()
 
-    return DissolveSubmodelResponse(status="ok", graph=flat.model_dump())
+    return DissolveSubmodelResponse(status="ok", graph=flat)

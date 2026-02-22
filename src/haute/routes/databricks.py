@@ -10,12 +10,16 @@ from fastapi import APIRouter, HTTPException
 from haute._logging import get_logger
 from haute.schemas import (
     CacheStatusResponse,
+    CatalogItem,
     CatalogListResponse,
     FetchProgressResponse,
     FetchTableRequest,
     FetchTableResponse,
+    SchemaItem,
     SchemaListResponse,
+    TableItem,
     TableListResponse,
+    WarehouseItem,
     WarehouseListResponse,
 )
 
@@ -52,16 +56,17 @@ async def list_databricks_warehouses() -> WarehouseListResponse:
     """List available Databricks SQL Warehouses."""
     try:
         w = _get_databricks_client()
-        warehouses = []
-        for wh in w.warehouses.list():
-            warehouses.append({
-                "id": wh.id,
-                "name": wh.name,
-                "http_path": f"/sql/1.0/warehouses/{wh.id}",
-                "state": wh.state.value if wh.state else "UNKNOWN",
-                "size": wh.cluster_size or "",
-            })
-        return WarehouseListResponse(warehouses=warehouses)  # type: ignore[arg-type]
+        warehouses = [
+            WarehouseItem(
+                id=wh.id,
+                name=wh.name,
+                http_path=f"/sql/1.0/warehouses/{wh.id}",
+                state=wh.state.value if wh.state else "UNKNOWN",
+                size=wh.cluster_size or "",
+            )
+            for wh in w.warehouses.list()
+        ]
+        return WarehouseListResponse(warehouses=warehouses)
     except HTTPException:
         raise
     except Exception as e:
@@ -74,11 +79,11 @@ async def list_databricks_catalogs() -> CatalogListResponse:
     try:
         w = _get_databricks_client()
         catalogs = [
-            {"name": c.name, "comment": c.comment or ""}
+            CatalogItem(name=c.name, comment=c.comment or "")
             for c in w.catalogs.list()
             if c.name
         ]
-        return CatalogListResponse(catalogs=catalogs)  # type: ignore[arg-type]
+        return CatalogListResponse(catalogs=catalogs)
     except HTTPException:
         raise
     except Exception as e:
@@ -91,11 +96,11 @@ async def list_databricks_schemas(catalog: str) -> SchemaListResponse:
     try:
         w = _get_databricks_client()
         schemas = [
-            {"name": s.name, "comment": s.comment or ""}
+            SchemaItem(name=s.name, comment=s.comment or "")
             for s in w.schemas.list(catalog_name=catalog)
             if s.name
         ]
-        return SchemaListResponse(schemas=schemas)  # type: ignore[arg-type]
+        return SchemaListResponse(schemas=schemas)
     except HTTPException:
         raise
     except Exception as e:
@@ -108,16 +113,16 @@ async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse
     try:
         w = _get_databricks_client()
         tables = [
-            {
-                "name": t.name,
-                "full_name": t.full_name or f"{catalog}.{schema}.{t.name}",
-                "table_type": t.table_type.value if t.table_type else "",
-                "comment": t.comment or "",
-            }
+            TableItem(
+                name=t.name,
+                full_name=t.full_name or f"{catalog}.{schema}.{t.name}",
+                table_type=t.table_type.value if t.table_type else "",
+                comment=t.comment or "",
+            )
             for t in w.tables.list(catalog_name=catalog, schema_name=schema)
             if t.name
         ]
-        return TableListResponse(tables=tables)  # type: ignore[arg-type]
+        return TableListResponse(tables=tables)
     except HTTPException:
         raise
     except Exception as e:
@@ -141,7 +146,7 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
             ),
             timeout=600.0,
         )
-        return FetchTableResponse(**result)
+        return FetchTableResponse.model_validate(result)
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Databricks fetch timed out (600s limit)")
     except ImportError:
@@ -162,7 +167,7 @@ async def get_fetch_progress(table: str) -> FetchProgressResponse:
     progress = fetch_progress(table)
     if progress is None:
         return FetchProgressResponse(active=False)
-    return FetchProgressResponse(active=True, **progress)  # type: ignore[arg-type]
+    return FetchProgressResponse.model_validate({"active": True, **progress})
 
 
 @router.get("/cache", response_model=CacheStatusResponse)
@@ -173,7 +178,7 @@ async def get_databricks_cache_status(table: str) -> CacheStatusResponse:
     info = cache_info(table)
     if info is None:
         return CacheStatusResponse(cached=False, table=table)
-    return CacheStatusResponse(cached=True, **info)
+    return CacheStatusResponse.model_validate({"cached": True, **info})
 
 
 @router.delete("/cache", response_model=CacheStatusResponse)

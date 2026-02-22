@@ -5,7 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
-from haute._types import GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from haute.graph_utils import (
     _execute_lazy,
     _object_cache,
@@ -51,9 +51,9 @@ class TestSanitizeFuncName:
         """Special characters are stripped, creating potential collisions."""
         assert _sanitize_func_name("foo@bar") == _sanitize_func_name("foobar")
 
-    def test_unicode_preserved(self):
-        """Unicode alphanumeric chars (é, ñ) pass isalnum() and are kept."""
-        assert _sanitize_func_name("café") == "café"
+    def test_unicode_stripped(self):
+        """Non-ASCII chars are stripped to stay in sync with the frontend."""
+        assert _sanitize_func_name("café") == "caf"
 
     def test_all_special_chars_returns_unnamed(self):
         """Label of only special characters becomes unnamed_node."""

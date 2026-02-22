@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { FileText, Database } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
-import type { SchemaInfo } from "./_shared"
+import { useSchemaFetch } from "../../hooks/useSchemaFetch"
+import { fetchDatabricksSchema } from "../../api/client"
 import { WarehousePicker, CatalogTablePicker, DatabricksFetchButton } from "./_DatabricksSelector"
 
 export default function DataSourceEditor({
@@ -14,42 +15,7 @@ export default function DataSourceEditor({
   onRefreshPreview?: () => void
 }) {
   const [sourceType, setSourceType] = useState<string>((config.sourceType as string) || "flat_file")
-  const [schema, setSchema] = useState<SchemaInfo>(null)
-  const [loadingSchema, setLoadingSchema] = useState(!!config.path)
-
-  const fetchSchema = (path: string) => {
-    setLoadingSchema(true)
-    fetch(`/api/schema?path=${encodeURIComponent(path)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data) => {
-        setSchema(data)
-        setLoadingSchema(false)
-      })
-      .catch(() => {
-        setSchema(null)
-        setLoadingSchema(false)
-      })
-  }
-
-  useEffect(() => {
-    if (!config.path) return
-    fetch(`/api/schema?path=${encodeURIComponent(config.path as string)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data) => {
-        setSchema(data)
-        setLoadingSchema(false)
-      })
-      .catch(() => {
-        setSchema(null)
-        setLoadingSchema(false)
-      })
-  }, [config.path])
+  const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(config.path as string | undefined)
 
   return (
     <>
@@ -99,7 +65,7 @@ export default function DataSourceEditor({
               currentPath={config.path as string | undefined}
               onSelect={(path) => {
                 onUpdate("path", path)
-                fetchSchema(path)
+                fetchForPath(path)
               }}
             />
           </div>
@@ -141,14 +107,9 @@ export default function DataSourceEditor({
               onFetched={() => {
                 const tbl = (config.table as string) || ""
                 if (tbl) {
-                  setLoadingSchema(true)
-                  fetch(`/api/schema/databricks?table=${encodeURIComponent(tbl)}`)
-                    .then((r) => {
-                      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                      return r.json()
-                    })
-                    .then((data) => { setSchema(data); setLoadingSchema(false); onRefreshPreview?.() })
-                    .catch(() => { setSchema(null); setLoadingSchema(false) })
+                  fetchDatabricksSchema(tbl)
+                    .then((data) => { setSchema(data); onRefreshPreview?.() })
+                    .catch(() => setSchema(null))
                 }
               }}
             />

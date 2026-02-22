@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from haute._types import GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from haute.codegen import graph_to_code
 from haute._parser_helpers import _build_node_config, _infer_node_type
 from tests.conftest import make_edge, make_graph

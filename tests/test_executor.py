@@ -289,10 +289,10 @@ class TestExecuteGraph:
             "edges": [_edge("src", "t")],
         })
         results = execute_graph(graph)
-        assert results["src"]["status"] == "ok"
-        assert results["t"]["status"] == "ok"
-        assert results["t"]["row_count"] == 3
-        assert any(c["name"] == "y" for c in results["t"]["columns"])
+        assert results["src"].status == "ok"
+        assert results["t"].status == "ok"
+        assert results["t"].row_count == 3
+        assert any(c.name == "y" for c in results["t"].columns)
 
     def test_timing_ms_present(self, tmp_path):
         p = tmp_path / "t.parquet"
@@ -307,9 +307,8 @@ class TestExecuteGraph:
         })
         results = execute_graph(graph)
         for nid in ("src", "t"):
-            assert "timing_ms" in results[nid]
-            assert isinstance(results[nid]["timing_ms"], float)
-            assert results[nid]["timing_ms"] >= 0
+            assert isinstance(results[nid].timing_ms, float)
+            assert results[nid].timing_ms >= 0
 
     def test_empty_graph(self):
         assert execute_graph(_g({"nodes": [], "edges": []})) == {}
@@ -320,7 +319,7 @@ class TestExecuteGraph:
 
         graph = _g({"nodes": [_source_node("s", str(p))], "edges": []})
         results = execute_graph(graph, row_limit=5)
-        assert results["s"]["row_count"] == 5
+        assert results["s"].row_count == 5
 
     def test_target_node_id(self, tmp_path):
         p = tmp_path / "d.parquet"
@@ -351,12 +350,12 @@ class TestExecuteGraph:
             "edges": [_edge("src", "bad")],
         })
         results = execute_graph(graph)
-        assert results["bad"]["status"] == "error"
-        assert "nonexistent_col" in results["bad"]["error"].lower() or "not found" in results["bad"]["error"].lower(), (
-            f"Expected column-not-found error, got: {results['bad']['error']}"
+        assert results["bad"].status == "error"
+        assert "nonexistent_col" in results["bad"].error.lower() or "not found" in results["bad"].error.lower(), (
+            f"Expected column-not-found error, got: {results['bad'].error}"
         )
-        assert results["bad"]["row_count"] == 0
-        assert results["bad"]["columns"] == []
+        assert results["bad"].row_count == 0
+        assert results["bad"].columns == []
 
     def test_cascading_failure_propagates(self, tmp_path):
         """When a mid-pipeline node fails, downstream nodes also fail."""
@@ -373,12 +372,12 @@ class TestExecuteGraph:
         })
         results = execute_graph(graph)
         # Mid node should fail
-        assert results["mid"]["status"] == "error"
+        assert results["mid"].status == "error"
         # Leaf node must also fail (it received None input from the failed mid node)
-        assert results["leaf"]["status"] == "error"
-        assert results["leaf"]["row_count"] == 0
+        assert results["leaf"].status == "error"
+        assert results["leaf"].row_count == 0
         # Source should still succeed
-        assert results["src"]["status"] == "ok"
+        assert results["src"].status == "ok"
 
     def test_row_limit_zero_is_no_limit(self, tmp_path):
         """row_limit=0 is falsy, so it behaves the same as None (no limit)."""
@@ -390,8 +389,8 @@ class TestExecuteGraph:
             "edges": [],
         })
         results = execute_graph(graph, row_limit=0)
-        assert results["src"]["status"] == "ok"
-        assert results["src"]["row_count"] == 10
+        assert results["src"].status == "ok"
+        assert results["src"].row_count == 10
 
     def test_row_limit_one(self, tmp_path):
         """row_limit=1 should produce exactly 1 row through the pipeline."""
@@ -406,9 +405,9 @@ class TestExecuteGraph:
             "edges": [_edge("src", "t")],
         })
         results = execute_graph(graph, row_limit=1)
-        assert results["src"]["row_count"] == 1
-        assert results["t"]["row_count"] == 1
-        col_names = [c["name"] for c in results["t"]["columns"]]
+        assert results["src"].row_count == 1
+        assert results["t"].row_count == 1
+        col_names = [c.name for c in results["t"].columns]
         assert "x" in col_names
         assert "y" in col_names
 
@@ -419,9 +418,9 @@ class TestExecuteGraph:
 
         graph = _g({"nodes": [_source_node("src", str(p))], "edges": []})
         results = execute_graph(graph)
-        assert results["src"]["status"] == "ok"
-        assert results["src"]["row_count"] == 0
-        col_names = [c["name"] for c in results["src"]["columns"]]
+        assert results["src"].status == "ok"
+        assert results["src"].row_count == 0
+        col_names = [c.name for c in results["src"].columns]
         assert "a" in col_names
         assert "b" in col_names
 
@@ -575,9 +574,9 @@ class TestInstanceAliasInjection:
             ],
         })
         results = execute_graph(graph, target_node_id="joiner_inst")
-        assert results["joiner_inst"]["status"] == "ok"
-        assert results["joiner_inst"]["row_count"] == 1
-        col_names = {c["name"] for c in results["joiner_inst"]["columns"]}
+        assert results["joiner_inst"].status == "ok"
+        assert results["joiner_inst"].row_count == 1
+        col_names = {c.name for c in results["joiner_inst"].columns}
         assert col_names == {"k", "v", "w"}
 
 
@@ -623,18 +622,18 @@ class TestLiveSwitch:
     def test_live_mode_selects_first_input(self, tmp_path):
         graph = self._switch_graph(tmp_path, mode="live")
         results = execute_graph(graph, target_node_id="switch")
-        assert results["switch"]["status"] == "ok"
-        assert results["switch"]["row_count"] == 3
+        assert results["switch"].status == "ok"
+        assert results["switch"].row_count == 3
 
     def test_live_mode_works_regardless_of_edge_order(self, tmp_path):
         """Edge order in the graph JSON is arbitrary — live must still pick the correct input."""
         graph = self._switch_graph(tmp_path, mode="live", reverse_edges=True)
         results = execute_graph(graph, target_node_id="switch")
-        assert results["switch"]["status"] == "ok"
-        assert results["switch"]["row_count"] == 3
+        assert results["switch"].status == "ok"
+        assert results["switch"].row_count == 3
 
     def test_batch_mode_selects_named_input(self, tmp_path):
         graph = self._switch_graph(tmp_path, mode="batch_src")
         results = execute_graph(graph, target_node_id="switch")
-        assert results["switch"]["status"] == "ok"
-        assert results["switch"]["row_count"] == 4
+        assert results["switch"].status == "ok"
+        assert results["switch"].row_count == 4

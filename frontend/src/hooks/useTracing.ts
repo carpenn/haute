@@ -46,7 +46,7 @@ export default function useTracing({
       ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
       : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
     setTracedCell({ rowIndex, column })
-    traceCell({ graph, rowIndex, targetNodeId: selectedNode.id, column, rowLimit })
+    traceCell({ graph, row_index: rowIndex, target_node_id: selectedNode.id, column, row_limit: rowLimit })
       .then((data) => {
         if (data.status === "ok" && data.trace) {
           setTraceResult(data.trace as unknown as TraceResult)

@@ -31,12 +31,23 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
 
   return (
     <div
-      className="bg-[#0f172a] text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2.5 text-[12px] font-medium animate-slide-in min-w-[240px] max-w-[380px] border border-slate-700/50"
+      className="px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2.5 text-[12px] font-medium animate-slide-in min-w-[240px] max-w-[380px]"
+      style={{
+        background: "var(--bg-panel)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-bright)",
+      }}
     >
       <Icon size={14} style={{ color: accent }} className="shrink-0" />
-      <span className="flex-1 text-slate-200">{toast.text}</span>
-      <button onClick={() => onDismiss(toast.id)} className="p-0.5 rounded hover:bg-white/10 shrink-0 transition-colors">
-        <X size={12} className="text-slate-500" />
+      <span className="flex-1" style={{ color: "var(--text-primary)" }}>{toast.text}</span>
+      <button
+        onClick={() => onDismiss(toast.id)}
+        className="p-0.5 rounded shrink-0 transition-colors"
+        style={{ color: "var(--text-muted)" }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)" }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
+      >
+        <X size={12} />
       </button>
     </div>
   )

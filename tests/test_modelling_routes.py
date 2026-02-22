@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from haute._types import NodeType
+from haute.graph_utils import NodeType
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 
@@ -86,7 +86,7 @@ def _poll_until_done(client: TestClient, job_id: str, timeout: float = 30) -> di
 class TestTrainEndpoint:
     def test_train_with_invalid_target(self, client, training_data):
         graph = _make_modelling_graph(training_data, target="nonexistent")
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "train"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "train"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "started"
@@ -98,17 +98,17 @@ class TestTrainEndpoint:
 
     def test_train_missing_node(self, client, training_data):
         graph = _make_modelling_graph(training_data)
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "nonexistent"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "nonexistent"})
         assert resp.status_code == 404
 
     def test_train_wrong_node_type(self, client, training_data):
         graph = _make_modelling_graph(training_data)
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "source"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "source"})
         assert resp.status_code == 400
 
     def test_train_success(self, client, training_data):
         graph = _make_modelling_graph(training_data)
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "train"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "train"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "started"
@@ -124,7 +124,7 @@ class TestTrainEndpoint:
     def test_train_reports_progress(self, client, training_data):
         """Training should report iteration progress via the status endpoint."""
         graph = _make_modelling_graph(training_data, params={"iterations": 20, "depth": 3})
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "train"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "train"})
         data = resp.json()
         job_id = data["job_id"]
         # Poll a few times — we should see iteration progress at some point
@@ -147,7 +147,7 @@ class TestTrainEndpoint:
     def test_train_result_includes_ave(self, client, training_data):
         """After successful training, ave_per_feature should be in the result."""
         graph = _make_modelling_graph(training_data)
-        resp = client.post("/api/modelling/train", json={"graph": graph, "nodeId": "train"})
+        resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "train"})
         data = resp.json()
         status = _poll_until_done(client, data["job_id"])
         assert status["status"] == "completed"
@@ -167,7 +167,7 @@ class TestExportEndpoint:
         graph = _make_modelling_graph(training_data)
         resp = client.post("/api/modelling/export", json={
             "graph": graph,
-            "nodeId": "train",
+            "node_id": "train",
             "data_path": "output/data.parquet",
         })
         assert resp.status_code == 200
@@ -181,7 +181,7 @@ class TestExportEndpoint:
         graph = _make_modelling_graph(training_data)
         resp = client.post("/api/modelling/export", json={
             "graph": graph,
-            "nodeId": "nonexistent",
+            "node_id": "nonexistent",
         })
         assert resp.status_code == 404
 

@@ -14,7 +14,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from haute._parser_helpers import _infer_node_type
-from haute._types import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 from haute.codegen import graph_to_code
 from haute.executor import _apply_banding
 from haute.graph_utils import _sanitize_func_name, topo_sort_ids

@@ -40,7 +40,7 @@ from haute.graph_utils import (
     load_external_object,
     read_source,
 )
-from haute.schemas import SinkResponse
+from haute.schemas import ColumnInfo, NodeResult, SchemaWarning, SinkResponse
 
 logger = get_logger(component="executor")
 
@@ -443,7 +443,7 @@ def execute_graph(
     target_node_id: str | None = None,
     row_limit: int | None = None,
     max_preview_rows: int = 100,
-) -> dict[str, dict]:
+) -> dict[str, NodeResult]:
     """Execute a graph and return per-node results.
 
     Uses eager single-pass execution with a single-entry cache so
@@ -510,12 +510,10 @@ def execute_graph(
 
     # Pre-compute schema warnings for instance nodes by comparing the
     # columns available at the instance's inputs vs the original's inputs.
-    node_map = {n.id: n for n in graph.nodes}
-    parents_of: dict[str, list[str]] = {}
-    for e in graph.edges:
-        parents_of.setdefault(e.target, []).append(e.source)
+    node_map = graph.node_map
+    parents_of = graph.parents_of
 
-    schema_warnings: dict[str, list[dict]] = {}
+    schema_warnings: dict[str, list[SchemaWarning]] = {}
     for nid in order:
         ref = node_map[nid].data.config.get("instanceOf")
         if not ref or ref not in node_map:
@@ -535,51 +533,41 @@ def execute_graph(
         missing = orig_input_cols - inst_input_cols
         if missing:
             schema_warnings[nid] = [
-                {"column": c, "status": "missing"} for c in sorted(missing)
+                SchemaWarning(column=c, status="missing") for c in sorted(missing)
             ]
 
-    results: dict[str, dict] = {}
+    results: dict[str, NodeResult] = {}
     for nid in order:
         if nid in errors:
-            results[nid] = {
-                "status": "error",
-                "row_count": 0,
-                "column_count": 0,
-                "columns": [],
-                "preview": [],
-                "error": errors[nid],
-                "timing_ms": timings.get(nid, 0),
-                "schema_warnings": schema_warnings.get(nid, []),
-            }
+            results[nid] = NodeResult(
+                status="error",
+                error=errors[nid],
+                timing_ms=timings.get(nid, 0),
+                schema_warnings=schema_warnings.get(nid, []),
+            )
             continue
         df = eager_outputs.get(nid)
         if df is None:
-            results[nid] = {
-                "status": "error",
-                "row_count": 0,
-                "column_count": 0,
-                "columns": [],
-                "preview": [],
-                "error": "No output",
-                "timing_ms": timings.get(nid, 0),
-                "schema_warnings": [],
-            }
+            results[nid] = NodeResult(
+                status="error",
+                error="No output",
+                timing_ms=timings.get(nid, 0),
+            )
             continue
         columns = [
-            {"name": c, "dtype": str(df[c].dtype)} for c in df.columns
+            ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns
         ]
-        results[nid] = {
-            "status": "ok",
-            "row_count": len(df),
-            "column_count": len(df.columns),
-            "columns": columns,
-            "preview": df.head(max_preview_rows).to_dicts(),
-            "error": None,
-            "timing_ms": timings.get(nid, 0),
-            "schema_warnings": schema_warnings.get(nid, []),
-        }
+        results[nid] = NodeResult(
+            status="ok",
+            row_count=len(df),
+            column_count=len(df.columns),
+            columns=columns,
+            preview=df.head(max_preview_rows).to_dicts(),
+            timing_ms=timings.get(nid, 0),
+            schema_warnings=schema_warnings.get(nid, []),
+        )
 
-    error_count = sum(1 for r in results.values() if r["status"] == "error")
+    error_count = sum(1 for r in results.values() if r.status == "error")
     logger.info(
         "graph_executed",
         node_count=len(results),
@@ -624,9 +612,7 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
     """
     from pathlib import Path
 
-    node_map = {n.id: n for n in graph.nodes}
-
-    sink_node = node_map.get(sink_node_id)
+    sink_node = graph.node_map.get(sink_node_id)
     if not sink_node:
         raise ValueError(f"Sink node '{sink_node_id}' not found")
 

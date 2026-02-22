@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Table2 } from "lucide-react"
 import { getDtypeColor } from "../../utils/dtypeColors"
+import type { ColumnInfo } from "../../types/node"
+import { listFiles } from "../../api/client"
 
 // ─── Shared Types ─────────────────────────────────────────────────
 
@@ -11,10 +13,8 @@ export type FileItem = {
   size?: number
 }
 
-export type SchemaColumn = {
-  name: string
-  dtype: string
-}
+/** @deprecated Use ColumnInfo from types/node instead */
+export type SchemaColumn = ColumnInfo
 
 export type InputSource = {
   varName: string
@@ -24,7 +24,7 @@ export type InputSource = {
 
 export type SchemaInfo = {
   path: string
-  columns: SchemaColumn[]
+  columns: ColumnInfo[]
   row_count: number
   column_count: number
   preview: Record<string, unknown>[]
@@ -59,12 +59,8 @@ export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath
 
   useEffect(() => {
     setError(null)
-    fetch(`/api/files?dir=${encodeURIComponent(dir)}${extensions ? `&extensions=${encodeURIComponent(extensions)}` : ``}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`Failed to browse files (${r.status})`)
-        return r.json()
-      })
-      .then((data: { items?: FileItem[] }) => {
+    listFiles(dir, extensions)
+      .then((data) => {
         setItems(data.items || [])
         setLoading(false)
       })

@@ -341,14 +341,11 @@ def run(pipeline_file: str | None) -> None:
     # Report per-node results
     errors = 0
     for nid, res in results.items():
-        status = res.get("status", "unknown")
-        if status == "ok":
-            rows = res.get("row_count", 0)
-            cols = res.get("column_count", 0)
-            click.echo(f"  ✓ {nid}: {rows:,} rows × {cols} cols")
+        if res.status == "ok":
+            click.echo(f"  ✓ {nid}: {res.row_count:,} rows × {res.column_count} cols")
         else:
             errors += 1
-            click.echo(f"  ✗ {nid}: {res.get('error', 'unknown error')}")
+            click.echo(f"  ✗ {nid}: {res.error or 'unknown error'}")
 
     if errors:
         click.echo(f"\n{errors} node(s) failed.", err=True)
@@ -357,11 +354,11 @@ def run(pipeline_file: str | None) -> None:
     # Print the last node's preview
     last_nid = list(results.keys())[-1]
     last = results[last_nid]
-    if last.get("preview"):
+    if last.preview:
         import polars as pl
 
-        df = pl.DataFrame(last["preview"])
-        click.echo(f"\nOutput - {last_nid} ({last['row_count']:,} rows):")
+        df = pl.DataFrame(last.preview)
+        click.echo(f"\nOutput - {last_nid} ({last.row_count:,} rows):")
         click.echo(df)
 
 

@@ -6,7 +6,7 @@ import ast
 
 import polars as pl
 
-from haute._types import GraphNode, NodeData, NodeType
+from haute.graph_utils import GraphNode, NodeData, NodeType
 from haute.codegen import _node_to_code, graph_to_code
 from haute.modelling._export import generate_training_script
 from haute.parser import parse_pipeline_source

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { HardDriveDownload } from "lucide-react"
 import type { SimpleNode, SimpleEdge } from "./_shared"
+import { executeSink } from "../../api/client"
 
 export default function SinkEditor({
   config,
@@ -34,13 +35,8 @@ export default function SinkEditor({
       submodels: submodels,
     }
 
-    fetch("/api/pipeline/sink", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, nodeId }),
-    })
-      .then((r) => r.json())
-      .then((data: { status?: string; message?: string }) => {
+    executeSink(graph, nodeId)
+      .then((data) => {
         setWriteResult({ status: data.status || "ok", message: data.message || "Written successfully" })
         setWriting(false)
       })

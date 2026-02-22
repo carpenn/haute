@@ -2,6 +2,14 @@ import { useState, useEffect, useRef } from "react"
 import { Loader2, Check, AlertTriangle, ChevronDown } from "lucide-react"
 import { InputSourcesBar, CodeEditor } from "./_shared"
 import type { InputSource } from "./_shared"
+import {
+  checkMlflow,
+  getExperiments,
+  getRuns,
+  getModels,
+  getModelVersions,
+  ApiError,
+} from "../../api/client"
 
 export default function ModelScoreEditor({
   config,
@@ -28,9 +36,8 @@ export default function ModelScoreEditor({
   useEffect(() => {
     if (checkedMlflow.current) return
     checkedMlflow.current = true
-    fetch("/api/modelling/mlflow/check")
-      .then((r) => r.json())
-      .then((data: { mlflow_installed?: boolean; backend?: string }) => {
+    checkMlflow()
+      .then((data) => {
         if (data.mlflow_installed) {
           setMlflowStatus("connected")
           setMlflowBackend(data.backend || "local")
@@ -63,20 +70,16 @@ export default function ModelScoreEditor({
   const fetchedRunsFor = useRef("")
   const fetchedVersionsFor = useRef("")
 
-  const apiFetch = (url: string) =>
-    fetch(url).then((r) => {
-      if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || `HTTP ${r.status}`) })
-      return r.json()
-    })
+  const errorMsg = (e: Error) => e instanceof ApiError ? e.detail || e.message : e.message
 
   const refreshExperiments = () => {
     if (fetchedExperiments.current) return
     fetchedExperiments.current = true
     setLoadingExperiments(true)
     setErrorExperiments("")
-    apiFetch("/api/mlflow/experiments")
+    getExperiments()
       .then((data) => { setExperiments(Array.isArray(data) ? data : []); setLoadingExperiments(false) })
-      .catch((e: Error) => { setExperiments([]); setLoadingExperiments(false); setErrorExperiments(e.message || "Failed to load experiments"); fetchedExperiments.current = false })
+      .catch((e: Error) => { setExperiments([]); setLoadingExperiments(false); setErrorExperiments(errorMsg(e) || "Failed to load experiments"); fetchedExperiments.current = false })
   }
 
   const refreshRuns = (expId: string) => {
@@ -85,9 +88,9 @@ export default function ModelScoreEditor({
     fetchedRunsFor.current = expId
     setLoadingRuns(true)
     setErrorRuns("")
-    apiFetch(`/api/mlflow/runs?experiment_id=${encodeURIComponent(expId)}`)
+    getRuns(expId)
       .then((data) => { setRuns(Array.isArray(data) ? data : []); setLoadingRuns(false) })
-      .catch((e: Error) => { setRuns([]); setLoadingRuns(false); setErrorRuns(e.message || "Failed to load runs"); fetchedRunsFor.current = "" })
+      .catch((e: Error) => { setRuns([]); setLoadingRuns(false); setErrorRuns(errorMsg(e) || "Failed to load runs"); fetchedRunsFor.current = "" })
   }
 
   const refreshModels = () => {
@@ -95,9 +98,9 @@ export default function ModelScoreEditor({
     fetchedModels.current = true
     setLoadingModels(true)
     setErrorModels("")
-    apiFetch("/api/mlflow/models")
+    getModels()
       .then((data) => { setModels(Array.isArray(data) ? data : []); setLoadingModels(false) })
-      .catch((e: Error) => { setModels([]); setLoadingModels(false); setErrorModels(e.message || "Failed to load models"); fetchedModels.current = false })
+      .catch((e: Error) => { setModels([]); setLoadingModels(false); setErrorModels(errorMsg(e) || "Failed to load models"); fetchedModels.current = false })
   }
 
   const refreshVersions = (modelName: string) => {
@@ -106,9 +109,9 @@ export default function ModelScoreEditor({
     fetchedVersionsFor.current = modelName
     setLoadingVersions(true)
     setErrorVersions("")
-    apiFetch(`/api/mlflow/model-versions?model_name=${encodeURIComponent(modelName)}`)
+    getModelVersions(modelName)
       .then((data) => { setModelVersions(Array.isArray(data) ? data : []); setLoadingVersions(false) })
-      .catch((e: Error) => { setModelVersions([]); setLoadingVersions(false); setErrorVersions(e.message || "Failed to load versions"); fetchedVersionsFor.current = "" })
+      .catch((e: Error) => { setModelVersions([]); setLoadingVersions(false); setErrorVersions(errorMsg(e) || "Failed to load versions"); fetchedVersionsFor.current = "" })
   }
 
   const selectStyle = {

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
-from haute._types import NodeType
+from haute.graph_utils import NodeType
 from haute.modelling._algorithms import ALGORITHM_REGISTRY
 from haute.schemas import (
     ExportScriptRequest,
@@ -43,8 +43,7 @@ def _evict_stale_jobs() -> None:
 
 def _find_modelling_node(graph: Any, node_id: str) -> Any:
     """Find and validate a modelling node in the graph."""
-    node_map = {n.id: n for n in graph.nodes}
-    node = node_map.get(node_id)
+    node = graph.node_map.get(node_id)
     if node is None:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     if node.data.nodeType != NodeType.MODELLING:
@@ -98,23 +97,23 @@ def train_model(body: TrainRequest) -> TrainResponse:
     Executes the pipeline up to the modelling node to materialise the
     training DataFrame, then runs TrainingJob in a background thread.
     """
-    node = _find_modelling_node(body.graph, body.nodeId)
+    node = _find_modelling_node(body.graph, body.node_id)
     config = node.data.config
 
     # --- Upfront config validation (fast, before any pipeline execution) ---
 
     target = config.get("target")
     if not target:
-        return TrainResponse(
-            status="error",
-            error="No target column selected. Open the config panel and choose a target column.",
+        raise HTTPException(
+            status_code=400,
+            detail="No target column selected. Open the config panel and choose a target column.",
         )
 
     algorithm = config.get("algorithm", "catboost")
     if algorithm not in ALGORITHM_REGISTRY:
-        return TrainResponse(
-            status="error",
-            error=(
+        raise HTTPException(
+            status_code=400,
+            detail=(
                 f"Unknown algorithm '{algorithm}'. "
                 f"Available algorithms: {', '.join(ALGORITHM_REGISTRY.keys())}."
             ),
@@ -134,27 +133,27 @@ def train_model(body: TrainRequest) -> TrainResponse:
     # --- Execute pipeline to get training DataFrame ---
 
     try:
-        from haute._execute_lazy import _execute_eager_core
         from haute.executor import _build_node_fn
+        from haute.graph_utils import _execute_eager_core
 
         result = _execute_eager_core(
             body.graph, _build_node_fn,
-            target_node_id=body.nodeId,
+            target_node_id=body.node_id,
             row_limit=None,
             swallow_errors=True,
         )
     except Exception as exc:
         error_msg = f"Pipeline execution failed: {exc}"
-        logger.error("pipeline_exec_failed", error=str(exc), node_id=body.nodeId)
+        logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
         _jobs[job_id] = {"status": "error", "message": error_msg}
-        return TrainResponse(status="error", job_id=job_id, error=error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
     # Check for upstream errors that prevented data from reaching this node
-    train_df = result.outputs.get(body.nodeId)
+    train_df = result.outputs.get(body.node_id)
     if train_df is None:
         # Find the actual failing node for a better message
         upstream_errors = {
-            nid: err for nid, err in result.errors.items() if nid != body.nodeId
+            nid: err for nid, err in result.errors.items() if nid != body.node_id
         }
         if upstream_errors:
             failed_node = next(iter(upstream_errors))
@@ -163,15 +162,15 @@ def train_model(body: TrainRequest) -> TrainResponse:
                 f"Upstream node '{failed_name}' failed: {upstream_errors[failed_node]}. "
                 f"Fix the error in that node before training."
             )
-        elif body.nodeId in result.errors:
-            error_msg = f"Modelling node error: {result.errors[body.nodeId]}"
+        elif body.node_id in result.errors:
+            error_msg = f"Modelling node error: {result.errors[body.node_id]}"
         else:
             error_msg = (
                 "No training data arrived at the modelling node. "
                 "Make sure an upstream data source is connected and producing data."
             )
         _jobs[job_id] = {"status": "error", "message": error_msg}
-        return TrainResponse(status="error", job_id=job_id, error=error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
 
     # --- Build TrainingJob and start in background ---
 
@@ -220,7 +219,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
         cv_folds=config.get("cv_folds"),
     )
 
-    node_id = body.nodeId  # capture for the closure
+    node_id = body.node_id  # capture for the closure
 
     def _train_background() -> None:
         try:
@@ -371,13 +370,13 @@ async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
         )
     except Exception as exc:
         logger.error("mlflow_log_failed", error=str(exc), job_id=body.job_id)
-        return LogExperimentResponse(status="error", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/export", response_model=ExportScriptResponse)
 async def export_script(body: ExportScriptRequest) -> ExportScriptResponse:
     """Generate a standalone training script from a modelling node's config."""
-    node = _find_modelling_node(body.graph, body.nodeId)
+    node = _find_modelling_node(body.graph, body.node_id)
     config = dict(node.data.config)
 
     # Use the node label as the default name

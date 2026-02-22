@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from haute._sandbox import _get_project_root, set_project_root
-from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 
 
 @pytest.fixture()

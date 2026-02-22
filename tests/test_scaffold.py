@@ -608,7 +608,7 @@ class TestDockerfileStructure:
     def test_dockerfile_has_required_instructions(self) -> None:
         from pathlib import Path
 
-        from haute._types import PipelineGraph
+        from haute.graph_utils import PipelineGraph
         from haute.deploy._config import DeployConfig, ResolvedDeploy
         from haute.deploy._container import _generate_dockerfile
 

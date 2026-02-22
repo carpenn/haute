@@ -1,17 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical } from "lucide-react"
-
-type SimpleNode = {
-  id: string
-  type?: string
-  data: { label: string; description: string; nodeType: string; config?: Record<string, unknown>; [key: string]: unknown }
-}
-
-type SimpleEdge = {
-  id: string
-  source: string
-  target: string
-}
+import type { SimpleNode, SimpleEdge } from "./editors"
+import { checkMlflow, getTrainStatus, trainModel, exportTraining, logToMlflow } from "../api/client"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -138,9 +128,8 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
   // Check MLflow backend on mount
   useEffect(() => {
-    fetch("/api/modelling/mlflow/check")
-      .then(r => r.json())
-      .then(data => setMlflowBackend({ installed: data.mlflow_installed, backend: data.backend, host: data.databricks_host }))
+    checkMlflow()
+      .then(data => setMlflowBackend({ installed: !!data.mlflow_installed, backend: data.backend || "", host: data.databricks_host || "" }))
       .catch(() => {})
   }, [])
 
@@ -173,9 +162,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const pollStatus = useCallback((jobId: string) => {
     pollRef.current = setInterval(async () => {
       try {
-        const resp = await fetch(`/api/modelling/train/status/${jobId}`)
-        if (!resp.ok) return
-        const status: TrainProgress = await resp.json()
+        const status = await getTrainStatus<TrainProgress>(jobId)
         setTrainProgress(status)
 
         if (status.status === "completed" || status.status === "error") {
@@ -206,25 +193,20 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     setTrainJobId(null)
     setMlflowResult(null)
     try {
-      const resp = await fetch("/api/modelling/train", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ graph: buildGraph(), nodeId: config._nodeId }),
-      })
-      const result = await resp.json()
+      const result = await trainModel({ graph: buildGraph(), node_id: config._nodeId as string })
 
       if (result.status === "started" && result.job_id) {
         // Training running in background — poll for updates
-        setTrainJobId(result.job_id)
+        setTrainJobId(result.job_id as string)
         setTrainProgress({ status: "running", progress: 0, message: "Starting...", iteration: 0, total_iterations: 0, train_loss: {}, elapsed_seconds: 0 })
-        pollStatus(result.job_id)
+        pollStatus(result.job_id as string)
       } else if (result.status === "error") {
         // Immediate validation error
-        setTrainResult(result)
+        setTrainResult(result as unknown as TrainResult)
         setTraining(false)
       } else {
         // Synchronous completion (shouldn't happen with new backend, but handle it)
-        setTrainResult(result)
+        setTrainResult(result as unknown as TrainResult)
         setTraining(false)
       }
     } catch (e) {
@@ -236,13 +218,8 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      const resp = await fetch("/api/modelling/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ graph: buildGraph(), nodeId: config._nodeId, data_path: "" }),
-      })
-      const result = await resp.json()
-      setExportedScript(result.script)
+      const result = await exportTraining({ graph: buildGraph(), node_id: config._nodeId as string, data_path: "" })
+      setExportedScript(result.script || null)
     } catch {
       // silently fail
     } finally {
@@ -255,16 +232,11 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     setLoggingToMlflow(true)
     setMlflowResult(null)
     try {
-      const resp = await fetch("/api/modelling/mlflow/log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          job_id: trainJobId,
-          experiment_name: (config.mlflow_experiment as string) || null,
-          model_name: (config.model_name as string) || null,
-        }),
+      const result = await logToMlflow({
+        job_id: trainJobId,
+        experiment_name: (config.mlflow_experiment as string) || null,
+        model_name: (config.model_name as string) || null,
       })
-      const result = await resp.json()
       setMlflowResult(result)
     } catch (e) {
       setMlflowResult({ status: "error", error: String(e) })

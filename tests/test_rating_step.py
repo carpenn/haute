@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.codegen import graph_to_code
 from haute.executor import _build_node_fn
 from haute.parser import parse_pipeline_source

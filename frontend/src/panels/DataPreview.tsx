@@ -2,22 +2,8 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react"
 import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2, Timer } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { formatValue } from "../utils/formatValue"
-
-interface Column {
-  name: string
-  dtype: string
-}
-
-interface NodeTiming {
-  nodeId: string
-  label: string
-  timing_ms: number
-}
-
-export interface SchemaWarning {
-  column: string
-  status: string
-}
+import type { ColumnInfo } from "../types/node"
+import type { SchemaWarning, NodeTiming } from "../api/types"
 
 export interface PreviewData {
   nodeId: string
@@ -25,7 +11,7 @@ export interface PreviewData {
   status: "ok" | "error" | "loading"
   row_count: number
   column_count: number
-  columns: Column[]
+  columns: ColumnInfo[]
   preview: Record<string, unknown>[]
   error: string | null
   timing_ms?: number
@@ -212,13 +198,13 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
             const pct = t.timing_ms / timingData.maxMs
             const barColor = pct > 0.7 ? '#ef4444' : pct > 0.3 ? '#eab308' : '#22c55e'
             return (
-              <div key={t.nodeId} className="flex items-center gap-2 py-0.5">
+              <div key={t.node_id} className="flex items-center gap-2 py-0.5">
                 <span
                   className="text-[11px] truncate shrink-0"
                   style={{
                     width: 100,
-                    color: t.nodeId === data.nodeId ? 'var(--accent)' : 'var(--text-secondary)',
-                    fontWeight: t.nodeId === data.nodeId ? 600 : 400,
+                    color: t.node_id === data.nodeId ? 'var(--accent)' : 'var(--text-secondary)',
+                    fontWeight: t.node_id === data.nodeId ? 600 : 400,
                   }}
                   title={t.label}
                 >
@@ -230,7 +216,7 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
                     style={{
                       width: `${Math.max(2, (t.timing_ms / timingData.maxMs) * 100)}%`,
                       background: barColor,
-                      opacity: t.nodeId === data.nodeId ? 1 : 0.6,
+                      opacity: t.node_id === data.nodeId ? 1 : 0.6,
                     }}
                   />
                 </div>

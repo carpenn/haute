@@ -8,8 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
-from haute._types import NodeType
-from haute.graph_utils import PipelineGraph
+from haute.graph_utils import NodeType, PipelineGraph
 from haute.routes._helpers import (
     discover_pipelines,
     lookup_pipeline_by_name,
@@ -208,9 +207,11 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
         results = await asyncio.wait_for(
             asyncio.to_thread(execute_graph, graph), timeout=300.0,
         )
-        return RunPipelineResponse(status="ok", results=results)  # type: ignore[arg-type]
+        return RunPipelineResponse(status="ok", results=results)
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Pipeline execution timed out (300s limit)")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -230,10 +231,10 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
             asyncio.to_thread(
                 execute_trace,
                 graph,
-                row_index=body.rowIndex,
-                target_node_id=body.targetNodeId,
+                row_index=body.row_index,
+                target_node_id=body.target_node_id,
                 column=body.column,
-                row_limit=body.rowLimit,
+                row_limit=body.row_limit,
             ),
             timeout=120.0,
         )
@@ -243,6 +244,8 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
         )
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Trace execution timed out (120s limit)")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -251,7 +254,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
 async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     """Run pipeline up to a specific node and return its output.
 
-    Accepts an optional ``rowLimit`` (default 1000) that is pushed into
+    Accepts an optional ``row_limit`` (default 1000) that is pushed into
     the Polars lazy query plan so only that many rows are scanned.
     """
     from haute.executor import execute_graph
@@ -266,40 +269,47 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             asyncio.to_thread(
                 execute_graph,
                 graph,
-                target_node_id=body.nodeId,
-                row_limit=body.rowLimit,
+                target_node_id=body.node_id,
+                row_limit=body.row_limit,
             ),
             timeout=120.0,
         )
-        node_result = results.get(body.nodeId)
+        node_result = results.get(body.node_id)
         if not node_result:
             raise HTTPException(
                 status_code=404,
-                detail=f"Node '{body.nodeId}' not found in results",
+                detail=f"Node '{body.node_id}' not found in results",
             )
 
-        node_map = {n.id: n for n in graph.nodes}
+        node_map = graph.node_map
         timings = [
             {
-                "nodeId": nid,
+                "node_id": nid,
                 "label": node_map[nid].data.label,
-                "timing_ms": r.get("timing_ms", 0),
+                "timing_ms": r.timing_ms,
             }
             for nid, r in results.items()
             if nid in node_map
         ]
 
-        return PreviewNodeResponse(nodeId=body.nodeId, timings=timings, **node_result)  # type: ignore[arg-type]
+        return PreviewNodeResponse(
+            node_id=body.node_id,
+            status=node_result.status,
+            row_count=node_result.row_count,
+            column_count=node_result.column_count,
+            columns=node_result.columns,
+            preview=node_result.preview,
+            error=node_result.error,
+            timing_ms=node_result.timing_ms,
+            timings=timings,
+            schema_warnings=node_result.schema_warnings,
+        )
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Preview execution timed out (120s limit)")
     except HTTPException:
         raise
     except Exception as e:
-        return PreviewNodeResponse(
-            nodeId=body.nodeId,
-            status="error",
-            error=str(e),
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/pipeline/sink", response_model=SinkResponse)
@@ -317,11 +327,11 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(execute_sink, graph, sink_node_id=body.nodeId),
+            asyncio.to_thread(execute_sink, graph, sink_node_id=body.node_id),
             timeout=300.0,
         )
         return result
     except TimeoutError:
-        return SinkResponse(status="error", message="Sink execution timed out (300s limit)")
+        raise HTTPException(status_code=504, detail="Sink execution timed out (300s limit)")
     except Exception as e:
-        return SinkResponse(status="error", message=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

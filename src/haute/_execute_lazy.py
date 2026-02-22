@@ -34,10 +34,9 @@ def _prepare_graph(
 
     Returns (node_map, order, parents_of, id_to_name).
     """
-    nodes = graph.nodes
     edges = graph.edges
 
-    node_map = {n.id: n for n in nodes}
+    node_map = graph.node_map
     all_ids = set(node_map.keys())
 
     if target_node_id:
@@ -84,9 +83,7 @@ def _execute_lazy(
     node_map, order, parents_of, id_to_name = _prepare_graph(graph, target_node_id)
 
     # Full parent lookup from ALL edges for instance resolution
-    all_parents: dict[str, list[str]] = {}
-    for e in graph.edges:
-        all_parents.setdefault(e.target, []).append(e.source)
+    all_parents = graph.parents_of
 
     # Build executable functions
     funcs: dict[str, tuple[Callable, bool]] = {}
@@ -201,9 +198,7 @@ def _execute_eager_core(
     )
 
     # Full parent lookup from ALL edges for instance resolution
-    all_parents: dict[str, list[str]] = {}
-    for e in graph.edges:
-        all_parents.setdefault(e.target, []).append(e.source)
+    all_parents = graph.parents_of
 
     funcs = _build_funcs(
         order, node_map, parents_of, id_to_name, all_parents,

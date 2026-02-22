@@ -269,4 +269,4 @@ class TestSchemas:
             graph={"nodes": [{"id": "tx"}], "edges": []},
         )
         assert resp.submodel_name == "scoring"
-        assert len(resp.graph["nodes"]) == 1
+        assert len(resp.graph.nodes) == 1

@@ -22,6 +22,8 @@ from typing import TypedDict
 
 import polars as pl
 
+from haute._types import HauteError
+
 # Fully-qualified Databricks table names: catalog.schema.table (each part is
 # alphanumeric + underscores/hyphens, optionally backtick-quoted).
 _TABLE_NAME_RE = re.compile(
@@ -49,11 +51,11 @@ def _clear_fetch_progress() -> None:
         _fetch_progress.clear()
 
 
-class DatabricksConfigError(Exception):
+class DatabricksConfigError(HauteError):
     """Raised when required Databricks data credentials are missing."""
 
 
-class CacheNotFoundError(Exception):
+class CacheNotFoundError(HauteError):
     """Raised when a pipeline tries to read a table that hasn't been fetched yet."""
 
 

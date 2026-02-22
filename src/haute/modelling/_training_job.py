@@ -298,15 +298,12 @@ class TrainingJob:
             return self._data
         if isinstance(self._data, pl.LazyFrame):
             return self._data.collect()
+        from haute._io import read_source
+
         path = Path(self._data)
         if not path.exists():
             raise FileNotFoundError(f"Data file not found: {path}")
-        if path.suffix == ".parquet":
-            return pl.read_parquet(path)
-        elif path.suffix == ".csv":
-            return pl.read_csv(path)
-        else:
-            raise ValueError(f"Unsupported file format: {path.suffix}")
+        return read_source(str(path)).collect()
 
     def _validate_columns(self, df: pl.DataFrame) -> None:
         """Validate that required columns exist in the DataFrame."""

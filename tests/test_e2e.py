@@ -37,17 +37,17 @@ class TestEndToEnd:
         graph = parse_pipeline_file(PIPELINE_FILE)
         results = execute_graph(graph)
         for nid, result in results.items():
-            assert result["status"] == "ok", (
-                f"Node {nid!r} failed: {result.get('error')}"
+            assert result.status == "ok", (
+                f"Node {nid!r} failed: {result.error}"
             )
-            assert result["row_count"] > 0
+            assert result.row_count > 0
 
     def test_execute_target_node(self):
         """Executing with a target returns results for the target and its ancestors."""
         graph = parse_pipeline_file(PIPELINE_FILE)
         results = execute_graph(graph, target_node_id="output")
         assert "output" in results
-        assert results["output"]["status"] == "ok"
+        assert results["output"].status == "ok"
         # All ancestors of output should be present
         assert "calculate_premium" in results
         assert "area_lookup" in results
@@ -109,9 +109,9 @@ class TestEndToEnd:
         # Step 2: Execute
         results = execute_graph(graph)
         output_result = results["output"]
-        assert output_result["status"] == "ok"
-        orig_row_count = output_result["row_count"]
-        orig_columns = sorted(c["name"] for c in output_result["columns"])
+        assert output_result.status == "ok"
+        orig_row_count = output_result.row_count
+        orig_columns = sorted(c.name for c in output_result.columns)
 
         # Step 3: Trace
         trace = execute_trace(graph, row_index=0, target_node_id="output")
@@ -125,10 +125,10 @@ class TestEndToEnd:
         # Step 5: Re-execute the re-parsed graph
         results2 = execute_graph(reparsed)
         output_result2 = results2["output"]
-        assert output_result2["status"] == "ok"
-        assert output_result2["row_count"] == orig_row_count
+        assert output_result2.status == "ok"
+        assert output_result2.row_count == orig_row_count
         # Core input columns must survive the round-trip
-        reparsed_columns = {c["name"] for c in output_result2["columns"]}
+        reparsed_columns = {c.name for c in output_result2.columns}
         assert "VehPower" in reparsed_columns
         assert "Area" in reparsed_columns
         assert "Exposure" in reparsed_columns

@@ -140,7 +140,7 @@ Every output value must be traceable back through the graph to its inputs, showi
 
 - Python: `snake_case` for functions/variables, `PascalCase` for classes.
 - TypeScript: `camelCase` for functions/variables, `PascalCase` for components/types.
-- API fields that cross the frontend/backend boundary use `camelCase` (frontend convention) with Pydantic model aliases where needed.
+- API fields that cross the frontend/backend boundary use `snake_case` (Python convention). Since we own both frontend and backend, one convention everywhere avoids alias machinery and translation layers.
 
 ## 14. Idiomatic React
 
@@ -369,7 +369,7 @@ Engineering Standards
 - [ ] No new heavy dependencies in core
 - [ ] No resource leaks (file handles, async tasks, sockets)
 - [ ] Error cases return structured responses, not bare strings
-- [ ] Consistent naming (snake_case Python, camelCase TypeScript, PascalCase classes/components)
+- [ ] Consistent naming (snake_case Python and API fields, camelCase TypeScript functions/variables, PascalCase classes/components)
 - [ ] React state in hooks/refs, not module-level variables
 - [ ] File access endpoints validate paths stay within project root
 - [ ] Tests added for new logic; bug fixes include regression tests

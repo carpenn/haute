@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from haute._types import PipelineGraph
+from haute.graph_utils import PipelineGraph
 from haute.parser import parse_pipeline_file
 
 if TYPE_CHECKING:

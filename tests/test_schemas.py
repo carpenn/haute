@@ -99,18 +99,18 @@ class TestRequestModels:
             RunPipelineRequest()  # missing graph
 
     def test_preview_node_defaults(self):
-        r = PreviewNodeRequest(graph=Graph(), nodeId="n1")
-        assert r.rowLimit == 1000
+        r = PreviewNodeRequest(graph=Graph(), node_id="n1")
+        assert r.row_limit == 1000
 
     def test_trace_request_defaults(self):
         r = TraceRequest(graph=Graph())
-        assert r.rowIndex == 0
-        assert r.targetNodeId is None
+        assert r.row_index == 0
+        assert r.target_node_id is None
         assert r.column is None
 
     def test_sink_request_requires_node_id(self):
         with pytest.raises(ValidationError):
-            SinkRequest(graph=Graph())  # missing nodeId
+            SinkRequest(graph=Graph())  # missing node_id
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +135,7 @@ class TestResponseModels:
         assert r.results["n1"].row_count == 10
 
     def test_preview_node_response_defaults(self):
-        r = PreviewNodeResponse(nodeId="n1", status="ok")
+        r = PreviewNodeResponse(node_id="n1", status="ok")
         assert r.row_count == 0
         assert r.columns == []
         assert r.error is None

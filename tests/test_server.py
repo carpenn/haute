@@ -155,18 +155,18 @@ class TestPreviewNode:
         node_id = graph.nodes[0].id
 
         resp = client.post("/api/pipeline/preview", json={
-            "graph": graph.model_dump(), "nodeId": node_id, "rowLimit": 10,
+            "graph": graph.model_dump(), "node_id": node_id, "row_limit": 10,
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert data["nodeId"] == node_id
+        assert data["node_id"] == node_id
         assert data["status"] == "ok"
         assert data["row_count"] <= 10
         assert len(data["columns"]) > 0
 
     def test_preview_empty_graph_returns_400(self, client: TestClient):
         resp = client.post("/api/pipeline/preview", json={
-            "graph": {"nodes": [], "edges": []}, "nodeId": "x",
+            "graph": {"nodes": [], "edges": []}, "node_id": "x",
         })
         assert resp.status_code == 400
 
@@ -181,7 +181,7 @@ class TestTraceRow:
         graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
 
         resp = client.post("/api/pipeline/trace", json={
-            "graph": graph.model_dump(), "rowIndex": 0,
+            "graph": graph.model_dump(), "row_index": 0,
         })
         assert resp.status_code == 200
         data = resp.json()
@@ -253,7 +253,7 @@ class TestExecuteSinkEndpoint:
             "edges": [{"id": "e1", "source": "src", "target": "sink"}],
         }
         resp = client.post("/api/pipeline/sink", json={
-            "graph": graph, "nodeId": "sink",
+            "graph": graph, "node_id": "sink",
         })
         assert resp.status_code == 200
         data = resp.json()

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from haute._logging import get_logger
+from haute._types import HauteError
 
 logger = get_logger(component="sandbox")
 
@@ -167,7 +168,7 @@ _BLOCKED_CALLS = frozenset({
 })
 
 
-class UnsafeCodeError(Exception):
+class UnsafeCodeError(HauteError):
     """Raised when AST validation detects a dangerous pattern."""
 
 

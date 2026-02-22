@@ -95,10 +95,13 @@ export default function ContextMenu({
       ref={ref}
       role="menu"
       aria-label={`Actions for ${nodeLabel}`}
-      className="fixed z-50 bg-[#0f172a] rounded-lg shadow-2xl border border-slate-700/50 py-1 min-w-[160px] animate-fade-in"
-      style={{ left: x, top: y }}
+      className="fixed z-50 rounded-lg shadow-2xl py-1 min-w-[160px] animate-fade-in"
+      style={{ left: x, top: y, background: "var(--bg-panel)", border: "1px solid var(--border-bright)" }}
     >
-      <div className="px-3 py-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-[0.1em] border-b border-slate-700/50 mb-0.5">
+      <div
+        className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.1em] mb-0.5"
+        style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}
+      >
         {nodeLabel}
       </div>
       {items.map((item, i) => {
@@ -113,11 +116,16 @@ export default function ContextMenu({
               item.action()
               onClose()
             }}
-            className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] transition-colors ${
-              item.danger
-                ? "text-red-400 hover:bg-red-500/10"
-                : "text-slate-300 hover:bg-slate-700/50 hover:text-white"
-            }`}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-[12px] transition-colors"
+            style={{ color: item.danger ? "#ef4444" : "var(--text-secondary)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = item.danger ? "rgba(239,68,68,.1)" : "var(--chrome-hover)"
+              if (!item.danger) e.currentTarget.style.color = "var(--text-primary)"
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent"
+              e.currentTarget.style.color = item.danger ? "#ef4444" : "var(--text-secondary)"
+            }}
           >
             <Icon size={13} aria-hidden="true" />
             {item.label}

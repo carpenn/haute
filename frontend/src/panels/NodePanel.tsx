@@ -16,27 +16,10 @@ import {
   SinkEditor,
   SubmodelEditor,
 } from "./editors"
-import type { InputSource } from "./editors"
+import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
 
-// ─── Re-exported types (preserve public API) ─────────────────────
-
-export type SimpleNode = {
-  id: string
-  type?: string
-  data: {
-    label: string
-    description: string
-    nodeType: string
-    config?: Record<string, unknown>
-    [key: string]: unknown
-  }
-}
-
-export type SimpleEdge = {
-  id: string
-  source: string
-  target: string
-}
+// Re-export types (preserve public API for App.tsx)
+export type { SimpleNode, SimpleEdge } from "./editors"
 
 type NodePanelProps = {
   node: SimpleNode | null

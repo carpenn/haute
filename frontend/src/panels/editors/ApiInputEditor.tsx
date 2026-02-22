@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react"
 import { Radio, AlertTriangle } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
-import type { SchemaInfo } from "./_shared"
+import { useSchemaFetch } from "../../hooks/useSchemaFetch"
 
 export default function ApiInputEditor({
   config,
@@ -10,42 +9,7 @@ export default function ApiInputEditor({
   config: Record<string, unknown>
   onUpdate: (key: string, value: unknown) => void
 }) {
-  const [schema, setSchema] = useState<SchemaInfo>(null)
-  const [loadingSchema, setLoadingSchema] = useState(!!config.path)
-
-  const fetchSchema = (path: string) => {
-    setLoadingSchema(true)
-    fetch(`/api/schema?path=${encodeURIComponent(path)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data) => {
-        setSchema(data)
-        setLoadingSchema(false)
-      })
-      .catch(() => {
-        setSchema(null)
-        setLoadingSchema(false)
-      })
-  }
-
-  useEffect(() => {
-    if (!config.path) return
-    fetch(`/api/schema?path=${encodeURIComponent(config.path as string)}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data) => {
-        setSchema(data)
-        setLoadingSchema(false)
-      })
-      .catch(() => {
-        setSchema(null)
-        setLoadingSchema(false)
-      })
-  }, [config.path])
+  const { schema, loading: loadingSchema, fetchForPath } = useSchemaFetch(config.path as string | undefined)
 
   return (
     <>
@@ -66,7 +30,7 @@ export default function ApiInputEditor({
             currentPath={config.path as string | undefined}
             onSelect={(path) => {
               onUpdate("path", path)
-              fetchSchema(path)
+              fetchForPath(path)
             }}
             extensions=".json,.jsonl"
           />

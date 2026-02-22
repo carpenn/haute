@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef } from "react"
 import { Check, ChevronDown, Loader2, Trash2, HardDriveDownload } from "lucide-react"
+import {
+  getWarehouses,
+  getCatalogs,
+  getSchemas,
+  getTables,
+  getCacheStatus,
+  getFetchProgress,
+  fetchDatabricksData,
+  deleteCache,
+  ApiError,
+} from "../../api/client"
 
 // ─── WarehousePicker ──────────────────────────────────────────────
 
@@ -31,19 +42,15 @@ export function WarehousePicker({
     }
     setLoading(true)
     setError(null)
-    fetch("/api/databricks/warehouses")
-      .then((r) => {
-        if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || `HTTP ${r.status}`) })
-        return r.json()
-      })
-      .then((data: { warehouses?: Warehouse[] }) => {
+    getWarehouses()
+      .then((data) => {
         setWarehouses(data.warehouses || [])
         fetched.current = true
         setOpen(true)
         setLoading(false)
       })
       .catch((e: Error) => {
-        setError(e.message)
+        setError(e instanceof ApiError ? e.detail || e.message : e.message)
         setLoading(false)
       })
   }
@@ -157,34 +164,30 @@ export function CatalogTablePicker({
   const [loadingTables, setLoadingTables] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const apiFetch = (url: string) =>
-    fetch(url).then((r) => {
-      if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || `HTTP ${r.status}`) })
-      return r.json()
-    })
+  const errorMsg = (e: Error) => e instanceof ApiError ? e.detail || e.message : e.message
 
   const refreshCatalogs = () => {
     setLoadingCatalogs(true)
     setError(null)
-    apiFetch("/api/databricks/catalogs")
-      .then((data: { catalogs?: CatalogItem[] }) => { setCatalogs(data.catalogs || []); setLoadingCatalogs(false) })
-      .catch((e: Error) => { setError(e.message); setLoadingCatalogs(false) })
+    getCatalogs()
+      .then((data) => { setCatalogs(data.catalogs || []); setLoadingCatalogs(false) })
+      .catch((e: Error) => { setError(errorMsg(e)); setLoadingCatalogs(false) })
   }
 
   const refreshSchemas = (cat: string) => {
     setLoadingSchemas(true)
     setError(null)
-    apiFetch(`/api/databricks/schemas?catalog=${encodeURIComponent(cat)}`)
-      .then((data: { schemas?: SchemaItem[] }) => { setSchemas(data.schemas || []); setLoadingSchemas(false) })
-      .catch((e: Error) => { setError(e.message); setLoadingSchemas(false) })
+    getSchemas(cat)
+      .then((data) => { setSchemas(data.schemas || []); setLoadingSchemas(false) })
+      .catch((e: Error) => { setError(errorMsg(e)); setLoadingSchemas(false) })
   }
 
   const refreshTables = (cat: string, sch: string) => {
     setLoadingTables(true)
     setError(null)
-    apiFetch(`/api/databricks/tables?catalog=${encodeURIComponent(cat)}&schema=${encodeURIComponent(sch)}`)
-      .then((data: { tables?: TableItem[] }) => { setTables(data.tables || []); setLoadingTables(false) })
-      .catch((e: Error) => { setError(e.message); setLoadingTables(false) })
+    getTables(cat, sch)
+      .then((data) => { setTables(data.tables || []); setLoadingTables(false) })
+      .catch((e: Error) => { setError(errorMsg(e)); setLoadingTables(false) })
   }
 
   const selectStyle = {
@@ -323,9 +326,8 @@ export function DatabricksFetchButton({
 
   useEffect(() => {
     if (!table) return
-    fetch(`/api/databricks/cache?table=${encodeURIComponent(table)}`)
-      .then((r) => r.json())
-      .then((data: CacheStatus) => {
+    getCacheStatus(table)
+      .then((data) => {
         setCache(data)
         if (data.cached) onFetched?.(data)
       })
@@ -335,9 +337,8 @@ export function DatabricksFetchButton({
   useEffect(() => {
     if (!fetching || !table) return
     const id = setInterval(() => {
-      fetch(`/api/databricks/fetch/progress?table=${encodeURIComponent(table)}`)
-        .then((r) => r.json())
-        .then((data: { active?: boolean; rows?: number; elapsed?: number }) => { if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0 }) })
+      getFetchProgress(table)
+        .then((data) => { if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0 }) })
         .catch(() => { /* polling retry on next interval */ })
     }, 1000)
     return () => { clearInterval(id); setProgress(null) }
@@ -347,26 +348,21 @@ export function DatabricksFetchButton({
     if (!table) return
     setFetching(true)
     setError("")
-    fetch("/api/databricks/fetch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        table,
-        http_path: httpPath || undefined,
-        query: query || undefined,
-      }),
+    fetchDatabricksData({
+      table,
+      http_path: httpPath || undefined,
+      query: query || undefined,
     })
-      .then((r) => {
-        if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || `HTTP ${r.status}`) })
-        return r.json()
-      })
       .then((data) => {
-        const info: CacheStatus = { cached: true, ...data }
+        const info: CacheStatus = { cached: true, ...data } as CacheStatus
         setCache(info)
         setFetching(false)
         onFetched?.(info)
       })
-      .catch((e: Error) => { setError(e.message); setFetching(false) })
+      .catch((e: Error) => {
+        setError(e instanceof ApiError ? e.detail || e.message : e.message)
+        setFetching(false)
+      })
   }
 
   const formatBytes = (b: number) => {
@@ -415,13 +411,9 @@ export function DatabricksFetchButton({
           <span>·</span>
           <button
             onClick={() => {
-              fetch(`/api/databricks/cache?table=${encodeURIComponent(table)}`, { method: "DELETE" })
-                .then((r) => {
-                  if (!r.ok) return r.json().then((d: { detail?: string }) => { throw new Error(d.detail || `HTTP ${r.status}`) })
-                  return r.json()
-                })
-                .then((data: CacheStatus) => setCache(data))
-                .catch((e: Error) => setError(e.message))
+              deleteCache(table)
+                .then((data) => setCache(data))
+                .catch((e: Error) => setError(e instanceof ApiError ? e.detail || e.message : e.message))
             }}
             className="inline-flex items-center gap-0.5 hover:opacity-70 transition-opacity"
             style={{ color: '#ef4444' }}
