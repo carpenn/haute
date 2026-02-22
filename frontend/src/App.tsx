@@ -120,7 +120,9 @@ function FlowEditor() {
   const toastCounter = useRef(0)
 
   // Keep graphRef in sync so callbacks never see stale state
-  graphRef.current = { nodes, edges }
+  useEffect(() => {
+    graphRef.current = { nodes, edges }
+  }, [nodes, edges])
 
   // Toast helpers
   const addToast = useCallback((type: ToastMessage["type"], text: string) => {
@@ -378,6 +380,9 @@ function FlowEditor() {
     )
   }
 
+  // eslint-disable-next-line react-hooks/refs -- ref is mutated by hooks; reading here is intentional
+  const submodelsSnapshot = submodelsRef.current
+
   return (
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <Toolbar
@@ -478,7 +483,7 @@ function FlowEditor() {
             node={selectedNode as unknown as SimpleNode | null}
             edges={edges as unknown as SimpleEdge[]}
             allNodes={nodes as unknown as SimpleNode[]}
-            submodels={submodelsRef.current}
+            submodels={submodelsSnapshot}
             onClose={() => setSelectedNode(null)}
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}

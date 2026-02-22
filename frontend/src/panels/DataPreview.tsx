@@ -47,13 +47,14 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
   const [showTimings, setShowTimings] = useState(false)
   const dragging = useRef(false)
 
+  const timings = data?.timings
   const timingData = useMemo(() => {
-    if (!data?.timings?.length) return null
-    const sorted = [...data.timings].sort((a, b) => b.timing_ms - a.timing_ms)
+    if (!timings?.length) return null
+    const sorted = [...timings].sort((a, b) => b.timing_ms - a.timing_ms)
     const maxMs = sorted[0]?.timing_ms || 1
     const totalMs = sorted.reduce((s, t) => s + t.timing_ms, 0)
     return { sorted, maxMs, totalMs }
-  }, [data?.timings])
+  }, [timings])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()

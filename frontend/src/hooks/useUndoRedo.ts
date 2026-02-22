@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   useNodesState,
   useEdgesState,
@@ -32,8 +32,13 @@ export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edg
   // Keep a live ref so we can read current state without re-renders
   const nodesRef = useRef(nodes)
   const edgesRef = useRef(edges)
-  nodesRef.current = nodes
-  edgesRef.current = edges
+  useEffect(() => {
+    nodesRef.current = nodes
+    edgesRef.current = edges
+  }, [nodes, edges])
+
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
 
   const pushSnapshot = useCallback(() => {
     past.current = [
@@ -41,6 +46,8 @@ export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edg
       { nodes: nodesRef.current, edges: edgesRef.current },
     ]
     future.current = []
+    setCanUndo(true)
+    setCanRedo(false)
   }, [])
 
   // Wrap onNodesChange to detect structural changes vs drag
@@ -114,6 +121,8 @@ export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edg
     future.current.push({ nodes: nodesRef.current, edges: edgesRef.current })
     setNodes(prev.nodes)
     setEdges(prev.edges)
+    setCanUndo(past.current.length > 0)
+    setCanRedo(true)
   }, [setNodes, setEdges])
 
   const redo = useCallback(() => {
@@ -122,10 +131,9 @@ export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edg
     past.current.push({ nodes: nodesRef.current, edges: edgesRef.current })
     setNodes(next.nodes)
     setEdges(next.edges)
+    setCanUndo(true)
+    setCanRedo(future.current.length > 0)
   }, [setNodes, setEdges])
-
-  const canUndo = past.current.length > 0
-  const canRedo = future.current.length > 0
 
   return {
     nodes,

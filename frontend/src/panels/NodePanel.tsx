@@ -64,11 +64,10 @@ type NodePanelProps = {
 function FileBrowser({ currentPath, onSelect, extensions }: { currentPath?: string; onSelect: (path: string) => void; extensions?: string }) {
   const [dir, setDir] = useState(".")
   const [items, setItems] = useState<FileItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [selectedPath, setSelectedPath] = useState<string | undefined>(currentPath)
 
   useEffect(() => {
-    setLoading(true)
     fetch(`/api/files?dir=${encodeURIComponent(dir)}${extensions ? `&extensions=${encodeURIComponent(extensions)}` : ``}`)
       .then((r) => r.json())
       .then((data) => {
@@ -82,6 +81,7 @@ function FileBrowser({ currentPath, onSelect, extensions }: { currentPath?: stri
     if (dir === ".") return
     const parts = dir.split("/")
     parts.pop()
+    setLoading(true)
     setDir(parts.length > 0 ? parts.join("/") : ".")
   }
 
@@ -130,6 +130,7 @@ function FileBrowser({ currentPath, onSelect, extensions }: { currentPath?: stri
                   key={item.path}
                   onClick={() => {
                     if (item.type === "directory") {
+                      setLoading(true)
                       setDir(item.path)
                     } else {
                       handleFileClick(item.path)
@@ -561,7 +562,7 @@ function DatabricksFetchButton({
   const [error, setError] = useState("")
 
   useEffect(() => {
-    if (!table) { setCache(null); return }
+    if (!table) return
     fetch(`/api/databricks/cache?table=${encodeURIComponent(table)}`)
       .then((r) => r.json())
       .then((data) => {
@@ -694,7 +695,7 @@ function ApiInputConfig({
   onUpdate: (key: string, value: unknown) => void
 }) {
   const [schema, setSchema] = useState<SchemaInfo>(null)
-  const [loadingSchema, setLoadingSchema] = useState(false)
+  const [loadingSchema, setLoadingSchema] = useState(!!config.path)
 
   const fetchSchema = (path: string) => {
     setLoadingSchema(true)
@@ -714,10 +715,21 @@ function ApiInputConfig({
   }
 
   useEffect(() => {
-    if (config.path) {
-      fetchSchema(config.path as string)
-    }
-  }, [])
+    if (!config.path) return
+    fetch(`/api/schema?path=${encodeURIComponent(config.path as string)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data) => {
+        setSchema(data)
+        setLoadingSchema(false)
+      })
+      .catch(() => {
+        setSchema(null)
+        setLoadingSchema(false)
+      })
+  }, [config.path])
 
   return (
     <>
@@ -912,7 +924,7 @@ function DataSourceConfig({
 }) {
   const [sourceType, setSourceType] = useState<string>((config.sourceType as string) || "flat_file")
   const [schema, setSchema] = useState<SchemaInfo>(null)
-  const [loadingSchema, setLoadingSchema] = useState(false)
+  const [loadingSchema, setLoadingSchema] = useState(!!config.path)
 
   const fetchSchema = (path: string) => {
     setLoadingSchema(true)
@@ -932,10 +944,21 @@ function DataSourceConfig({
   }
 
   useEffect(() => {
-    if (config.path) {
-      fetchSchema(config.path as string)
-    }
-  }, [])
+    if (!config.path) return
+    fetch(`/api/schema?path=${encodeURIComponent(config.path as string)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data) => {
+        setSchema(data)
+        setLoadingSchema(false)
+      })
+      .catch(() => {
+        setSchema(null)
+        setLoadingSchema(false)
+      })
+  }, [config.path])
 
   return (
     <>
@@ -1873,17 +1896,17 @@ function OneWayEditor({ table, bandingLevels, onUpdateEntries }: {
   onUpdateEntries: (entries: Record<string, string | number>[]) => void
 }) {
   const factor = table.factors[0]
+  const entries = useMemo(() => table.entries || [], [table.entries])
+  const stats = useMemo(() => tableStats(entries), [entries])
+
   if (!factor) return null
   const levels = bandingLevels[factor] || []
-  const entries = table.entries || []
 
   const lookup = new Map<string, number>()
   for (const e of entries) {
     const k = String(e[factor] ?? "")
     if (k) lookup.set(k, typeof e.value === "number" ? e.value : parseFloat(String(e.value ?? "1")))
   }
-
-  const stats = useMemo(() => tableStats(entries), [entries])
   const maxVal = stats ? Math.max(Math.abs(stats.max), Math.abs(stats.min), 1) : 1
 
   const updateCell = (level: string, val: string) => {
@@ -1962,11 +1985,13 @@ function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverrides }: 
   const sliceKey = factorOverrides?.sliceKey || {}
   const rowFactor = usedFactors[0]
   const colFactor = usedFactors[1]
+  const entries = useMemo(() => table.entries || [], [table.entries])
+  const stats = useMemo(() => tableStats(entries), [entries])
+
   if (!rowFactor || !colFactor) return null
 
   const rowLabels = bandingLevels[rowFactor] || []
   const colLabels = bandingLevels[colFactor] || []
-  const entries = table.entries || []
 
   const lookup = new Map<string, number>()
   for (const e of entries) {
@@ -1975,8 +2000,6 @@ function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverrides }: 
     const key = `${e[rowFactor]}|${e[colFactor]}`
     lookup.set(key, typeof e.value === "number" ? e.value : parseFloat(String(e.value ?? "1")))
   }
-
-  const stats = useMemo(() => tableStats(entries), [entries])
 
   const updateCell = (row: string, col: string, val: string) => {
     const num = val === "" ? 0 : parseFloat(val)
@@ -2755,7 +2778,7 @@ function ModelScoreConfig({
   const [loadingExperiments, setLoadingExperiments] = useState(false)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingModels, setLoadingModels] = useState(false)
-  const [_loadingVersions, setLoadingVersions] = useState(false)
+  const [, setLoadingVersions] = useState(false)
   const [errorExperiments, setErrorExperiments] = useState("")
   const [errorRuns, setErrorRuns] = useState("")
   const [errorModels, setErrorModels] = useState("")

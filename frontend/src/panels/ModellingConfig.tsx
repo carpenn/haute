@@ -243,7 +243,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       })
       const result = await resp.json()
       setExportedScript(result.script)
-    } catch (e) {
+    } catch {
       // silently fail
     } finally {
       setExporting(false)
