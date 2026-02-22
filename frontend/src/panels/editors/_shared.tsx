@@ -13,9 +13,6 @@ export type FileItem = {
   size?: number
 }
 
-/** @deprecated Use ColumnInfo from types/node instead */
-export type SchemaColumn = ColumnInfo
-
 export type InputSource = {
   varName: string
   sourceLabel: string
