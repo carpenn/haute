@@ -307,6 +307,38 @@ def _build_node_fn(
 
         return func_name, rating_fn, False
 
+    elif node_type == NodeType.SCENARIO_EXPANDER:
+        _col_name = config.get("column_name", "multiplier")
+        _min_val = float(config.get("min_value", 0.8))
+        _max_val = float(config.get("max_value", 1.2))
+        _steps = int(config.get("steps", 21))
+        _step_col = config.get("step_column", "scenario_step")
+
+        def scenario_expand_fn(
+            *dfs: _Frame,
+            _cn: str = _col_name,
+            _mn: float = _min_val,
+            _mx: float = _max_val,
+            _st: int = _steps,
+            _sc: str = _step_col,
+        ) -> _Frame:
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            import numpy as np
+            scenarios = pl.DataFrame({
+                _sc: pl.Series(range(_st), dtype=pl.Int32),
+                _cn: pl.Series(np.linspace(_mn, _mx, _st).tolist(), dtype=pl.Float64),
+            }).lazy()
+            return lf.join(scenarios, how="cross")
+
+        return func_name, scenario_expand_fn, False
+
+    elif node_type == NodeType.OPTIMISER:
+        # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
+        def optimiser_passthrough(*dfs: _Frame) -> _Frame:
+            return dfs[0] if dfs else pl.LazyFrame()
+
+        return func_name, optimiser_passthrough, False
+
     elif node_type == NodeType.MODELLING:
         # Pass-through in preview mode. Training happens via /api/modelling/train.
         def modelling_passthrough(*dfs: _Frame) -> _Frame:

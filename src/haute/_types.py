@@ -41,6 +41,8 @@ class NodeType(StrEnum):
     EXTERNAL_FILE = "externalFile"
     LIVE_SWITCH = "liveSwitch"
     MODELLING = "modelling"
+    OPTIMISER = "optimiser"
+    SCENARIO_EXPANDER = "scenarioExpander"
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
 
@@ -180,6 +182,77 @@ class ModellingConfig(TypedDict, total=False):
     mlflow_experiment: str
     model_name: str
     output_dir: str
+
+
+class OptimiserConfig(TypedDict, total=False):
+    """Config for optimiser (price optimisation) nodes."""
+
+    # Mode
+    mode: str  # "online" | "ratebook"
+
+    # Column mappings
+    quote_id: str
+    scenario_step: str
+    multiplier: str
+    objective: str
+
+    # Constraints
+    constraints: dict[str, dict[str, float]]
+    # e.g. {"volume": {"min": 0.90}, "loss_ratio": {"max": 1.05}}
+
+    # Solver tuning
+    max_iter: int
+    tolerance: float
+    chunk_size: int
+    record_history: bool
+
+    # Frontier
+    frontier_enabled: bool
+    frontier_points_per_dim: int
+    frontier_threshold_ranges: dict[str, list[float]]
+
+    # Ratebook
+    factor_columns: list[list[str]]
+    candidate_min: float
+    candidate_max: float
+    candidate_steps: int
+    max_cd_iterations: int
+    cd_tolerance: float
+    structure_mode: str  # "explicit" | "auto"
+
+    # Two-input support for ratebook
+    scored_input: str
+    factors_input: str
+
+    # MLflow
+    mlflow_experiment: str
+    model_name: str
+
+
+class ScenarioExpanderConfig(TypedDict, total=False):
+    """Config for scenarioExpander nodes."""
+
+    quote_id: str       # column identifying each quote/row-group
+    column_name: str    # name of the new value column (e.g. "multiplier")
+    min_value: float    # start of linspace
+    max_value: float    # end of linspace
+    steps: int          # number of steps
+    step_column: str    # name of the 0-based step index column
+
+
+OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
+    "mode", "quote_id", "scenario_step", "multiplier", "objective",
+    "constraints", "max_iter", "tolerance", "chunk_size", "record_history",
+    "frontier_enabled", "frontier_points_per_dim", "frontier_threshold_ranges",
+    "factor_columns", "candidate_min", "candidate_max", "candidate_steps",
+    "max_cd_iterations", "cd_tolerance", "structure_mode",
+    "scored_input", "factors_input",
+    "mlflow_experiment", "model_name",
+)
+
+SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (
+    "quote_id", "column_name", "min_value", "max_value", "steps", "step_column",
+)
 
 
 class SubmodelConfig(TypedDict, total=False):

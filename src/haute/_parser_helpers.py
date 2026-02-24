@@ -13,7 +13,14 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType
+from haute.graph_utils import (
+    OPTIMISER_CONFIG_KEYS,
+    SCENARIO_EXPANDER_CONFIG_KEYS,
+    GraphEdge,
+    GraphNode,
+    NodeData,
+    NodeType,
+)
 
 # ---------------------------------------------------------------------------
 # Node type inference
@@ -36,6 +43,10 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeTyp
         return NodeType.LIVE_SWITCH
     if decorator_kwargs.get("output"):
         return NodeType.OUTPUT
+    if decorator_kwargs.get("scenario_expander"):
+        return NodeType.SCENARIO_EXPANDER
+    if decorator_kwargs.get("optimiser"):
+        return NodeType.OPTIMISER
     if decorator_kwargs.get("modelling"):
         return NodeType.MODELLING
     if decorator_kwargs.get("model_score"):
@@ -458,6 +469,14 @@ def _build_node_config(
         )
         if combined:
             config["combinedColumn"] = str(combined)
+    elif node_type == NodeType.SCENARIO_EXPANDER:
+        for key in SCENARIO_EXPANDER_CONFIG_KEYS:
+            if key in decorator_kwargs:
+                config[key] = decorator_kwargs[key]
+    elif node_type == NodeType.OPTIMISER:
+        for key in OPTIMISER_CONFIG_KEYS:
+            if key in decorator_kwargs:
+                config[key] = decorator_kwargs[key]
     elif node_type == NodeType.MODELLING:
         modelling_keys = (
             "name", "target", "weight", "exclude", "algorithm", "task",

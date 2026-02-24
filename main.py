@@ -49,16 +49,10 @@ def quotes() -> pl.LazyFrame:
     return pl.read_json("data/IDpol_1052049.json").lazy()
 
 
-@pipeline.node(live_switch=True, mode="live")
+@pipeline.node(live_switch=True, mode="batch_quotes")
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
-    return quotes
-
-
-@pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '<=', 'val2': '20', 'assignment': '0-20'}, {'op1': '>', 'val1': '20', 'op2': '<=', 'val2': '30', 'assignment': '20-30'}, {'op1': '>', 'val1': '30', 'op2': '<=', 'val2': '40', 'assignment': '30-40'}, {'op1': '>', 'val1': '40', 'op2': '<=', 'val2': '50', 'assignment': '50-60'}, {'op1': '>', 'val1': '50', 'op2': '', 'val2': '', 'assignment': '60+'}]}, {'banding': 'categorical', 'column': 'Region', 'output_column': 'RegionBand', 'rules': [{'value': 'Centre', 'assignment': 'Centre'}, {'value': 'London', 'assignment': 'London'}, {'value': 'Paris', 'assignment': 'Paris'}], 'default': 'Other'}, {'banding': 'continuous', 'column': 'VehPower', 'output_column': 'VehPowerBand', 'rules': [{'op1': '>=', 'val1': '0', 'op2': '<', 'val2': '3', 'assignment': '0-3'}, {'op1': '>=', 'val1': '3', 'op2': '<', 'val2': '6', 'assignment': '3-6'}, {'op1': '>=', 'val1': '6', 'op2': '', 'val2': '', 'assignment': '6+'}]}])
-def Banding_15(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """Banding 15 node"""
-    return df
+    return batch_quotes
 
 
 @pipeline.node(model_score=True, source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression", output_column="prediction", run_name="Model_Training_17", experiment_name="/Shared/haute/Model_Training_17", experiment_id="2825776902945395")
@@ -75,12 +69,6 @@ def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
     df_eager = df_eager.with_columns(pl.Series("prediction", preds))
     result = df_eager.lazy()
     return result
-
-
-@pipeline.node(tables=[{'name': 'Multit', 'factors': ['DrivAgeBand', 'RegionBand', 'VehPowerBand'], 'output_column': 'Multi', 'entries': [{'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 2}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}], 'default_value': '1.0'}])
-def Rating_Step_16(Banding_15: pl.LazyFrame) -> pl.LazyFrame:
-    """Rating Step 16 node"""
-    return df
 
 
 @pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
@@ -129,6 +117,18 @@ def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
     return frequency_set
 
 
+@pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '<=', 'val2': '20', 'assignment': '0-20'}, {'op1': '>', 'val1': '20', 'op2': '<=', 'val2': '30', 'assignment': '20-30'}, {'op1': '>', 'val1': '30', 'op2': '<=', 'val2': '40', 'assignment': '30-40'}, {'op1': '>', 'val1': '40', 'op2': '<=', 'val2': '50', 'assignment': '50-60'}, {'op1': '>', 'val1': '50', 'op2': '', 'val2': '', 'assignment': '60+'}]}, {'banding': 'categorical', 'column': 'Region', 'output_column': 'RegionBand', 'rules': [{'value': 'Centre', 'assignment': 'Centre'}, {'value': 'London', 'assignment': 'London'}, {'value': 'Paris', 'assignment': 'Paris'}], 'default': 'Other'}, {'banding': 'continuous', 'column': 'VehPower', 'output_column': 'VehPowerBand', 'rules': [{'op1': '>=', 'val1': '0', 'op2': '<', 'val2': '3', 'assignment': '0-3'}, {'op1': '>=', 'val1': '3', 'op2': '<', 'val2': '6', 'assignment': '3-6'}, {'op1': '>=', 'val1': '6', 'op2': '', 'val2': '', 'assignment': '6+'}]}])
+def optimiser_banding(policies: pl.LazyFrame) -> pl.LazyFrame:
+    """Banding 15 node"""
+    return df
+
+
+@pipeline.node(tables=[{'name': 'Multit', 'factors': ['DrivAgeBand', 'RegionBand', 'VehPowerBand'], 'output_column': 'Multi', 'entries': [{'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 2}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}], 'default_value': '1.0'}])
+def Rating_Step_16(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
+    """Rating Step 16 node"""
+    return df
+
+
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
@@ -169,6 +169,40 @@ def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFram
 def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """Output 13 node"""
     return calculate_premium
+
+
+@pipeline.node(scenario_expander=True, quote_id='IDpol', column_name='price_multiplier', min_value=0.8, max_value=1.2, steps=21, step_column='scenario_step')
+def price_scenarios(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
+    """price_scenarios node"""
+    return calculate_premium
+
+
+@pipeline.node
+def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
+    """optimiser_inputs node"""
+    df = (
+    price_scenarios
+    .with_columns(
+        price_scenario = pl.col('price_multiplier') * pl.col('premium'),
+        volume = (30-pl.col('scenario_step'))/100
+    )
+    .with_columns(
+        income = (pl.col('price_scenario') - pl.col('technical_price') - 5) * pl.col('volume')
+    )
+    )
+    return df
+
+
+@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_step='scenario_step', multiplier='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06)
+def online_optimisation(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
+    """online_optimisation node"""
+    return optimiser_inputs
+
+
+@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_step='scenario_step', multiplier='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']])
+def ratebook_optimisation(optimiser_inputs: pl.LazyFrame, optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
+    """Optimiser 24 node"""
+    return optimiser_inputs
 
 
 @pipeline.node
@@ -217,7 +251,12 @@ pipeline.connect("policies", "frequency_model")
 pipeline.connect("policies", "severity_model")
 pipeline.connect("severity_model", "calculate_premium")
 pipeline.connect("frequency_model", "calculate_premium")
-pipeline.connect("policies", "Banding_15")
-pipeline.connect("Banding_15", "Rating_Step_16")
+pipeline.connect("policies", "optimiser_banding")
+pipeline.connect("optimiser_banding", "Rating_Step_16")
 pipeline.connect("severity_set", "Model_Training_17")
 pipeline.connect("policies", "Model_Score_19")
+pipeline.connect("calculate_premium", "price_scenarios")
+pipeline.connect("price_scenarios", "optimiser_inputs")
+pipeline.connect("optimiser_inputs", "online_optimisation")
+pipeline.connect("optimiser_inputs", "ratebook_optimisation")
+pipeline.connect("optimiser_banding", "ratebook_optimisation")

@@ -443,3 +443,67 @@ class MlflowModelVersionSummary(BaseModel):
     status: str
     creation_timestamp: int | None = None
     description: str = ""
+
+
+# ---------------------------------------------------------------------------
+# /api/optimiser/*
+# ---------------------------------------------------------------------------
+
+
+class OptimiserSolveRequest(BaseModel):
+    graph: Graph
+    node_id: str
+
+
+class OptimiserSolveResponse(BaseModel):
+    status: str  # "started" | "error"
+    job_id: str | None = None
+    error: str | None = None
+
+
+class OptimiserStatusResponse(BaseModel):
+    status: str  # "running" | "completed" | "error"
+    progress: float = 0.0
+    message: str = ""
+    elapsed_seconds: float = 0.0
+    result: dict[str, Any] | None = None
+
+
+class OptimiserApplyRequest(BaseModel):
+    job_id: str
+
+
+class OptimiserApplyResponse(BaseModel):
+    status: str
+    total_objective: float = 0.0
+    constraints: dict[str, float] = Field(default_factory=dict)
+    preview: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int = 0
+    error: str | None = None
+
+
+class OptimiserSaveRequest(BaseModel):
+    job_id: str
+    output_path: str
+
+
+class OptimiserSaveResponse(BaseModel):
+    status: str
+    path: str | None = None
+    message: str = ""
+
+
+class OptimiserMlflowLogRequest(BaseModel):
+    job_id: str
+    experiment_name: str = "/optimisation"
+    model_name: str | None = None
+
+
+class OptimiserMlflowLogResponse(BaseModel):
+    status: str
+    backend: str = ""
+    experiment_name: str = ""
+    run_id: str | None = None
+    run_url: str | None = None
+    tracking_uri: str = ""
+    error: str | None = None

@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Rows3 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
@@ -44,6 +44,14 @@ const nodeTemplates = [
     icon: SlidersHorizontal,
     accent: "#14b8a6",
     defaultConfig: { factors: [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }] },
+  },
+  {
+    type: NODE_TYPES.SCENARIO_EXPANDER,
+    label: "Expander",
+    description: "Cross-join rows with scenario values (price, tier, etc.)",
+    icon: Rows3,
+    accent: "#0ea5e9",
+    defaultConfig: { quote_id: "quote_id", column_name: "multiplier", min_value: 0.8, max_value: 1.2, steps: 21, step_column: "scenario_step" },
   },
   {
     type: NODE_TYPES.RATING_STEP,
@@ -92,6 +100,14 @@ const nodeTemplates = [
     icon: FlaskConical,
     accent: "#a855f7",
     defaultConfig: { algorithm: "catboost", task: "regression", target: "", weight: "", exclude: [], params: { iterations: 1000, learning_rate: 0.05, depth: 6 }, split: { strategy: "random", test_size: 0.2, seed: 42 }, metrics: ["gini", "rmse"] },
+  },
+  {
+    type: NODE_TYPES.OPTIMISER,
+    label: "Optimiser",
+    description: "Price optimisation via Lagrangian solver",
+    icon: Target,
+    accent: "#f97316",
+    defaultConfig: { mode: "online", objective: "", constraints: {}, quote_id: "quote_id", scenario_step: "scenario_step", multiplier: "multiplier", max_iter: 50, tolerance: 1e-6 },
   },
 ]
 

@@ -250,6 +250,45 @@ export function logToMlflow(
 }
 
 // ---------------------------------------------------------------------------
+// Optimiser endpoints
+// ---------------------------------------------------------------------------
+
+export function solveOptimiser(
+  payload: { graph: GraphPayload; node_id: string },
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; job_id?: string; error?: string }> {
+  return post("/api/optimiser/solve", payload, { timeout: 300_000, ...options })
+}
+
+export function getOptimiserStatus<T = unknown>(
+  jobId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return request<T>(`/api/optimiser/solve/status/${encodeURIComponent(jobId)}`, options)
+}
+
+export function applyOptimiser(
+  payload: { job_id: string },
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; total_objective?: number; constraints?: Record<string, number>; preview?: Record<string, unknown>[]; row_count?: number; error?: string }> {
+  return post("/api/optimiser/apply", payload, { timeout: 120_000, ...options })
+}
+
+export function saveOptimiser(
+  payload: { job_id: string; output_path: string },
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; path?: string; message?: string }> {
+  return post("/api/optimiser/save", payload, options)
+}
+
+export function logOptimiserToMlflow(
+  payload: { job_id: string; experiment_name?: string; model_name?: string | null },
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string }> {
+  return post("/api/optimiser/mlflow/log", payload, options)
+}
+
+// ---------------------------------------------------------------------------
 // Databricks endpoints
 // ---------------------------------------------------------------------------
 

@@ -25,6 +25,8 @@ from haute._io import read_source as read_source
 from haute._mlflow_io import load_mlflow_model as load_mlflow_model
 from haute._topo import ancestors as ancestors
 from haute._topo import topo_sort_ids as topo_sort_ids
+from haute._types import OPTIMISER_CONFIG_KEYS as OPTIMISER_CONFIG_KEYS
+from haute._types import SCENARIO_EXPANDER_CONFIG_KEYS as SCENARIO_EXPANDER_CONFIG_KEYS
 from haute._types import GraphEdge as GraphEdge
 from haute._types import GraphNode as GraphNode
 from haute._types import HauteError as HauteError

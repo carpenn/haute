@@ -8,6 +8,7 @@ export { default as ExternalFileEditor } from "./ExternalFileEditor"
 export { default as ApiInputEditor } from "./ApiInputEditor"
 export { default as LiveSwitchEditor } from "./LiveSwitchEditor"
 export { default as SinkEditor } from "./SinkEditor"
+export { default as ScenarioExpanderEditor } from "./ScenarioExpanderEditor"
 export { default as SubmodelEditor } from "./SubmodelEditor"
 
 // Re-export shared types so NodePanel can use them

@@ -3,6 +3,7 @@ import { X, Link2, AlertTriangle } from "lucide-react"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
 import ModellingConfig from "./ModellingConfig"
+import OptimiserConfig from "./OptimiserConfig"
 import {
   DataSourceEditor,
   TransformEditor,
@@ -14,6 +15,7 @@ import {
   ApiInputEditor,
   LiveSwitchEditor,
   SinkEditor,
+  ScenarioExpanderEditor,
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
@@ -313,6 +315,17 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           />
         )
 
+      case NODE_TYPES.SCENARIO_EXPANDER:
+        return (
+          <ScenarioExpanderEditor
+            config={config}
+            onUpdate={handleConfigUpdate}
+            inputSources={inputSources}
+            onDeleteInput={onDeleteEdge}
+            upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
+          />
+        )
+
       case NODE_TYPES.RATING_STEP:
         return <RatingStepEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} allNodes={allNodes} />
 
@@ -327,6 +340,23 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           : ((node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined) || []
         return (
           <ModellingConfig
+            config={{ ...config, _nodeId: node.id }}
+            onUpdate={handleConfigUpdate}
+            allNodes={allNodes}
+            edges={edges}
+            submodels={submodels}
+            upstreamColumns={effectiveCols}
+          />
+        )
+      }
+
+      case NODE_TYPES.OPTIMISER: {
+        const upstreamCols = collectUpstreamColumns(node.id, edges, nodeMap)
+        const effectiveCols = upstreamCols.length > 0
+          ? upstreamCols
+          : ((node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined) || []
+        return (
+          <OptimiserConfig
             config={{ ...config, _nodeId: node.id }}
             onUpdate={handleConfigUpdate}
             allNodes={allNodes}

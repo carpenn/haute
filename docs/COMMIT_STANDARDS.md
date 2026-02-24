@@ -66,6 +66,7 @@ Every output value must be traceable back through the graph to its inputs, showi
 
 - No copy-pasted logic. If two places do the same thing, extract a shared function/module.
 - Shared utilities live in well-known locations (`graph_utils.py`, `frontend/src/utils/`).
+- Shared constants (e.g. config key tuples used by both parser and codegen) live in `_types.py` alongside the TypedDict they describe, and are re-exported through `graph_utils.py`.
 - Frontend and backend implementations of the same logic (e.g. `sanitizeName`) must reference each other in comments and stay in sync.
 
 ## 2. Simplicity (KISS)
@@ -85,6 +86,8 @@ Every output value must be traceable back through the graph to its inputs, showi
 - **Python**: All function signatures have type annotations. No `Any` unless truly unavoidable.
 - **Python API**: Every endpoint uses Pydantic request/response models. No `body: dict`.
 - **TypeScript**: No `any`. Use proper interfaces/types for all props, state, and API responses.
+- **PEP standards**: The codebase uses PEP 563 (`from __future__ import annotations` in every `.py` file), PEP 585 (`list`, `dict`, `tuple` — not `List`, `Dict`, `Tuple`), and PEP 604 (`str | None` — not `Optional[str]`).
+- **Pydantic field conventions**: Optional primitives use `str | None = None`. Mutable defaults use `Field(default_factory=dict)` or `Field(default_factory=list)`. Numeric defaults are inline: `float = 0.0`, `int = 0`.
 
 ## 5. Linter Clean
 
@@ -133,7 +136,9 @@ Every output value must be traceable back through the graph to its inputs, showi
 ## 12. Error Handling
 
 - Never swallow exceptions silently (`except: pass`).
+- The same applies to frontend code: `.catch(() => {})` is the TypeScript equivalent of `except: pass`. Always log with `console.warn` at minimum.
 - API errors return structured JSON with status codes, not bare strings.
+- `HTTPException` and other intentional error responses must be raised **outside** generic `try/except Exception` blocks. Otherwise the framework exception is caught and re-wrapped as a 500.
 - The GUI never crashes due to bad data. Worst case: show last good state + error banner.
 
 ## 13. Consistent Naming
@@ -152,7 +157,18 @@ Every output value must be traceable back through the graph to its inputs, showi
 ## 15. Security Basics
 
 - No hardcoded secrets or API keys. Use environment variables.
-- File access endpoints must validate paths stay within the project root.
+- File access endpoints must validate paths stay within the project root. Use `_get_project_root()` from `haute._sandbox`, resolve the path, and check with `.startswith()`:
+
+```python
+from haute._sandbox import _get_project_root
+
+base = _get_project_root()
+target = (base / user_path).resolve()
+if not str(target).startswith(str(base)):
+    raise HTTPException(status_code=403, detail="Cannot save outside project root")
+```
+
+- Path validation must include a test that verifies traversal paths like `../../etc/passwd` are rejected with 403.
 - No `eval()` on untrusted input. User code execution is sandboxed to pipeline context.
 - Sensitive internal docs (competitive analysis, credentials) must be in `.gitignore`.
 
@@ -248,6 +264,22 @@ logger.info("pipeline_parsed", file=str(path), node_count=len(graph.nodes))
 - **No sensitive data in logs.** Do not log file contents, DataFrame values, API keys, or user code. Log metadata (file paths, column names, row counts) only.
 - **Errors carry context up.** When catching and re-raising, use `raise ... from exc` to preserve the chain. When logging an error, include the exception: `logger.exception("...")` or `logger.error("...", exc_info=True)`.
 
+## 25. Background Job Pattern
+
+Long-running operations (model training, optimisation solving) use a consistent pattern across route modules:
+
+- **Job store**: `_jobs: dict[str, dict[str, Any]] = {}` at module level, keyed by a hex job ID from `os.urandom`.
+- **TTL eviction**: `_evict_stale_jobs()` called at the start of the submit endpoint. Jobs older than `_JOB_TTL_SECONDS` (24h) are removed.
+- **Thread dispatch**: The submit endpoint starts a `threading.Thread(target=_background_fn, daemon=True)` and returns `{"status": "started", "job_id": ...}` immediately.
+- **Status polling**: A GET endpoint returns the job's current status, progress, and elapsed time. The result is included when status is `"completed"`.
+- **Thin closures**: The thread target should be a thin dispatcher. Extract the actual work into module-level functions (e.g. `_solve_online`, `_solve_ratebook`) with explicit typed parameters so they are testable and readable.
+
+New route modules that add background jobs must follow this same structure. See `routes/modelling.py` and `routes/optimiser.py` as reference implementations.
+
+## 26. Formatted Lookup Tables
+
+When a file contains an aligned lookup table (e.g. `NODE_TYPE_META` in `nodeTypes.ts`), new entries must match the column alignment of existing entries. Misaligned entries make diffs noisy and the table harder to scan.
+
 ---
 
 ## LLM-Generated Code: Watch For These
@@ -322,6 +354,34 @@ x = x + 1  # increment x by 1
 - LLMs generate `if` branches for edge cases but don't test them. An untested branch is worse than no branch - it gives false confidence.
 - If you add an edge case handler, add a test for it. If you can't test it, add a `# TODO: untested` comment.
 
+### HTTPException swallowed by generic except
+
+```python
+# BAD - the 403 is caught and becomes a 500
+try:
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Outside root")
+    target.write_text(data)
+except Exception as exc:
+    raise HTTPException(status_code=500, detail=str(exc))
+```
+
+- LLMs naturally place validation inside the same `try` block as the I/O. `HTTPException` inherits from `Exception`, so it gets caught and re-wrapped as a 500.
+- Fix: move validation (and its `raise HTTPException`) **before** the `try` block.
+
+### Frontend silent catches
+
+```typescript
+// BAD - TypeScript equivalent of except: pass
+fetch(url).catch(() => {})
+
+// GOOD - at minimum, log the failure
+fetch(url).catch((e) => console.warn("request failed", e))
+```
+
+- LLMs generate `.catch(() => {})` to suppress Promise rejections. This hides network errors, auth failures, and API bugs.
+- Always log with `console.warn` at minimum. If the catch updates state (e.g. clearing a list), still log the error.
+
 ### Import bloat
 
 - LLMs import modules speculatively. If a function isn't used, the import shouldn't be there.
@@ -360,8 +420,10 @@ Design Philosophy
 - [ ] GUI interactions feel instant - no unnecessary re-renders, network calls, or blocking
 
 Engineering Standards
-- [ ] No duplicated logic
+- [ ] No duplicated logic; shared constants in `_types.py`, re-exported through `graph_utils.py`
 - [ ] All functions have type annotations
+- [ ] Uses PEP 563/585/604: `from __future__ import annotations`, `list`/`dict`/`tuple`, `X | None`
+- [ ] Pydantic fields: `str | None = None` for optionals, `Field(default_factory=...)` for mutables
 - [ ] API endpoints use Pydantic request/response models
 - [ ] `ruff check src/haute/` passes with zero errors
 - [ ] No unused imports, variables, or dead code
@@ -369,9 +431,11 @@ Engineering Standards
 - [ ] No new heavy dependencies in core
 - [ ] No resource leaks (file handles, async tasks, sockets)
 - [ ] Error cases return structured responses, not bare strings
+- [ ] `HTTPException` raised outside `try/except Exception` blocks
 - [ ] Consistent naming (snake_case Python and API fields, camelCase TypeScript functions/variables, PascalCase classes/components)
 - [ ] React state in hooks/refs, not module-level variables
-- [ ] File access endpoints validate paths stay within project root
+- [ ] File access endpoints validate paths with `_get_project_root()` + resolve + startswith
+- [ ] Path traversal rejection tested (e.g. `../../etc/passwd` → 403)
 - [ ] Tests added for new logic; bug fixes include regression tests
 - [ ] Design doc in `docs/` if change touches >3 files or changes a public API
 - [ ] PR is under 400 lines of diff, or split into a reviewable stack
@@ -379,11 +443,14 @@ Engineering Standards
 - [ ] Internal helpers prefixed with `_`; only intentional public API is exported
 - [ ] Tests are deterministic, fast, focused, and independent
 - [ ] No circular imports; import direction flows downward
-- [ ] Logging uses `logging` module, not `print`; correct levels; structured context
+- [ ] Logging uses structlog, not `print`; correct levels; structured context
+- [ ] Background jobs follow the standard pattern (§25): job store, TTL eviction, thread dispatch, status polling
+- [ ] New entries in aligned lookup tables match existing column alignment
 
 LLM Code Review
 - [ ] No silent fallbacks that mask errors (return empty data, `or {}`, `or []`)
-- [ ] No broad exception swallowing (`except Exception: pass`)
+- [ ] No broad exception swallowing (`except Exception: pass` in Python, `.catch(() => {})` in TypeScript)
+- [ ] No `HTTPException` inside generic `try/except Exception` blocks
 - [ ] All API calls and imports verified against actual codebase/library docs
 - [ ] No deprecated patterns (old typing imports, on_event, pandas)
 - [ ] No chained .get() on keys that should exist - fail loudly on missing data

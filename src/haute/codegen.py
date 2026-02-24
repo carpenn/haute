@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from haute._logging import get_logger
 from haute.graph_utils import (
+    OPTIMISER_CONFIG_KEYS,
+    SCENARIO_EXPANDER_CONFIG_KEYS,
     GraphEdge,
     GraphNode,
     NodeType,
@@ -126,6 +128,20 @@ _SINK_CSV = '''\
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     {first}.collect().write_csv("{path}")
+    return {first}
+'''
+
+_SCENARIO_EXPANDER = '''\
+@pipeline.node(scenario_expander=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first}
+'''
+
+_OPTIMISER = '''\
+@pipeline.node(optimiser=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
     return {first}
 '''
 
@@ -425,6 +441,40 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
             description=description,
             tables_repr=repr(emit_tables),
             params=params,
+            extra_kwargs=extra_kwargs,
+        )
+
+    elif node_type == NodeType.SCENARIO_EXPANDER:
+        params = _build_params(source_names)
+        first = source_names[0] if source_names else "df"
+        extra_parts = []
+        for key in SCENARIO_EXPANDER_CONFIG_KEYS:
+            val = config.get(key)
+            if val is not None and val != "":
+                extra_parts.append(f"{key}={val!r}")
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        return _SCENARIO_EXPANDER.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first=first,
+            extra_kwargs=extra_kwargs,
+        )
+
+    elif node_type == NodeType.OPTIMISER:
+        params = _build_params(source_names)
+        first = source_names[0] if source_names else "df"
+        extra_parts = []
+        for key in OPTIMISER_CONFIG_KEYS:
+            val = config.get(key)
+            if val is not None and val != "" and val != []:
+                extra_parts.append(f"{key}={val!r}")
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        return _OPTIMISER.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first=first,
             extra_kwargs=extra_kwargs,
         )
 
