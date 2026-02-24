@@ -43,6 +43,7 @@ class NodeType(StrEnum):
     MODELLING = "modelling"
     OPTIMISER = "optimiser"
     SCENARIO_EXPANDER = "scenarioExpander"
+    OPTIMISER_APPLY = "optimiserApply"
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
 
@@ -229,6 +230,19 @@ class OptimiserConfig(TypedDict, total=False):
     model_name: str
 
 
+class OptimiserApplyConfig(TypedDict, total=False):
+    """Config for optimiserApply nodes."""
+
+    artifact_path: str          # path to saved optimiser artifact JSON
+    version_column: str         # column name for version tracking (default "__optimiser_version__")
+    # MLflow source fields
+    sourceType: str             # "file" | "run" | "registered"
+    registered_model: str       # registered model name (when sourceType="registered")
+    version: str                # model version or "latest" (when sourceType="registered")
+    experiment_id: str          # MLflow experiment ID (when sourceType="run")
+    run_id: str                 # MLflow run ID (when sourceType="run")
+
+
 class ScenarioExpanderConfig(TypedDict, total=False):
     """Config for scenarioExpander nodes."""
 
@@ -248,6 +262,12 @@ OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
     "max_cd_iterations", "cd_tolerance", "structure_mode",
     "scored_input", "factors_input",
     "mlflow_experiment", "model_name",
+)
+
+OPTIMISER_APPLY_CONFIG_KEYS: tuple[str, ...] = (
+    "artifact_path", "version_column",
+    "sourceType", "registered_model", "version",
+    "experiment_id", "run_id",
 )
 
 SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (

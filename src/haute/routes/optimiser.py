@@ -596,6 +596,48 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _build_artifact_payload(
+    job: dict[str, Any],
+    solve_result: Any,
+    version_override: str = "",
+) -> dict[str, Any]:
+    """Build the JSON payload for an optimiser artifact.
+
+    Shared by both file-save and MLflow-log paths to avoid duplication.
+    """
+    from datetime import datetime, timezone
+
+    node_label = job.get("node_label", "optimiser")
+    label_slug = node_label.lower().replace(" ", "_")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")  # noqa: UP017
+    auto_version = f"{label_slug}_{ts}"
+    job_config = job.get("config", {})
+
+    payload: dict[str, Any] = {
+        "version": version_override or auto_version,
+        "created_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
+        "mode": job_config.get("mode", "online"),
+        "lambdas": solve_result.lambdas,
+        "total_objective": solve_result.total_objective,
+        "baseline_objective": getattr(solve_result, "baseline_objective", None),
+        "total_constraints": solve_result.total_constraints,
+        "baseline_constraints": getattr(solve_result, "baseline_constraints", None),
+        "constraints": job_config.get("constraints"),
+        "objective": job_config.get("objective"),
+        "quote_id": job_config.get("quote_id", "quote_id"),
+        "scenario_index": job_config.get("scenario_index", "scenario_index"),
+        "scenario_value": job_config.get("scenario_value", "scenario_value"),
+        "chunk_size": job_config.get("chunk_size", 500_000),
+        "converged": solve_result.converged,
+        "iterations": getattr(solve_result, "iterations", None),
+        "cd_iterations": getattr(solve_result, "cd_iterations", None),
+    }
+    if job_config.get("mode") == "ratebook":
+        payload["factor_tables"] = job.get("result", {}).get("factor_tables")
+        payload["clamp_rate"] = getattr(solve_result, "clamp_rate", None)
+    return payload
+
+
 @router.post("/save", response_model=OptimiserSaveResponse)
 def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     """Save the optimisation result to disk."""
@@ -621,28 +663,7 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save config + lambdas as JSON
-        job_config = job.get("config", {})
-        payload = {
-            "mode": job_config.get("mode", "online"),
-            "lambdas": solve_result.lambdas,
-            "total_objective": solve_result.total_objective,
-            "baseline_objective": getattr(solve_result, "baseline_objective", None),
-            "total_constraints": solve_result.total_constraints,
-            "baseline_constraints": getattr(solve_result, "baseline_constraints", None),
-            "constraints": job_config.get("constraints"),
-            "objective": job_config.get("objective"),
-            "quote_id": job_config.get("quote_id", "quote_id"),
-            "scenario_index": job_config.get("scenario_index", "scenario_index"),
-            "scenario_value": job_config.get("scenario_value", "scenario_value"),
-            "chunk_size": job_config.get("chunk_size", 500_000),
-            "converged": solve_result.converged,
-            "iterations": getattr(solve_result, "iterations", None),
-            "cd_iterations": getattr(solve_result, "cd_iterations", None),
-        }
-        if job_config.get("mode") == "ratebook":
-            payload["factor_tables"] = job.get("result", {}).get("factor_tables")
-            payload["clamp_rate"] = getattr(solve_result, "clamp_rate", None)
+        payload = _build_artifact_payload(job, solve_result, version_override=body.version)
         out.write_text(json.dumps(payload, indent=2, default=str))
         logger.info("result_saved", path=str(out), job_id=body.job_id)
 
@@ -714,6 +735,12 @@ def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
                     artifact_path = Path(tmpdir) / f"{name}.json"
                     artifact_path.write_text(json.dumps(data, indent=2, default=str))
                     mlflow.log_artifact(str(artifact_path))
+
+                # Also log the complete artifact used by OPTIMISER_APPLY
+                complete_payload = _build_artifact_payload(job, solve_result)
+                complete_path = Path(tmpdir) / "optimiser_result.json"
+                complete_path.write_text(json.dumps(complete_payload, indent=2, default=str))
+                mlflow.log_artifact(str(complete_path))
 
             run_id = run.info.run_id
             run_url = None

@@ -129,6 +129,12 @@ def Rating_Step_16(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
+@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', run_id='db866caae8d7451bba18285a2c669b71')
+def apply_ratebook(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
+    """apply_ratebook node"""
+    return optimiser_banding
+
+
 @pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
@@ -191,6 +197,12 @@ def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
     )
     )
     return df
+
+
+@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', run_id='fe9fcd1fe3734556af235b4335837e70')
+def apply_online(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
+    """Apply Optimisation 23 node"""
+    return optimiser_inputs
 
 
 @pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06)
@@ -260,3 +272,5 @@ pipeline.connect("price_scenarios", "optimiser_inputs")
 pipeline.connect("optimiser_inputs", "online_optimisation")
 pipeline.connect("optimiser_inputs", "ratebook_optimisation")
 pipeline.connect("optimiser_banding", "ratebook_optimisation")
+pipeline.connect("optimiser_inputs", "apply_online")
+pipeline.connect("optimiser_banding", "apply_ratebook")

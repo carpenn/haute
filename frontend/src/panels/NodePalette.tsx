@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Rows3 } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
@@ -108,6 +108,14 @@ const nodeTemplates = [
     icon: Target,
     accent: "#f97316",
     defaultConfig: { mode: "online", objective: "", constraints: {}, quote_id: "quote_id", scenario_index: "scenario_index", scenario_value: "scenario_value", max_iter: 50, tolerance: 1e-6 },
+  },
+  {
+    type: NODE_TYPES.OPTIMISER_APPLY,
+    label: "Apply Optimisation",
+    description: "Apply saved optimisation results (lambdas or factor tables)",
+    icon: Crosshair,
+    accent: "#22c55e",
+    defaultConfig: { sourceType: "file", artifact_path: "", version_column: "__optimiser_version__" },
   },
 ]
 

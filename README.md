@@ -28,7 +28,7 @@ Haute is a free, open-source pricing engine that changes how this works. You get
 
 Haute opens in your browser. You build rating pipelines by dragging nodes onto a canvas and connecting them - data sources, transforms, model scores, rating steps, outputs. Click any node and its data appears instantly in a preview table below.
 
-There are ten node types, each purpose-built for pricing work:
+There are fifteen node types, each purpose-built for pricing work:
 
 | Node | What it does |
 |---|---|
@@ -38,7 +38,12 @@ There are ten node types, each purpose-built for pricing work:
 | **Model Score** | Scores records through a GLM, CatBoost, XGBoost, or any Python model |
 | **Banding** | Groups continuous or categorical values into bands |
 | **Rating Step** | Applies rating factors from a lookup table - multiply, add, cap, floor |
+| **External File** | Loads an external object (pickle, JSON, joblib, CatBoost) with optional code |
 | **Live Switch** | Routes between live API data and batch data |
+| **Modelling** | Trains a model (CatBoost) with MLflow experiment tracking |
+| **Optimiser** | Runs online or ratebook price optimisation with constraints |
+| **Optimiser Apply** | Applies saved optimisation results (lambdas or factor tables) to score data |
+| **Scenario Expander** | Expands each row into multiple scenarios for optimisation |
 | **Output** | Defines the final price fields returned by your API |
 | **Data Sink** | Writes results to a file |
 | **Submodel** | Collapses a group of nodes into a single reusable block |

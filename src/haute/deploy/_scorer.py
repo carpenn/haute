@@ -102,6 +102,60 @@ def score_graph(
 
                     return func_name, external_passthrough, False
 
+        # Intercept: optimiserApply with remapped artifact path or MLflow source
+        if node_type == NodeType.OPTIMISER_APPLY:
+            _vcol = config.get("version_column", "__optimiser_version__")
+            _st = config.get("sourceType", "")
+
+            # File-based with remap
+            if remap:
+                raw_path = config.get("artifact_path", "")
+                artifact_key = f"{nid}__{PurePosixPath(raw_path).name}"
+                if artifact_key in remap:
+                    remapped_path = remap[artifact_key]
+
+                    def optimiser_apply_fn(
+                        *dfs: _Frame,
+                        _path: str = remapped_path,
+                        _version_col: str = _vcol,
+                    ) -> _Frame:
+                        from haute._optimiser_io import load_optimiser_artifact
+                        from haute.executor import _dispatch_apply
+
+                        artifact = load_optimiser_artifact(_path)
+                        lf = dfs[0] if dfs else pl.LazyFrame()
+                        return _dispatch_apply(lf, artifact, _version_col)
+
+                    return func_name, optimiser_apply_fn, False
+
+            # MLflow-sourced (downloads from MLflow at runtime)
+            if _st in ("run", "registered"):
+                _rid = config.get("run_id", "")
+                _rm = config.get("registered_model", "")
+                _ver = config.get("version", "latest")
+
+                def optimiser_apply_mlflow_fn(
+                    *dfs: _Frame,
+                    _source_type: str = _st,
+                    _run_id: str = _rid,
+                    _reg_model: str = _rm,
+                    _opt_ver: str = _ver,
+                    _version_col: str = _vcol,
+                ) -> _Frame:
+                    from haute._optimiser_io import load_mlflow_optimiser_artifact
+                    from haute.executor import _dispatch_apply
+
+                    artifact = load_mlflow_optimiser_artifact(
+                        source_type=_source_type,
+                        run_id=_run_id,
+                        registered_model=_reg_model,
+                        version=_opt_ver,
+                    )
+                    lf = dfs[0] if dfs else pl.LazyFrame()
+                    return _dispatch_apply(lf, artifact, _version_col)
+
+                return func_name, optimiser_apply_mlflow_fn, False
+
         # Intercept: static dataSource with remapped artifact path
         if node_type == NodeType.DATA_SOURCE and nid not in input_set and remap:
             raw_path = config.get("path", "")

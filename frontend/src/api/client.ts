@@ -355,7 +355,7 @@ export function deleteCache(
 }
 
 // ---------------------------------------------------------------------------
-// MLflow endpoints (used by ModelScoreEditor)
+// MLflow endpoints (used by ModelScoreEditor + OptimiserApplyEditor)
 // ---------------------------------------------------------------------------
 
 export function getExperiments(
@@ -366,9 +366,12 @@ export function getExperiments(
 
 export function getRuns(
   experimentId: string,
+  artifactFilter?: string,
   options?: { signal?: AbortSignal },
 ): Promise<{ run_id: string; run_name: string; metrics: Record<string, number>; artifacts: string[] }[]> {
-  return request(`/api/mlflow/runs?experiment_id=${encodeURIComponent(experimentId)}`, options)
+  const params = new URLSearchParams({ experiment_id: experimentId })
+  if (artifactFilter) params.set("artifact_filter", artifactFilter)
+  return request(`/api/mlflow/runs?${params.toString()}`, options)
 }
 
 export function getModels(

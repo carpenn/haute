@@ -16,6 +16,7 @@ import {
   LiveSwitchEditor,
   SinkEditor,
   ScenarioExpanderEditor,
+  OptimiserApplyEditor,
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
@@ -369,6 +370,16 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           />
         )
       }
+
+      case NODE_TYPES.OPTIMISER_APPLY:
+        return (
+          <OptimiserApplyEditor
+            config={config}
+            onUpdate={handleConfigUpdate}
+            inputSources={inputSources}
+            onDeleteInput={onDeleteEdge}
+          />
+        )
 
       case NODE_TYPES.TRANSFORM:
         return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />

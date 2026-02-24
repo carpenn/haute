@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from haute._logging import get_logger
 from haute.graph_utils import (
+    OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
     GraphEdge,
@@ -140,6 +141,13 @@ def {func_name}({params}) -> pl.LazyFrame:
 
 _OPTIMISER = '''\
 @pipeline.node(optimiser=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first}
+'''
+
+_OPTIMISER_APPLY = '''\
+@pipeline.node(optimiser_apply=True{extra_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
@@ -471,6 +479,23 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 extra_parts.append(f"{key}={val!r}")
         extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
         return _OPTIMISER.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first=first,
+            extra_kwargs=extra_kwargs,
+        )
+
+    elif node_type == NodeType.OPTIMISER_APPLY:
+        params = _build_params(source_names)
+        first = source_names[0] if source_names else "df"
+        extra_parts = []
+        for key in OPTIMISER_APPLY_CONFIG_KEYS:
+            val = config.get(key)
+            if val is not None and val != "":
+                extra_parts.append(f"{key}={val!r}")
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        return _OPTIMISER_APPLY.format(
             func_name=func_name,
             description=description,
             params=params,

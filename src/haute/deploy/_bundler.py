@@ -51,6 +51,15 @@ def collect_artifacts(
             _check_exists(abs_path, nid, "externalFile")
             artifacts[artifact_name] = abs_path
 
+        elif node_type == NodeType.OPTIMISER_APPLY:
+            raw_path = config.get("artifact_path", "")
+            if not raw_path:
+                continue
+            abs_path = _resolve_path(raw_path, pipeline_dir)
+            artifact_name = _artifact_name(nid, abs_path)
+            _check_exists(abs_path, nid, "optimiserApply")
+            artifacts[artifact_name] = abs_path
+
         elif node_type == NodeType.DATA_SOURCE and nid not in input_set:
             raw_path = config.get("path", "")
             if not raw_path:

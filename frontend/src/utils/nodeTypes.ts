@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Rows3 } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const NODE_TYPES = {
@@ -14,6 +14,7 @@ export const NODE_TYPES = {
   LIVE_SWITCH: "liveSwitch",
   MODELLING: "modelling",
   OPTIMISER: "optimiser",
+  OPTIMISER_APPLY: "optimiserApply",
   SCENARIO_EXPANDER: "scenarioExpander",
   SUBMODEL: "submodel",
   SUBMODEL_PORT: "submodelPort",
@@ -37,11 +38,12 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
   [NODE_TYPES.DATA_SINK]:     { icon: HardDriveDownload,  color: "#f59e0b", label: "SINK" },
   [NODE_TYPES.EXTERNAL_FILE]: { icon: FileArchive,        color: "#ec4899", label: "EXTERNAL" },
   [NODE_TYPES.LIVE_SWITCH]:   { icon: ToggleLeft,         color: "#f59e0b", label: "SWITCH" },
-  [NODE_TYPES.MODELLING]:          { icon: FlaskConical,       color: "#a855f7", label: "TRAINING" },
-  [NODE_TYPES.OPTIMISER]:          { icon: Target,             color: "#f97316", label: "OPTIMISER" },
-  [NODE_TYPES.SCENARIO_EXPANDER]:  { icon: Rows3,              color: "#0ea5e9", label: "EXPANDER" },
-  [NODE_TYPES.SUBMODEL]:           { icon: Package,            color: "#ea580c", label: "SUBMODEL" },
-  [NODE_TYPES.SUBMODEL_PORT]:      { icon: ArrowRight,         color: "#94a3b8", label: "PORT" },
+  [NODE_TYPES.MODELLING]:         { icon: FlaskConical,       color: "#a855f7", label: "TRAINING" },
+  [NODE_TYPES.OPTIMISER]:         { icon: Target,             color: "#f97316", label: "OPTIMISER" },
+  [NODE_TYPES.OPTIMISER_APPLY]:   { icon: Crosshair,          color: "#22c55e", label: "APPLY OPT" },
+  [NODE_TYPES.SCENARIO_EXPANDER]: { icon: Rows3,              color: "#0ea5e9", label: "EXPANDER" },
+  [NODE_TYPES.SUBMODEL]:          { icon: Package,            color: "#ea580c", label: "SUBMODEL" },
+  [NODE_TYPES.SUBMODEL_PORT]:     { icon: ArrowRight,         color: "#94a3b8", label: "PORT" },
 }
 
 export const SINGLETON_TYPES = new Set<NodeTypeValue>([

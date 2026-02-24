@@ -341,6 +341,55 @@ def _build_node_fn(
 
         return func_name, optimiser_passthrough, False
 
+    elif node_type == NodeType.OPTIMISER_APPLY:
+        _artifact_path = config.get("artifact_path", "")
+        _version_col = config.get("version_column", "__optimiser_version__")
+        _source_type = config.get("sourceType", "")
+        _run_id = config.get("run_id", "")
+        _registered_model = config.get("registered_model", "")
+        _opt_version = config.get("version", "latest")
+
+        # Determine if we have a valid source configured
+        _has_file = bool(_artifact_path) and _source_type in ("", "file")
+        _has_mlflow = _source_type in ("run", "registered") and (
+            (_source_type == "run" and _run_id)
+            or (_source_type == "registered" and _registered_model)
+        )
+
+        if not _has_file and not _has_mlflow:
+
+            def optimiser_apply_passthrough(*dfs: _Frame) -> _Frame:
+                return dfs[0] if dfs else pl.LazyFrame()
+
+            return func_name, optimiser_apply_passthrough, False
+
+        def optimiser_apply_fn(
+            *dfs: _Frame,
+            _path: str = _artifact_path,
+            _vcol: str = _version_col,
+            _st: str = _source_type,
+            _rid: str = _run_id,
+            _rm: str = _registered_model,
+            _ver: str = _opt_version,
+        ) -> _Frame:
+            if _st in ("run", "registered"):
+                from haute._optimiser_io import load_mlflow_optimiser_artifact
+
+                artifact = load_mlflow_optimiser_artifact(
+                    source_type=_st,
+                    run_id=_rid,
+                    registered_model=_rm,
+                    version=_ver,
+                )
+            else:
+                from haute._optimiser_io import load_optimiser_artifact
+
+                artifact = load_optimiser_artifact(_path)
+
+            return _dispatch_apply(dfs[0] if dfs else pl.LazyFrame(), artifact, _vcol)
+
+        return func_name, optimiser_apply_fn, False
+
     elif node_type == NodeType.MODELLING:
         # Pass-through in preview mode. Training happens via /api/modelling/train.
         def modelling_passthrough(*dfs: _Frame) -> _Frame:
@@ -438,6 +487,125 @@ def _build_node_fn(
             return dfs[0] if dfs else pl.LazyFrame()
 
         return func_name, default_passthrough, False
+
+
+# ---------------------------------------------------------------------------
+# OptimiserApply helpers
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_apply(
+    lf: _Frame,
+    artifact: dict[str, Any],
+    version_col: str,
+) -> _Frame:
+    """Route to the correct apply function based on artifact mode."""
+    mode = artifact.get("mode", "online")
+    version = artifact.get("version", "")
+    if mode == "ratebook":
+        return _apply_ratebook(lf, artifact, version, version_col)
+    return _apply_online(lf, artifact, version, version_col)
+
+
+def _apply_online(
+    lf: _Frame,
+    artifact: dict[str, Any],
+    version: str,
+    version_col: str,
+) -> _Frame:
+    """Apply online optimisation: Lagrangian argmax with stored lambdas."""
+    from price_contour import ApplyOptimiser
+
+    qid_col = artifact.get("quote_id", "quote_id")
+    step_col = artifact.get("scenario_index", "scenario_index")
+    mult_col = artifact.get("scenario_value", "scenario_value")
+    objective = artifact.get("objective", "expected_income")
+    constraints = artifact.get("constraints") or {}
+
+    # Cast columns to the types price-contour expects (same as solve endpoint)
+    cast_exprs = [
+        pl.col(qid_col).cast(pl.Utf8),
+        pl.col(step_col).cast(pl.Int32),
+        pl.col(mult_col).cast(pl.Float32),
+        pl.col(objective).cast(pl.Float32),
+    ]
+    for c in constraints:
+        cast_exprs.append(pl.col(c).cast(pl.Float32))
+
+    df_eager = lf.with_columns(cast_exprs).collect()
+
+    applier = ApplyOptimiser(
+        lambdas=artifact["lambdas"],
+        objective=objective,
+        constraints=constraints,
+        quote_id=qid_col,
+        scenario_index=step_col,
+        scenario_value=mult_col,
+        chunk_size=artifact.get("chunk_size", 500_000),
+    )
+    result = applier.apply(df_eager)
+    result_df = result.dataframe
+
+    if version:
+        result_df = result_df.with_columns(pl.lit(version).alias(version_col))
+
+    return result_df.lazy()
+
+
+def _apply_ratebook(
+    lf: _Frame,
+    artifact: dict[str, Any],
+    version: str,
+    version_col: str,
+) -> _Frame:
+    """Apply ratebook optimisation: factor table lookups with stored tables.
+
+    Each factor group produces a ``{name}_optimised_factor`` column, and
+    they are multiplied together into ``optimised_factor`` so that
+    downstream nodes have a single combined relativity.
+    """
+    factor_tables = artifact.get("factor_tables", {})
+    if not factor_tables:
+        logger.warning("ratebook_apply_no_factor_tables", artifact_keys=list(artifact.keys()))
+        result_lf = lf
+    else:
+        result_lf = lf
+        factor_cols: list[str] = []
+        for _name, entries in factor_tables.items():
+            if not entries:
+                continue
+            # factor_tables format from save: list of
+            # {"__factor_group__": level, "optimal_scenario_value": value}
+            # Convert to the rating table format expected by _apply_rating_table
+            factor_col = "__factor_group__"
+            out_col = f"{_name}_optimised_factor"
+            table = {
+                "factors": [_name],
+                "outputColumn": out_col,
+                "entries": [
+                    {_name: e[factor_col], "value": e["optimal_scenario_value"]}
+                    for e in entries
+                    if factor_col in e
+                ],
+                "defaultValue": "1.0",
+            }
+            result_lf = _apply_rating_table(result_lf, table)
+            factor_cols.append(out_col)
+
+        # Combine individual factor columns into a single relativity
+        if len(factor_cols) > 1:
+            result_lf = _combine_rating_columns(
+                result_lf, factor_cols, "multiply", "optimised_factor",
+            )
+        elif len(factor_cols) == 1:
+            result_lf = result_lf.with_columns(
+                pl.col(factor_cols[0]).alias("optimised_factor"),
+            )
+
+    if version:
+        result_lf = result_lf.with_columns(pl.lit(version).alias(version_col))
+
+    return result_lf
 
 
 # ---------------------------------------------------------------------------

@@ -76,11 +76,19 @@ def list_experiments() -> list[MlflowExperimentSummary]:
 def list_runs(
     experiment_id: str = Query(..., description="MLflow experiment ID"),
     max_results: int = Query(20, ge=1, le=100),
+    artifact_filter: str = Query(
+        "cbm",
+        description=(
+            "Filter runs by artifact type: "
+            "'cbm' for CatBoost models (.cbm), "
+            "'optimiser' for optimiser results (optimiser_result.json)"
+        ),
+    ),
 ) -> list[MlflowRunSummary]:
-    """List runs for an experiment, filtered to FINISHED runs with .cbm artifacts.
+    """List runs for an experiment, filtered to FINISHED runs with matching artifacts.
 
     Note: Each run requires a separate ``list_artifacts`` call to check for
-    ``.cbm`` files.  MLflow has no batch artifacts API, so this is O(N) in
+    matching files.  MLflow has no batch artifacts API, so this is O(N) in
     the number of runs.  The ``max_results`` cap bounds the total calls.
     """
     mlflow, client = _ensure_tracking()
@@ -95,14 +103,19 @@ def list_runs(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
 
+    def _match(path: str) -> bool:
+        if artifact_filter == "optimiser":
+            return path == "optimiser_result.json"
+        return path.endswith(".cbm")
+
     results: list[MlflowRunSummary] = []
     for run in runs:
         run_id = run.info.run_id
-        # Check for .cbm artifacts (N+1 — unavoidable without batch API)
+        # Check for matching artifacts (N+1 — unavoidable without batch API)
         try:
             artifacts = client.list_artifacts(run_id)
-            cbm_paths = [a.path for a in artifacts if a.path.endswith(".cbm")]
-            if not cbm_paths:
+            matched = [a.path for a in artifacts if _match(a.path)]
+            if not matched:
                 continue
         except Exception as exc:
             logger.warning("artifact_list_failed", run_id=run_id, error=str(exc))
@@ -115,7 +128,7 @@ def list_runs(
             start_time=run.info.start_time,
             metrics=run.data.metrics or {},
             params=run.data.params or {},
-            artifacts=cbm_paths,
+            artifacts=matched,
         ))
 
     return results

@@ -498,6 +498,7 @@ class OptimiserFrontierResponse(BaseModel):
 class OptimiserSaveRequest(BaseModel):
     job_id: str
     output_path: str
+    version: str = ""  # optional user-specified version label; auto-generated if empty
 
 
 class OptimiserSaveResponse(BaseModel):

@@ -14,6 +14,7 @@ import ast
 from typing import Any
 
 from haute.graph_utils import (
+    OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
     GraphEdge,
@@ -45,6 +46,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeTyp
         return NodeType.OUTPUT
     if decorator_kwargs.get("scenario_expander"):
         return NodeType.SCENARIO_EXPANDER
+    if decorator_kwargs.get("optimiser_apply"):
+        return NodeType.OPTIMISER_APPLY
     if decorator_kwargs.get("optimiser"):
         return NodeType.OPTIMISER
     if decorator_kwargs.get("modelling"):
@@ -471,6 +474,10 @@ def _build_node_config(
             config["combinedColumn"] = str(combined)
     elif node_type == NodeType.SCENARIO_EXPANDER:
         for key in SCENARIO_EXPANDER_CONFIG_KEYS:
+            if key in decorator_kwargs:
+                config[key] = decorator_kwargs[key]
+    elif node_type == NodeType.OPTIMISER_APPLY:
+        for key in OPTIMISER_APPLY_CONFIG_KEYS:
             if key in decorator_kwargs:
                 config[key] = decorator_kwargs[key]
     elif node_type == NodeType.OPTIMISER:
