@@ -29,7 +29,7 @@ def client():
 def _make_scored_data(tmp_path, n_quotes: int = 50, n_steps: int = 5) -> str:
     """Create a scored DataFrame in long format for optimisation tests.
 
-    Columns: quote_id, scenario_step, multiplier, expected_income, volume
+    Columns: quote_id, scenario_index, scenario_value, expected_income, volume
     """
     rng = np.random.RandomState(42)
     quote_ids = []
@@ -37,11 +37,11 @@ def _make_scored_data(tmp_path, n_quotes: int = 50, n_steps: int = 5) -> str:
     mults = []
     incomes = []
     volumes = []
-    multipliers = np.linspace(0.8, 1.2, n_steps).astype(np.float32)
+    scenario_values = np.linspace(0.8, 1.2, n_steps).astype(np.float32)
     for q in range(n_quotes):
         base_income = rng.uniform(100, 1000)
         base_volume = rng.uniform(0.5, 1.5)
-        for s, m in enumerate(multipliers):
+        for s, m in enumerate(scenario_values):
             quote_ids.append(f"q_{q:04d}")
             steps.append(s)
             mults.append(float(m))
@@ -49,8 +49,8 @@ def _make_scored_data(tmp_path, n_quotes: int = 50, n_steps: int = 5) -> str:
             volumes.append(float(base_volume * (2.0 - m)))
     df = pl.DataFrame({
         "quote_id": quote_ids,
-        "scenario_step": pl.Series(steps, dtype=pl.Int32),
-        "multiplier": pl.Series(mults, dtype=pl.Float32),
+        "scenario_index": pl.Series(steps, dtype=pl.Int32),
+        "scenario_value": pl.Series(mults, dtype=pl.Float32),
         "expected_income": pl.Series(incomes, dtype=pl.Float32),
         "volume": pl.Series(volumes, dtype=pl.Float32),
     })
@@ -71,8 +71,8 @@ def _make_optimiser_graph(data_path: str, config: dict | None = None) -> dict:
         "objective": "expected_income",
         "constraints": {"volume": {"min": 0.90}},
         "quote_id": "quote_id",
-        "scenario_step": "scenario_step",
-        "multiplier": "multiplier",
+        "scenario_index": "scenario_index",
+        "scenario_value": "scenario_value",
         "max_iter": 20,
         "tolerance": 1e-4,
     }
@@ -351,11 +351,11 @@ def _make_ratebook_data(tmp_path, n_quotes: int = 50, n_steps: int = 5):
     mults = []
     incomes = []
     volumes = []
-    multipliers = np.linspace(0.8, 1.2, n_steps).astype(np.float32)
+    scenario_values = np.linspace(0.8, 1.2, n_steps).astype(np.float32)
     for q in range(n_quotes):
         base_income = rng.uniform(100, 1000)
         base_volume = rng.uniform(0.5, 1.5)
-        for s, m in enumerate(multipliers):
+        for s, m in enumerate(scenario_values):
             quote_ids.append(f"q_{q:04d}")
             steps.append(s)
             mults.append(float(m))
@@ -364,8 +364,8 @@ def _make_ratebook_data(tmp_path, n_quotes: int = 50, n_steps: int = 5):
 
     scored_df = pl.DataFrame({
         "quote_id": quote_ids,
-        "scenario_step": pl.Series(steps, dtype=pl.Int32),
-        "multiplier": pl.Series(mults, dtype=pl.Float32),
+        "scenario_index": pl.Series(steps, dtype=pl.Int32),
+        "scenario_value": pl.Series(mults, dtype=pl.Float32),
         "expected_income": pl.Series(incomes, dtype=pl.Float32),
         "volume": pl.Series(volumes, dtype=pl.Float32),
     })
@@ -413,8 +413,8 @@ def _make_ratebook_graph(data_path: str, banding_data_path: str) -> dict:
                         "objective": "expected_income",
                         "constraints": {"volume": {"min": 0.90}},
                         "quote_id": "quote_id",
-                        "scenario_step": "scenario_step",
-                        "multiplier": "multiplier",
+                        "scenario_index": "scenario_index",
+                        "scenario_value": "scenario_value",
                         "max_iter": 20,
                         "tolerance": 1e-4,
                         "max_cd_iterations": 5,
@@ -501,9 +501,9 @@ class TestSolveWithHistory:
         assert "total_objective" in first
 
 
-class TestMultiplierStats:
+class TestScenarioValueStats:
     @pytest.mark.usefixtures("_widen_sandbox_root")
-    def test_multiplier_stats_in_result(self, client, scored_data):
+    def test_scenario_value_stats_in_result(self, client, scored_data):
         graph = _make_optimiser_graph(scored_data)
         resp = client.post(
             "/api/optimiser/solve",
@@ -513,13 +513,13 @@ class TestMultiplierStats:
         status = _poll_until_done(client, job_id)
         assert status["status"] == "completed"
         result = status["result"]
-        assert "multiplier_stats" in result
-        stats = result["multiplier_stats"]
+        assert "scenario_value_stats" in result
+        stats = result["scenario_value_stats"]
         assert "mean" in stats
         assert "p50" in stats
         assert "pct_increase" in stats
-        assert "multiplier_histogram" in result
-        hist = result["multiplier_histogram"]
+        assert "scenario_value_histogram" in result
+        hist = result["scenario_value_histogram"]
         assert "counts" in hist
         assert "edges" in hist
         assert len(hist["counts"]) == 20
@@ -532,8 +532,8 @@ class TestColumnValidation:
         """Data without a constraint column returns 400."""
         df = pl.DataFrame({
             "quote_id": ["q_0"] * 5,
-            "scenario_step": pl.Series(range(5), dtype=pl.Int32),
-            "multiplier": pl.Series(
+            "scenario_index": pl.Series(range(5), dtype=pl.Int32),
+            "scenario_value": pl.Series(
                 np.linspace(0.8, 1.2, 5).tolist(), dtype=pl.Float32
             ),
             "expected_income": pl.Series(
@@ -633,7 +633,7 @@ def _make_base_data(tmp_path, n_quotes: int = 50) -> str:
 def _make_expander_graph(data_path: str) -> dict:
     """Build a 4-node graph: dataSource → expander → transform → optimiser.
 
-    The expander cross-joins multiplier and scenario_step columns.
+    The expander cross-joins scenario_value and scenario_index columns.
     The transform computes objective and constraint columns.
     """
     graph = make_graph({
@@ -655,10 +655,10 @@ def _make_expander_graph(data_path: str) -> dict:
                         "code": (
                             "df = df.with_columns([\n"
                             "    (pl.col('base_income') * "
-                            "pl.col('multiplier'))"
+                            "pl.col('scenario_value'))"
                             ".alias('expected_income'),\n"
                             "    (pl.col('base_volume') * "
-                            "(2.0 - pl.col('multiplier')))"
+                            "(2.0 - pl.col('scenario_value')))"
                             ".alias('volume'),\n"
                             "])"
                         ),
@@ -671,11 +671,11 @@ def _make_expander_graph(data_path: str) -> dict:
                     "label": "expander",
                     "nodeType": "scenarioExpander",
                     "config": {
-                        "column_name": "multiplier",
+                        "column_name": "scenario_value",
                         "min_value": 0.8,
                         "max_value": 1.2,
                         "steps": 5,
-                        "step_column": "scenario_step",
+                        "step_column": "scenario_index",
                     },
                 },
             },
@@ -689,8 +689,8 @@ def _make_expander_graph(data_path: str) -> dict:
                         "objective": "expected_income",
                         "constraints": {"volume": {"min": 0.90}},
                         "quote_id": "quote_id",
-                        "scenario_step": "scenario_step",
-                        "multiplier": "multiplier",
+                        "scenario_index": "scenario_index",
+                        "scenario_value": "scenario_value",
                         "max_iter": 20,
                         "tolerance": 1e-4,
                     },

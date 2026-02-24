@@ -42,7 +42,7 @@ class TestBuildConfig:
         decorator_kwargs = {
             "scenario_expander": True,
             "quote_id": "policy_id",
-            "column_name": "multiplier",
+            "column_name": "scenario_value",
             "min_value": 0.8,
             "max_value": 1.2,
             "steps": 11,
@@ -55,7 +55,7 @@ class TestBuildConfig:
             body="",
         )
         assert config["quote_id"] == "policy_id"
-        assert config["column_name"] == "multiplier"
+        assert config["column_name"] == "scenario_value"
         assert config["min_value"] == 0.8
         assert config["max_value"] == 1.2
         assert config["steps"] == 11
@@ -66,11 +66,11 @@ class TestCodegen:
     def test_codegen(self):
         config = {
             "quote_id": "quote_id",
-            "column_name": "multiplier",
+            "column_name": "scenario_value",
             "min_value": 0.8,
             "max_value": 1.2,
             "steps": 21,
-            "step_column": "scenario_step",
+            "step_column": "scenario_index",
         }
         node = _make_node(config, label="expand_scenarios")
         code = _node_to_code(node, source_names=["base_data"])
@@ -82,21 +82,21 @@ class TestCodegen:
 class TestExecutor:
     def test_cross_join(self):
         config = {
-            "column_name": "multiplier",
+            "column_name": "scenario_value",
             "min_value": 0.5,
             "max_value": 1.5,
             "steps": 5,
-            "step_column": "scenario_step",
+            "step_column": "scenario_index",
         }
         node = _make_node(config)
         _, fn, _ = _build_node_fn(node, source_names=["upstream"])
         input_df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}).lazy()
         result = fn(input_df).collect()
         assert result.shape[0] == 50  # 10 rows x 5 steps
-        assert "multiplier" in result.columns
-        assert "scenario_step" in result.columns
-        assert result["scenario_step"].dtype == pl.Int32
-        assert result["multiplier"].dtype == pl.Float64
+        assert "scenario_value" in result.columns
+        assert "scenario_index" in result.columns
+        assert result["scenario_index"].dtype == pl.Int32
+        assert result["scenario_value"].dtype == pl.Float32
 
     def test_values(self):
         config = {
@@ -124,6 +124,6 @@ class TestExecutor:
         input_df = pl.DataFrame({"a": [1]}).lazy()
         result = fn(input_df).collect()
         assert result.shape[0] == 21
-        assert "multiplier" in result.columns
-        assert "scenario_step" in result.columns
+        assert "scenario_value" in result.columns
+        assert "scenario_index" in result.columns
 

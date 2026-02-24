@@ -308,11 +308,11 @@ def _build_node_fn(
         return func_name, rating_fn, False
 
     elif node_type == NodeType.SCENARIO_EXPANDER:
-        _col_name = config.get("column_name", "multiplier")
+        _col_name = config.get("column_name", "scenario_value")
         _min_val = float(config.get("min_value", 0.8))
         _max_val = float(config.get("max_value", 1.2))
         _steps = int(config.get("steps", 21))
-        _step_col = config.get("step_column", "scenario_step")
+        _step_col = config.get("step_column", "scenario_index")
         def scenario_expand_fn(
             *dfs: _Frame,
             _cn: str = _col_name,
@@ -327,7 +327,8 @@ def _build_node_fn(
             vals = np.linspace(_mn, _mx, _st)
             scenarios = pl.DataFrame({
                 _sc: pl.Series(range(_st), dtype=pl.Int32),
-                _cn: pl.Series(vals.tolist(), dtype=pl.Float64),
+                # Float32 to match Rust QuoteGrid schema (price-contour ingests f32)
+                _cn: pl.Series(vals.tolist(), dtype=pl.Float32),
             }).lazy()
             return lf.join(scenarios, how="cross")
 

@@ -146,8 +146,8 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const objective = (config.objective as string) || ""
   const constraints = (config.constraints as Record<string, Record<string, number>>) || {}
   const quoteId = (config.quote_id as string) || "quote_id"
-  const scenarioStep = (config.scenario_step as string) || "scenario_step"
-  const multiplier = (config.multiplier as string) || "multiplier"
+  const scenarioIndex = (config.scenario_index as string) || "scenario_index"
+  const scenarioValue = (config.scenario_value as string) || "scenario_value"
   const maxIter = (config.max_iter as number) ?? 50
   const tolerance = (config.tolerance as number) ?? 1e-6
   const chunkSize = (config.chunk_size as number) ?? 500_000
@@ -484,8 +484,8 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
         <div className="mt-1.5 space-y-2">
           {[
             { key: "quote_id", label: "Quote ID", value: quoteId, default: "quote_id" },
-            { key: "scenario_step", label: "Scenario Step", value: scenarioStep, default: "scenario_step" },
-            { key: "multiplier", label: "Multiplier", value: multiplier, default: "multiplier" },
+            { key: "scenario_index", label: "Scenario Index", value: scenarioIndex, default: "scenario_index" },
+            { key: "scenario_value", label: "Scenario Value", value: scenarioValue, default: "scenario_value" },
           ].map(field => (
             <div key={field.key}>
               <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>{field.label}</label>

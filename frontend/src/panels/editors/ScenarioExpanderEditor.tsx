@@ -17,11 +17,11 @@ export default function ScenarioExpanderEditor({
   upstreamColumns: { name: string; dtype: string }[]
 }) {
   const quoteId = (config.quote_id as string) || ""
-  const columnName = (config.column_name as string) || "multiplier"
+  const columnName = (config.column_name as string) || "scenario_value"
   const minValue = config.min_value as number ?? 0.8
   const maxValue = config.max_value as number ?? 1.2
   const steps = config.steps as number ?? 21
-  const stepColumn = (config.step_column as string) || "scenario_step"
+  const stepColumn = (config.step_column as string) || "scenario_index"
 
   return (
     <div className="px-4 py-3 space-y-4">
@@ -70,7 +70,7 @@ export default function ScenarioExpanderEditor({
           style={INPUT_STYLE}
           value={columnName}
           onChange={(e) => onUpdate("column_name", e.target.value)}
-          placeholder="multiplier"
+          placeholder="scenario_value"
         />
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
           Name of the new column with generated values
@@ -130,7 +130,7 @@ export default function ScenarioExpanderEditor({
           style={INPUT_STYLE}
           value={stepColumn}
           onChange={(e) => onUpdate("step_column", e.target.value)}
-          placeholder="scenario_step"
+          placeholder="scenario_index"
         />
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
           Name of the 0-based step index column

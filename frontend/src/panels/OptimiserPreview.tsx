@@ -33,12 +33,12 @@ export type SolveResult = {
     total_constraints?: Record<string, number>
   }[] | null
   warning?: string
-  multiplier_stats?: {
+  scenario_value_stats?: {
     mean: number; std: number; min: number; max: number
     p5: number; p25: number; p50: number; p75: number; p95: number
     pct_increase: number; pct_decrease: number
   }
-  multiplier_histogram?: { counts: number[]; edges: number[] }
+  scenario_value_histogram?: { counts: number[]; edges: number[] }
   clamp_rate?: number | null
 }
 
@@ -278,8 +278,8 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
             </div>
 
             {/* Middle column: histogram + stats */}
-            {result.multiplier_histogram && (() => {
-              const { counts, edges } = result.multiplier_histogram
+            {result.scenario_value_histogram && (() => {
+              const { counts, edges } = result.scenario_value_histogram
               if (!counts || counts.length === 0) return null
               const maxCount = Math.max(...counts)
               const w = 320, h = 100, px = 2, py = 2
@@ -289,7 +289,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
               const oneX = eMax > eMin ? px + ((1.0 - eMin) / (eMax - eMin)) * chartW : null
               return (
                 <div className="min-w-[200px]">
-                  <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Multiplier Distribution</label>
+                  <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Scenario Value Distribution</label>
                   <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
                     {counts.map((c, i) => {
                       const barH = maxCount > 0 ? (c / maxCount) * chartH : 0
@@ -310,14 +310,14 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
                   </div>
 
                   {/* Stats grid */}
-                  {result.multiplier_stats && (
+                  {result.scenario_value_stats && (
                     <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs font-mono">
-                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Mean</span><span style={{ color: "var(--text-primary)" }}>{result.multiplier_stats.mean.toFixed(4)}</span></div>
-                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Std</span><span style={{ color: "var(--text-primary)" }}>{result.multiplier_stats.std.toFixed(4)}</span></div>
-                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>P5–P95</span><span style={{ color: "var(--text-primary)" }}>{result.multiplier_stats.p5.toFixed(3)}–{result.multiplier_stats.p95.toFixed(3)}</span></div>
-                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Min–Max</span><span style={{ color: "var(--text-primary)" }}>{result.multiplier_stats.min.toFixed(3)}–{result.multiplier_stats.max.toFixed(3)}</span></div>
-                      <div className="flex justify-between"><span style={{ color: "#22c55e" }}>Increase</span><span style={{ color: "#22c55e" }}>{(result.multiplier_stats.pct_increase * 100).toFixed(1)}%</span></div>
-                      <div className="flex justify-between"><span style={{ color: "#ef4444" }}>Decrease</span><span style={{ color: "#ef4444" }}>{(result.multiplier_stats.pct_decrease * 100).toFixed(1)}%</span></div>
+                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Mean</span><span style={{ color: "var(--text-primary)" }}>{result.scenario_value_stats.mean.toFixed(4)}</span></div>
+                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Std</span><span style={{ color: "var(--text-primary)" }}>{result.scenario_value_stats.std.toFixed(4)}</span></div>
+                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>P5–P95</span><span style={{ color: "var(--text-primary)" }}>{result.scenario_value_stats.p5.toFixed(3)}–{result.scenario_value_stats.p95.toFixed(3)}</span></div>
+                      <div className="flex justify-between"><span style={{ color: "var(--text-muted)" }}>Min–Max</span><span style={{ color: "var(--text-primary)" }}>{result.scenario_value_stats.min.toFixed(3)}–{result.scenario_value_stats.max.toFixed(3)}</span></div>
+                      <div className="flex justify-between"><span style={{ color: "#22c55e" }}>Increase</span><span style={{ color: "#22c55e" }}>{(result.scenario_value_stats.pct_increase * 100).toFixed(1)}%</span></div>
+                      <div className="flex justify-between"><span style={{ color: "#ef4444" }}>Decrease</span><span style={{ color: "#ef4444" }}>{(result.scenario_value_stats.pct_decrease * 100).toFixed(1)}%</span></div>
                     </div>
                   )}
                 </div>
@@ -334,7 +334,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
                     <div className="space-y-0.5">
                       {rows.map((row, i) => {
                         const levelName = row.__factor_group__ as string ?? row[Object.keys(row)[0]] as string ?? `Level ${i}`
-                        const mult = row.optimal_multiplier as number
+                        const mult = row.optimal_scenario_value as number
                         return (
                           <div key={i} className="flex justify-between text-xs font-mono gap-4">
                             <span style={{ color: "var(--text-secondary)" }}>{levelName}</span>

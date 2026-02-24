@@ -51,7 +51,7 @@ const nodeTemplates = [
     description: "Cross-join rows with scenario values (price, tier, etc.)",
     icon: Rows3,
     accent: "#0ea5e9",
-    defaultConfig: { quote_id: "quote_id", column_name: "multiplier", min_value: 0.8, max_value: 1.2, steps: 21, step_column: "scenario_step" },
+    defaultConfig: { quote_id: "quote_id", column_name: "scenario_value", min_value: 0.8, max_value: 1.2, steps: 21, step_column: "scenario_index" },
   },
   {
     type: NODE_TYPES.RATING_STEP,
@@ -107,7 +107,7 @@ const nodeTemplates = [
     description: "Price optimisation via Lagrangian solver",
     icon: Target,
     accent: "#f97316",
-    defaultConfig: { mode: "online", objective: "", constraints: {}, quote_id: "quote_id", scenario_step: "scenario_step", multiplier: "multiplier", max_iter: 50, tolerance: 1e-6 },
+    defaultConfig: { mode: "online", objective: "", constraints: {}, quote_id: "quote_id", scenario_index: "scenario_index", scenario_value: "scenario_value", max_iter: 50, tolerance: 1e-6 },
   },
 ]
 

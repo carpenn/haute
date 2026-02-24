@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
+
+if TYPE_CHECKING:
+    import polars as pl
+    from price_contour import QuoteGrid
 
 from haute._logging import get_logger
 from haute._sandbox import _get_project_root
@@ -49,10 +55,10 @@ def _evict_stale_jobs() -> None:
 _DEFAULT_TIMEOUT = 300  # seconds
 
 
-def _compute_multiplier_stats(
+def _compute_scenario_value_stats(
     solve_result: Any,
 ) -> tuple[dict[str, float], dict[str, list[float]]]:
-    """Compute multiplier distribution statistics and histogram from solve result.
+    """Compute scenario value distribution statistics and histogram from solve result.
 
     Returns (stats_dict, histogram_dict).  Falls back to empty dicts if the
     result doesn't expose a per-quote ``dataframe`` (e.g. RatebookResult).
@@ -60,10 +66,10 @@ def _compute_multiplier_stats(
     if not hasattr(solve_result, "dataframe"):
         return {}, {}
     df = solve_result.dataframe
-    if "optimal_multiplier" not in df.columns:
+    if "optimal_scenario_value" not in df.columns:
         return {}, {}
 
-    col = df["optimal_multiplier"]
+    col = df["optimal_scenario_value"]
     n = len(col)
     stats = {
         "mean": float(col.mean()),
@@ -75,13 +81,13 @@ def _compute_multiplier_stats(
         "p50": float(col.quantile(0.50)),
         "p75": float(col.quantile(0.75)),
         "p95": float(col.quantile(0.95)),
-        "pct_increase": float((col > 1.0).sum() / n * 100) if n else 0.0,
-        "pct_decrease": float((col < 1.0).sum() / n * 100) if n else 0.0,
+        "pct_increase": float((col > 1.0).sum() / n) if n else 0.0,
+        "pct_decrease": float((col < 1.0).sum() / n) if n else 0.0,
     }
 
     # Histogram via numpy (Polars has no native histogram)
-    mults = col.to_numpy()
-    counts, edges = np.histogram(mults, bins=20)
+    vals = col.to_numpy()
+    counts, edges = np.histogram(vals, bins=20)
     histogram = {
         "counts": [int(c) for c in counts],
         "edges": [float(e) for e in edges],
@@ -104,59 +110,29 @@ def _find_optimiser_node(graph: Any, node_id: str) -> Any:
 
 
 def _solve_online(
-    scored_df: Any,
+    quote_grid: QuoteGrid,
     config: dict[str, Any],
     job: dict[str, Any],
     start_time: float,
 ) -> None:
-    """Run the online optimiser solver."""
-    import polars as pl
+    """Run the online optimiser solver on a pre-built QuoteGrid."""
     from price_contour import OnlineOptimiser
 
-    objective = config["objective"]
-    constraints = config["constraints"]
-    qid_col = config.get("quote_id", "quote_id")
-    mult_col = config.get("multiplier", "multiplier")
-    step_col = config.get("scenario_step", "scenario_step")
-    constraint_cols = list(constraints.keys()) if isinstance(constraints, dict) else []
-
-    # Cast columns to types the Rust solver expects
-    cast_map: dict[str, pl.DataType] = {}
-    cast_map[qid_col] = pl.Utf8
-    cast_map[step_col] = pl.Int32
-    cast_map[mult_col] = pl.Float32
-    cast_map[objective] = pl.Float32
-    for c in constraint_cols:
-        cast_map[c] = pl.Float32
-    cast_exprs = [
-        pl.col(c).cast(t)
-        for c, t in cast_map.items()
-        if c in scored_df.columns and scored_df[c].dtype != t
-    ]
-    if cast_exprs:
-        scored_df = scored_df.with_columns(cast_exprs)
-
-    # Drop null quote_ids
-    scored_df = scored_df.filter(pl.col(qid_col).is_not_null())
-
     solver = OnlineOptimiser(
-        objective=objective,
-        constraints=constraints,
-        quote_id=qid_col,
-        scenario_step=step_col,
-        multiplier=mult_col,
+        objective=config["objective"],
+        constraints=config["constraints"],
         max_iter=config.get("max_iter", 50),
         chunk_size=config.get("chunk_size", 500_000),
         tolerance=config.get("tolerance", 1e-6),
         record_history=config.get("record_history", False),
     )
-    solve_result = solver.solve(scored_df)
+    solve_result = solver.solve(quote_grid)
     elapsed = time.monotonic() - start_time
     converged = solve_result.converged
     logger.info("solve_completed", mode="online", elapsed=f"{elapsed:.2f}s", converged=converged)
 
-    # Multiplier stats & histogram
-    multiplier_stats, multiplier_histogram = _compute_multiplier_stats(solve_result)
+    # Scenario value stats & histogram
+    scenario_value_stats, scenario_value_histogram = _compute_scenario_value_stats(solve_result)
 
     result_dict: dict[str, Any] = {
         "mode": "online",
@@ -170,14 +146,15 @@ def _solve_online(
         "n_quotes": solve_result.n_quotes,
         "n_steps": solve_result.n_steps,
         "history": solve_result.history if config.get("record_history") else None,
-        "multiplier_stats": multiplier_stats,
-        "multiplier_histogram": multiplier_histogram,
+        "scenario_value_stats": scenario_value_stats,
+        "scenario_value_histogram": scenario_value_histogram,
     }
     if not solve_result.converged:
         result_dict["warning"] = (
             "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
         )
 
+    # Store QuoteGrid (Arc-shared, compact) instead of DataFrame for frontier reuse
     job.update({
         "status": "completed",
         "progress": 1.0,
@@ -185,18 +162,19 @@ def _solve_online(
         "elapsed_seconds": elapsed,
         "solver": solver,
         "solve_result": solve_result,
+        "quote_grid": solve_result.grid,
         "result": result_dict,
     })
 
 
 def _solve_ratebook(
-    scored_df: Any,
+    quote_grid: QuoteGrid,
     config: dict[str, Any],
-    factors_df: Any,
+    factors_df: pl.DataFrame,
     job: dict[str, Any],
     start_time: float,
 ) -> None:
-    """Run the ratebook optimiser solver."""
+    """Run the ratebook optimiser solver on a pre-built QuoteGrid."""
     import polars as pl
     from price_contour import RatebookOptimiser
 
@@ -206,47 +184,8 @@ def _solve_ratebook(
             "Select a banding node in the Rating Factor Source dropdown."
         )
 
-    objective = config["objective"]
     constraints = config["constraints"]
     qid_col = config.get("quote_id", "quote_id")
-    mult_col = config.get("multiplier", "multiplier")
-    step_col = config.get("scenario_step", "scenario_step")
-
-    # QuoteGridBuilder expects hardcoded columns: quote_id, scenario_step, multiplier
-    # Rename user-specified columns, then cast to required types.
-    # Skip rename if the target column already exists (e.g. scenario_step
-    # from the expander) to avoid duplicate column errors.
-    rename_map: dict[str, str] = {}
-    if qid_col != "quote_id" and "quote_id" not in scored_df.columns:
-        rename_map[qid_col] = "quote_id"
-    if step_col != "scenario_step" and "scenario_step" not in scored_df.columns:
-        rename_map[step_col] = "scenario_step"
-    if mult_col != "multiplier" and "multiplier" not in scored_df.columns:
-        rename_map[mult_col] = "multiplier"
-    if rename_map:
-        scored_df = scored_df.rename(rename_map)
-
-    eff_objective = rename_map.get(objective, objective)
-    eff_constraints = {rename_map.get(k, k): v for k, v in constraints.items()}
-
-    # Cast to required types using a dict to prevent duplicates
-    cast_map: dict[str, pl.DataType] = {}
-    cast_map["quote_id"] = pl.Utf8
-    cast_map["scenario_step"] = pl.Int32
-    cast_map["multiplier"] = pl.Float32
-    cast_map[eff_objective] = pl.Float32
-    for c in eff_constraints:
-        cast_map[c] = pl.Float32
-    cast_exprs = [
-        pl.col(c).cast(t)
-        for c, t in cast_map.items()
-        if c in scored_df.columns and scored_df[c].dtype != t
-    ]
-    if cast_exprs:
-        scored_df = scored_df.with_columns(cast_exprs)
-
-    # Drop null quote_ids
-    scored_df = scored_df.filter(pl.col("quote_id").is_not_null())
 
     # Filter factor_columns to only groups whose columns exist in factors_df
     raw_factor_columns = config.get("factor_columns", [])
@@ -263,8 +202,8 @@ def _solve_ratebook(
         )
 
     solver = RatebookOptimiser(
-        objective=eff_objective,
-        constraints=eff_constraints,
+        objective=config["objective"],
+        constraints=constraints,
         factor_columns=factor_columns_valid,
         max_iter=config.get("max_iter", 50),
         max_cd_iterations=config.get("max_cd_iterations", 10),
@@ -291,12 +230,13 @@ def _solve_ratebook(
     # Deduplicate to one row per quote
     factors_df = factors_df.unique(subset=["quote_id"])
 
-    # Align factor rows to match scored_df quote order
-    quote_order = scored_df.select("quote_id").unique(maintain_order=True)
+    # Align factor rows to match the grid's quote order
+    quote_order = pl.DataFrame({"quote_id": quote_grid.quote_ids})
+    quote_order = quote_order.unique(maintain_order=True)
     factors_df = quote_order.join(factors_df, on="quote_id", how="left")
     factors_df = factors_df.drop("quote_id")
 
-    solve_result = solver.solve(scored_df, factors_df)
+    solve_result = solver.solve(quote_grid, factors_df)
     elapsed = time.monotonic() - start_time
     converged = solve_result.converged
     logger.info("solve_completed", mode="ratebook", elapsed=f"{elapsed:.2f}s", converged=converged)
@@ -305,12 +245,12 @@ def _solve_ratebook(
     factor_tables_serialised = {}
     for name, table in solve_result.factor_tables.items():
         factor_tables_serialised[name] = [
-            {"__factor_group__": level, "optimal_multiplier": mult}
-            for level, mult in table.items()
+            {"__factor_group__": level, "optimal_scenario_value": sv}
+            for level, sv in table.items()
         ]
 
-    # Multiplier stats & histogram
-    multiplier_stats, multiplier_histogram = _compute_multiplier_stats(solve_result)
+    # Scenario value stats & histogram
+    scenario_value_stats, scenario_value_histogram = _compute_scenario_value_stats(solve_result)
 
     result_dict: dict[str, Any] = {
         "mode": "ratebook",
@@ -324,14 +264,15 @@ def _solve_ratebook(
         "factor_tables": factor_tables_serialised,
         "clamp_rate": getattr(solve_result, "clamp_rate", None),
         "history": None,
-        "multiplier_stats": multiplier_stats,
-        "multiplier_histogram": multiplier_histogram,
+        "scenario_value_stats": scenario_value_stats,
+        "scenario_value_histogram": scenario_value_histogram,
     }
     if not solve_result.converged:
         result_dict["warning"] = (
             "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
         )
 
+    # Store QuoteGrid (Arc-shared, compact) instead of DataFrame for frontier reuse
     job.update({
         "status": "completed",
         "progress": 1.0,
@@ -339,6 +280,7 @@ def _solve_ratebook(
         "elapsed_seconds": elapsed,
         "solver": solver,
         "solve_result": solve_result,
+        "quote_grid": quote_grid,
         "result": result_dict,
     })
 
@@ -395,16 +337,16 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
         "created_at": time.time(),
     }
 
-    # --- Execute pipeline to get scored DataFrame ---
+    # --- Execute pipeline lazily (no intermediate DataFrames in memory) ---
+    import polars as pl
+
     try:
         from haute.executor import _build_node_fn
-        from haute.graph_utils import _execute_eager_core
+        from haute.graph_utils import _execute_lazy
 
-        result = _execute_eager_core(
+        lazy_outputs, *_ = _execute_lazy(
             body.graph, _build_node_fn,
             target_node_id=body.node_id,
-            row_limit=None,
-            swallow_errors=True,
         )
     except Exception as exc:
         error_msg = f"Pipeline execution failed: {exc}"
@@ -412,84 +354,104 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
         _jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=500, detail=error_msg)
 
-    # If the user selected a specific data input, use that node's output
-    # instead of the optimiser's own pass-through output.
+    # If the user selected a specific data input, use that node's lazy output
     data_input_id = config.get("data_input")
-    if data_input_id and data_input_id in result.outputs:
-        scored_df = result.outputs.get(data_input_id)
+    if data_input_id and data_input_id in lazy_outputs:
+        source_lf = lazy_outputs[data_input_id]
     else:
-        scored_df = result.outputs.get(body.node_id)
-    if scored_df is not None and scored_df.shape[0] == 0:
-        upstream_errs = {
-            result.id_to_name.get(nid, nid): err
-            for nid, err in result.errors.items()
-        }
-        detail = (
-            f"DataFrame arrived at optimiser with 0 rows. "
-            f"Upstream errors: {upstream_errs}" if upstream_errs
-            else "DataFrame arrived at optimiser with 0 rows — check upstream data."
+        source_lf = lazy_outputs.get(body.node_id)
+
+    if source_lf is None:
+        error_msg = (
+            "No data arrived at the optimiser node. "
+            "Make sure an upstream data source is connected and producing data."
         )
-        _jobs[job_id] = {"status": "error", "message": detail}
-        raise HTTPException(status_code=400, detail=detail)
-    if scored_df is None:
-        upstream_errors = {
-            nid: err for nid, err in result.errors.items() if nid != body.node_id
-        }
-        if upstream_errors:
-            failed_node = next(iter(upstream_errors))
-            failed_name = result.id_to_name.get(failed_node, failed_node)
-            error_msg = (
-                f"Upstream node '{failed_name}' failed: {upstream_errors[failed_node]}. "
-                f"Fix the error in that node before optimising."
-            )
-        elif body.node_id in result.errors:
-            error_msg = f"Optimiser node error: {result.errors[body.node_id]}"
-        else:
-            error_msg = (
-                "No data arrived at the optimiser node. "
-                "Make sure an upstream data source is connected and producing data."
-            )
         _jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=400, detail=error_msg)
 
-    # --- Column validation ---
+    # --- Column validation via schema (no collect) ---
     qid_col = config.get("quote_id", "quote_id")
-    mult_col = config.get("multiplier", "multiplier")
-    step_col = config.get("scenario_step", "scenario_step")
+    mult_col = config.get("scenario_value", "scenario_value")
+    step_col = config.get("scenario_index", "scenario_index")
+    available_cols = set(source_lf.collect_schema().names())
     required_cols = {objective, qid_col, mult_col, step_col}
     for cname in constraints:
         required_cols.add(cname)
-    missing_cols = sorted(required_cols - set(scored_df.columns))
+    missing_cols = sorted(required_cols - available_cols)
     if missing_cols:
-        avail = sorted(scored_df.columns)
+        avail = sorted(available_cols)
         detail = f"Missing columns in scored data: {missing_cols}. Available: {avail}"
         _jobs[job_id] = {"status": "error", "message": detail}
         raise HTTPException(status_code=400, detail=detail)
 
-    # --- Extract ratebook factors before dropping pipeline result ---
-    # For ratebook mode, grab the banding factors DataFrame now so we can
-    # free all other intermediate pipeline outputs from memory.
+    constraint_cols = list(constraints.keys()) if isinstance(constraints, dict) else []
+
+    # --- Build cast + select as lazy expressions (projection pushdown) ---
+    solver_cols = [qid_col, step_col, mult_col, objective] + [
+        c for c in constraint_cols if c in available_cols
+    ]
+    cast_map: dict[str, pl.DataType] = {
+        qid_col: pl.Utf8,
+        step_col: pl.Int32,
+        mult_col: pl.Float32,
+        objective: pl.Float32,
+    }
+    for c in constraint_cols:
+        cast_map[c] = pl.Float32
+    cast_exprs = [pl.col(c).cast(t) for c, t in cast_map.items()]
+
+    scored_lf = (
+        source_lf
+        .select(solver_cols)
+        .with_columns(cast_exprs)
+        .filter(pl.col(qid_col).is_not_null())
+    )
+
+    # --- Extract ratebook factors ---
+    # Eager collect is justified: factors_df is small (one row per factor level)
+    # and RatebookOptimiser.solve() requires an eager DataFrame for alignment.
     factors_df = None
     if mode == "ratebook":
         banding_source_id = config.get("banding_source")
-        if banding_source_id and banding_source_id in result.outputs:
-            factors_df = result.outputs[banding_source_id]
-    del result  # free intermediate DataFrames from all other pipeline nodes
+        if banding_source_id and banding_source_id in lazy_outputs:
+            factors_df = lazy_outputs[banding_source_id].collect(engine="streaming")
 
-    # --- Keep only solver-relevant columns on the job ---
-    # The solver selects its own columns internally, but keeping the full
-    # wide DataFrame alive for 24h (for frontier) wastes memory.
-    solver_cols = [
-        c for c in [qid_col, mult_col, step_col, objective] + list(constraints.keys())
-        if c in scored_df.columns
-    ]
-    scored_df_narrow = scored_df.select(solver_cols)
-    del scored_df
+    del lazy_outputs  # free all LazyFrame references
+
+    # --- Sink to parquet and build QuoteGrid in Rust ---
+    # The lazy plan streams to a temp parquet file (Python never holds
+    # the full DataFrame).  Rust reads the file and builds the grid
+    # directly, keeping peak Python memory near zero.
+    from price_contour import build_grid_from_parquet
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+    os.close(tmp_fd)
+    try:
+        scored_lf.sink_parquet(tmp_path)
+        del scored_lf
+
+        quote_grid = build_grid_from_parquet(
+            tmp_path,
+            constraint_cols,
+            quote_id=qid_col,
+            scenario_index=step_col,
+            scenario_value_col=mult_col,
+            objective=objective,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        detail = f"Grid construction failed: {exc}"
+        logger.error("grid_build_failed", error=str(exc), node_id=body.node_id)
+        _jobs[job_id].update({"status": "error", "message": detail})
+        raise HTTPException(status_code=400, detail=detail) from exc
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     start_time = time.monotonic()
     _jobs[job_id]["start_time"] = start_time
     _jobs[job_id]["timeout"] = config.get("timeout", _DEFAULT_TIMEOUT)
-    _jobs[job_id]["scored_df"] = scored_df_narrow
     node_id = body.node_id  # capture for closure
 
     def _solve_background() -> None:
@@ -502,10 +464,10 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
             })
             if mode == "ratebook":
                 _solve_ratebook(
-                    scored_df_narrow, config, factors_df, job, start_time,
+                    quote_grid, config, factors_df, job, start_time,
                 )
             else:
-                _solve_online(scored_df_narrow, config, job, start_time)
+                _solve_online(quote_grid, config, job, start_time)
         except ValueError as exc:
             error_msg = f"Data error: {exc}"
             logger.error("solve_failed", error=str(exc), node_id=node_id, category="data")
@@ -608,9 +570,9 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
         )
 
     solver = job.get("solver")
-    scored_df = job.get("scored_df")
-    if solver is None or scored_df is None:
-        raise HTTPException(status_code=400, detail="Job has no solver or scored data")
+    quote_grid = job.get("quote_grid")
+    if solver is None or quote_grid is None:
+        raise HTTPException(status_code=400, detail="Job has no solver or quote grid")
 
     try:
         # Convert threshold ranges from lists to tuples for Rust binding
@@ -618,7 +580,7 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
             k: tuple(v) for k, v in body.threshold_ranges.items()
         }
         frontier_result = solver.frontier(
-            scored_df,
+            quote_grid,
             threshold_ranges=ranges,
             n_points_per_dim=body.n_points_per_dim,
         )
@@ -671,8 +633,8 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
             "constraints": job_config.get("constraints"),
             "objective": job_config.get("objective"),
             "quote_id": job_config.get("quote_id", "quote_id"),
-            "scenario_step": job_config.get("scenario_step", "scenario_step"),
-            "multiplier": job_config.get("multiplier", "multiplier"),
+            "scenario_index": job_config.get("scenario_index", "scenario_index"),
+            "scenario_value": job_config.get("scenario_value", "scenario_value"),
             "chunk_size": job_config.get("chunk_size", 500_000),
             "converged": solve_result.converged,
             "iterations": getattr(solve_result, "iterations", None),

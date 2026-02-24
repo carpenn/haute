@@ -171,7 +171,7 @@ def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     return calculate_premium
 
 
-@pipeline.node(scenario_expander=True, quote_id='IDpol', column_name='price_multiplier', min_value=0.8, max_value=1.2, steps=21, step_column='scenario_step')
+@pipeline.node(scenario_expander=True, quote_id='IDpol', column_name='price_multiplier', min_value=0.8, max_value=1.2, steps=21, step_column='scenario_index')
 def price_scenarios(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """price_scenarios node"""
     return calculate_premium
@@ -184,7 +184,7 @@ def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
     price_scenarios
     .with_columns(
         price_scenario = pl.col('price_multiplier') * pl.col('premium'),
-        volume = (30-pl.col('scenario_step'))/100
+        volume = (30-pl.col('scenario_index'))/100
     )
     .with_columns(
         income = (pl.col('price_scenario') - pl.col('technical_price') - 5) * pl.col('volume')
@@ -193,13 +193,13 @@ def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_step='scenario_step', multiplier='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06)
+@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06)
 def online_optimisation(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
     """online_optimisation node"""
     return optimiser_inputs
 
 
-@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_step='scenario_step', multiplier='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']])
+@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']])
 def ratebook_optimisation(optimiser_inputs: pl.LazyFrame, optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """Optimiser 24 node"""
     return optimiser_inputs

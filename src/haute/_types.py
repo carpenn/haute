@@ -192,8 +192,8 @@ class OptimiserConfig(TypedDict, total=False):
 
     # Column mappings
     quote_id: str
-    scenario_step: str
-    multiplier: str
+    scenario_index: str
+    scenario_value: str
     objective: str
 
     # Constraints
@@ -233,15 +233,15 @@ class ScenarioExpanderConfig(TypedDict, total=False):
     """Config for scenarioExpander nodes."""
 
     quote_id: str       # column identifying each quote/row-group
-    column_name: str    # name of the new value column (e.g. "multiplier")
+    column_name: str    # name of the new value column (e.g. "scenario_value")
     min_value: float    # start of linspace
     max_value: float    # end of linspace
     steps: int          # number of steps
-    step_column: str    # name of the 0-based step index column
+    step_column: str    # name of the 0-based step index column (e.g. "scenario_index")
 
 
 OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
-    "mode", "quote_id", "scenario_step", "multiplier", "objective",
+    "mode", "quote_id", "scenario_index", "scenario_value", "objective",
     "constraints", "max_iter", "tolerance", "chunk_size", "record_history",
     "frontier_enabled", "frontier_points_per_dim", "frontier_threshold_ranges",
     "factor_columns", "candidate_min", "candidate_max", "candidate_steps",

@@ -209,8 +209,9 @@ __marimo__/
 # Pipeline output files
 output/
 
-# CatBoost training logs
+# CatBoost training logs and model binaries
 catboost_info/
+*.cbm
 
 # Databricks local parquet cache
 .haute_cache/
