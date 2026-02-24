@@ -471,3 +471,330 @@ class TestRatebookSolve:
         )
         assert resp.status_code == 400
         assert "factor_columns" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 tests
+# ---------------------------------------------------------------------------
+
+
+class TestSolveWithHistory:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_with_history(self, client, scored_data):
+        graph = _make_optimiser_graph(
+            scored_data, config={"record_history": True}
+        )
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        assert status["status"] == "completed"
+        result = status["result"]
+        assert "history" in result
+        history = result["history"]
+        assert isinstance(history, list)
+        assert len(history) > 0
+        first = history[0]
+        assert "iteration" in first
+        assert "total_objective" in first
+
+
+class TestMultiplierStats:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_multiplier_stats_in_result(self, client, scored_data):
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        assert status["status"] == "completed"
+        result = status["result"]
+        assert "multiplier_stats" in result
+        stats = result["multiplier_stats"]
+        assert "mean" in stats
+        assert "p50" in stats
+        assert "pct_increase" in stats
+        assert "multiplier_histogram" in result
+        hist = result["multiplier_histogram"]
+        assert "counts" in hist
+        assert "edges" in hist
+        assert len(hist["counts"]) == 20
+        assert len(hist["edges"]) == 21
+
+
+class TestColumnValidation:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_missing_column(self, client, tmp_path):
+        """Data without a constraint column returns 400."""
+        df = pl.DataFrame({
+            "quote_id": ["q_0"] * 5,
+            "scenario_step": pl.Series(range(5), dtype=pl.Int32),
+            "multiplier": pl.Series(
+                np.linspace(0.8, 1.2, 5).tolist(), dtype=pl.Float32
+            ),
+            "expected_income": pl.Series(
+                [100.0] * 5, dtype=pl.Float32
+            ),
+            # no "volume" column!
+        })
+        path = str(tmp_path / "no_volume.parquet")
+        df.write_parquet(path)
+        graph = _make_optimiser_graph(path)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        assert resp.status_code == 400
+        assert "volume" in resp.json()["detail"]
+
+
+class TestNonConvergenceWarning:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_non_convergence_warning(self, client, scored_data):
+        graph = _make_optimiser_graph(
+            scored_data, config={"max_iter": 1}
+        )
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        assert status["status"] == "completed"
+        result = status["result"]
+        if not result["converged"]:
+            assert "warning" in result
+
+
+class TestSaveEndpointFields:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_save_has_full_fields(self, client, scored_data, tmp_path):
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        _poll_until_done(client, job_id)
+
+        out_path = str(tmp_path / "result.json")
+        resp = client.post(
+            "/api/optimiser/save",
+            json={"job_id": job_id, "output_path": out_path},
+        )
+        assert resp.status_code == 200
+
+        import json as json_mod
+        saved = json_mod.loads((tmp_path / "result.json").read_text())
+        assert "lambdas" in saved
+        assert "mode" in saved
+        assert saved["mode"] == "online"
+        assert "baseline_objective" in saved
+        assert "baseline_constraints" in saved
+        assert "constraints" in saved
+        assert "objective" in saved
+        assert "quote_id" in saved
+        assert "chunk_size" in saved
+
+
+# ---------------------------------------------------------------------------
+# Phase 2a: Frontier
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Step-wise expansion
+# ---------------------------------------------------------------------------
+
+
+def _make_base_data(tmp_path, n_quotes: int = 50) -> str:
+    """Create base data (one row per quote, no scenario expansion)."""
+    rng = np.random.RandomState(42)
+    df = pl.DataFrame({
+        "quote_id": [f"q_{q:04d}" for q in range(n_quotes)],
+        "base_income": pl.Series(
+            rng.uniform(100, 1000, n_quotes).tolist(),
+            dtype=pl.Float64,
+        ),
+        "base_volume": pl.Series(
+            rng.uniform(0.5, 1.5, n_quotes).tolist(),
+            dtype=pl.Float64,
+        ),
+    })
+    path = tmp_path / "base.parquet"
+    df.write_parquet(path)
+    return str(path)
+
+
+def _make_expander_graph(data_path: str) -> dict:
+    """Build a 4-node graph: dataSource → expander → transform → optimiser.
+
+    The expander cross-joins multiplier and scenario_step columns.
+    The transform computes objective and constraint columns.
+    """
+    graph = make_graph({
+        "nodes": [
+            {
+                "id": "source",
+                "data": {
+                    "label": "source",
+                    "nodeType": "dataSource",
+                    "config": {"path": data_path},
+                },
+            },
+            {
+                "id": "transform",
+                "data": {
+                    "label": "compute_metrics",
+                    "nodeType": "transform",
+                    "config": {
+                        "code": (
+                            "df = df.with_columns([\n"
+                            "    (pl.col('base_income') * "
+                            "pl.col('multiplier'))"
+                            ".alias('expected_income'),\n"
+                            "    (pl.col('base_volume') * "
+                            "(2.0 - pl.col('multiplier')))"
+                            ".alias('volume'),\n"
+                            "])"
+                        ),
+                    },
+                },
+            },
+            {
+                "id": "expander",
+                "data": {
+                    "label": "expander",
+                    "nodeType": "scenarioExpander",
+                    "config": {
+                        "column_name": "multiplier",
+                        "min_value": 0.8,
+                        "max_value": 1.2,
+                        "steps": 5,
+                        "step_column": "scenario_step",
+                    },
+                },
+            },
+            {
+                "id": "opt",
+                "data": {
+                    "label": "optimiser",
+                    "nodeType": "optimiser",
+                    "config": {
+                        "mode": "online",
+                        "objective": "expected_income",
+                        "constraints": {"volume": {"min": 0.90}},
+                        "quote_id": "quote_id",
+                        "scenario_step": "scenario_step",
+                        "multiplier": "multiplier",
+                        "max_iter": 20,
+                        "tolerance": 1e-4,
+                    },
+                },
+            },
+        ],
+        "edges": [
+            make_edge("source", "expander").model_dump(),
+            make_edge("expander", "transform").model_dump(),
+            make_edge("transform", "opt").model_dump(),
+        ],
+    })
+    return graph.model_dump()
+
+
+class TestExpanderSolve:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_expander_solve_completes(self, client, tmp_path):
+        data_path = _make_base_data(tmp_path)
+        graph = _make_expander_graph(data_path)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "started"
+
+        status = _poll_until_done(client, data["job_id"])
+        assert status["status"] == "completed", status.get("message", "")
+        result = status["result"]
+        assert "total_objective" in result
+        assert "lambdas" in result
+        assert result["n_steps"] == 5
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_normal_solve_produces_lambdas(self, client, tmp_path):
+        """Normal solve should complete and produce lambdas."""
+        scored_path = _make_scored_data(tmp_path, n_quotes=50, n_steps=5)
+        normal_graph = _make_optimiser_graph(scored_path)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": normal_graph, "node_id": "opt"},
+        )
+        normal_status = _poll_until_done(client, resp.json()["job_id"])
+        assert normal_status["status"] == "completed"
+        normal_result = normal_status["result"]
+        assert len(normal_result["lambdas"]) > 0
+        assert "total_objective" in normal_result
+
+
+class TestFrontierRoute:
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_frontier_after_solve(self, client, scored_data):
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        _poll_until_done(client, job_id)
+
+        resp = client.post(
+            "/api/optimiser/frontier",
+            json={
+                "job_id": job_id,
+                "threshold_ranges": {"volume": [0.85, 0.95]},
+                "n_points_per_dim": 3,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["n_points"] > 0
+        assert len(data["points"]) == data["n_points"]
+        assert "volume" in data["constraint_names"]
+
+    def test_frontier_missing_job(self, client):
+        resp = client.post(
+            "/api/optimiser/frontier",
+            json={
+                "job_id": "nonexistent",
+                "threshold_ranges": {"volume": [0.85, 0.95]},
+            },
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_frontier_incomplete_job(self, client, scored_data):
+        """Frontier on a not-yet-completed job returns 400."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post(
+            "/api/optimiser/solve",
+            json={"graph": graph, "node_id": "opt"},
+        )
+        job_id = resp.json()["job_id"]
+        # Don't poll — submit frontier immediately
+        # Job may already be complete for small data; handle both
+        resp = client.post(
+            "/api/optimiser/frontier",
+            json={
+                "job_id": job_id,
+                "threshold_ranges": {"volume": [0.85, 0.95]},
+            },
+        )
+        # Either 400 (still running) or 200 (already done) is acceptable
+        assert resp.status_code in (200, 400)

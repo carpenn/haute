@@ -126,3 +126,4 @@ class TestExecutor:
         assert result.shape[0] == 21
         assert "multiplier" in result.columns
         assert "scenario_step" in result.columns
+

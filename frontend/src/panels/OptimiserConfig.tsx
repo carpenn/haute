@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
-import { Play, Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers } from "lucide-react"
+import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers } from "lucide-react"
 import type { SimpleNode, SimpleEdge } from "./editors"
 import { solveOptimiser, getOptimiserStatus, saveOptimiser, logOptimiserToMlflow, checkMlflow, previewNode } from "../api/client"
+import type { SolveResult, OptimiserPreviewData } from "./OptimiserPreview"
 import { NODE_TYPES } from "../utils/nodeTypes"
 
 // ─── Banding factor extraction ───
@@ -72,21 +73,7 @@ type OptimiserConfigProps = {
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
-}
-
-type SolveResult = {
-  mode?: string
-  total_objective: number
-  baseline_objective: number
-  constraints: Record<string, number>
-  baseline_constraints: Record<string, number>
-  lambdas: Record<string, number>
-  converged: boolean
-  iterations?: number
-  n_quotes?: number
-  n_steps?: number
-  cd_iterations?: number
-  factor_tables?: Record<string, Record<string, unknown>[]>
+  onSolveComplete?: (data: OptimiserPreviewData | null) => void
 }
 
 type SolveProgress = {
@@ -111,13 +98,7 @@ function formatElapsed(seconds: number): string {
   return `${mins}m ${secs}s`
 }
 
-function formatNumber(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M"
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + "K"
-  return n.toFixed(4)
-}
-
-export default function OptimiserConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels }: OptimiserConfigProps) {
+export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels, onSolveComplete }: OptimiserConfigProps) {
   const [solving, setSolving] = useState(false)
   const [solveResult, setSolveResult] = useState<SolveResult | null>(null)
   const [solveProgress, setSolveProgress] = useState<SolveProgress | null>(null)
@@ -145,6 +126,21 @@ export default function OptimiserConfig({ config, onUpdate, upstreamColumns, all
       .catch((e) => console.warn("MLflow check failed", e))
   }, [])
 
+  // Notify parent (preview panel) when solve completes
+  useEffect(() => {
+    if (!onSolveComplete) return
+    if (solveResult && solveJobId) {
+      const label = allNodes.find(n => n.id === (config._nodeId as string))?.data.label || "Optimiser"
+      onSolveComplete({
+        result: solveResult,
+        jobId: solveJobId,
+        constraints,
+        nodeLabel: label,
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solveResult])
+
   const mode = (config.mode as string) || "online"
   const factorColumns = (config.factor_columns as string[][]) || []
   const objective = (config.objective as string) || ""
@@ -155,7 +151,7 @@ export default function OptimiserConfig({ config, onUpdate, upstreamColumns, all
   const maxIter = (config.max_iter as number) ?? 50
   const tolerance = (config.tolerance as number) ?? 1e-6
   const chunkSize = (config.chunk_size as number) ?? 500_000
-  const recordHistory = (config.record_history as boolean) ?? false
+  const recordHistory = (config.record_history as boolean) ?? true
   const maxCdIterations = (config.max_cd_iterations as number) ?? 10
   const cdTolerance = (config.cd_tolerance as number) ?? 1e-4
 
@@ -714,9 +710,22 @@ export default function OptimiserConfig({ config, onUpdate, upstreamColumns, all
       {/* Results */}
       {solveResult && (
         <div className="space-y-2">
-          {/* Summary */}
-          <div className="px-3 py-2 rounded-lg text-xs space-y-1" style={{ background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.2)" }}>
-            <div style={{ color: "#22c55e" }}>
+          {/* Non-convergence warning banner */}
+          {!solveResult.converged && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.1)", border: "1px solid rgba(245,158,11,.25)" }}>
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: "#f59e0b" }} />
+              <div>
+                <div className="font-semibold" style={{ color: "#f59e0b" }}>Solver did not converge</div>
+                <div style={{ color: "#fbbf24", lineHeight: "1.5" }}>
+                  {solveResult.warning || "Try increasing max iterations or relaxing the tolerance."}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Convergence status */}
+          <div className="px-3 py-2 rounded-lg text-xs space-y-1" style={{ background: solveResult.converged ? "rgba(34,197,94,.1)" : "rgba(245,158,11,.06)", border: `1px solid ${solveResult.converged ? "rgba(34,197,94,.2)" : "rgba(245,158,11,.15)"}` }}>
+            <div style={{ color: solveResult.converged ? "#22c55e" : "#f59e0b" }}>
               {solveResult.converged ? "Converged" : "Did not converge"}
               {solveResult.mode === "ratebook"
                 ? ` in ${solveResult.cd_iterations ?? "?"} CD iterations`
@@ -727,91 +736,6 @@ export default function OptimiserConfig({ config, onUpdate, upstreamColumns, all
             </div>
           </div>
 
-          {/* Objective */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Objective</label>
-            <div className="mt-1 space-y-0.5">
-              <div className="flex justify-between text-xs font-mono">
-                <span style={{ color: "var(--text-secondary)" }}>Optimised</span>
-                <span style={{ color: "var(--text-primary)" }}>{formatNumber(solveResult.total_objective)}</span>
-              </div>
-              <div className="flex justify-between text-xs font-mono">
-                <span style={{ color: "var(--text-secondary)" }}>Baseline</span>
-                <span style={{ color: "var(--text-muted)" }}>{formatNumber(solveResult.baseline_objective)}</span>
-              </div>
-              {solveResult.baseline_objective !== 0 && (
-                <div className="flex justify-between text-xs font-mono">
-                  <span style={{ color: "var(--text-secondary)" }}>Uplift</span>
-                  <span style={{ color: "#f97316" }}>
-                    {((solveResult.total_objective / solveResult.baseline_objective - 1) * 100).toFixed(2)}%
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Constraints */}
-          {Object.keys(solveResult.constraints).length > 0 && (
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Constraints</label>
-              <div className="mt-1 space-y-0.5">
-                {Object.entries(solveResult.constraints).map(([name, value]) => {
-                  const baseline = solveResult.baseline_constraints[name]
-                  const ratio = baseline ? value / baseline : 0
-                  return (
-                    <div key={name} className="flex justify-between text-xs font-mono">
-                      <span style={{ color: "var(--text-secondary)" }}>{name}</span>
-                      <span>
-                        <span style={{ color: "var(--text-primary)" }}>{formatNumber(value)}</span>
-                        {baseline !== undefined && (
-                          <span style={{ color: "var(--text-muted)" }}> ({(ratio * 100).toFixed(1)}%)</span>
-                        )}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Factor Tables (ratebook mode) */}
-          {solveResult.mode === "ratebook" && solveResult.factor_tables && (
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Factor Tables</label>
-              {Object.entries(solveResult.factor_tables).map(([factorName, rows]) => (
-                <div key={factorName} className="mt-1.5">
-                  <div className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>{factorName}</div>
-                  <div className="space-y-0.5">
-                    {rows.map((row, i) => {
-                      const levelName = row.__factor_group__ as string ?? row[Object.keys(row)[0]] as string ?? `Level ${i}`
-                      const mult = row.optimal_multiplier as number
-                      return (
-                        <div key={i} className="flex justify-between text-xs font-mono">
-                          <span style={{ color: "var(--text-secondary)" }}>{levelName}</span>
-                          <span style={{ color: "var(--text-primary)" }}>{typeof mult === "number" ? mult.toFixed(2) : "?"}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Lambdas (online mode) */}
-          {solveResult.mode !== "ratebook" && Object.keys(solveResult.lambdas).length > 0 && (
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Lambdas</label>
-              <div className="mt-1 space-y-0.5">
-                {Object.entries(solveResult.lambdas).map(([name, value]) => (
-                  <div key={name} className="flex justify-between text-xs font-mono">
-                    <span style={{ color: "var(--text-secondary)" }}>{name}</span>
-                    <span style={{ color: "var(--text-primary)" }}>{value.toFixed(6)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Save & MLflow buttons */}
           <div className="space-y-2 pt-1">

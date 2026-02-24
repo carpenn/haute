@@ -482,6 +482,19 @@ class OptimiserApplyResponse(BaseModel):
     error: str | None = None
 
 
+class OptimiserFrontierRequest(BaseModel):
+    job_id: str
+    threshold_ranges: dict[str, list[float]]
+    n_points_per_dim: int = 5
+
+
+class OptimiserFrontierResponse(BaseModel):
+    status: str
+    points: list[dict[str, Any]] = Field(default_factory=list)
+    n_points: int = 0
+    constraint_names: list[str] = Field(default_factory=list)
+
+
 class OptimiserSaveRequest(BaseModel):
     job_id: str
     output_path: str

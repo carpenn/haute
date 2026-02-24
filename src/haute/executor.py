@@ -313,7 +313,6 @@ def _build_node_fn(
         _max_val = float(config.get("max_value", 1.2))
         _steps = int(config.get("steps", 21))
         _step_col = config.get("step_column", "scenario_step")
-
         def scenario_expand_fn(
             *dfs: _Frame,
             _cn: str = _col_name,
@@ -322,11 +321,13 @@ def _build_node_fn(
             _st: int = _steps,
             _sc: str = _step_col,
         ) -> _Frame:
-            lf = dfs[0] if dfs else pl.LazyFrame()
             import numpy as np
+
+            lf = dfs[0] if dfs else pl.LazyFrame()
+            vals = np.linspace(_mn, _mx, _st)
             scenarios = pl.DataFrame({
                 _sc: pl.Series(range(_st), dtype=pl.Int32),
-                _cn: pl.Series(np.linspace(_mn, _mx, _st).tolist(), dtype=pl.Float64),
+                _cn: pl.Series(vals.tolist(), dtype=pl.Float64),
             }).lazy()
             return lf.join(scenarios, how="cross")
 

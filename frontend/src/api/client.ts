@@ -288,6 +288,13 @@ export function logOptimiserToMlflow(
   return post("/api/optimiser/mlflow/log", payload, options)
 }
 
+export function runFrontier(
+  payload: { job_id: string; threshold_ranges: Record<string, [number, number]>; n_points_per_dim?: number },
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; points: Record<string, unknown>[]; n_points: number; constraint_names: string[] }> {
+  return post("/api/optimiser/frontier", payload, { timeout: 120_000, ...options })
+}
+
 // ---------------------------------------------------------------------------
 // Databricks endpoints
 // ---------------------------------------------------------------------------

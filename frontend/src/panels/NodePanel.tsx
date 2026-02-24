@@ -19,6 +19,7 @@ import {
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
+import type { OptimiserPreviewData } from "./OptimiserPreview"
 
 // Re-export types (preserve public API for App.tsx)
 export type { SimpleNode, SimpleEdge } from "./editors"
@@ -32,6 +33,7 @@ type NodePanelProps = {
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
   onDeleteEdge?: (edgeId: string) => void
   onRefreshPreview?: () => void
+  onOptimiserSolve?: (data: OptimiserPreviewData | null) => void
 }
 
 // ─── Panel sizing ─────────────────────────────────────────────────
@@ -208,7 +210,7 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 
 // ─── NodePanel ────────────────────────────────────────────────────
 
-export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, onOptimiserSolve }: NodePanelProps) {
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_W)
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -363,6 +365,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
             edges={edges}
             submodels={submodels}
             upstreamColumns={effectiveCols}
+            onSolveComplete={onOptimiserSolve}
           />
         )
       }

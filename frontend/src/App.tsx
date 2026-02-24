@@ -21,6 +21,8 @@ import SubmodelPortNode from "./nodes/SubmodelPortNode"
 import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview from "./panels/DataPreview"
+import OptimiserPreview from "./panels/OptimiserPreview"
+import type { OptimiserPreviewData } from "./panels/OptimiserPreview"
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
@@ -119,6 +121,7 @@ function FlowEditor() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
   const [preamble, setPreamble] = useState("")
+  const [optimiserPreview, setOptimiserPreview] = useState<OptimiserPreviewData | null>(null)
 
   // Refs
   const submodelsRef = useRef<Record<string, unknown>>({})
@@ -229,12 +232,14 @@ function FlowEditor() {
         if (prev?.id !== node.id) {
           fetchPreview(node)
           clearTrace()
+          setOptimiserPreview(null)
         }
         return node
       })
     } else {
       setSelectedNode(null)
       setPreviewData(null)
+      setOptimiserPreview(null)
       clearTrace()
     }
   }, [fetchPreview, clearTrace, setPreviewData])
@@ -468,12 +473,19 @@ function FlowEditor() {
             </ReactFlow>
           </div>
 
-          <DataPreview
-            data={previewData}
-            onClose={() => { setPreviewData(null); clearTrace() }}
-            onCellClick={handleCellClick}
-            tracedCell={tracedCell}
-          />
+          {optimiserPreview ? (
+            <OptimiserPreview
+              data={optimiserPreview}
+              onClose={() => setOptimiserPreview(null)}
+            />
+          ) : (
+            <DataPreview
+              data={previewData}
+              onClose={() => { setPreviewData(null); clearTrace() }}
+              onCellClick={handleCellClick}
+              tracedCell={tracedCell}
+            />
+          )}
         </div>
 
         {traceResult ? (
@@ -488,6 +500,7 @@ function FlowEditor() {
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}
             onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
+            onOptimiserSolve={setOptimiserPreview}
           />
         )}
       </div>

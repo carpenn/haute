@@ -266,7 +266,7 @@ export function CodeEditor({
 
   // Debounce parent onChange — local state updates instantly, parent
   // update is deferred by 150ms to avoid re-render storms on fast typing.
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => onChange(code), 150)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }

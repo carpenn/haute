@@ -1,4 +1,4 @@
-"""Optimiser endpoints: solve, status, apply, save, mlflow log."""
+"""Optimiser endpoints: solve, status, apply, save, frontier, mlflow log."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
@@ -17,6 +18,8 @@ from haute.graph_utils import NodeType
 from haute.schemas import (
     OptimiserApplyRequest,
     OptimiserApplyResponse,
+    OptimiserFrontierRequest,
+    OptimiserFrontierResponse,
     OptimiserMlflowLogRequest,
     OptimiserMlflowLogResponse,
     OptimiserSaveRequest,
@@ -41,6 +44,50 @@ def _evict_stale_jobs() -> None:
     stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
     for jid in stale:
         del _jobs[jid]
+
+
+_DEFAULT_TIMEOUT = 300  # seconds
+
+
+def _compute_multiplier_stats(
+    solve_result: Any,
+) -> tuple[dict[str, float], dict[str, list[float]]]:
+    """Compute multiplier distribution statistics and histogram from solve result.
+
+    Returns (stats_dict, histogram_dict).  Falls back to empty dicts if the
+    result doesn't expose a per-quote ``dataframe`` (e.g. RatebookResult).
+    """
+    if not hasattr(solve_result, "dataframe"):
+        return {}, {}
+    df = solve_result.dataframe
+    if "optimal_multiplier" not in df.columns:
+        return {}, {}
+
+    col = df["optimal_multiplier"]
+    n = len(col)
+    stats = {
+        "mean": float(col.mean()),
+        "std": float(col.std()),
+        "min": float(col.min()),
+        "max": float(col.max()),
+        "p5": float(col.quantile(0.05)),
+        "p25": float(col.quantile(0.25)),
+        "p50": float(col.quantile(0.50)),
+        "p75": float(col.quantile(0.75)),
+        "p95": float(col.quantile(0.95)),
+        "pct_increase": float((col > 1.0).sum() / n * 100) if n else 0.0,
+        "pct_decrease": float((col < 1.0).sum() / n * 100) if n else 0.0,
+    }
+
+    # Histogram via numpy (Polars has no native histogram)
+    mults = col.to_numpy()
+    counts, edges = np.histogram(mults, bins=20)
+    histogram = {
+        "counts": [int(c) for c in counts],
+        "edges": [float(e) for e in edges],
+    }
+    return stats, histogram
+
 
 
 def _find_optimiser_node(graph: Any, node_id: str) -> Any:
@@ -108,6 +155,29 @@ def _solve_online(
     converged = solve_result.converged
     logger.info("solve_completed", mode="online", elapsed=f"{elapsed:.2f}s", converged=converged)
 
+    # Multiplier stats & histogram
+    multiplier_stats, multiplier_histogram = _compute_multiplier_stats(solve_result)
+
+    result_dict: dict[str, Any] = {
+        "mode": "online",
+        "total_objective": solve_result.total_objective,
+        "baseline_objective": solve_result.baseline_objective,
+        "constraints": solve_result.total_constraints,
+        "baseline_constraints": solve_result.baseline_constraints,
+        "lambdas": solve_result.lambdas,
+        "converged": solve_result.converged,
+        "iterations": solve_result.iterations,
+        "n_quotes": solve_result.n_quotes,
+        "n_steps": solve_result.n_steps,
+        "history": solve_result.history if config.get("record_history") else None,
+        "multiplier_stats": multiplier_stats,
+        "multiplier_histogram": multiplier_histogram,
+    }
+    if not solve_result.converged:
+        result_dict["warning"] = (
+            "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
+        )
+
     job.update({
         "status": "completed",
         "progress": 1.0,
@@ -115,31 +185,26 @@ def _solve_online(
         "elapsed_seconds": elapsed,
         "solver": solver,
         "solve_result": solve_result,
-        "result": {
-            "mode": "online",
-            "total_objective": solve_result.total_objective,
-            "baseline_objective": solve_result.baseline_objective,
-            "constraints": solve_result.total_constraints,
-            "baseline_constraints": solve_result.baseline_constraints,
-            "lambdas": solve_result.lambdas,
-            "converged": solve_result.converged,
-            "iterations": solve_result.iterations,
-            "n_quotes": solve_result.n_quotes,
-            "n_steps": solve_result.n_steps,
-        },
+        "result": result_dict,
     })
 
 
 def _solve_ratebook(
     scored_df: Any,
     config: dict[str, Any],
-    pipeline_result: Any,
+    factors_df: Any,
     job: dict[str, Any],
     start_time: float,
 ) -> None:
     """Run the ratebook optimiser solver."""
     import polars as pl
     from price_contour import RatebookOptimiser
+
+    if factors_df is None:
+        raise RuntimeError(
+            "Ratebook mode requires a banding source. "
+            "Select a banding node in the Rating Factor Source dropdown."
+        )
 
     objective = config["objective"]
     constraints = config["constraints"]
@@ -182,16 +247,6 @@ def _solve_ratebook(
 
     # Drop null quote_ids
     scored_df = scored_df.filter(pl.col("quote_id").is_not_null())
-
-    # Get per-quote factors from the banding source node
-    banding_source_id = config.get("banding_source")
-    if banding_source_id and banding_source_id in pipeline_result.outputs:
-        factors_df = pipeline_result.outputs[banding_source_id]
-    else:
-        raise RuntimeError(
-            "Ratebook mode requires a banding source. "
-            "Select a banding node in the Rating Factor Source dropdown."
-        )
 
     # Filter factor_columns to only groups whose columns exist in factors_df
     raw_factor_columns = config.get("factor_columns", [])
@@ -254,6 +309,29 @@ def _solve_ratebook(
             for level, mult in table.items()
         ]
 
+    # Multiplier stats & histogram
+    multiplier_stats, multiplier_histogram = _compute_multiplier_stats(solve_result)
+
+    result_dict: dict[str, Any] = {
+        "mode": "ratebook",
+        "total_objective": solve_result.total_objective,
+        "baseline_objective": solve_result.baseline_objective,
+        "constraints": solve_result.total_constraints,
+        "baseline_constraints": solve_result.baseline_constraints,
+        "lambdas": solve_result.lambdas,
+        "converged": solve_result.converged,
+        "cd_iterations": solve_result.cd_iterations,
+        "factor_tables": factor_tables_serialised,
+        "clamp_rate": getattr(solve_result, "clamp_rate", None),
+        "history": None,
+        "multiplier_stats": multiplier_stats,
+        "multiplier_histogram": multiplier_histogram,
+    }
+    if not solve_result.converged:
+        result_dict["warning"] = (
+            "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
+        )
+
     job.update({
         "status": "completed",
         "progress": 1.0,
@@ -261,17 +339,7 @@ def _solve_ratebook(
         "elapsed_seconds": elapsed,
         "solver": solver,
         "solve_result": solve_result,
-        "result": {
-            "mode": "ratebook",
-            "total_objective": solve_result.total_objective,
-            "baseline_objective": solve_result.baseline_objective,
-            "constraints": solve_result.total_constraints,
-            "baseline_constraints": solve_result.baseline_constraints,
-            "lambdas": solve_result.lambdas,
-            "converged": solve_result.converged,
-            "cd_iterations": solve_result.cd_iterations,
-            "factor_tables": factor_tables_serialised,
-        },
+        "result": result_dict,
     })
 
 
@@ -384,9 +452,44 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
         _jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=400, detail=error_msg)
 
-    # --- Build solver and run in background ---
+    # --- Column validation ---
+    qid_col = config.get("quote_id", "quote_id")
+    mult_col = config.get("multiplier", "multiplier")
+    step_col = config.get("scenario_step", "scenario_step")
+    required_cols = {objective, qid_col, mult_col, step_col}
+    for cname in constraints:
+        required_cols.add(cname)
+    missing_cols = sorted(required_cols - set(scored_df.columns))
+    if missing_cols:
+        avail = sorted(scored_df.columns)
+        detail = f"Missing columns in scored data: {missing_cols}. Available: {avail}"
+        _jobs[job_id] = {"status": "error", "message": detail}
+        raise HTTPException(status_code=400, detail=detail)
+
+    # --- Extract ratebook factors before dropping pipeline result ---
+    # For ratebook mode, grab the banding factors DataFrame now so we can
+    # free all other intermediate pipeline outputs from memory.
+    factors_df = None
+    if mode == "ratebook":
+        banding_source_id = config.get("banding_source")
+        if banding_source_id and banding_source_id in result.outputs:
+            factors_df = result.outputs[banding_source_id]
+    del result  # free intermediate DataFrames from all other pipeline nodes
+
+    # --- Keep only solver-relevant columns on the job ---
+    # The solver selects its own columns internally, but keeping the full
+    # wide DataFrame alive for 24h (for frontier) wastes memory.
+    solver_cols = [
+        c for c in [qid_col, mult_col, step_col, objective] + list(constraints.keys())
+        if c in scored_df.columns
+    ]
+    scored_df_narrow = scored_df.select(solver_cols)
+    del scored_df
+
     start_time = time.monotonic()
     _jobs[job_id]["start_time"] = start_time
+    _jobs[job_id]["timeout"] = config.get("timeout", _DEFAULT_TIMEOUT)
+    _jobs[job_id]["scored_df"] = scored_df_narrow
     node_id = body.node_id  # capture for closure
 
     def _solve_background() -> None:
@@ -398,12 +501,30 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
                 "elapsed_seconds": time.monotonic() - start_time,
             })
             if mode == "ratebook":
-                _solve_ratebook(scored_df, config, result, job, start_time)
+                _solve_ratebook(
+                    scored_df_narrow, config, factors_df, job, start_time,
+                )
             else:
-                _solve_online(scored_df, config, job, start_time)
+                _solve_online(scored_df_narrow, config, job, start_time)
+        except ValueError as exc:
+            error_msg = f"Data error: {exc}"
+            logger.error("solve_failed", error=str(exc), node_id=node_id, category="data")
+            _jobs[job_id].update({
+                "status": "error",
+                "message": error_msg,
+                "elapsed_seconds": time.monotonic() - start_time,
+            })
+        except RuntimeError as exc:
+            error_msg = f"Algorithm error: {exc}"
+            logger.error("solve_failed", error=str(exc), node_id=node_id, category="algorithm")
+            _jobs[job_id].update({
+                "status": "error",
+                "message": error_msg,
+                "elapsed_seconds": time.monotonic() - start_time,
+            })
         except Exception as exc:
-            error_msg = f"Optimisation failed: {exc}"
-            logger.error("solve_failed", error=str(exc), node_id=node_id)
+            error_msg = f"Unexpected error: {exc}"
+            logger.error("solve_failed", error=str(exc), node_id=node_id, category="unexpected")
             _jobs[job_id].update({
                 "status": "error",
                 "message": error_msg,
@@ -421,6 +542,18 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    # Check for timeout on running jobs
+    if job.get("status") == "running":
+        start = job.get("start_time")
+        timeout = job.get("timeout", _DEFAULT_TIMEOUT)
+        if start and (time.monotonic() - start) > timeout:
+            job.update({
+                "status": "error",
+                "message": f"Solve timed out after {timeout}s. "
+                "Increase timeout or simplify the problem.",
+                "elapsed_seconds": time.monotonic() - start,
+            })
 
     return OptimiserStatusResponse(
         status=job.get("status", "unknown"),
@@ -462,6 +595,45 @@ def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/frontier", response_model=OptimiserFrontierResponse)
+def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
+    """Compute efficient frontier for a completed optimisation job."""
+    job = _jobs.get(body.job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    if job.get("status") != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
+        )
+
+    solver = job.get("solver")
+    scored_df = job.get("scored_df")
+    if solver is None or scored_df is None:
+        raise HTTPException(status_code=400, detail="Job has no solver or scored data")
+
+    try:
+        # Convert threshold ranges from lists to tuples for Rust binding
+        ranges = {
+            k: tuple(v) for k, v in body.threshold_ranges.items()
+        }
+        frontier_result = solver.frontier(
+            scored_df,
+            threshold_ranges=ranges,
+            n_points_per_dim=body.n_points_per_dim,
+        )
+        points_df = frontier_result.points
+        return OptimiserFrontierResponse(
+            status="ok",
+            points=points_df.to_dicts(),
+            n_points=len(points_df),
+            constraint_names=list(body.threshold_ranges.keys()),
+        )
+    except Exception as exc:
+        logger.error("frontier_failed", error=str(exc), job_id=body.job_id)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/save", response_model=OptimiserSaveResponse)
 def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     """Save the optimisation result to disk."""
@@ -488,14 +660,27 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
         out.parent.mkdir(parents=True, exist_ok=True)
 
         # Save config + lambdas as JSON
+        job_config = job.get("config", {})
         payload = {
+            "mode": job_config.get("mode", "online"),
             "lambdas": solve_result.lambdas,
             "total_objective": solve_result.total_objective,
+            "baseline_objective": getattr(solve_result, "baseline_objective", None),
             "total_constraints": solve_result.total_constraints,
+            "baseline_constraints": getattr(solve_result, "baseline_constraints", None),
+            "constraints": job_config.get("constraints"),
+            "objective": job_config.get("objective"),
+            "quote_id": job_config.get("quote_id", "quote_id"),
+            "scenario_step": job_config.get("scenario_step", "scenario_step"),
+            "multiplier": job_config.get("multiplier", "multiplier"),
+            "chunk_size": job_config.get("chunk_size", 500_000),
             "converged": solve_result.converged,
             "iterations": getattr(solve_result, "iterations", None),
             "cd_iterations": getattr(solve_result, "cd_iterations", None),
         }
+        if job_config.get("mode") == "ratebook":
+            payload["factor_tables"] = job.get("result", {}).get("factor_tables")
+            payload["clamp_rate"] = getattr(solve_result, "clamp_rate", None)
         out.write_text(json.dumps(payload, indent=2, default=str))
         logger.info("result_saved", path=str(out), job_id=body.job_id)
 
