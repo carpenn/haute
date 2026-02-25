@@ -1,0 +1,6 @@
+{
+  "path": "data/policies.parquet",
+  "sourceType": "databricks",
+  "http_path": "/sql/1.0/warehouses/a4cdf14603abd87b",
+  "table": "quotes.delta.policies"
+}

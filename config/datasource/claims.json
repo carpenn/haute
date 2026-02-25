@@ -1,0 +1,4 @@
+{
+  "path": "data/claims_amounts.parquet",
+  "sourceType": "flat_file"
+}

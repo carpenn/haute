@@ -7,6 +7,9 @@ markers work normally.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from haute._config_io import collect_node_configs
 from haute.codegen import graph_to_code
 from haute.parser import parse_pipeline_source
 
@@ -15,15 +18,25 @@ from haute.parser import parse_pipeline_source
 # ---------------------------------------------------------------------------
 
 
-def _roundtrip(source: str) -> str:
-    """Parse source -> codegen -> return generated code."""
-    graph = parse_pipeline_source(source)
-    return graph_to_code(
+def _roundtrip(source: str, base_dir: Path | None = None) -> str:
+    """Parse source -> codegen -> return generated code.
+
+    If *base_dir* is given, config files are written there before parsing
+    and the parser resolves ``config=`` references relative to it.
+    """
+    graph = parse_pipeline_source(source, _base_dir=base_dir)
+    code = graph_to_code(
         graph,
         pipeline_name=graph.pipeline_name or "main",
         description=graph.pipeline_description or "",
         preamble=graph.preamble or "",
     )
+    if base_dir is not None:
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = base_dir / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+    return code
 
 
 def _make_pipeline(
@@ -329,7 +342,7 @@ class TestPreservedBlocksRoundTrip:
         code = _roundtrip(source)
         compile(code, "<test>", "exec")
 
-    def test_double_roundtrip_stable(self):
+    def test_double_roundtrip_stable(self, tmp_path):
         """Two consecutive round-trips produce the same output (idempotent)."""
         source = _make_pipeline(
             preamble="from datetime import date",
@@ -343,6 +356,6 @@ class TestPreservedBlocksRoundTrip:
                 "# haute:preserve-end"
             ),
         )
-        code1 = _roundtrip(source)
-        code2 = _roundtrip(code1)
+        code1 = _roundtrip(source, base_dir=tmp_path)
+        code2 = _roundtrip(code1, base_dir=tmp_path)
         assert code1 == code2

@@ -183,15 +183,14 @@ class TestCodegen:
             label="apply_optimised_price",
         )
         code = _node_to_code(node, source_names=["score_models"])
-        assert "@pipeline.node(optimiser_apply=True" in code
-        assert "artifact_path=" in code
+        assert 'config="config/optimiser_apply/apply_optimised_price.json"' in code
         assert "def apply_optimised_price(" in code
         assert "return score_models" in code
 
     def test_codegen_empty_config(self):
         node = _make_node({}, label="apply_opt")
         code = _node_to_code(node, source_names=["df"])
-        assert "@pipeline.node(optimiser_apply=True)" in code
+        assert 'config="config/optimiser_apply/apply_opt.json"' in code
 
     def test_codegen_mlflow_registered(self):
         node = _make_node({
@@ -200,9 +199,7 @@ class TestCodegen:
             "version": "2",
         })
         code = _node_to_code(node, source_names=["df"])
-        assert "sourceType='registered'" in code
-        assert "registered_model='opt_model'" in code
-        assert "version='2'" in code
+        assert 'config="config/optimiser_apply/apply_opt.json"' in code
 
     def test_codegen_mlflow_run(self):
         node = _make_node({
@@ -210,15 +207,14 @@ class TestCodegen:
             "run_id": "abc123",
         })
         code = _node_to_code(node, source_names=["df"])
-        assert "sourceType='run'" in code
-        assert "run_id='abc123'" in code
+        assert 'config="config/optimiser_apply/apply_opt.json"' in code
 
     def test_codegen_version_column(self):
         node = _make_node(
             {"artifact_path": "a.json", "version_column": "__ver__"},
         )
         code = _node_to_code(node, source_names=["df"])
-        assert "version_column='__ver__'" in code
+        assert 'config="config/optimiser_apply/apply_opt.json"' in code
 
 
 # ---------------------------------------------------------------------------

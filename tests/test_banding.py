@@ -288,13 +288,11 @@ class TestBandingCodegen:
         )
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        assert 'banding="continuous"' in code
-        assert 'column="age"' in code
-        assert 'output_column="age_band"' in code
-        assert "rules=" in code
+        assert 'config="config/factors/band_age.json"' in code
 
-    def test_codegen_roundtrip(self):
+    def test_codegen_roundtrip(self, tmp_path):
         """Generate code → parse it back → same config."""
+        from haute._config_io import collect_node_configs
         from haute.codegen import graph_to_code
         from haute.parser import parse_pipeline_source
 
@@ -311,7 +309,16 @@ class TestBandingCodegen:
         )
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        parsed = parse_pipeline_source(code)
+
+        # Write config files so the parser can resolve them
+        py_file = tmp_path / "pipeline.py"
+        py_file.write_text(code)
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        parsed = parse_pipeline_source(code, _base_dir=tmp_path)
 
         assert len(parsed.nodes) == 1
         pn = parsed.nodes[0]
@@ -387,9 +394,10 @@ class TestMultiFactor:
         ])
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        assert "factors=" in code
+        assert 'config="config/factors/multi.json"' in code
 
-    def test_codegen_multi_factor_roundtrip(self):
+    def test_codegen_multi_factor_roundtrip(self, tmp_path):
+        from haute._config_io import collect_node_configs
         from haute.codegen import graph_to_code
         from haute.parser import parse_pipeline_source
 
@@ -399,7 +407,14 @@ class TestMultiFactor:
         ])
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        parsed = parse_pipeline_source(code)
+
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        parsed = parse_pipeline_source(code, _base_dir=tmp_path)
 
         pn = parsed.nodes[0]
         assert pn.data.nodeType == "banding"

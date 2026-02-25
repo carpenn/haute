@@ -327,11 +327,12 @@ class TestRatingStepCodegen:
             edges=[GraphEdge(id="e1", source="src", target="rating")],
         )
         code = graph_to_code(graph)
-        assert "tables=" in code
-        assert "output_column" in code
+        assert 'config="config/tables/rating.json"' in code
 
-    def test_codegen_roundtrip(self):
+    def test_codegen_roundtrip(self, tmp_path):
         """Code generated from a graph can be parsed back."""
+        from haute._config_io import collect_node_configs
+
         tables = [{
             "name": "Age Factor",
             "factors": ["age_band"],
@@ -350,7 +351,13 @@ class TestRatingStepCodegen:
         )
         code = graph_to_code(graph)
 
-        parsed = parse_pipeline_source(code)
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        parsed = parse_pipeline_source(code, _base_dir=tmp_path)
         rating_nodes = [
             n for n in parsed.nodes if n.data.nodeType == "ratingStep"
         ]
@@ -361,8 +368,10 @@ class TestRatingStepCodegen:
         assert rt[0]["outputColumn"] == "age_factor"
         assert len(rt[0]["entries"]) == 2
 
-    def test_codegen_with_operation(self):
-        """Codegen emits operation and combined_column when set."""
+    def test_codegen_with_operation(self, tmp_path):
+        """Codegen emits operation and combined_column in config file when set."""
+        from haute._config_io import collect_node_configs
+
         tables = [
             {"name": "T1", "factors": ["b"], "outputColumn": "f1",
              "defaultValue": 1.0, "entries": [{"b": "A", "value": 2.0}]},
@@ -376,17 +385,26 @@ class TestRatingStepCodegen:
             edges=[GraphEdge(id="e1", source="src", target="rating")],
         )
         code = graph_to_code(graph)
-        assert "operation='add'" in code
-        assert "combined_column='total'" in code
+        assert 'config="config/tables/rating.json"' in code
+
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
 
         # Roundtrip
-        parsed = parse_pipeline_source(code)
+        parsed = parse_pipeline_source(code, _base_dir=tmp_path)
         rn = [n for n in parsed.nodes if n.data.nodeType == "ratingStep"][0]
         assert rn.data.config["operation"] == "add"
         assert rn.data.config["combinedColumn"] == "total"
 
-    def test_codegen_multiply_default_omitted(self):
-        """Multiply (default) operation is not emitted in code."""
+    def test_codegen_multiply_default_omitted(self, tmp_path):
+        """Multiply (default) operation is not emitted in decorator; config file has combinedColumn."""
+        import json
+
+        from haute._config_io import collect_node_configs
+
         tables = [
             {"name": "T1", "factors": ["b"], "outputColumn": "f1",
              "entries": [{"b": "A", "value": 2.0}]},
@@ -398,5 +416,10 @@ class TestRatingStepCodegen:
             edges=[GraphEdge(id="e1", source="src", target="rating")],
         )
         code = graph_to_code(graph)
-        assert 'operation=' not in code
-        assert "combined_column='c'" in code
+        # Decorator should just be a config= reference
+        assert 'config="config/tables/rating.json"' in code
+
+        # Verify config file contents
+        configs = collect_node_configs(graph)
+        rating_cfg = json.loads(configs["config/tables/rating.json"])
+        assert rating_cfg["combinedColumn"] == "c"

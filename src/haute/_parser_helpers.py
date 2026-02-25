@@ -11,8 +11,12 @@ Import direction:  _parser_helpers  ←  parser / _parser_regex / _parser_submod
 from __future__ import annotations
 
 import ast
+import json
+from pathlib import Path
 from typing import Any
 
+from haute._config_io import infer_node_type_from_config_path, load_node_config
+from haute._logging import get_logger
 from haute.graph_utils import (
     OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
@@ -22,6 +26,8 @@ from haute.graph_utils import (
     NodeData,
     NodeType,
 )
+
+logger = get_logger(component="parser_helpers")
 
 # ---------------------------------------------------------------------------
 # Node type inference
@@ -716,3 +722,46 @@ def _extract_preserved_blocks(source: str) -> list[str]:
             # else: unmatched start marker — skip
         i += 1
     return blocks
+
+
+# ---------------------------------------------------------------------------
+# Config resolution (shared by parser.py and _parser_submodels.py)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_node_config(
+    decorator_kwargs: dict[str, Any],
+    body: str,
+    param_names: list[str],
+    n_params: int,
+    base_dir: Path | None,
+) -> tuple[NodeType, dict[str, Any]]:
+    """Resolve node type and config from decorator kwargs.
+
+    Handles both the new ``config="config/…/name.json"`` format (external
+    JSON file) and the legacy inline-kwargs format.
+
+    Returns ``(node_type, config_dict)``.
+    """
+    config_ref = decorator_kwargs.pop("config", None)
+    if config_ref:
+        node_type_hint = infer_node_type_from_config_path(config_ref)
+        base = base_dir or Path.cwd()
+        try:
+            loaded = load_node_config(config_ref, base_dir=base)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            logger.warning("config_load_failed", path=config_ref, error=str(exc))
+            loaded = {}
+        node_type = node_type_hint or _infer_node_type(decorator_kwargs, n_params)
+        config = dict(loaded)
+        # Code lives in the .py function body, not in the JSON file
+        if node_type == NodeType.MODEL_SCORE:
+            config["code"] = _extract_model_score_user_code(body) if body else ""
+        elif node_type == NodeType.EXTERNAL_FILE:
+            config["code"] = _extract_external_user_code(body, param_names) if body else ""
+        elif node_type == NodeType.TRANSFORM:
+            config["code"] = _extract_user_code(body, param_names) if body else ""
+    else:
+        node_type = _infer_node_type(decorator_kwargs, n_params)
+        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+    return node_type, config

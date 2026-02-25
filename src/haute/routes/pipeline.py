@@ -117,11 +117,12 @@ async def get_first_pipeline() -> PipelineGraph:
 
 @router.post("/pipeline/save", response_model=SavePipelineResponse)
 async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
-    """Save a graph: .py (source of truth) + .haute.json (positions).
+    """Save a graph: .py (source of truth) + config JSON + .haute.json (positions).
 
     When the graph contains submodels, multiple files are written via
     ``graph_to_code_multi``.
     """
+    from haute._config_io import collect_node_configs
     from haute.codegen import graph_to_code, graph_to_code_multi
 
     graph = body.graph
@@ -183,6 +184,15 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
             preserved_blocks=body.preserved_blocks or None,
         )
         py_path.write_text(code)
+
+    # Write node config JSON sidecar files
+    config_files = collect_node_configs(graph)
+    for rel_path, json_content in config_files.items():
+        out_path = (cwd / rel_path).resolve()
+        if not out_path.is_relative_to(cwd):
+            continue
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json_content)
 
     # Write sidecar .haute.json (node positions for the GUI)
     save_sidecar(py_path, graph)

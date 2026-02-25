@@ -16,7 +16,6 @@ from pathlib import Path
 from haute._logging import get_logger
 from haute._parser_helpers import (
     _build_edges,
-    _build_node_config,
     _build_rf_nodes,
     _extract_connect_calls,
     _extract_function_bodies,
@@ -25,8 +24,8 @@ from haute._parser_helpers import (
     _extract_preserved_blocks,
     _get_decorator_kwargs,
     _get_docstring,
-    _infer_node_type,
     _is_pipeline_node_decorator,
+    _resolve_node_config,
 )
 from haute._parser_regex import fallback_parse as _fallback_parse
 from haute._parser_submodels import extract_submodel_calls as _extract_submodel_calls
@@ -68,15 +67,25 @@ def parse_pipeline_file(filepath: str | Path, *, flatten: bool = False) -> Pipel
     )
 
 
-def parse_submodel_file(filepath: str | Path) -> PipelineGraph:
+def parse_submodel_file(
+    filepath: str | Path,
+    _base_dir: Path | None = None,
+) -> PipelineGraph:
     """Parse a submodel .py file and return a PipelineGraph.
 
     The submodel name and description are stored in ``pipeline_name``
     and ``pipeline_description`` respectively.
+
+    *_base_dir* is the project root for resolving config file references.
+    Defaults to ``filepath.parent`` if not provided.
     """
     filepath = Path(filepath)
     source = filepath.read_text()
-    return _parse_submodel_source(source, source_file=str(filepath))
+    return _parse_submodel_source(
+        source,
+        source_file=str(filepath),
+        _base_dir=_base_dir or filepath.parent,
+    )
 
 
 def parse_pipeline_source(
@@ -125,12 +134,12 @@ def parse_pipeline_source(
         decorator_kwargs = _get_decorator_kwargs(matched_decorator)
         param_names = [arg.arg for arg in stmt.args.args]
         n_params = len(param_names)
-        node_type = _infer_node_type(decorator_kwargs, n_params)
         description = _get_docstring(stmt)
-
-        # Build config
         body = func_bodies.get(func_name, "")
-        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+        node_type, config = _resolve_node_config(
+            decorator_kwargs, body, param_names, n_params, _base_dir,
+        )
 
         raw_nodes.append(
             {
@@ -176,7 +185,7 @@ def parse_pipeline_source(
             sm_filepath = (_base_dir / rel_path).resolve()
             if not sm_filepath.is_file():
                 continue
-            sm_graph = parse_submodel_file(sm_filepath)
+            sm_graph = parse_submodel_file(sm_filepath, _base_dir=_base_dir)
             sm_name = sm_graph.pipeline_name or sm_filepath.stem
             submodel_graphs[sm_name] = sm_graph
             submodel_files[sm_name] = rel_path

@@ -25,6 +25,7 @@ from haute._cache import graph_fingerprint
 from haute._logging import configure_logging, get_logger
 from haute.routes._helpers import (
     broadcast,
+    discover_pipelines,
     invalidate_pipeline_index,
     is_self_write,
     parse_pipeline_to_graph,
@@ -148,6 +149,9 @@ async def _file_watcher() -> None:
     modules_dir = cwd / "modules"
     if modules_dir.is_dir():
         watch_dirs.append(modules_dir)
+    config_dir = cwd / "config"
+    if config_dir.is_dir():
+        watch_dirs.append(config_dir)
 
     logger.info("file_watcher_started", watch_dirs=[str(d) for d in watch_dirs])
 
@@ -165,11 +169,16 @@ async def _file_watcher() -> None:
         # Collect changed files from pending set
         changed_files: list[Path] = []
         module_stems: list[str] = []
+        config_changed = False
         for change_type, changed_path in pending_changes:
             p = Path(changed_path)
-            if p.suffix != ".py" or p.name.startswith("__"):
-                continue
             if change_type not in (Change.modified, Change.added):
+                continue
+            # JSON config files in config/ directory
+            if p.suffix == ".json" and config_dir.is_dir() and p.is_relative_to(config_dir):
+                config_changed = True
+                continue
+            if p.suffix != ".py" or p.name.startswith("__"):
                 continue
             if p.parent == modules_dir:
                 module_stems.append(p.stem)
@@ -182,6 +191,13 @@ async def _file_watcher() -> None:
         # For changed modules, only re-parse pipelines that import them
         for stem in module_stems:
             changed_files.extend(pipelines_importing_module(stem))
+
+        # If config JSON changed, re-parse all discovered pipelines
+        if config_changed and not changed_files:
+            changed_files.extend(
+                p for p in discover_pipelines()
+                if p.suffix == ".py" and not p.name.startswith("__")
+            )
 
         # Deduplicate and parse
         seen: set[str] = set()
@@ -223,7 +239,7 @@ async def _file_watcher() -> None:
                     }
                 )
 
-    async for changes in awatch(*watch_dirs, recursive=False):
+    async for changes in awatch(*watch_dirs, recursive=True):
         # Accumulate changes and (re)start the debounce timer
         pending_changes.update(changes)
         if debounce_task and not debounce_task.done():

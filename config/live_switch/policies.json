@@ -1,0 +1,7 @@
+{
+  "mode": "batch_quotes",
+  "inputs": [
+    "quotes",
+    "batch_quotes"
+  ]
+}

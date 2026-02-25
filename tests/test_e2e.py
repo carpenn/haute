@@ -76,11 +76,20 @@ class TestEndToEnd:
         assert "Pipeline" in code
         assert "pipeline.node" in code or "@pipeline.node" in code
 
-    def test_codegen_roundtrip_preserves_structure(self):
+    def test_codegen_roundtrip_preserves_structure(self, tmp_path):
         """parse → codegen → re-parse preserves node types."""
+        from haute._config_io import collect_node_configs
+
         graph = parse_pipeline_file(PIPELINE_FILE)
         code = graph_to_code(graph, pipeline_name="roundtrip")
-        reparsed = parse_pipeline_source(code)
+
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
 
         orig_types = sorted(n.data.nodeType for n in graph.nodes)
         new_types = sorted(n.data.nodeType for n in reparsed.nodes)
@@ -100,8 +109,10 @@ class TestEndToEnd:
         reparsed = parse_pipeline_source(code)
         assert len(reparsed.edges) == len(graph.edges)
 
-    def test_full_lifecycle(self):
+    def test_full_lifecycle(self, tmp_path):
         """Complete lifecycle: parse → execute → trace → codegen → re-parse → re-execute."""
+        from haute._config_io import collect_node_configs
+
         # Step 1: Parse
         graph = parse_pipeline_file(PIPELINE_FILE)
         assert len(graph.nodes) > 0
@@ -119,7 +130,14 @@ class TestEndToEnd:
 
         # Step 4: Codegen → re-parse
         code = graph_to_code(graph, pipeline_name="lifecycle")
-        reparsed = parse_pipeline_source(code)
+
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
         assert len(reparsed.nodes) == len(graph.nodes)
 
         # Step 5: Re-execute the re-parsed graph

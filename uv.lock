@@ -2231,6 +2231,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "maturin", marker = "extra == 'dev'", specifier = ">=1.4" },
     { name = "polars", specifier = ">=0.20" },
     { name = "pyarrow", specifier = ">=23.0.1" },
@@ -2240,6 +2241,7 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "maturin", specifier = ">=1.12.4" },
     { name = "nbclient", specifier = ">=0.10.4" },

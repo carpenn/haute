@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from haute._config_io import config_path_for_node, has_config_folder
 from haute._logging import get_logger
 from haute.graph_utils import (
     OPTIMISER_APPLY_CONFIG_KEYS,
@@ -222,7 +223,8 @@ def _wrap_user_code(code: str, source_names: list[str]) -> str:
 
     Rules:
     - If code starts with '.', it's a chain → wrap as `df = (<first_input>\\n<code>\\n)`
-    - Otherwise it's a full expression → wrap as `df = <code>`
+    - If code already contains a statement (``df =``, ``return``, etc.), indent it as-is.
+    - Otherwise it's a bare expression → wrap as `df = <code>`
     """
     code = code.strip()
     if not code:
@@ -234,14 +236,41 @@ def _wrap_user_code(code: str, source_names: list[str]) -> str:
         first = source_names[0] if source_names else "df"
         chain_indented = "\n".join(f"        {line}" for line in code.splitlines())
         return f"    df = (\n        {first}\n{chain_indented}\n    )\n    return df"
-    else:
-        # Full expression: transform_2.join(transform_3, ...)
+
+    # Code that already contains an assignment or return — indent as-is
+    first_line = code.split("\n", 1)[0]
+    if "=" in first_line.split("(", 1)[0] or first_line.startswith("return "):
         indented = "\n".join(f"    {line}" for line in code.splitlines())
-        return f"    df = (\n{indented}\n    )\n    return df"
+        return f"{indented}\n    return df"
+
+    # Bare expression: wrap as `df = (<code>)`
+    indented = "\n".join(f"    {line}" for line in code.splitlines())
+    return f"    df = (\n{indented}\n    )\n    return df"
 
 
 def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str:
     """Generate code for a single node.
+
+    Delegates to ``_generate_node_code`` for the type-specific body, then
+    replaces the decorator line with a ``config=`` file reference for node
+    types that use external JSON config files.
+    """
+    code = _generate_node_code(node, source_names)
+
+    node_type = node.data.nodeType
+    if has_config_folder(node_type):
+        func_name = _sanitize_func_name(node.data.label)
+        cfg_path = str(config_path_for_node(node_type, func_name))
+        try:
+            def_idx = code.index("\ndef ")
+            code = f'@pipeline.node(config="{cfg_path}")' + code[def_idx:]
+        except ValueError:
+            logger.warning("no_def_in_generated_code", node=node.data.label)
+    return code
+
+
+def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) -> str:
+    """Generate code for a single node (with legacy inline decorator).
 
     source_names: sanitized function names of upstream nodes (used as param names).
     """
@@ -316,7 +345,10 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
     elif node_type == NodeType.CONSTANT:
         raw_values = config.get("values", []) or []
         # Build the repr for the decorator kwarg
-        values_repr = repr([{"name": v.get("name", ""), "value": v.get("value", "")} for v in raw_values])
+        values_repr = repr([
+            {"name": v.get("name", ""), "value": v.get("value", "")}
+            for v in raw_values
+        ])
         # Build a dict literal for the LazyFrame constructor
         data_pairs: list[str] = []
         for v in raw_values:

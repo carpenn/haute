@@ -10,20 +10,20 @@ Handles:
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 from typing import Any
 
 from haute._logging import get_logger
 from haute._parser_helpers import (
     _build_edges,
-    _build_node_config,
     _build_rf_nodes,
     _extract_connect_calls,
     _extract_function_bodies,
     _extract_submodel_meta,
     _get_decorator_kwargs,
     _get_docstring,
-    _infer_node_type,
     _is_submodel_node_decorator,
+    _resolve_node_config,
 )
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 
@@ -50,8 +50,15 @@ def extract_submodel_calls(tree: ast.Module) -> list[str]:
     return paths
 
 
-def parse_submodel_source(source: str, source_file: str = "") -> PipelineGraph:
-    """Parse submodel source code and return a PipelineGraph."""
+def parse_submodel_source(
+    source: str,
+    source_file: str = "",
+    _base_dir: Path | None = None,
+) -> PipelineGraph:
+    """Parse submodel source code and return a PipelineGraph.
+
+    *_base_dir* is the project root for resolving ``config=`` references.
+    """
 
     try:
         tree = ast.parse(source)
@@ -85,11 +92,12 @@ def parse_submodel_source(source: str, source_file: str = "") -> PipelineGraph:
         decorator_kwargs = _get_decorator_kwargs(matched_decorator)
         param_names = [arg.arg for arg in stmt.args.args]
         n_params = len(param_names)
-        node_type = _infer_node_type(decorator_kwargs, n_params)
         description = _get_docstring(stmt)
-
         body = func_bodies.get(func_name, "")
-        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+        node_type, config = _resolve_node_config(
+            decorator_kwargs, body, param_names, n_params, _base_dir,
+        )
 
         raw_nodes.append(
             {

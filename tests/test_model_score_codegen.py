@@ -222,8 +222,9 @@ class TestBuildNodeConfigModelScore:
 
 
 class TestParserRoundTrip:
-    def test_codegen_parses_back(self):
+    def test_codegen_parses_back(self, tmp_path):
         """Generated code can be parsed back into a graph."""
+        from haute._config_io import collect_node_configs
         from haute.parser import parse_pipeline_source
 
         graph = make_graph({
@@ -251,8 +252,14 @@ class TestParserRoundTrip:
         })
         code = graph_to_code(graph)
 
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
         # Parse it back
-        parsed = parse_pipeline_source(code)
+        parsed = parse_pipeline_source(code, _base_dir=tmp_path)
         node_map = {n.data.label: n for n in parsed.nodes}
 
         assert "scorer" in node_map

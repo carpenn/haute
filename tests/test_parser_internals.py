@@ -462,6 +462,7 @@ pipeline.connect("a", "b")
 
 class TestDeepRoundtrip:
     def test_roundtrip_preserves_node_types_and_configs(self, tmp_path):
+        from haute._config_io import collect_node_configs
         from haute.codegen import graph_to_code
 
         code = '''\
@@ -508,6 +509,13 @@ pipeline.connect("transform", "output")
         )
         p2 = tmp_path / "generated.py"
         p2.write_text(generated)
+
+        # Write config JSON sidecar files so the parser can resolve them
+        for rel_path, json_content in collect_node_configs(graph1).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(json_content)
+
         graph2 = parse_pipeline_file(p2)
 
         # Same node count

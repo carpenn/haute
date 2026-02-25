@@ -1,0 +1,10 @@
+{
+  "sourceType": "run",
+  "run_id": "d5aa4ee011594c52bed9fff777376619",
+  "artifact_path": "Model_Training_17.cbm",
+  "run_name": "Model_Training_17",
+  "task": "regression",
+  "output_column": "prediction",
+  "experiment_name": "/Shared/haute/Model_Training_17",
+  "experiment_id": "2825776902945395"
+}

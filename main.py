@@ -6,13 +6,14 @@ import haute
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
-@pipeline.node(path="data/policies.parquet")
+@pipeline.node(config="config/datasource/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    return pl.scan_parquet("data/policies.parquet")
+    from haute._databricks_io import read_cached_table
+    return read_cached_table("quotes.delta.policies")
 
 
-@pipeline.node(path="data/claims_amounts.parquet")
+@pipeline.node(config="config/datasource/claims.json")
 def claims() -> pl.LazyFrame:
     """claims node"""
     return pl.scan_parquet("data/claims_amounts.parquet")
@@ -37,25 +38,25 @@ def claims_aggregate(claims: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(path="data/exposure.parquet")
+@pipeline.node(config="config/datasource/exposure.json")
 def exposure() -> pl.LazyFrame:
     """exposure node"""
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(api_input=True, path="data/IDpol_1052049.json", row_id_column="IDpol")
+@pipeline.node(config="config/api_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """api_input node"""
     return pl.read_json("data/IDpol_1052049.json").lazy()
 
 
-@pipeline.node(live_switch=True, mode="batch_quotes")
+@pipeline.node(config="config/live_switch/policies.json")
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
     return batch_quotes
 
 
-@pipeline.node(model_score=True, source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression", output_column="prediction", run_name="Model_Training_17", experiment_name="/Shared/haute/Model_Training_17", experiment_id="2825776902945395")
+@pipeline.node(config="config/model_score/Model_Score_19.json")
 def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
     """Model Score 19 node"""
     df = policies
@@ -71,7 +72,7 @@ def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
     return result
 
 
-@pipeline.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
+@pipeline.node(config="config/external_model/frequency_model.json")
 def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
     from haute.graph_utils import load_external_object
@@ -110,32 +111,32 @@ def frequency_set(exposure: pl.LazyFrame, claims_aggregate: pl.LazyFrame, polici
     return df
 
 
-@pipeline.node(sink="output/frequency.parquet", format="parquet")
+@pipeline.node(config="config/sink/frequency_write.json")
 def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
     """frequency_write node"""
     frequency_set.collect().write_parquet("output/frequency.parquet")
     return frequency_set
 
 
-@pipeline.node(factors=[{'banding': 'continuous', 'column': 'DrivAge', 'output_column': 'DrivAgeBand', 'rules': [{'op1': '>', 'val1': '0', 'op2': '<=', 'val2': '20', 'assignment': '0-20'}, {'op1': '>', 'val1': '20', 'op2': '<=', 'val2': '30', 'assignment': '20-30'}, {'op1': '>', 'val1': '30', 'op2': '<=', 'val2': '40', 'assignment': '30-40'}, {'op1': '>', 'val1': '40', 'op2': '<=', 'val2': '50', 'assignment': '50-60'}, {'op1': '>', 'val1': '50', 'op2': '', 'val2': '', 'assignment': '60+'}]}, {'banding': 'categorical', 'column': 'Region', 'output_column': 'RegionBand', 'rules': [{'value': 'Centre', 'assignment': 'Centre'}, {'value': 'London', 'assignment': 'London'}, {'value': 'Paris', 'assignment': 'Paris'}], 'default': 'Other'}, {'banding': 'continuous', 'column': 'VehPower', 'output_column': 'VehPowerBand', 'rules': [{'op1': '>=', 'val1': '0', 'op2': '<', 'val2': '3', 'assignment': '0-3'}, {'op1': '>=', 'val1': '3', 'op2': '<', 'val2': '6', 'assignment': '3-6'}, {'op1': '>=', 'val1': '6', 'op2': '', 'val2': '', 'assignment': '6+'}]}])
+@pipeline.node(config="config/factors/optimiser_banding.json")
 def optimiser_banding(policies: pl.LazyFrame) -> pl.LazyFrame:
     """Banding 15 node"""
     return df
 
 
-@pipeline.node(tables=[{'name': 'Multit', 'factors': ['DrivAgeBand', 'RegionBand', 'VehPowerBand'], 'output_column': 'Multi', 'entries': [{'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '0-20', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '20-30', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '30-40', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '50-60', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '3-6', 'value': 2}, {'DrivAgeBand': '60+', 'RegionBand': 'Centre', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'London', 'VehPowerBand': '6+', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '0-3', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '3-6', 'value': 1}, {'DrivAgeBand': '60+', 'RegionBand': 'Paris', 'VehPowerBand': '6+', 'value': 1}], 'default_value': '1.0'}])
+@pipeline.node(config="config/tables/Rating_Step_16.json")
 def Rating_Step_16(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """Rating Step 16 node"""
     return df
 
 
-@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', run_id='db866caae8d7451bba18285a2c669b71')
+@pipeline.node(config="config/optimiser_apply/apply_ratebook.json")
 def apply_ratebook(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """apply_ratebook node"""
     return optimiser_banding
 
 
-@pipeline.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
+@pipeline.node(config="config/external_model/severity_model.json")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """catboost_load node"""
     from haute.graph_utils import load_external_object
@@ -171,13 +172,13 @@ def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFram
     return df
 
 
-@pipeline.node(output=True)
+@pipeline.node(config="config/output/output.json")
 def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """Output 13 node"""
     return calculate_premium
 
 
-@pipeline.node(scenario_expander=True, quote_id='IDpol', column_name='price_multiplier', min_value=0.8, max_value=1.2, steps=21, step_column='scenario_index')
+@pipeline.node(config="config/scenario_expander/price_scenarios.json")
 def price_scenarios(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """price_scenarios node"""
     return calculate_premium
@@ -199,19 +200,19 @@ def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', experiment_name='/optimisation', run_id='fe9fcd1fe3734556af235b4335837e70', run_name='online_optimisation')
+@pipeline.node(config="config/optimiser_apply/apply_online.json")
 def apply_online(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
     """Apply Optimisation 23 node"""
     return optimiser_inputs
 
 
-@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, data_input='optimiser_inputs')
+@pipeline.node(config="config/optimiser/online_optimisation.json")
 def online_optimisation(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
     """online_optimisation node"""
     return optimiser_inputs
 
 
-@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']], data_input='optimiser_inputs', banding_source='optimiser_banding')
+@pipeline.node(config="config/optimiser/ratebook_optimisation.json")
 def ratebook_optimisation(optimiser_inputs: pl.LazyFrame, optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """Optimiser 24 node"""
     return optimiser_inputs
@@ -232,13 +233,13 @@ def severity_set(exposure: pl.LazyFrame, claims: pl.LazyFrame, policies: pl.Lazy
     return df
 
 
-@pipeline.node(modelling=True, target='ClaimAmount', exclude=['IDpol'], algorithm='catboost', task='regression', params={'iterations': 1000, 'learning_rate': 0.05, 'depth': 6}, split={'strategy': 'random', 'test_size': 0.2, 'seed': 42}, metrics=['rmse'])
+@pipeline.node(config="config/modelling/Model_Training_17.json")
 def Model_Training_17(severity_set: pl.LazyFrame) -> pl.LazyFrame:
     """Model Training 17 node"""
     return df
 
 
-@pipeline.node(sink="output/severity.parquet", format="parquet")
+@pipeline.node(config="config/sink/severity_write.json")
 def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
     """severity_write node"""
     severity_set.collect().write_parquet("output/severity.parquet")

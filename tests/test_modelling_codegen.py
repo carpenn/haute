@@ -199,9 +199,8 @@ class TestModellingNodeToCode:
             ),
         )
         code = _node_to_code(node, source_names=["frequency_set"])
-        assert "@pipeline.node(modelling=True" in code
+        assert 'config="config/modelling/train_freq.json"' in code
         assert "def train_freq" in code
-        assert "target='ClaimCount'" in code
 
     def test_modelling_code_is_parseable(self):
         node = GraphNode(
@@ -217,8 +216,10 @@ class TestModellingNodeToCode:
         full = "import polars as pl\nimport haute\npipeline = haute.Pipeline('test')\n\n" + code
         ast.parse(full)
 
-    def test_parser_roundtrip(self):
+    def test_parser_roundtrip(self, tmp_path):
         """code → parse → codegen → parse should produce matching modelling node."""
+        from haute._config_io import collect_node_configs
+
         source_node = GraphNode(
             id="data",
             data=NodeData(label="data", nodeType=NodeType.DATA_SOURCE, config={"path": "data.parquet"}),
@@ -237,8 +238,15 @@ class TestModellingNodeToCode:
             "pipeline_name": "test",
         })
         code = graph_to_code(graph, pipeline_name="test")
+
+        # Write config files so the parser can resolve them
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
         # Parse the generated code back
-        parsed_graph = parse_pipeline_source(code, "test.py")
+        parsed_graph = parse_pipeline_source(code, "test.py", _base_dir=tmp_path)
         # Find the modelling node
         mod_nodes = [n for n in parsed_graph.nodes if n.data.nodeType == NodeType.MODELLING]
         assert len(mod_nodes) == 1

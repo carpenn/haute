@@ -1,0 +1,8 @@
+{
+  "quote_id": "IDpol",
+  "column_name": "price_multiplier",
+  "min_value": 0.8,
+  "max_value": 1.2,
+  "steps": 21,
+  "step_column": "scenario_index"
+}

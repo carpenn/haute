@@ -1,0 +1,286 @@
+{
+  "tables": [
+    {
+      "name": "Multit",
+      "factors": [
+        "DrivAgeBand",
+        "RegionBand",
+        "VehPowerBand"
+      ],
+      "outputColumn": "Multi",
+      "defaultValue": "1.0",
+      "entries": [
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Centre",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Centre",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Centre",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "London",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "London",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "London",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Paris",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Paris",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "0-20",
+          "RegionBand": "Paris",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Centre",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Centre",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Centre",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "London",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "London",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "London",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Paris",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Paris",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "20-30",
+          "RegionBand": "Paris",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Centre",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Centre",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Centre",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "London",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "London",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "London",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Paris",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Paris",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "30-40",
+          "RegionBand": "Paris",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Centre",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Centre",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Centre",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "London",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "London",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "London",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Paris",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Paris",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "50-60",
+          "RegionBand": "Paris",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Centre",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Centre",
+          "VehPowerBand": "3-6",
+          "value": 2
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Centre",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "London",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "London",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "London",
+          "VehPowerBand": "6+",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Paris",
+          "VehPowerBand": "0-3",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Paris",
+          "VehPowerBand": "3-6",
+          "value": 1
+        },
+        {
+          "DrivAgeBand": "60+",
+          "RegionBand": "Paris",
+          "VehPowerBand": "6+",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}
