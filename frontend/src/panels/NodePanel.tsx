@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback } from "react"
 import { X, Link2, AlertTriangle } from "lucide-react"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
@@ -21,7 +21,7 @@ import {
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
-import type { OptimiserPreviewData } from "./OptimiserPreview"
+import useUIStore from "../stores/useUIStore"
 
 // Re-export types (preserve public API for App.tsx)
 export type { SimpleNode, SimpleEdge } from "./editors"
@@ -35,7 +35,8 @@ type NodePanelProps = {
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
   onDeleteEdge?: (edgeId: string) => void
   onRefreshPreview?: () => void
-  onOptimiserSolve?: (data: OptimiserPreviewData | null) => void
+  /** True when showing last-selected node while nothing is actively selected */
+  dimmed?: boolean
 }
 
 // ─── Panel sizing ─────────────────────────────────────────────────
@@ -212,8 +213,9 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 
 // ─── NodePanel ────────────────────────────────────────────────────
 
-export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, onOptimiserSolve }: NodePanelProps) {
-  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_W)
+export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed }: NodePanelProps) {
+  const panelWidth = useUIStore((s) => s.nodePanelWidth)
+  const setNodePanelWidth = useUIStore((s) => s.setNodePanelWidth)
   const isDragging = useRef(false)
   const startX = useRef(0)
   const startW = useRef(DEFAULT_PANEL_W)
@@ -223,7 +225,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
       if (!isDragging.current) return
       const delta = startX.current - e.clientX
       const newW = Math.min(MAX_PANEL_W, Math.max(MIN_PANEL_W, startW.current + delta))
-      setPanelWidth(newW)
+      setNodePanelWidth(newW)
     }
     const onMouseUp = () => {
       if (isDragging.current) {
@@ -238,7 +240,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
-  }, [])
+  }, [setNodePanelWidth])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     isDragging.current = true
@@ -367,7 +369,6 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
             edges={edges}
             submodels={submodels}
             upstreamColumns={effectiveCols}
-            onSolveComplete={onOptimiserSolve}
           />
         )
       }
@@ -411,7 +412,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
   }
 
   return (
-    <div key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)' }}>
+    <div key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)', opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
       {/* Drag handle */}
       <div
         onMouseDown={onDragStart}

@@ -1,15 +1,24 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef } from "react"
 import { Loader2, Check, AlertTriangle, ChevronDown } from "lucide-react"
 import { InputSourcesBar, CodeEditor } from "./_shared"
 import type { InputSource } from "./_shared"
 import {
-  checkMlflow,
   getExperiments,
   getRuns,
   getModels,
   getModelVersions,
   ApiError,
 } from "../../api/client"
+import useUIStore from "../../stores/useUIStore"
+
+// Derive MLflow status from the global store for instant rendering
+function useMlflowFromStore() {
+  const mlflow = useUIStore((s) => s.mlflow)
+  return {
+    mlflowStatus: mlflow.status === "pending" ? "loading" as const : mlflow.status,
+    mlflowBackend: mlflow.backend,
+  }
+}
 
 export default function ModelScoreEditor({
   config,
@@ -28,25 +37,8 @@ export default function ModelScoreEditor({
   const defaultCode = (config.code as string) || ""
   const selectedModel = (config.registered_model as string) || ""
 
-  // MLflow connection status -- checked once on mount
-  const [mlflowStatus, setMlflowStatus] = useState<"loading" | "connected" | "error">("loading")
-  const [mlflowBackend, setMlflowBackend] = useState("")
-
-  const checkedMlflow = useRef(false)
-  useEffect(() => {
-    if (checkedMlflow.current) return
-    checkedMlflow.current = true
-    checkMlflow()
-      .then((data) => {
-        if (data.mlflow_installed) {
-          setMlflowStatus("connected")
-          setMlflowBackend(data.backend || "local")
-        } else {
-          setMlflowStatus("error")
-        }
-      })
-      .catch(() => { setMlflowStatus("error"); checkedMlflow.current = false })
-  }, [])
+  // MLflow connection status — from global store (fetched once on app startup)
+  const { mlflowStatus, mlflowBackend } = useMlflowFromStore()
 
   // Lazy-loaded dropdown data -- fetched on focus only, like Databricks selects
   const [experiments, setExperiments] = useState<{ experiment_id: string; name: string }[]>([])

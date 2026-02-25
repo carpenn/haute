@@ -1,9 +1,11 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react"
-import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers } from "lucide-react"
+import { useState, useCallback, useEffect, useMemo } from "react"
+import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge } from "./editors"
-import { solveOptimiser, getOptimiserStatus, saveOptimiser, logOptimiserToMlflow, checkMlflow, previewNode } from "../api/client"
-import type { SolveResult, OptimiserPreviewData } from "./OptimiserPreview"
+import { solveOptimiser, saveOptimiser, logOptimiserToMlflow, previewNode } from "../api/client"
+import type { SolveResult } from "./OptimiserPreview"
 import { NODE_TYPES } from "../utils/nodeTypes"
+import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
+import useUIStore from "../stores/useUIStore"
 
 // ─── Banding factor extraction ───
 
@@ -73,15 +75,6 @@ type OptimiserConfigProps = {
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
-  onSolveComplete?: (data: OptimiserPreviewData | null) => void
-}
-
-type SolveProgress = {
-  status: string
-  progress: number
-  message: string
-  elapsed_seconds: number
-  result?: SolveResult
 }
 
 const CONSTRAINT_TYPES = [
@@ -98,48 +91,36 @@ function formatElapsed(seconds: number): string {
   return `${mins}m ${secs}s`
 }
 
-export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels, onSolveComplete }: OptimiserConfigProps) {
-  const [solving, setSolving] = useState(false)
-  const [solveResult, setSolveResult] = useState<SolveResult | null>(null)
-  const [solveProgress, setSolveProgress] = useState<SolveProgress | null>(null)
-  const [solveError, setSolveError] = useState<string | null>(null)
-  const [solveJobId, setSolveJobId] = useState<string | null>(null)
+export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels }: OptimiserConfigProps) {
+  // ── Store-backed state (survives panel unmount) ──
+  const nodeId = config._nodeId as string
+  const solveJob = useNodeResultsStore((s) => s.solveJobs[nodeId])
+  const cachedResult = useNodeResultsStore((s) => s.solveResults[nodeId])
+  const startSolveJob = useNodeResultsStore((s) => s.startSolveJob)
+
+  const solving = !!solveJob
+  const solveProgress = solveJob?.progress ?? null
+  const solveError = solveJob?.error ?? null
+  const solveResult: SolveResult | null = cachedResult?.result ?? null
+  const solveJobId: string | null = cachedResult?.jobId ?? solveJob?.jobId ?? null
+
+  // Staleness detection: has config changed since last solve?
+  const currentConfigHash = useMemo(() => hashConfig(config), [config])
+  const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
+
+  // ── Local UI state (cheap, ok to recreate) ──
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [loggingToMlflow, setLoggingToMlflow] = useState(false)
   const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
-  const [mlflowBackend, setMlflowBackend] = useState<{ installed: boolean; backend: string; host: string } | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [])
+  // Global MLflow status from store (fetched once on app startup)
+  const mlflow = useUIStore((s) => s.mlflow)
+  const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
 
-  // Check MLflow backend on mount
-  useEffect(() => {
-    checkMlflow()
-      .then(data => setMlflowBackend({ installed: !!data.mlflow_installed, backend: data.backend || "", host: data.databricks_host || "" }))
-      .catch((e) => console.warn("MLflow check failed", e))
-  }, [])
-
-  // Notify parent (preview panel) when solve completes
-  useEffect(() => {
-    if (!onSolveComplete) return
-    if (solveResult && solveJobId) {
-      const label = allNodes.find(n => n.id === (config._nodeId as string))?.data.label || "Optimiser"
-      onSolveComplete({
-        result: solveResult,
-        jobId: solveJobId,
-        constraints,
-        nodeLabel: label,
-      })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solveResult])
+  // Collapse state from UI store (persisted)
+  const advancedOpen = useUIStore((s) => s.isSectionOpen("optimiser.advanced"))
+  const toggleAdvanced = useUIStore((s) => s.toggleSection)
 
   const mode = (config.mode as string) || "online"
   const factorColumns = (config.factor_columns as string[][]) || []
@@ -155,8 +136,6 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const maxCdIterations = (config.max_cd_iterations as number) ?? 10
   const cdTolerance = (config.cd_tolerance as number) ?? 1e-4
 
-  const nodeId = config._nodeId as string
-
   // Input nodes connected to this optimiser
   const inputNodes = useMemo(
     () => nodeId ? findInputNodes(nodeId, allNodes, edges) : [],
@@ -166,14 +145,25 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   // Data input selection — which connected input provides objectives & constraints
   const dataInput = (config.data_input as string) || ""
 
-  // Columns from the selected data input node — fetched directly via preview API
-  const [dataInputColumns, setDataInputColumns] = useState<{ name: string; dtype: string }[]>([])
+  // Columns from the selected data input node — cached in store
+  const setColumnsCache = useNodeResultsStore((s) => s.setColumns)
+  const cachedColumns = useNodeResultsStore((s) => dataInput ? s.columnCache[dataInput] : undefined)
+  const [dataInputColumns, setDataInputColumns] = useState<{ name: string; dtype: string }[]>(
+    cachedColumns?.columns ?? []
+  )
 
   useEffect(() => {
     if (!dataInput) {
       setDataInputColumns([])
       return
     }
+    // Check store cache first
+    const cached = useNodeResultsStore.getState().getColumns(dataInput)
+    if (cached) {
+      setDataInputColumns(cached.columns)
+      if (cached.fresh) return // cache is current, skip API call
+    }
+    // Fetch fresh columns (cached value shown meanwhile — no loading flash)
     const graph = {
       nodes: allNodes.map(n => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
       edges,
@@ -183,13 +173,14 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
       .then(result => {
         if (result.columns) {
           setDataInputColumns(result.columns)
+          setColumnsCache(dataInput, result.columns, useNodeResultsStore.getState().graphVersion)
         }
       })
       .catch((e) => {
         console.warn("Column fetch failed", e)
-        setDataInputColumns([])
+        if (!cached) setDataInputColumns([])
       })
-  }, [dataInput]) // only re-fetch when the selected input changes
+  }, [dataInput, allNodes, edges, submodels, setColumnsCache]) // re-fetch when input or graph changes
 
   const buildGraph = useCallback(() => ({
     nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
@@ -238,58 +229,24 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     }
   }, [factorColumns, onUpdate])
 
-  // --- Polling ---
-
-  const pollStatus = useCallback((jobId: string) => {
-    pollRef.current = setInterval(async () => {
-      try {
-        const status = await getOptimiserStatus<SolveProgress>(jobId)
-        setSolveProgress(status)
-
-        if (status.status === "completed" || status.status === "error") {
-          if (pollRef.current) clearInterval(pollRef.current)
-          pollRef.current = null
-          setSolving(false)
-          if (status.status === "completed" && status.result) {
-            setSolveResult(status.result)
-            setSolveError(null)
-          } else if (status.status === "error") {
-            setSolveError(status.message)
-            setSolveResult(null)
-          }
-          setSolveProgress(null)
-        }
-      } catch {
-        // Network error - keep polling
-      }
-    }, 500)
-  }, [])
-
-  // --- Actions ---
+  // --- Actions (polling is handled by useBackgroundJobs hook in App.tsx) ---
 
   const handleSolve = useCallback(async () => {
-    setSolving(true)
-    setSolveResult(null)
-    setSolveError(null)
-    setSolveProgress(null)
-    setSolveJobId(null)
     setSaveMessage(null)
     setMlflowResult(null)
+    const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Optimiser"
     try {
-      const result = await solveOptimiser({ graph: buildGraph(), node_id: config._nodeId as string })
+      const result = await solveOptimiser({ graph: buildGraph(), node_id: nodeId })
       if (result.status === "started" && result.job_id) {
-        setSolveJobId(result.job_id)
-        setSolveProgress({ status: "running", progress: 0, message: "Starting...", elapsed_seconds: 0 })
-        pollStatus(result.job_id)
+        // Register job in store — background hook picks up polling
+        startSolveJob(nodeId, result.job_id, nodeLabel, constraints, currentConfigHash)
       } else if (result.status === "error") {
-        setSolveError(result.error || "Unknown error")
-        setSolving(false)
+        useNodeResultsStore.getState().failSolveJob(nodeId, result.error || "Unknown error")
       }
     } catch (e) {
-      setSolveError(String(e))
-      setSolving(false)
+      useNodeResultsStore.getState().failSolveJob(nodeId, String(e))
     }
-  }, [config._nodeId, buildGraph, pollStatus])
+  }, [nodeId, allNodes, buildGraph, constraints, currentConfigHash, startSolveJob])
 
   const handleSave = useCallback(async () => {
     if (!solveJobId) return
@@ -598,7 +555,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
       {/* Advanced (collapsible) */}
       <div>
         <button
-          onClick={() => setAdvancedOpen(!advancedOpen)}
+          onClick={() => toggleAdvanced("optimiser.advanced")}
           className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em]"
           style={{ color: "var(--text-muted)" }}
         >
@@ -658,6 +615,22 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
           </div>
         )}
       </div>
+
+      {/* Staleness indicator */}
+      {isStale && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.2)" }}>
+          <RefreshCw size={12} style={{ color: "#f59e0b" }} className="shrink-0" />
+          <span style={{ color: "#fbbf24" }}>Config changed since last solve</span>
+          <button
+            onClick={handleSolve}
+            disabled={solving || !canSolve}
+            className="ml-auto px-2 py-0.5 rounded text-[11px] font-medium"
+            style={{ background: "rgba(249,115,22,.15)", color: "#f97316" }}
+          >
+            Re-run
+          </button>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="space-y-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>

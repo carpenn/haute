@@ -22,7 +22,6 @@ import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview from "./panels/DataPreview"
 import OptimiserPreview from "./panels/OptimiserPreview"
-import type { OptimiserPreviewData } from "./panels/OptimiserPreview"
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
 import ContextMenu from "./components/ContextMenu"
@@ -38,7 +37,9 @@ import usePipelineAPI from "./hooks/usePipelineAPI"
 import useTracing from "./hooks/useTracing"
 import useSubmodelNavigation from "./hooks/useSubmodelNavigation"
 import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts"
+import useBackgroundJobs from "./hooks/useBackgroundJobs"
 import useUIStore from "./stores/useUIStore"
+import useNodeResultsStore from "./stores/useNodeResultsStore"
 
 import { NODE_TYPES } from "./utils/nodeTypes"
 import { getLayoutedElements } from "./utils/layout"
@@ -73,15 +74,15 @@ const labelMap: Record<string, string> = {
   [NODE_TYPES.API_INPUT]: "API Input",
   [NODE_TYPES.DATA_SOURCE]: "Data Source",
   [NODE_TYPES.TRANSFORM]: "Polars",
-  [NODE_TYPES.MODEL_SCORE]: "Model Score",
+  [NODE_TYPES.MODEL_SCORE]: "Model Scoring",
   [NODE_TYPES.RATING_STEP]: "Rating Step",
   [NODE_TYPES.BANDING]: "Banding",
-  [NODE_TYPES.OUTPUT]: "Output",
+  [NODE_TYPES.OUTPUT]: "API Output",
   [NODE_TYPES.DATA_SINK]: "Data Sink",
-  [NODE_TYPES.EXTERNAL_FILE]: "External File",
+  [NODE_TYPES.EXTERNAL_FILE]: "Load File",
   [NODE_TYPES.LIVE_SWITCH]: "Live Switch",
   [NODE_TYPES.MODELLING]: "Model Training",
-  [NODE_TYPES.OPTIMISER]: "Optimiser",
+  [NODE_TYPES.OPTIMISER]: "Optimisation",
   [NODE_TYPES.OPTIMISER_APPLY]: "Apply Optimisation",
   [NODE_TYPES.SCENARIO_EXPANDER]: "Expander",
   [NODE_TYPES.CONSTANT]: "Constant",
@@ -120,12 +121,21 @@ function FlowEditor() {
   const setSyncBanner = useUIStore((s) => s.setSyncBanner)
   const dirty = useUIStore((s) => s.dirty)
   const setDirty = useUIStore((s) => s.setDirty)
+  const fetchMlflow = useUIStore((s) => s.fetchMlflow)
+
+  // Fetch MLflow status once on startup (shared by all panels)
+  useEffect(() => { fetchMlflow() }, [fetchMlflow])
 
   // Local UI state (not worth globalizing)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
   const [preamble, setPreamble] = useState("")
-  const [optimiserPreview, setOptimiserPreview] = useState<OptimiserPreviewData | null>(null)
+  const lastSelectedNodeRef = useRef<Node | null>(null)
+
+  // Node results store — background jobs + cached results
+  const bumpGraphVersion = useNodeResultsStore((s) => s.bumpGraphVersion)
+  const getOptimiserPreview = useNodeResultsStore((s) => s.getOptimiserPreview)
+  const clearNode = useNodeResultsStore((s) => s.clearNode)
 
   // Refs
   const submodelsRef = useRef<Record<string, unknown>>({})
@@ -141,7 +151,8 @@ function FlowEditor() {
   // Keep graphRef in sync so callbacks never see stale state
   useEffect(() => {
     graphRef.current = { nodes, edges }
-  }, [nodes, edges])
+    bumpGraphVersion()
+  }, [nodes, edges, bumpGraphVersion])
 
   // Track dirty state via reference equality (avoids JSON.stringify overhead)
   const prevStateRef = useRef<{ nodes: Node[]; edges: Edge[]; preamble: string } | null>(null)
@@ -205,6 +216,9 @@ function FlowEditor() {
     clearTrace,
   })
 
+  // Background polling for optimiser/training jobs (survives panel unmount)
+  useBackgroundJobs()
+
   // ---------------------------------------------------------------------------
   // Node interaction handlers
   // ---------------------------------------------------------------------------
@@ -236,17 +250,17 @@ function FlowEditor() {
         if (prev?.id !== node.id) {
           fetchPreview(node)
           clearTrace()
-          setOptimiserPreview(null)
         }
         return node
       })
+      lastSelectedNodeRef.current = node
     } else {
+      // Canvas click: deselect but keep panel showing last node
       setSelectedNode(null)
-      setPreviewData(null)
-      setOptimiserPreview(null)
       clearTrace()
+      // Don't clear previewData or lastSelectedNodeRef — panel stays visible
     }
-  }, [fetchPreview, clearTrace, setPreviewData])
+  }, [fetchPreview, clearTrace])
 
   const onUpdateNode = useCallback(
     (id: string, data: Record<string, unknown>) => {
@@ -266,7 +280,9 @@ function FlowEditor() {
     setEdges(e.filter((edge) => edge.source !== id && edge.target !== id))
     setSelectedNode((prev) => (prev?.id === id ? null : prev))
     setPreviewData((prev) => (prev?.nodeId === id ? null : prev))
-  }, [setNodes, setEdges, setPreviewData])
+    clearNode(id)
+    if (lastSelectedNodeRef.current?.id === id) lastSelectedNodeRef.current = null
+  }, [setNodes, setEdges, setPreviewData, clearNode])
 
   const handleDuplicateNode = useCallback((id: string) => {
     const { nodes: n } = graphRef.current
@@ -477,34 +493,44 @@ function FlowEditor() {
             </ReactFlow>
           </div>
 
-          {optimiserPreview ? (
-            <OptimiserPreview
-              data={optimiserPreview}
-              onClose={() => setOptimiserPreview(null)}
-            />
-          ) : (
-            <DataPreview
-              data={previewData}
-              onClose={() => { setPreviewData(null); clearTrace() }}
-              onCellClick={handleCellClick}
-              tracedCell={tracedCell}
-            />
-          )}
+          {(() => {
+            const activeNodeId = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+            const optPreview = activeNodeId ? getOptimiserPreview(activeNodeId) : null
+            if (optPreview) {
+              return (
+                <OptimiserPreview
+                  data={optPreview}
+                  onClose={() => {
+                    // Clear from store so the preview dismisses
+                    if (activeNodeId) clearNode(activeNodeId)
+                  }}
+                />
+              )
+            }
+            return (
+              <DataPreview
+                data={previewData}
+                onClose={() => { setPreviewData(null); clearTrace() }}
+                onCellClick={handleCellClick}
+                tracedCell={tracedCell}
+              />
+            )
+          })()}
         </div>
 
         {traceResult ? (
           <TracePanel trace={traceResult} onClose={clearTrace} />
         ) : (
           <NodePanel
-            node={selectedNode as unknown as SimpleNode | null}
+            node={(selectedNode ?? lastSelectedNodeRef.current) as unknown as SimpleNode | null}
             edges={edges as unknown as SimpleEdge[]}
             allNodes={nodes as unknown as SimpleNode[]}
             submodels={submodelsSnapshot}
-            onClose={() => setSelectedNode(null)}
+            onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}
             onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
-            onOptimiserSolve={setOptimiserPreview}
+            dimmed={!selectedNode && !!lastSelectedNodeRef.current}
           />
         )}
       </div>

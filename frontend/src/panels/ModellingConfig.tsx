@@ -1,7 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from "react"
-import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical } from "lucide-react"
+import { useState, useCallback, useMemo, useEffect } from "react"
+import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge } from "./editors"
-import { checkMlflow, getTrainStatus, trainModel, exportTraining, logToMlflow } from "../api/client"
+import { trainModel, exportTraining, logToMlflow } from "../api/client"
+import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
+import useUIStore from "../stores/useUIStore"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -12,32 +14,7 @@ type ModellingConfigProps = {
   submodels?: Record<string, unknown>
 }
 
-type TrainResult = {
-  status: string
-  metrics: Record<string, number>
-  feature_importance: { feature: string; importance: number }[]
-  model_path: string
-  train_rows: number
-  test_rows: number
-  error?: string
-  best_iteration?: number | null
-  loss_history?: { iteration: number; [key: string]: number }[]
-  double_lift?: { decile: number; actual: number; predicted: number; count: number }[]
-  shap_summary?: { feature: string; mean_abs_shap: number }[]
-  feature_importance_loss?: { feature: string; importance: number }[]
-  cv_results?: { mean_metrics: Record<string, number>; std_metrics: Record<string, number>; n_folds: number } | null
-}
-
-type TrainProgress = {
-  status: string
-  progress: number
-  message: string
-  iteration: number
-  total_iterations: number
-  train_loss: Record<string, number>
-  elapsed_seconds: number
-  result?: TrainResult
-}
+import type { TrainResult, TrainProgress } from "../stores/useNodeResultsStore"
 
 const REGRESSION_METRICS = ["gini", "rmse", "mae", "mse", "r2", "poisson_deviance", "tweedie_deviance"]
 const CLASSIFICATION_METRICS = ["auc", "logloss"]
@@ -104,34 +81,37 @@ function LossChart({ lossHistory, bestIteration }: { lossHistory: { iteration: n
 }
 
 export default function ModellingConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels }: ModellingConfigProps) {
-  const [training, setTraining] = useState(false)
-  const [trainResult, setTrainResult] = useState<TrainResult | null>(null)
-  const [trainProgress, setTrainProgress] = useState<TrainProgress | null>(null)
+  // ── Store-backed state (survives panel unmount) ──
+  const nodeId = config._nodeId as string
+  const trainJob = useNodeResultsStore((s) => s.trainJobs[nodeId])
+  const cachedResult = useNodeResultsStore((s) => s.trainResults[nodeId])
+  const startTrainJob = useNodeResultsStore((s) => s.startTrainJob)
+
+  const training = !!trainJob
+  const trainProgress: TrainProgress | null = trainJob?.progress ?? null
+  const trainResult: TrainResult | null = cachedResult?.result ?? null
+  const trainJobId: string | null = cachedResult?.jobId ?? trainJob?.jobId ?? null
+
+  // Staleness detection
+  const currentConfigHash = useMemo(() => hashConfig(config), [config])
+  const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
+
+  // ── Local UI state (cheap, ok to recreate) ──
   const [exporting, setExporting] = useState(false)
   const [exportedScript, setExportedScript] = useState<string | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [mlflowOpen, setMlflowOpen] = useState(false)
-  const [monotonicOpen, setMonotonicOpen] = useState(false)
   const [importanceType, setImportanceType] = useState<"prediction" | "loss" | "shap">("prediction")
-  const [trainJobId, setTrainJobId] = useState<string | null>(null)
   const [loggingToMlflow, setLoggingToMlflow] = useState(false)
   const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
-  const [mlflowBackend, setMlflowBackend] = useState<{ installed: boolean; backend: string; host: string } | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [])
+  // Global MLflow status from store (fetched once on app startup)
+  const mlflow = useUIStore((s) => s.mlflow)
+  const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
 
-  // Check MLflow backend on mount
-  useEffect(() => {
-    checkMlflow()
-      .then(data => setMlflowBackend({ installed: !!data.mlflow_installed, backend: data.backend || "", host: data.databricks_host || "" }))
-      .catch(() => {})
-  }, [])
+  // Collapse state from UI store (persisted)
+  const advancedOpen = useUIStore((s) => s.isSectionOpen("modelling.advanced"))
+  const mlflowOpen = useUIStore((s) => s.isSectionOpen("modelling.mlflow"))
+  const monotonicOpen = useUIStore((s) => s.isSectionOpen("modelling.monotonic"))
+  const toggleSection = useUIStore((s) => s.toggleSection)
 
   const target = (config.target as string) || ""
   const weight = (config.weight as string) || ""
@@ -159,61 +139,29 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     submodels,
   }), [allNodes, edges, submodels])
 
-  const pollStatus = useCallback((jobId: string) => {
-    pollRef.current = setInterval(async () => {
-      try {
-        const status = await getTrainStatus<TrainProgress>(jobId)
-        setTrainProgress(status)
-
-        if (status.status === "completed" || status.status === "error") {
-          if (pollRef.current) clearInterval(pollRef.current)
-          pollRef.current = null
-          setTraining(false)
-          if (status.status === "completed" && status.result) {
-            setTrainResult(status.result)
-          } else if (status.status === "error") {
-            setTrainResult({
-              status: "error", metrics: {}, feature_importance: [],
-              model_path: "", train_rows: 0, test_rows: 0,
-              error: status.message,
-            })
-          }
-          setTrainProgress(null)
-        }
-      } catch {
-        // Network error — keep polling
-      }
-    }, 500)
-  }, [])
-
   const handleTrain = useCallback(async () => {
-    setTraining(true)
-    setTrainResult(null)
-    setTrainProgress(null)
-    setTrainJobId(null)
     setMlflowResult(null)
+    const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     try {
-      const result = await trainModel({ graph: buildGraph(), node_id: config._nodeId as string })
+      const result = await trainModel({ graph: buildGraph(), node_id: nodeId })
 
       if (result.status === "started" && result.job_id) {
-        // Training running in background — poll for updates
-        setTrainJobId(result.job_id as string)
-        setTrainProgress({ status: "running", progress: 0, message: "Starting...", iteration: 0, total_iterations: 0, train_loss: {}, elapsed_seconds: 0 })
-        pollStatus(result.job_id as string)
+        // Register job in store — background hook picks up polling
+        startTrainJob(nodeId, result.job_id as string, nodeLabel, currentConfigHash)
       } else if (result.status === "error") {
-        // Immediate validation error
-        setTrainResult(result as unknown as TrainResult)
-        setTraining(false)
+        // Immediate validation error — store as completed with error result
+        useNodeResultsStore.getState().completeTrainJob(nodeId, result as unknown as TrainResult)
       } else {
-        // Synchronous completion (shouldn't happen with new backend, but handle it)
-        setTrainResult(result as unknown as TrainResult)
-        setTraining(false)
+        // Synchronous completion
+        useNodeResultsStore.getState().completeTrainJob(nodeId, result as unknown as TrainResult)
       }
     } catch (e) {
-      setTrainResult({ status: "error", metrics: {}, feature_importance: [], model_path: "", train_rows: 0, test_rows: 0, error: String(e) })
-      setTraining(false)
+      useNodeResultsStore.getState().completeTrainJob(nodeId, {
+        status: "error", metrics: {}, feature_importance: [],
+        model_path: "", train_rows: 0, test_rows: 0, error: String(e),
+      })
     }
-  }, [config._nodeId, buildGraph, pollStatus])
+  }, [nodeId, allNodes, buildGraph, currentConfigHash, startTrainJob])
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -455,7 +403,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
             />
           </div>
           <button
-            onClick={() => setAdvancedOpen(!advancedOpen)}
+            onClick={() => toggleSection("modelling.advanced")}
             className="flex items-center gap-1 text-[11px]"
             style={{ color: "var(--text-muted)" }}
           >
@@ -632,7 +580,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       {/* MLflow (collapsible) */}
       <div>
         <button
-          onClick={() => setMlflowOpen(!mlflowOpen)}
+          onClick={() => toggleSection("modelling.mlflow")}
           className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em]"
           style={{ color: "var(--text-muted)" }}
         >
@@ -671,7 +619,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       {columns.length > 0 && (
         <div>
           <button
-            onClick={() => setMonotonicOpen(!monotonicOpen)}
+            onClick={() => toggleSection("modelling.monotonic")}
             className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em]"
             style={{ color: "var(--text-muted)" }}
           >
@@ -712,6 +660,22 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
                 })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Staleness indicator */}
+      {isStale && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.2)" }}>
+          <RefreshCw size={12} style={{ color: "#f59e0b" }} className="shrink-0" />
+          <span style={{ color: "#fbbf24" }}>Config changed since last training</span>
+          <button
+            onClick={handleTrain}
+            disabled={training || !target}
+            className="ml-auto px-2 py-0.5 rounded text-[11px] font-medium"
+            style={{ background: "rgba(168,85,247,.15)", color: "#a855f7" }}
+          >
+            Re-train
+          </button>
         </div>
       )}
 

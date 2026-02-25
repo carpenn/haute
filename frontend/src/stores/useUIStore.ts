@@ -1,11 +1,12 @@
 /**
- * Zustand store for UI state — toasts, modals, panels, settings.
+ * Zustand store for UI state — toasts, modals, panels, settings, global caches.
  *
  * Eliminates prop-drilling of addToast, setSettingsOpen, etc. through
  * every hook and component in the tree.
  */
 import { create } from "zustand"
 import type { ToastMessage } from "../components/Toast"
+import { checkMlflow } from "../api/client"
 
 interface UIState {
   // Toast
@@ -39,6 +40,25 @@ interface UIState {
   // Dirty flag
   dirty: boolean
   setDirty: (dirty: boolean) => void
+
+  // Node panel width (persisted across selection changes)
+  nodePanelWidth: number
+  setNodePanelWidth: (width: number) => void
+
+  // Collapsible section states (keyed by section ID, e.g. "optimiser.advanced")
+  collapsedSections: Record<string, boolean>
+  toggleSection: (key: string) => void
+  isSectionOpen: (key: string, defaultOpen?: boolean) => boolean
+
+  // MLflow status cache (fetched once, shared by all panels)
+  mlflow: { status: "pending" | "connected" | "error"; backend: string; host: string }
+  _mlflowFetching: boolean
+  fetchMlflow: () => void
+
+  // File listing cache (keyed by "dir|extensions")
+  fileListCache: Record<string, { items: { name: string; path: string; type: "file" | "directory"; size?: number }[]; fetchedAt: number }>
+  setFileListCache: (key: string, items: { name: string; path: string; type: "file" | "directory"; size?: number }[]) => void
+  getFileListCache: (key: string) => { name: string; path: string; type: "file" | "directory"; size?: number }[] | null
 }
 
 const useUIStore = create<UIState>()((set, get) => ({
@@ -85,6 +105,54 @@ const useUIStore = create<UIState>()((set, get) => ({
   // Dirty flag
   dirty: false,
   setDirty: (dirty) => set({ dirty }),
+
+  // Node panel width
+  nodePanelWidth: 400,
+  setNodePanelWidth: (width) => set({ nodePanelWidth: width }),
+
+  // Collapsible sections
+  collapsedSections: {},
+  toggleSection: (key) => set((s) => ({
+    collapsedSections: { ...s.collapsedSections, [key]: !s.collapsedSections[key] },
+  })),
+  isSectionOpen: (key, defaultOpen = false) => {
+    const val = get().collapsedSections[key]
+    // undefined means use default; stored value is "isOpen"
+    return val === undefined ? defaultOpen : val
+  },
+
+  // MLflow status cache — fetched once on first call, shared by all panels
+  mlflow: { status: "pending", backend: "", host: "" },
+  _mlflowFetching: false,
+  fetchMlflow: () => {
+    const state = get()
+    if (state.mlflow.status !== "pending" || state._mlflowFetching) return
+    set({ _mlflowFetching: true })
+    checkMlflow()
+      .then((data) => {
+        if (data.mlflow_installed) {
+          set({ mlflow: { status: "connected", backend: data.backend || "local", host: data.databricks_host || "" } })
+        } else {
+          set({ mlflow: { status: "error", backend: "", host: "" } })
+        }
+      })
+      .catch(() => {
+        set({ mlflow: { status: "error", backend: "", host: "" } })
+      })
+  },
+
+  // File listing cache
+  fileListCache: {},
+  setFileListCache: (key, items) => set((s) => ({
+    fileListCache: { ...s.fileListCache, [key]: { items, fetchedAt: Date.now() } },
+  })),
+  getFileListCache: (key) => {
+    const entry = get().fileListCache[key]
+    if (!entry) return null
+    // Expire after 30s — file system can change
+    if (Date.now() - entry.fetchedAt > 30_000) return null
+    return entry.items
+  },
 }))
 
 export default useUIStore

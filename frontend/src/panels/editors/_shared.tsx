@@ -3,6 +3,7 @@ import { X, Folder, FileText, ChevronLeft, Check, Table2 } from "lucide-react"
 import { getDtypeColor } from "../../utils/dtypeColors"
 import type { ColumnInfo } from "../../types/node"
 import { listFiles } from "../../api/client"
+import useUIStore from "../../stores/useUIStore"
 
 // ─── Shared Types ─────────────────────────────────────────────────
 
@@ -53,12 +54,23 @@ export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | undefined>(currentPath)
+  const getFileListCache = useUIStore((s) => s.getFileListCache)
+  const setFileListCache = useUIStore((s) => s.setFileListCache)
 
   useEffect(() => {
+    const cacheKey = `${dir}|${extensions || ""}`
+    const cached = getFileListCache(cacheKey)
+    if (cached) {
+      setItems(cached as FileItem[])
+      setLoading(false)
+      return
+    }
     setError(null)
     listFiles(dir, extensions)
       .then((data) => {
-        setItems(data.items || [])
+        const fileItems = data.items || []
+        setItems(fileItems)
+        setFileListCache(cacheKey, fileItems)
         setLoading(false)
       })
       .catch((e: unknown) => {
@@ -66,7 +78,7 @@ export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath
         setItems([])
         setLoading(false)
       })
-  }, [dir, extensions])
+  }, [dir, extensions, getFileListCache, setFileListCache])
 
   const goUp = () => {
     if (dir === ".") return

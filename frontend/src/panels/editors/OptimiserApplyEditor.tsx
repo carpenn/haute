@@ -3,13 +3,13 @@ import { Loader2, Check, AlertTriangle } from "lucide-react"
 import { InputSourcesBar } from "./_shared"
 import type { InputSource } from "./_shared"
 import {
-  checkMlflow,
   getExperiments,
   getRuns,
   getModels,
   getModelVersions,
   ApiError,
 } from "../../api/client"
+import useUIStore from "../../stores/useUIStore"
 
 const INPUT_STYLE = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 const ACCENT = "#22c55e"
@@ -43,25 +43,10 @@ export default function OptimiserApplyEditor({
   const [meta, setMeta] = useState<ArtifactMeta | null>(null)
   const [loadError, setLoadError] = useState("")
 
-  // MLflow connection status
-  const [mlflowStatus, setMlflowStatus] = useState<"loading" | "connected" | "error">("loading")
-  const [mlflowBackend, setMlflowBackend] = useState("")
-
-  const checkedMlflow = useRef(false)
-  useEffect(() => {
-    if (checkedMlflow.current) return
-    checkedMlflow.current = true
-    checkMlflow()
-      .then((data) => {
-        if (data.mlflow_installed) {
-          setMlflowStatus("connected")
-          setMlflowBackend(data.backend || "local")
-        } else {
-          setMlflowStatus("error")
-        }
-      })
-      .catch((e: unknown) => { console.warn("MLflow check failed:", e); setMlflowStatus("error"); checkedMlflow.current = false })
-  }, [])
+  // MLflow connection status — from global store (fetched once on app startup)
+  const mlflow = useUIStore((s) => s.mlflow)
+  const mlflowStatus = mlflow.status === "pending" ? "loading" as const : mlflow.status
+  const mlflowBackend = mlflow.backend
 
   // MLflow dropdown data (lazy-loaded on focus)
   const [experiments, setExperiments] = useState<{ experiment_id: string; name: string }[]>([])

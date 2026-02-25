@@ -5,6 +5,7 @@ import { makePreviewData } from "../utils/makePreviewData"
 import { loadPipeline, previewNode, runPipeline, savePipeline, ApiError } from "../api/client"
 import type { NodeResult } from "../api/types"
 import useUIStore from "../stores/useUIStore"
+import useNodeResultsStore from "../stores/useNodeResultsStore"
 
 interface PipelineAPIParams {
   nodes: Node[]
@@ -101,14 +102,29 @@ export default function usePipelineAPI({
     previewAbort.current = controller
 
     const label = nodeLabel(node)
-    setPreviewData(makePreviewData(node.id, label, { status: "loading" }))
+    const { getPreview, setPreview: storePreview, graphVersion } = useNodeResultsStore.getState()
+
+    // Cache-first: show cached data immediately if available
+    const cached = getPreview(node.id)
+    if (cached) {
+      setPreviewData(cached.data)
+      // If cache is fresh (same graph version), skip the API call
+      if (cached.graphVersion === graphVersion) return
+      // Otherwise continue to fetch fresh data in background (cached data shown meanwhile)
+    } else {
+      setPreviewData(makePreviewData(node.id, label, { status: "loading" }))
+    }
+
     const graph = parentGraphRef.current
       ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
       : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
 
     previewNode(graph, node.id, rowLimit, { signal: controller.signal })
       .then((result) => {
-        setPreviewData(resultToPreview(node.id, label, result))
+        const preview = resultToPreview(node.id, label, result)
+        setPreviewData(preview)
+        // Cache the result for next time
+        storePreview(node.id, preview, useNodeResultsStore.getState().graphVersion)
         if (result.columns) {
           setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
         }
@@ -122,7 +138,13 @@ export default function usePipelineAPI({
 
   const fetchPreview = useCallback((node: Node) => {
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
-    setPreviewData(makePreviewData(node.id, nodeLabel(node), { status: "loading" }))
+    // Show cached data immediately if available (no loading flash)
+    const cached = useNodeResultsStore.getState().getPreview(node.id)
+    if (cached) {
+      setPreviewData(cached.data)
+    } else {
+      setPreviewData(makePreviewData(node.id, nodeLabel(node), { status: "loading" }))
+    }
     previewDebounce.current = setTimeout(() => fetchPreviewImmediate(node), 200)
   }, [fetchPreviewImmediate])
 
