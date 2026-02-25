@@ -9,7 +9,7 @@ import {
   getModelVersions,
   ApiError,
 } from "../../api/client"
-import useUIStore from "../../stores/useUIStore"
+import { useMlflowStatus } from "../../stores/useUIStore"
 
 const INPUT_STYLE = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 const ACCENT = "#22c55e"
@@ -44,9 +44,7 @@ export default function OptimiserApplyEditor({
   const [loadError, setLoadError] = useState("")
 
   // MLflow connection status — from global store (fetched once on app startup)
-  const mlflow = useUIStore((s) => s.mlflow)
-  const mlflowStatus = mlflow.status === "pending" ? "loading" as const : mlflow.status
-  const mlflowBackend = mlflow.backend
+  const { mlflowStatus, mlflowBackend } = useMlflowStatus()
 
   // MLflow dropdown data (lazy-loaded on focus)
   const [experiments, setExperiments] = useState<{ experiment_id: string; name: string }[]>([])

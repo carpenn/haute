@@ -55,8 +55,8 @@ export default function useBackgroundJobs() {
           } else {
             updateSolveProgress(nodeId, status)
           }
-        } catch {
-          // Network error — keep polling, don't kill the interval
+        } catch (e) {
+          console.warn("Optimiser poll failed (will retry):", e)
         }
       }, POLL_INTERVAL_MS)
     }
@@ -103,8 +103,8 @@ export default function useBackgroundJobs() {
           } else {
             updateTrainProgress(nodeId, status)
           }
-        } catch {
-          // Network error — keep polling
+        } catch (e) {
+          console.warn("Training poll failed (will retry):", e)
         }
       }, POLL_INTERVAL_MS)
     }

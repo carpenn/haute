@@ -6,6 +6,7 @@ import type { SolveResult } from "./OptimiserPreview"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useUIStore from "../stores/useUIStore"
+import { formatElapsed } from "../utils/formatValue"
 
 // ─── Banding factor extraction ───
 
@@ -83,13 +84,6 @@ const CONSTRAINT_TYPES = [
   { value: "min_abs", label: "Min (absolute)" },
   { value: "max_abs", label: "Max (absolute)" },
 ]
-
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds.toFixed(0)}s`
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}m ${secs}s`
-}
 
 export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels }: OptimiserConfigProps) {
   // ── Store-backed state (survives panel unmount) ──

@@ -4,6 +4,7 @@ import type { SimpleNode, SimpleEdge } from "./editors"
 import { trainModel, exportTraining, logToMlflow } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useUIStore from "../stores/useUIStore"
+import { formatElapsed } from "../utils/formatValue"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -21,12 +22,7 @@ const CLASSIFICATION_METRICS = ["auc", "logloss"]
 const REGRESSION_LOSSES = ["RMSE", "MAE", "Poisson", "Tweedie"]
 const CLASSIFICATION_LOSSES = ["Logloss", "CrossEntropy"]
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds.toFixed(0)}s`
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}m ${secs}s`
-}
+
 
 function LossChart({ lossHistory, bestIteration }: { lossHistory: { iteration: number; [key: string]: number }[]; bestIteration?: number | null }) {
   if (!lossHistory || lossHistory.length < 2) return null

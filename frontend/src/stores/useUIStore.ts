@@ -136,7 +136,8 @@ const useUIStore = create<UIState>()((set, get) => ({
           set({ mlflow: { status: "error", backend: "", host: "" } })
         }
       })
-      .catch(() => {
+      .catch((e) => {
+        console.warn("MLflow check failed:", e)
         set({ mlflow: { status: "error", backend: "", host: "" } })
       })
   },
@@ -156,3 +157,12 @@ const useUIStore = create<UIState>()((set, get) => ({
 }))
 
 export default useUIStore
+
+/** Derive MLflow connection status for panel display (maps "pending" → "loading"). */
+export function useMlflowStatus() {
+  const mlflow = useUIStore((s) => s.mlflow)
+  return {
+    mlflowStatus: mlflow.status === "pending" ? "loading" as const : mlflow.status,
+    mlflowBackend: mlflow.backend,
+  }
+}

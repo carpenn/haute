@@ -9,16 +9,7 @@ import {
   getModelVersions,
   ApiError,
 } from "../../api/client"
-import useUIStore from "../../stores/useUIStore"
-
-// Derive MLflow status from the global store for instant rendering
-function useMlflowFromStore() {
-  const mlflow = useUIStore((s) => s.mlflow)
-  return {
-    mlflowStatus: mlflow.status === "pending" ? "loading" as const : mlflow.status,
-    mlflowBackend: mlflow.backend,
-  }
-}
+import { useMlflowStatus } from "../../stores/useUIStore"
 
 export default function ModelScoreEditor({
   config,
@@ -38,7 +29,7 @@ export default function ModelScoreEditor({
   const selectedModel = (config.registered_model as string) || ""
 
   // MLflow connection status — from global store (fetched once on app startup)
-  const { mlflowStatus, mlflowBackend } = useMlflowFromStore()
+  const { mlflowStatus, mlflowBackend } = useMlflowStatus()
 
   // Lazy-loaded dropdown data -- fetched on focus only, like Databricks selects
   const [experiments, setExperiments] = useState<{ experiment_id: string; name: string }[]>([])
