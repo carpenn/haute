@@ -44,6 +44,7 @@ class NodeType(StrEnum):
     OPTIMISER = "optimiser"
     SCENARIO_EXPANDER = "scenarioExpander"
     OPTIMISER_APPLY = "optimiserApply"
+    CONSTANT = "constant"
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
 
@@ -273,6 +274,17 @@ OPTIMISER_APPLY_CONFIG_KEYS: tuple[str, ...] = (
 SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (
     "quote_id", "column_name", "min_value", "max_value", "steps", "step_column",
 )
+
+
+class ConstantConfig(TypedDict, total=False):
+    """Config for constant nodes.
+
+    Each entry in ``values`` is a ``{"name": str, "value": str}`` dict.
+    Values are coerced to float where possible; otherwise kept as strings.
+    The node outputs a 1-row LazyFrame with one column per entry.
+    """
+
+    values: list[dict[str, str]]
 
 
 class SubmodelConfig(TypedDict, total=False):

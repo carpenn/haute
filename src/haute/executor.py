@@ -194,6 +194,26 @@ def _build_node_fn(
 
         return func_name, source_fn, True
 
+    if node_type == NodeType.CONSTANT:
+        raw_values = config.get("values", []) or []
+
+        def constant_fn() -> _Frame:
+            data: dict[str, list] = {}
+            for v in raw_values:
+                name = v.get("name", "")
+                if not name:
+                    continue
+                val = v.get("value", "")
+                try:
+                    data[name] = [float(val)]
+                except (ValueError, TypeError):
+                    data[name] = [val]
+            if not data:
+                data = {"constant": [0]}
+            return pl.LazyFrame(data)
+
+        return func_name, constant_fn, True
+
     elif node_type == NodeType.LIVE_SWITCH:
         mode = config.get("mode", "live")
         input_names = list(source_names)

@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3 } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, PanelLeftClose, HardDriveDownload, FileArchive, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3, Hash } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import type { DragEvent } from "react"
 import type { Node } from "@xyflow/react"
@@ -20,6 +20,14 @@ const nodeTemplates = [
     icon: Database,
     accent: "#3b82f6",
     defaultConfig: { path: "" },
+  },
+  {
+    type: NODE_TYPES.CONSTANT,
+    label: "Constant",
+    description: "Named constant values (1-row DataFrame)",
+    icon: Hash,
+    accent: "#64748b",
+    defaultConfig: { values: [{ name: "constant_1", value: "1.0" }] },
   },
   {
     type: NODE_TYPES.TRANSFORM,

@@ -64,6 +64,7 @@ const nodeTypes = {
   [NODE_TYPES.OPTIMISER]: PipelineNode,
   [NODE_TYPES.OPTIMISER_APPLY]: PipelineNode,
   [NODE_TYPES.SCENARIO_EXPANDER]: PipelineNode,
+  [NODE_TYPES.CONSTANT]: PipelineNode,
   [NODE_TYPES.SUBMODEL]: SubmodelNode,
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
@@ -83,6 +84,7 @@ const labelMap: Record<string, string> = {
   [NODE_TYPES.OPTIMISER]: "Optimiser",
   [NODE_TYPES.OPTIMISER_APPLY]: "Apply Optimisation",
   [NODE_TYPES.SCENARIO_EXPANDER]: "Expander",
+  [NODE_TYPES.CONSTANT]: "Constant",
   [NODE_TYPES.SUBMODEL]: "Submodel",
   [NODE_TYPES.SUBMODEL_PORT]: "Port",
 }

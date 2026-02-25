@@ -15,12 +15,13 @@ describe("NODE_TYPES", () => {
     expect(NODE_TYPES.LIVE_SWITCH).toBe("liveSwitch")
     expect(NODE_TYPES.MODELLING).toBe("modelling")
     expect(NODE_TYPES.SCENARIO_EXPANDER).toBe("scenarioExpander")
+    expect(NODE_TYPES.CONSTANT).toBe("constant")
     expect(NODE_TYPES.SUBMODEL).toBe("submodel")
     expect(NODE_TYPES.SUBMODEL_PORT).toBe("submodelPort")
   })
 
-  it("has exactly 15 node types", () => {
-    expect(Object.keys(NODE_TYPES)).toHaveLength(15)
+  it("has exactly 17 node types", () => {
+    expect(Object.keys(NODE_TYPES)).toHaveLength(17)
   })
 })
 
@@ -58,9 +59,10 @@ describe("SINGLETON_TYPES", () => {
 })
 
 describe("SOURCE_ONLY_TYPES", () => {
-  it("contains dataSource and apiInput", () => {
+  it("contains dataSource, apiInput, and constant", () => {
     expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(true)
     expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(true)
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.CONSTANT)).toBe(true)
   })
 
   it("does not contain non-source types", () => {
@@ -69,8 +71,8 @@ describe("SOURCE_ONLY_TYPES", () => {
     expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.DATA_SINK)).toBe(false)
   })
 
-  it("has exactly 2 entries", () => {
-    expect(SOURCE_ONLY_TYPES.size).toBe(2)
+  it("has exactly 3 entries", () => {
+    expect(SOURCE_ONLY_TYPES.size).toBe(3)
   })
 })
 

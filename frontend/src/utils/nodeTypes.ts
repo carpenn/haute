@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3 } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3, Hash } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const NODE_TYPES = {
@@ -16,6 +16,7 @@ export const NODE_TYPES = {
   OPTIMISER: "optimiser",
   OPTIMISER_APPLY: "optimiserApply",
   SCENARIO_EXPANDER: "scenarioExpander",
+  CONSTANT: "constant",
   SUBMODEL: "submodel",
   SUBMODEL_PORT: "submodelPort",
 } as const
@@ -42,6 +43,7 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
   [NODE_TYPES.OPTIMISER]:         { icon: Target,             color: "#f97316", label: "OPTIMISER" },
   [NODE_TYPES.OPTIMISER_APPLY]:   { icon: Crosshair,          color: "#22c55e", label: "APPLY OPT" },
   [NODE_TYPES.SCENARIO_EXPANDER]: { icon: Rows3,              color: "#0ea5e9", label: "EXPANDER" },
+  [NODE_TYPES.CONSTANT]:          { icon: Hash,               color: "#64748b", label: "CONSTANT" },
   [NODE_TYPES.SUBMODEL]:          { icon: Package,            color: "#ea580c", label: "SUBMODEL" },
   [NODE_TYPES.SUBMODEL_PORT]:     { icon: ArrowRight,         color: "#94a3b8", label: "PORT" },
 }
@@ -52,7 +54,7 @@ export const SINGLETON_TYPES = new Set<NodeTypeValue>([
 
 /** Nodes that only produce data — no input handle. */
 export const SOURCE_ONLY_TYPES = new Set<string>([
-  NODE_TYPES.DATA_SOURCE, NODE_TYPES.API_INPUT,
+  NODE_TYPES.DATA_SOURCE, NODE_TYPES.API_INPUT, NODE_TYPES.CONSTANT,
 ])
 
 /** Nodes that only consume data — no output handle. */

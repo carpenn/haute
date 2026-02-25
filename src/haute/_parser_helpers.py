@@ -50,6 +50,8 @@ def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeTyp
         return NodeType.OPTIMISER_APPLY
     if decorator_kwargs.get("optimiser"):
         return NodeType.OPTIMISER
+    if decorator_kwargs.get("constant"):
+        return NodeType.CONSTANT
     if decorator_kwargs.get("modelling"):
         return NodeType.MODELLING
     if decorator_kwargs.get("model_score"):
@@ -493,6 +495,12 @@ def _build_node_config(
         for key in modelling_keys:
             if key in decorator_kwargs:
                 config[key] = decorator_kwargs[key]
+    elif node_type == NodeType.CONSTANT:
+        raw_values = decorator_kwargs.get("values", [])
+        config["values"] = [
+            {"name": v.get("name", ""), "value": str(v.get("value", ""))}
+            for v in (raw_values if isinstance(raw_values, list) else [])
+        ]
     elif node_type == NodeType.DATA_SINK:
         config["path"] = decorator_kwargs.get("sink", "")
         config["format"] = decorator_kwargs.get("format", "parquet")

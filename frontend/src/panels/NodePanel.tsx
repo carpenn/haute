@@ -17,6 +17,7 @@ import {
   SinkEditor,
   ScenarioExpanderEditor,
   OptimiserApplyEditor,
+  ConstantEditor,
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
@@ -380,6 +381,9 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
             onDeleteInput={onDeleteEdge}
           />
         )
+
+      case NODE_TYPES.CONSTANT:
+        return <ConstantEditor config={config} onUpdate={handleConfigUpdate} />
 
       case NODE_TYPES.TRANSFORM:
         return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />

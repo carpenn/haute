@@ -10,6 +10,7 @@ export { default as LiveSwitchEditor } from "./LiveSwitchEditor"
 export { default as SinkEditor } from "./SinkEditor"
 export { default as ScenarioExpanderEditor } from "./ScenarioExpanderEditor"
 export { default as OptimiserApplyEditor } from "./OptimiserApplyEditor"
+export { default as ConstantEditor } from "./ConstantEditor"
 export { default as SubmodelEditor } from "./SubmodelEditor"
 
 // Re-export shared types so NodePanel can use them

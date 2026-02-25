@@ -160,6 +160,13 @@ def {func_name}({params}) -> pl.LazyFrame:
     return df
 '''
 
+_CONSTANT = '''\
+@pipeline.node(constant=True, values={values_repr})
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.LazyFrame({data_dict})
+'''
+
 _EXTERNAL_PICKLE = '''\
 @pipeline.node(external="{path}", file_type="pickle")
 def {func_name}({params}) -> pl.LazyFrame:
@@ -305,6 +312,29 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
                 description=description,
                 path=path,
             )
+
+    elif node_type == NodeType.CONSTANT:
+        raw_values = config.get("values", []) or []
+        # Build the repr for the decorator kwarg
+        values_repr = repr([{"name": v.get("name", ""), "value": v.get("value", "")} for v in raw_values])
+        # Build a dict literal for the LazyFrame constructor
+        data_pairs: list[str] = []
+        for v in raw_values:
+            name = v.get("name", "col")
+            val = v.get("value", "")
+            # Try numeric coercion for the code literal
+            try:
+                num = float(val)
+                data_pairs.append(f'"{name}": [{num!r}]')
+            except (ValueError, TypeError):
+                data_pairs.append(f'"{name}": ["{val}"]')
+        data_dict = "{" + ", ".join(data_pairs) + "}" if data_pairs else '{"constant": [0]}'
+        return _CONSTANT.format(
+            func_name=func_name,
+            description=description,
+            values_repr=values_repr,
+            data_dict=data_dict,
+        )
 
     elif node_type == NodeType.MODEL_SCORE:
         source_type = config.get("sourceType", "run")
