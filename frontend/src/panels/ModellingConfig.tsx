@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
 import { trainModel, exportTraining, logToMlflow } from "../api/client"

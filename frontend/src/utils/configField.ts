@@ -5,8 +5,13 @@
  * Uses nullish coalescing (`??`) — only falls back on null/undefined.
  * For string fields where empty string should also fall back, callers
  * can chain: `configField(config, "key", "") || "actualDefault"`.
+ *
+ * Primitive literal types are widened (e.g. `"online"` → `string`) so
+ * downstream comparisons like `mode === "ratebook"` don't trigger TS2367.
  */
-export function configField<T>(config: Record<string, unknown>, key: string, fallback: T): T {
+type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T
+
+export function configField<T>(config: Record<string, unknown>, key: string, fallback: T): Widen<T> {
   const val = config[key]
-  return (val as T) ?? fallback
+  return (val ?? fallback) as Widen<T>
 }

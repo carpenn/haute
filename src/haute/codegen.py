@@ -37,14 +37,30 @@ _API_INPUT_JSON = '''\
 @pipeline.node(api_input=True, path="{path}"{row_id_kw})
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
-    return pl.read_json("{path}").lazy()
+    from haute._json_flatten import read_json_flat
+    return read_json_flat("{path}", config_path="{config_path}")
 '''
 
 _API_INPUT_JSONL = '''\
 @pipeline.node(api_input=True, path="{path}"{row_id_kw})
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
-    return pl.scan_ndjson("{path}")
+    from haute._json_flatten import read_json_flat
+    return read_json_flat("{path}", config_path="{config_path}")
+'''
+
+_API_INPUT_FLAT = '''\
+@pipeline.node(api_input=True, path="{path}"{row_id_kw})
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.scan_parquet("{path}")
+'''
+
+_API_INPUT_CSV = '''\
+@pipeline.node(api_input=True, path="{path}"{row_id_kw})
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.scan_csv("{path}")
 '''
 
 _LIVE_SWITCH = '''\
@@ -289,12 +305,19 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
         row_id_kw = ""
         if config.get("row_id_column"):
             row_id_kw = f', row_id_column="{config["row_id_column"]}"'
-        template = _API_INPUT_JSONL if path.endswith(".jsonl") else _API_INPUT_JSON
+        cfg_path = str(config_path_for_node(node_type, func_name))
+        if path.endswith((".json", ".jsonl")):
+            template = _API_INPUT_JSON
+        elif path.endswith(".csv"):
+            template = _API_INPUT_CSV
+        else:
+            template = _API_INPUT_FLAT
         return template.format(
             func_name=func_name,
             description=description,
             path=path,
             row_id_kw=row_id_kw,
+            config_path=cfg_path,
         )
 
     elif node_type == NodeType.LIVE_SWITCH:

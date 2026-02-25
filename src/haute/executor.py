@@ -169,9 +169,15 @@ def _build_node_fn(
 
     if node_type == NodeType.API_INPUT:
         path = config.get("path", "")
+        flat_schema = config.get("flattenSchema")
 
-        def api_source_fn() -> _Frame:
-            return read_source(path)
+        if path.endswith((".json", ".jsonl")):
+            def api_source_fn() -> _Frame:
+                from haute._json_flatten import read_json_flat
+                return read_json_flat(path, schema=flat_schema)
+        else:
+            def api_source_fn() -> _Frame:
+                return read_source(path)
 
         return func_name, api_source_fn, True
 

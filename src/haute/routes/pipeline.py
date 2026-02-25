@@ -185,6 +185,24 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
         )
         py_path.write_text(code)
 
+    # Auto-infer flattenSchema for api_input nodes with JSON data paths
+    from haute._json_flatten import infer_schema, load_samples
+
+    for node in graph.nodes:
+        if node.data.nodeType != NodeType.API_INPUT:
+            continue
+        cfg = node.data.config
+        path = cfg.get("path", "")
+        if not path.endswith((".json", ".jsonl")):
+            continue
+        if cfg.get("flattenSchema"):
+            continue
+        data_path = (cwd / path).resolve()
+        if data_path.is_file() and data_path.is_relative_to(cwd):
+            samples = load_samples(data_path)
+            if samples:
+                cfg["flattenSchema"] = infer_schema(samples)
+
     # Write node config JSON sidecar files
     config_files = collect_node_configs(graph)
     for rel_path, json_content in config_files.items():

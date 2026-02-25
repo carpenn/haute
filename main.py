@@ -44,14 +44,8 @@ def exposure() -> pl.LazyFrame:
     return pl.scan_parquet("data/exposure.parquet")
 
 
-@pipeline.node(config="config/api_input/quotes.json")
-def quotes() -> pl.LazyFrame:
-    """api_input node"""
-    return pl.read_json("data/IDpol_1052049.json").lazy()
-
-
 @pipeline.node(config="config/live_switch/policies.json")
-def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
+def policies(batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
     return batch_quotes
 
@@ -134,6 +128,13 @@ def Rating_Step_16(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
 def apply_ratebook(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """apply_ratebook node"""
     return optimiser_banding
+
+
+@pipeline.node(config="config/api_input/quotes.json")
+def quotes() -> pl.LazyFrame:
+    """api_input node"""
+    from haute._json_flatten import read_json_flat
+    return read_json_flat("data/sample_quote.json", config_path="config/api_input/quotes.json")
 
 
 @pipeline.node(config="config/external_model/severity_model.json")
@@ -246,6 +247,22 @@ def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
     return severity_set
 
 
+@pipeline.node
+def Polars_25(quotes: pl.LazyFrame) -> pl.LazyFrame:
+    """Polars 25 node"""
+    df = (
+    quotes
+    )
+    return df
+
+
+@pipeline.node(config="config/sink/flattened_json.json")
+def flattened_json(Polars_25: pl.LazyFrame) -> pl.LazyFrame:
+    """flattened_json node"""
+    Polars_25.collect().write_parquet("output/flattened.parquet")
+    return Polars_25
+
+
 
 # Wire nodes together - edges define data flow
 pipeline.connect("exposure", "frequency_set")
@@ -254,7 +271,6 @@ pipeline.connect("claims", "severity_set")
 pipeline.connect("claims", "claims_aggregate")
 pipeline.connect("frequency_set", "frequency_write")
 pipeline.connect("severity_set", "severity_write")
-pipeline.connect("quotes", "policies")
 pipeline.connect("batch_quotes", "policies")
 pipeline.connect("claims_aggregate", "frequency_set")
 pipeline.connect("policies", "frequency_set")
@@ -275,3 +291,5 @@ pipeline.connect("optimiser_inputs", "ratebook_optimisation")
 pipeline.connect("optimiser_banding", "ratebook_optimisation")
 pipeline.connect("optimiser_inputs", "apply_online")
 pipeline.connect("optimiser_banding", "apply_ratebook")
+pipeline.connect("quotes", "Polars_25")
+pipeline.connect("Polars_25", "flattened_json")

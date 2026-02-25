@@ -1,10 +1,10 @@
 import { useEffect } from "react"
-import { CheckCircle2, AlertCircle, Info, X } from "lucide-react"
+import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from "lucide-react"
 import useUIStore from "../stores/useUIStore"
 
 export interface ToastMessage {
   id: string
-  type: "success" | "error" | "info"
+  type: "success" | "error" | "info" | "warning"
   text: string
 }
 
@@ -12,12 +12,14 @@ const icons = {
   success: CheckCircle2,
   error: AlertCircle,
   info: Info,
+  warning: AlertTriangle,
 }
 
 const accentColors = {
   success: "#22c55e",
   error: "#ef4444",
   info: "#6366f1",
+  warning: "#f59e0b",
 }
 
 function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: string) => void }) {
