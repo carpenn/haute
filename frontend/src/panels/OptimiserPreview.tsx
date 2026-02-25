@@ -8,6 +8,8 @@
 import { useState, useCallback } from "react"
 import { X, ChevronDown, ChevronUp, Loader2, Target } from "lucide-react"
 import { runFrontier } from "../api/client"
+import { formatNumber } from "../utils/formatValue"
+import { useDragResize } from "../hooks/useDragResize"
 
 // ─── Types (shared with OptimiserConfig) ─────────────────────────
 
@@ -51,14 +53,6 @@ export type OptimiserPreviewData = {
 
 type FrontierPoint = Record<string, unknown>
 
-// ─── Helpers ─────────────────────────────────────────────────────
-
-function formatNumber(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M"
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + "K"
-  return n.toFixed(4)
-}
-
 // ─── Component ───────────────────────────────────────────────────
 
 interface OptimiserPreviewProps {
@@ -69,7 +63,7 @@ interface OptimiserPreviewProps {
 export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProps) {
   const { result, jobId, constraints } = data
   const [collapsed, setCollapsed] = useState(false)
-  const [height, setHeight] = useState(320)
+  const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 320, minHeight: 160, maxHeight: 600 })
   const [tab, setTab] = useState<"summary" | "frontier" | "convergence">("summary")
 
   // Frontier state
@@ -77,22 +71,6 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
   const [frontierLoading, setFrontierLoading] = useState(false)
   const [frontierError, setFrontierError] = useState<string | null>(null)
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null)
-
-  // Drag resize
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startH = height
-    const onMove = (ev: MouseEvent) => {
-      setHeight(Math.max(160, Math.min(600, startH + (startY - ev.clientY))))
-    }
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove)
-      document.removeEventListener("mouseup", onUp)
-    }
-    document.addEventListener("mousemove", onMove)
-    document.addEventListener("mouseup", onUp)
-  }, [height])
 
   const handleRunFrontier = useCallback(async () => {
     setFrontierLoading(true)
@@ -133,7 +111,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
 
   // ── Expanded ──
   return (
-    <div style={{ height, borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }} className="flex flex-col shrink-0 relative">
+    <div ref={containerRef} style={{ height, borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }} className="flex flex-col shrink-0 relative">
       {/* Drag handle */}
       <div
         onMouseDown={onDragStart}

@@ -1,17 +1,8 @@
 import { useState } from "react"
 import { X, Plus, Trash, SlidersHorizontal } from "lucide-react"
-import { InputSourcesBar } from "./_shared"
-import type { InputSource } from "./_shared"
-
-type ContinuousRule = { op1: string; val1: string; op2: string; val2: string; assignment: string }
-type CategoricalRule = { value: string; assignment: string }
-type BandingFactor = {
-  banding: string
-  column: string
-  outputColumn: string
-  rules: (ContinuousRule | CategoricalRule)[]
-  default?: string | null
-}
+import { InputSourcesBar, INPUT_STYLE } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import type { ContinuousRule, CategoricalRule, BandingFactor } from "../../types/banding"
 
 function normaliseBandingFactors(config: Record<string, unknown>): BandingFactor[] {
   const raw = config.factors as BandingFactor[] | undefined
@@ -22,7 +13,6 @@ function normaliseBandingFactors(config: Record<string, unknown>): BandingFactor
 const EMPTY_CONTINUOUS: ContinuousRule = { op1: ">", val1: "", op2: "", val2: "", assignment: "" }
 const EMPTY_CATEGORICAL: CategoricalRule = { value: "", assignment: "" }
 const OPS = ["<", "<=", ">", ">=", "="]
-const INPUT_STYLE = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFactor; onUpdateFactor: (patch: Partial<BandingFactor>) => void }) {
   const rules = factor.rules || []
@@ -139,7 +129,7 @@ export default function BandingEditor({
   upstreamColumns = [],
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns?: { name: string; dtype: string }[]

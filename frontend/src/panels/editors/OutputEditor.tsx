@@ -1,5 +1,6 @@
 import { getDtypeColor } from "../../utils/dtypeColors"
-import type { SimpleNode, SimpleEdge } from "./_shared"
+import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 export default function OutputEditor({
   config,
@@ -9,12 +10,12 @@ export default function OutputEditor({
   edges,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   nodeId: string
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
 }) {
-  const fields = (config.fields as string[]) || []
+  const fields = configField<string[]>(config, "fields", [])
 
   // Read cached columns from the upstream node (populated by preview/run)
   const incomingEdge = edges.find((e) => e.target === nodeId)

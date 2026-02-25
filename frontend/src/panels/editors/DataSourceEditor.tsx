@@ -1,9 +1,11 @@
 import { useState } from "react"
 import { FileText, Database } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
+import type { OnUpdateConfig } from "./_shared"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
 import { fetchDatabricksSchema } from "../../api/client"
 import { WarehousePicker, CatalogTablePicker, DatabricksFetchButton } from "./_DatabricksSelector"
+import { configField } from "../../utils/configField"
 
 export default function DataSourceEditor({
   config,
@@ -11,11 +13,11 @@ export default function DataSourceEditor({
   onRefreshPreview,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   onRefreshPreview?: () => void
 }) {
-  const [sourceType, setSourceType] = useState<string>((config.sourceType as string) || "flat_file")
-  const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(config.path as string | undefined)
+  const [sourceType, setSourceType] = useState<string>(configField(config, "sourceType", "flat_file"))
+  const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(configField<string | undefined>(config, "path", undefined))
 
   return (
     <>
@@ -62,7 +64,7 @@ export default function DataSourceEditor({
               File
             </label>
             <FileBrowser
-              currentPath={config.path as string | undefined}
+              currentPath={configField<string | undefined>(config, "path", undefined)}
               onSelect={(path) => {
                 onUpdate("path", path)
                 fetchForPath(path)
@@ -74,11 +76,11 @@ export default function DataSourceEditor({
         {sourceType === "databricks" && (
           <div className="space-y-3">
             <WarehousePicker
-              httpPath={(config.http_path as string) || ""}
+              httpPath={configField(config, "http_path", "")}
               onSelect={(hp) => onUpdate("http_path", hp || undefined)}
             />
             <CatalogTablePicker
-              table={(config.table as string) || ""}
+              table={configField(config, "table", "")}
               onSelect={(fullName) => onUpdate("table", fullName || undefined)}
             />
             <div>
@@ -88,7 +90,7 @@ export default function DataSourceEditor({
               </label>
               <textarea
                 placeholder={"SELECT *\nFROM catalog.schema.table\nWHERE status = 'active'"}
-                defaultValue={(config.query as string) || "SELECT *"}
+                defaultValue={configField(config, "query", "") || "SELECT *"}
                 onChange={(e) => onUpdate("query", e.target.value || undefined)}
                 rows={3}
                 className="mt-1 w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2 resize-y"
@@ -101,15 +103,15 @@ export default function DataSourceEditor({
               </div>
             </div>
             <DatabricksFetchButton
-              table={(config.table as string) || ""}
-              httpPath={(config.http_path as string) || ""}
-              query={(config.query as string) || ""}
+              table={configField(config, "table", "")}
+              httpPath={configField(config, "http_path", "")}
+              query={configField(config, "query", "")}
               onFetched={() => {
-                const tbl = (config.table as string) || ""
+                const tbl = configField(config, "table", "")
                 if (tbl) {
                   fetchDatabricksSchema(tbl)
                     .then((data) => { setSchema(data); onRefreshPreview?.() })
-                    .catch(() => setSchema(null))
+                    .catch((err: unknown) => { console.warn("Databricks schema fetch failed:", err); setSchema(null) })
                 }
               }}
             />

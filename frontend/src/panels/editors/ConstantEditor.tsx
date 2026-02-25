@@ -1,4 +1,6 @@
 import { Plus, Trash2 } from "lucide-react"
+import type { OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 type ConstantValue = { name: string; value: string }
 
@@ -7,9 +9,9 @@ export default function ConstantEditor({
   onUpdate,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
 }) {
-  const values = (config.values as ConstantValue[] | undefined) || []
+  const values = configField<ConstantValue[]>(config, "values", [])
 
   const updateRow = (index: number, field: "name" | "value", val: string) => {
     const next = values.map((v, i) => (i === index ? { ...v, [field]: val } : v))

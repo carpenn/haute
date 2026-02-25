@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { HardDriveDownload } from "lucide-react"
-import type { SimpleNode, SimpleEdge } from "./_shared"
+import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./_shared"
 import { executeSink } from "../../api/client"
+import { configField } from "../../utils/configField"
+import { buildGraph } from "../../utils/buildGraph"
 
 export default function SinkEditor({
   config,
@@ -12,13 +14,13 @@ export default function SinkEditor({
   submodels,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   nodeId: string
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
 }) {
-  const [format, setFormat] = useState<string>((config.format as string) || "parquet")
+  const format = configField(config, "format", "parquet")
   const [writing, setWriting] = useState(false)
   const [writeResult, setWriteResult] = useState<{ status: string; message: string } | null>(null)
 
@@ -29,11 +31,7 @@ export default function SinkEditor({
     setWriting(true)
     setWriteResult(null)
 
-    const graph = {
-      nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
-      edges: edges,
-      submodels: submodels,
-    }
+    const graph = buildGraph(allNodes, edges, submodels)
 
     executeSink(graph, nodeId)
       .then((data) => {
@@ -54,10 +52,7 @@ export default function SinkEditor({
           {["parquet", "csv"].map((fmt) => (
             <button
               key={fmt}
-              onClick={() => {
-                setFormat(fmt)
-                onUpdate("format", fmt)
-              }}
+              onClick={() => onUpdate("format", fmt)}
               className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
               style={{
                 background: format === fmt ? 'rgba(245,158,11,.1)' : 'var(--bg-input)',
@@ -78,7 +73,7 @@ export default function SinkEditor({
         <input
           type="text"
           placeholder={format === "csv" ? "output/results.csv" : "output/results.parquet"}
-          defaultValue={(config.path as string) || ""}
+          defaultValue={configField(config, "path", "")}
           onChange={(e) => onUpdate("path", e.target.value)}
           className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
           style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}

@@ -1,11 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { X, Folder, FileText, ChevronLeft, Check, Table2 } from "lucide-react"
+import { X, Folder, FileText, ChevronLeft, Check, Table2, Loader2, AlertTriangle } from "lucide-react"
 import { getDtypeColor } from "../../utils/dtypeColors"
 import type { ColumnInfo } from "../../types/node"
 import { listFiles } from "../../api/client"
-import useUIStore from "../../stores/useUIStore"
+import useUIStore, { useMlflowStatus } from "../../stores/useUIStore"
+
+// ─── Shared Styles ───────────────────────────────────────────────
+export const INPUT_STYLE = {
+  background: 'var(--bg-input)',
+  border: '1px solid var(--border)',
+  color: 'var(--text-primary)',
+} as const
+
+export const SELECT_STYLE = INPUT_STYLE
 
 // ─── Shared Types ─────────────────────────────────────────────────
+
+export type OnUpdateConfig = (keyOrUpdates: string | Record<string, unknown>, value?: unknown) => void
 
 export type FileItem = {
   name: string
@@ -44,6 +55,26 @@ export type SimpleEdge = {
   id: string
   source: string
   target: string
+}
+
+// ─── MlflowStatusBadge ───────────────────────────────────────────
+
+export function MlflowStatusBadge() {
+  const { mlflowStatus, mlflowBackend } = useMlflowStatus()
+  return (
+    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px]" style={{
+      background: mlflowStatus === "connected" ? "rgba(34,197,94,.06)" : mlflowStatus === "error" ? "rgba(239,68,68,.06)" : "var(--bg-surface)",
+      border: `1px solid ${mlflowStatus === "connected" ? "rgba(34,197,94,.2)" : mlflowStatus === "error" ? "rgba(239,68,68,.2)" : "var(--border)"}`,
+    }}>
+      {mlflowStatus === "loading" ? (
+        <><Loader2 size={11} className="animate-spin" style={{ color: "var(--text-muted)" }} /><span style={{ color: "var(--text-muted)" }}>Connecting to MLflow...</span></>
+      ) : mlflowStatus === "connected" ? (
+        <><Check size={11} style={{ color: "#22c55e" }} /><span style={{ color: "var(--text-secondary)" }}>MLflow ({mlflowBackend})</span></>
+      ) : (
+        <><AlertTriangle size={11} style={{ color: "#ef4444" }} /><span style={{ color: "#ef4444" }}>MLflow not available</span></>
+      )}
+    </div>
+  )
 }
 
 // ─── FileBrowser ──────────────────────────────────────────────────

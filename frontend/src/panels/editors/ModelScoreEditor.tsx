@@ -1,15 +1,9 @@
-import { useState, useRef } from "react"
-import { Loader2, Check, AlertTriangle, ChevronDown } from "lucide-react"
-import { InputSourcesBar, CodeEditor } from "./_shared"
-import type { InputSource } from "./_shared"
-import {
-  getExperiments,
-  getRuns,
-  getModels,
-  getModelVersions,
-  ApiError,
-} from "../../api/client"
-import { useMlflowStatus } from "../../stores/useUIStore"
+import { useState } from "react"
+import { ChevronDown } from "lucide-react"
+import { InputSourcesBar, CodeEditor, MlflowStatusBadge, SELECT_STYLE } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import { useMlflowBrowser } from "../../hooks/useMlflowBrowser"
+import { configField } from "../../utils/configField"
 
 export default function ModelScoreEditor({
   config,
@@ -18,90 +12,23 @@ export default function ModelScoreEditor({
   onDeleteInput,
 }: {
   config: Record<string, unknown>
-  onUpdate: (keyOrUpdates: string | Record<string, unknown>, value?: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
 }) {
-  const sourceType = (config.sourceType as string) || "registered"
-  const task = (config.task as string) || "regression"
-  const outputColumn = (config.output_column as string) || "prediction"
-  const defaultCode = (config.code as string) || ""
-  const selectedModel = (config.registered_model as string) || ""
+  const sourceType = configField(config, "sourceType", "registered")
+  const task = configField(config, "task", "regression")
+  const outputColumn = configField(config, "output_column", "prediction")
+  const defaultCode = configField(config, "code", "")
+  const selectedModel = configField(config, "registered_model", "")
 
-  // MLflow connection status — from global store (fetched once on app startup)
-  const { mlflowStatus, mlflowBackend } = useMlflowStatus()
-
-  // Lazy-loaded dropdown data -- fetched on focus only, like Databricks selects
-  const [experiments, setExperiments] = useState<{ experiment_id: string; name: string }[]>([])
-  const [runs, setRuns] = useState<{ run_id: string; run_name: string; metrics: Record<string, number>; artifacts: string[] }[]>([])
-  const [models, setModels] = useState<{ name: string; latest_versions: { version: string; status: string; run_id: string }[] }[]>([])
-  const [modelVersions, setModelVersions] = useState<{ version: string; run_id: string; status: string; description: string }[]>([])
-  const [loadingExperiments, setLoadingExperiments] = useState(false)
-  const [loadingRuns, setLoadingRuns] = useState(false)
-  const [loadingModels, setLoadingModels] = useState(false)
-  const [, setLoadingVersions] = useState(false)
-  const [errorExperiments, setErrorExperiments] = useState("")
-  const [errorRuns, setErrorRuns] = useState("")
-  const [errorModels, setErrorModels] = useState("")
-  const [errorVersions, setErrorVersions] = useState("")
-
-  const [browseExpId, setBrowseExpId] = useState((config.experiment_id as string) || "")
-
-  // Fetch guards -- only fetch once per mount, not on every focus
-  const fetchedExperiments = useRef(false)
-  const fetchedModels = useRef(false)
-  const fetchedRunsFor = useRef("")
-  const fetchedVersionsFor = useRef("")
-
-  const errorMsg = (e: Error) => e instanceof ApiError ? e.detail || e.message : e.message
-
-  const refreshExperiments = () => {
-    if (fetchedExperiments.current) return
-    fetchedExperiments.current = true
-    setLoadingExperiments(true)
-    setErrorExperiments("")
-    getExperiments()
-      .then((data) => { setExperiments(Array.isArray(data) ? data : []); setLoadingExperiments(false) })
-      .catch((e: Error) => { setExperiments([]); setLoadingExperiments(false); setErrorExperiments(errorMsg(e) || "Failed to load experiments"); fetchedExperiments.current = false })
-  }
-
-  const refreshRuns = (expId: string) => {
-    if (!expId) return
-    if (fetchedRunsFor.current === expId) return
-    fetchedRunsFor.current = expId
-    setLoadingRuns(true)
-    setErrorRuns("")
-    getRuns(expId)
-      .then((data) => { setRuns(Array.isArray(data) ? data : []); setLoadingRuns(false) })
-      .catch((e: Error) => { setRuns([]); setLoadingRuns(false); setErrorRuns(errorMsg(e) || "Failed to load runs"); fetchedRunsFor.current = "" })
-  }
-
-  const refreshModels = () => {
-    if (fetchedModels.current) return
-    fetchedModels.current = true
-    setLoadingModels(true)
-    setErrorModels("")
-    getModels()
-      .then((data) => { setModels(Array.isArray(data) ? data : []); setLoadingModels(false) })
-      .catch((e: Error) => { setModels([]); setLoadingModels(false); setErrorModels(errorMsg(e) || "Failed to load models"); fetchedModels.current = false })
-  }
-
-  const refreshVersions = (modelName: string) => {
-    if (!modelName) return
-    if (fetchedVersionsFor.current === modelName) return
-    fetchedVersionsFor.current = modelName
-    setLoadingVersions(true)
-    setErrorVersions("")
-    getModelVersions(modelName)
-      .then((data) => { setModelVersions(Array.isArray(data) ? data : []); setLoadingVersions(false) })
-      .catch((e: Error) => { setModelVersions([]); setLoadingVersions(false); setErrorVersions(errorMsg(e) || "Failed to load versions"); fetchedVersionsFor.current = "" })
-  }
-
-  const selectStyle = {
-    background: 'var(--bg-input)',
-    border: '1px solid var(--border)',
-    color: 'var(--text-primary)',
-  }
+  const {
+    experiments, runs, models, modelVersions,
+    loadingExperiments, loadingRuns, loadingModels,
+    errorExperiments, errorRuns, errorModels, errorVersions,
+    browseExpId, setBrowseExpId, setRuns, resetRunsGuard,
+    refreshExperiments, refreshRuns, refreshModels, refreshVersions,
+  } = useMlflowBrowser({ initialExpId: configField(config, "experiment_id", "") })
 
   const [showCode, setShowCode] = useState(!!defaultCode)
 
@@ -110,18 +37,7 @@ export default function ModelScoreEditor({
       <InputSourcesBar inputSources={inputSources} onDeleteInput={onDeleteInput} />
 
       {/* MLflow Status */}
-      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px]" style={{
-        background: mlflowStatus === "connected" ? "rgba(34,197,94,.06)" : mlflowStatus === "error" ? "rgba(239,68,68,.06)" : "var(--bg-surface)",
-        border: `1px solid ${mlflowStatus === "connected" ? "rgba(34,197,94,.2)" : mlflowStatus === "error" ? "rgba(239,68,68,.2)" : "var(--border)"}`,
-      }}>
-        {mlflowStatus === "loading" ? (
-          <><Loader2 size={11} className="animate-spin" style={{ color: "var(--text-muted)" }} /><span style={{ color: "var(--text-muted)" }}>Connecting to MLflow...</span></>
-        ) : mlflowStatus === "connected" ? (
-          <><Check size={11} style={{ color: "#22c55e" }} /><span style={{ color: "var(--text-secondary)" }}>MLflow ({mlflowBackend})</span></>
-        ) : (
-          <><AlertTriangle size={11} style={{ color: "#ef4444" }} /><span style={{ color: "#ef4444" }}>MLflow not available</span></>
-        )}
-      </div>
+      <MlflowStatusBadge />
 
       {/* Source Type Toggle */}
       <div>
@@ -154,13 +70,13 @@ export default function ModelScoreEditor({
             <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Model Name</label>
             <select
               className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-              style={selectStyle}
+              style={SELECT_STYLE}
               value={selectedModel}
               onFocus={refreshModels}
               onChange={(e) => onUpdate({ registered_model: e.target.value, version: "latest" })}
             >
               <option value="">{loadingModels ? "Loading..." : "Select a model..."}</option>
-              {selectedModel && models.every((m) => m.name !== selectedModel) && (
+              {selectedModel && !models.some((m) => m.name === selectedModel) && (
                 <option value={selectedModel}>{selectedModel}</option>
               )}
               {models.map((m) => (
@@ -174,8 +90,8 @@ export default function ModelScoreEditor({
               <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Version</label>
               <select
                 className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                style={selectStyle}
-                value={(config.version as string) || "latest"}
+                style={SELECT_STYLE}
+                value={configField(config, "version", "latest")}
                 onFocus={() => refreshVersions(selectedModel)}
                 onChange={(e) => onUpdate("version", e.target.value)}
               >
@@ -197,7 +113,7 @@ export default function ModelScoreEditor({
             <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Experiment</label>
             <select
               className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-              style={selectStyle}
+              style={SELECT_STYLE}
               value={browseExpId}
               onFocus={refreshExperiments}
               onChange={(e) => {
@@ -206,13 +122,13 @@ export default function ModelScoreEditor({
                 setBrowseExpId(eid)
                 onUpdate({ experiment_id: eid, experiment_name: exp?.name || eid })
                 setRuns([])
-                fetchedRunsFor.current = ""
+                resetRunsGuard()
                 if (eid) refreshRuns(eid)
               }}
             >
               <option value="">{loadingExperiments ? "Loading..." : "Select an experiment..."}</option>
-              {browseExpId && experiments.every((e) => e.experiment_id !== browseExpId) && (
-                <option value={browseExpId}>{(config.experiment_name as string) || browseExpId}</option>
+              {browseExpId && !experiments.some((e) => e.experiment_id === browseExpId) && (
+                <option value={browseExpId}>{configField(config, "experiment_name", "") || browseExpId}</option>
               )}
               {experiments.map((exp) => (
                 <option key={exp.experiment_id} value={exp.experiment_id}>{exp.name}</option>
@@ -225,8 +141,8 @@ export default function ModelScoreEditor({
               <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Run</label>
               <select
                 className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                style={selectStyle}
-                value={(config.run_id as string) || ""}
+                style={SELECT_STYLE}
+                value={configField(config, "run_id", "")}
                 onFocus={() => refreshRuns(browseExpId)}
                 onChange={(e) => {
                   const runId = e.target.value
@@ -235,8 +151,8 @@ export default function ModelScoreEditor({
                 }}
               >
                 <option value="">{loadingRuns ? "Loading..." : "Select a run..."}</option>
-                {(config.run_id as string) && runs.every((r) => r.run_id !== config.run_id) && (
-                  <option value={config.run_id as string}>{(config.run_name as string) || (config.run_id as string).slice(0, 8) + "..."}</option>
+                {configField(config, "run_id", "") && !runs.some((r) => r.run_id === config.run_id) && (
+                  <option value={configField(config, "run_id", "")}>{configField(config, "run_name", "") || configField(config, "run_id", "")}</option>
                 )}
                 {runs.map((r) => (
                   <option key={r.run_id} value={r.run_id}>
@@ -254,8 +170,8 @@ export default function ModelScoreEditor({
             <input
               type="text"
               className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg font-mono focus:outline-none focus:ring-2"
-              style={selectStyle}
-              value={(config.run_id as string) || ""}
+              style={SELECT_STYLE}
+              value={configField(config, "run_id", "")}
               onChange={(e) => onUpdate("run_id", e.target.value)}
               placeholder="e.g. a1b2c3d4e5f6..."
             />
@@ -265,8 +181,8 @@ export default function ModelScoreEditor({
             <input
               type="text"
               className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg font-mono focus:outline-none focus:ring-2"
-              style={selectStyle}
-              value={(config.artifact_path as string) || ""}
+              style={SELECT_STYLE}
+              value={configField(config, "artifact_path", "")}
               onChange={(e) => onUpdate("artifact_path", e.target.value)}
               placeholder="e.g. model.cbm"
             />
@@ -280,7 +196,7 @@ export default function ModelScoreEditor({
           <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Task</label>
           <select
             className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-            style={selectStyle}
+            style={SELECT_STYLE}
             value={task}
             onChange={(e) => onUpdate("task", e.target.value)}
           >
@@ -293,7 +209,7 @@ export default function ModelScoreEditor({
           <input
             type="text"
             className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-            style={selectStyle}
+            style={SELECT_STYLE}
             value={outputColumn}
             onChange={(e) => onUpdate("output_column", e.target.value)}
             placeholder="prediction"

@@ -1,7 +1,6 @@
-import { InputSourcesBar } from "./_shared"
-import type { InputSource } from "./_shared"
-
-const INPUT_STYLE = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+import { InputSourcesBar, INPUT_STYLE } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 export default function ScenarioExpanderEditor({
   config,
@@ -11,17 +10,17 @@ export default function ScenarioExpanderEditor({
   upstreamColumns,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns: { name: string; dtype: string }[]
 }) {
-  const quoteId = (config.quote_id as string) || ""
-  const columnName = (config.column_name as string) || "scenario_value"
-  const minValue = config.min_value as number ?? 0.8
-  const maxValue = config.max_value as number ?? 1.2
-  const steps = config.steps as number ?? 21
-  const stepColumn = (config.step_column as string) || "scenario_index"
+  const quoteId = configField(config, "quote_id", "")
+  const columnName = configField(config, "column_name", "scenario_value")
+  const minValue = configField(config, "min_value", 0.8)
+  const maxValue = configField(config, "max_value", 1.2)
+  const steps = configField(config, "steps", 21)
+  const stepColumn = configField(config, "step_column", "scenario_index")
 
   return (
     <div className="px-4 py-3 space-y-4">

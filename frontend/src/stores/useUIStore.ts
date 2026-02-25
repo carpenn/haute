@@ -53,6 +53,7 @@ interface UIState {
   // MLflow status cache (fetched once, shared by all panels)
   mlflow: { status: "pending" | "connected" | "error"; backend: string; host: string }
   _mlflowFetching: boolean
+  _mlflowLastAttempt: number
   fetchMlflow: () => void
 
   // File listing cache (keyed by "dir|extensions")
@@ -124,11 +125,20 @@ const useUIStore = create<UIState>()((set, get) => ({
   // MLflow status cache — fetched once on first call, shared by all panels
   mlflow: { status: "pending", backend: "", host: "" },
   _mlflowFetching: false,
+  _mlflowLastAttempt: 0,
   fetchMlflow: () => {
     const state = get()
-    if (state.mlflow.status !== "pending" || state._mlflowFetching) return
-    set({ _mlflowFetching: true })
-    checkMlflow()
+    // Allow fetch if pending, or if errored and cooldown (10s) has elapsed
+    const canRetry =
+      state.mlflow.status === "error" &&
+      Date.now() - state._mlflowLastAttempt >= 10_000
+    if (state._mlflowFetching) return
+    if (state.mlflow.status !== "pending" && !canRetry) return
+    set({ _mlflowFetching: true, _mlflowLastAttempt: Date.now() })
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("MLflow check timed out after 5s")), 5_000),
+    )
+    Promise.race([checkMlflow(), timeout])
       .then((data) => {
         if (data.mlflow_installed) {
           set({ mlflow: { status: "connected", backend: data.backend || "local", host: data.databricks_host || "" } })
@@ -139,6 +149,9 @@ const useUIStore = create<UIState>()((set, get) => ({
       .catch((e) => {
         console.warn("MLflow check failed:", e)
         set({ mlflow: { status: "error", backend: "", host: "" } })
+      })
+      .finally(() => {
+        set({ _mlflowFetching: false })
       })
   },
 

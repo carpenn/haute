@@ -1,22 +1,18 @@
 import { useState, useCallback, useEffect, useMemo } from "react"
 import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers, RefreshCw } from "lucide-react"
-import type { SimpleNode, SimpleEdge } from "./editors"
-import { solveOptimiser, saveOptimiser, logOptimiserToMlflow, previewNode } from "../api/client"
+import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
+import { solveOptimiser, saveOptimiser, logOptimiserToMlflow } from "../api/client"
+import { useDataInputColumns } from "../hooks/useDataInputColumns"
 import type { SolveResult } from "./OptimiserPreview"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useUIStore from "../stores/useUIStore"
 import { formatElapsed } from "../utils/formatValue"
+import { configField } from "../utils/configField"
+import { extractBandingLevelsForNode } from "../utils/banding"
+import { buildGraph } from "../utils/buildGraph"
 
 // ─── Banding factor extraction ───
-
-type BandingFactor = {
-  banding: string
-  column: string
-  outputColumn: string
-  rules: Record<string, string>[]
-  default?: string | null
-}
 
 type BandingNodeInfo = { id: string; label: string }
 type InputNodeInfo = { id: string; label: string; nodeType: string }
@@ -46,32 +42,9 @@ function findInputBandingNodes(
     .map(({ id, label }) => ({ id, label }))
 }
 
-/** Extract factor column → level names from a single banding node. */
-function extractBandingLevelsForNode(
-  allNodes: SimpleNode[],
-  nodeId: string,
-): Record<string, string[]> {
-  const node = allNodes.find(n => n.id === nodeId)
-  if (!node || node.data.nodeType !== NODE_TYPES.BANDING) return {}
-  const cfg = (node.data.config || {}) as Record<string, unknown>
-  const factors = cfg.factors as BandingFactor[] | undefined
-  if (!Array.isArray(factors)) return {}
-  const levels: Record<string, string[]> = {}
-  for (const f of factors) {
-    if (!f.outputColumn) continue
-    const vals = new Set<string>()
-    for (const r of f.rules || []) {
-      const a = r.assignment
-      if (a) vals.add(a)
-    }
-    if (vals.size > 0) levels[f.outputColumn] = [...vals]
-  }
-  return levels
-}
-
 type OptimiserConfigProps = {
   config: Record<string, unknown>
-  onUpdate: (keyOrUpdates: string | Record<string, unknown>, value?: unknown) => void
+  onUpdate: OnUpdateConfig
   upstreamColumns?: { name: string; dtype: string }[]
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
@@ -116,19 +89,19 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const advancedOpen = useUIStore((s) => s.isSectionOpen("optimiser.advanced"))
   const toggleAdvanced = useUIStore((s) => s.toggleSection)
 
-  const mode = (config.mode as string) || "online"
-  const factorColumns = (config.factor_columns as string[][]) || []
-  const objective = (config.objective as string) || ""
-  const constraints = (config.constraints as Record<string, Record<string, number>>) || {}
-  const quoteId = (config.quote_id as string) || "quote_id"
-  const scenarioIndex = (config.scenario_index as string) || "scenario_index"
-  const scenarioValue = (config.scenario_value as string) || "scenario_value"
-  const maxIter = (config.max_iter as number) ?? 50
-  const tolerance = (config.tolerance as number) ?? 1e-6
-  const chunkSize = (config.chunk_size as number) ?? 500_000
-  const recordHistory = (config.record_history as boolean) ?? true
-  const maxCdIterations = (config.max_cd_iterations as number) ?? 10
-  const cdTolerance = (config.cd_tolerance as number) ?? 1e-4
+  const mode = configField(config, "mode", "online")
+  const factorColumns = configField<string[][]>(config, "factor_columns", [])
+  const objective = configField(config, "objective", "")
+  const constraints = configField<Record<string, Record<string, number>>>(config, "constraints", {})
+  const quoteId = configField(config, "quote_id", "quote_id")
+  const scenarioIndex = configField(config, "scenario_index", "scenario_index")
+  const scenarioValue = configField(config, "scenario_value", "scenario_value")
+  const maxIter = configField(config, "max_iter", 50)
+  const tolerance = configField(config, "tolerance", 1e-6)
+  const chunkSize = configField(config, "chunk_size", 500_000)
+  const recordHistory = configField(config, "record_history", true)
+  const maxCdIterations = configField(config, "max_cd_iterations", 10)
+  const cdTolerance = configField(config, "cd_tolerance", 1e-4)
 
   // Input nodes connected to this optimiser
   const inputNodes = useMemo(
@@ -137,50 +110,15 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   )
 
   // Data input selection — which connected input provides objectives & constraints
-  const dataInput = (config.data_input as string) || ""
+  const dataInput = configField(config, "data_input", "")
 
   // Columns from the selected data input node — cached in store
-  const setColumnsCache = useNodeResultsStore((s) => s.setColumns)
-  const cachedColumns = useNodeResultsStore((s) => dataInput ? s.columnCache[dataInput] : undefined)
-  const [dataInputColumns, setDataInputColumns] = useState<{ name: string; dtype: string }[]>(
-    cachedColumns?.columns ?? []
+  const dataInputColumns = useDataInputColumns(dataInput, allNodes, edges, submodels)
+
+  const buildGraphCb = useCallback(
+    () => buildGraph(allNodes, edges, submodels),
+    [allNodes, edges, submodels],
   )
-
-  useEffect(() => {
-    if (!dataInput) {
-      setDataInputColumns([])
-      return
-    }
-    // Check store cache first
-    const cached = useNodeResultsStore.getState().getColumns(dataInput)
-    if (cached) {
-      setDataInputColumns(cached.columns)
-      if (cached.fresh) return // cache is current, skip API call
-    }
-    // Fetch fresh columns (cached value shown meanwhile — no loading flash)
-    const graph = {
-      nodes: allNodes.map(n => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
-      edges,
-      submodels,
-    }
-    previewNode(graph, dataInput, 1)
-      .then(result => {
-        if (result.columns) {
-          setDataInputColumns(result.columns)
-          setColumnsCache(dataInput, result.columns, useNodeResultsStore.getState().graphVersion)
-        }
-      })
-      .catch((e) => {
-        console.warn("Column fetch failed", e)
-        if (!cached) setDataInputColumns([])
-      })
-  }, [dataInput, allNodes, edges, submodels, setColumnsCache]) // re-fetch when input or graph changes
-
-  const buildGraph = useCallback(() => ({
-    nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
-    edges,
-    submodels,
-  }), [allNodes, edges, submodels])
 
   // --- Constraints helpers ---
 
@@ -230,7 +168,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     setMlflowResult(null)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Optimiser"
     try {
-      const result = await solveOptimiser({ graph: buildGraph(), node_id: nodeId })
+      const result = await solveOptimiser({ graph: buildGraphCb(), node_id: nodeId })
       if (result.status === "started" && result.job_id) {
         // Register job in store — background hook picks up polling
         startSolveJob(nodeId, result.job_id, nodeLabel, constraints, currentConfigHash)
@@ -240,7 +178,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     } catch (e) {
       useNodeResultsStore.getState().failSolveJob(nodeId, String(e))
     }
-  }, [nodeId, allNodes, buildGraph, constraints, currentConfigHash, startSolveJob])
+  }, [nodeId, allNodes, buildGraphCb, constraints, currentConfigHash, startSolveJob])
 
   const handleSave = useCallback(async () => {
     if (!solveJobId) return
@@ -278,7 +216,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     () => nodeId ? findInputBandingNodes(nodeId, allNodes, edges) : [],
     [nodeId, allNodes, edges],
   )
-  const bandingSource = (config.banding_source as string) || ""
+  const bandingSource = configField(config, "banding_source", "")
   const effectiveBandingSource = bandingSource || (bandingNodes.length > 0 ? bandingNodes[0].id : "")
 
   // Auto-persist the effective banding source so the backend can read it

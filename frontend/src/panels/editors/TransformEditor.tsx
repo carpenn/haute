@@ -1,5 +1,6 @@
 import { InputSourcesBar, CodeEditor } from "./_shared"
-import type { InputSource } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 export default function TransformEditor({
   config,
@@ -8,11 +9,11 @@ export default function TransformEditor({
   onDeleteInput,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
 }) {
-  const defaultCode = (config.code as string) || ""
+  const defaultCode = configField(config, "code", "")
   const isMultiInput = inputSources.length > 1
   const hasInput = inputSources.length > 0
 

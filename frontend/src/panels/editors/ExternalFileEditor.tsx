@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { InputSourcesBar, FileBrowser, CodeEditor } from "./_shared"
-import type { InputSource } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 export default function ExternalFileEditor({
   config,
@@ -9,13 +10,13 @@ export default function ExternalFileEditor({
   onDeleteInput,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
 }) {
-  const [fileType, setFileType] = useState<string>((config.fileType as string) || "pickle")
-  const [modelClass, setModelClass] = useState<string>((config.modelClass as string) || "classifier")
-  const defaultCode = (config.code as string) || ""
+  const [fileType, setFileType] = useState<string>(configField(config, "fileType", "pickle"))
+  const [modelClass, setModelClass] = useState<string>(configField(config, "modelClass", "classifier"))
+  const defaultCode = configField(config, "code", "")
   const hasInput = inputSources.length > 0
 
   const firstInput = inputSources.length > 0 ? inputSources[0].varName : "df"
@@ -91,7 +92,7 @@ export default function ExternalFileEditor({
           File Path
         </label>
         <FileBrowser
-          currentPath={(config.path as string) || undefined}
+          currentPath={configField(config, "path", "") || undefined}
           onSelect={(path) => onUpdate("path", path)}
           extensions=".pkl,.pickle,.json,.joblib,.cbm,.onnx,.pmml"
         />

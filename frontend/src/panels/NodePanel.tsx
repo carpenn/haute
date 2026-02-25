@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useMemo } from "react"
 import { X, Link2, AlertTriangle } from "lucide-react"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
@@ -219,19 +219,25 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
   const isDragging = useRef(false)
   const startX = useRef(0)
   const startW = useRef(DEFAULT_PANEL_W)
+  const widthRef = useRef(panelWidth)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return
       const delta = startX.current - e.clientX
       const newW = Math.min(MAX_PANEL_W, Math.max(MIN_PANEL_W, startW.current + delta))
-      setNodePanelWidth(newW)
+      widthRef.current = newW
+      if (panelRef.current) {
+        panelRef.current.style.width = `${newW}px`
+      }
     }
     const onMouseUp = () => {
       if (isDragging.current) {
         isDragging.current = false
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
+        setNodePanelWidth(widthRef.current)
       }
     }
     window.addEventListener('mousemove', onMouseMove)
@@ -246,13 +252,28 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
     isDragging.current = true
     startX.current = e.clientX
     startW.current = panelWidth
+    widthRef.current = panelWidth
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }, [panelWidth])
 
+  const config = (node?.data.config || {}) as Record<string, unknown>
+
+  const handleConfigUpdate = useCallback((keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
+    if (!node || !onUpdateNode) return
+    const newConfig = typeof keyOrUpdates === "string"
+      ? { ...config, [keyOrUpdates]: value }
+      : { ...config, ...keyOrUpdates }
+    onUpdateNode(node.id, { ...node.data, config: newConfig })
+  }, [config, node, onUpdateNode])
+
+  const configWithNodeId = useMemo(
+    () => ({ ...config, _nodeId: node?.id ?? "" }),
+    [config, node?.id]
+  )
+
   if (!node) return null
 
-  const config = (node.data.config || {}) as Record<string, unknown>
   const isInstance = !!config.instanceOf
   const nodeType = node.data.nodeType
 
@@ -265,15 +286,6 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
       sourceLabel: nodeMap[e.source]?.data.label || e.source,
       edgeId: e.id,
     }))
-
-  const handleConfigUpdate = (keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
-    const newConfig = typeof keyOrUpdates === "string"
-      ? { ...config, [keyOrUpdates]: value }
-      : { ...config, ...keyOrUpdates }
-    if (onUpdateNode) {
-      onUpdateNode(node.id, { ...node.data, config: newConfig })
-    }
-  }
 
   // ── Render the right editor based on nodeType ──
 
@@ -346,7 +358,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           : ((node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined) || []
         return (
           <ModellingConfig
-            config={{ ...config, _nodeId: node.id }}
+            config={configWithNodeId}
             onUpdate={handleConfigUpdate}
             allNodes={allNodes}
             edges={edges}
@@ -363,7 +375,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
           : ((node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[] | undefined) || []
         return (
           <OptimiserConfig
-            config={{ ...config, _nodeId: node.id }}
+            config={configWithNodeId}
             onUpdate={handleConfigUpdate}
             allNodes={allNodes}
             edges={edges}
@@ -412,7 +424,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
   }
 
   return (
-    <div key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)', opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
+    <div ref={panelRef} key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)', opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
       {/* Drag handle */}
       <div
         onMouseDown={onDragStart}

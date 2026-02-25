@@ -1,14 +1,15 @@
 import { Package } from "lucide-react"
+import { configField } from "../../utils/configField"
 
 export default function SubmodelEditor({
   config,
 }: {
   config: Record<string, unknown>
 }) {
-  const file = (config.file as string) || ""
-  const childNodeIds = (config.childNodeIds as string[]) || []
-  const inputPorts = (config.inputPorts as string[]) || []
-  const outputPorts = (config.outputPorts as string[]) || []
+  const file = configField(config, "file", "")
+  const childNodeIds = configField<string[]>(config, "childNodeIds", [])
+  const inputPorts = configField<string[]>(config, "inputPorts", [])
+  const outputPorts = configField<string[]>(config, "outputPorts", [])
 
   return (
     <div className="px-4 py-3 space-y-3">

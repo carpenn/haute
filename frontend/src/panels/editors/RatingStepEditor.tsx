@@ -1,20 +1,11 @@
 import { useState, useMemo } from "react"
 import { X, Plus, Table2 } from "lucide-react"
-import { InputSourcesBar } from "./_shared"
-import type { InputSource, SimpleNode } from "./_shared"
-import { NODE_TYPES } from "../../utils/nodeTypes"
+import { InputSourcesBar, INPUT_STYLE } from "./_shared"
+import type { InputSource, SimpleNode, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
+import { extractBandingLevels } from "../../utils/banding"
 
 // ─── Types & helpers ──────────────────────────────────────────────
-
-type ContinuousRule = { op1: string; val1: string; op2: string; val2: string; assignment: string }
-type CategoricalRule = { value: string; assignment: string }
-type BandingFactor = {
-  banding: string
-  column: string
-  outputColumn: string
-  rules: (ContinuousRule | CategoricalRule)[]
-  default?: string | null
-}
 
 type RatingTable = {
   name: string
@@ -24,35 +15,10 @@ type RatingTable = {
   entries: Record<string, string | number>[]
 }
 
-const INPUT_STYLE = { background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
-
 function normaliseRatingTables(config: Record<string, unknown>): RatingTable[] {
   const raw = config.tables as RatingTable[] | undefined
   if (Array.isArray(raw) && raw.length > 0) return raw
   return [{ name: "Table 1", factors: [], outputColumn: "", defaultValue: "1.0", entries: [] }]
-}
-
-function extractBandingLevels(allNodes: SimpleNode[]): Record<string, string[]> {
-  const levelSets: Record<string, Set<string>> = {}
-  for (const n of allNodes) {
-    if (n.data.nodeType !== NODE_TYPES.BANDING) continue
-    const cfg = (n.data.config || {}) as Record<string, unknown>
-    const factors = cfg.factors as BandingFactor[] | undefined
-    if (!Array.isArray(factors)) continue
-    for (const f of factors) {
-      if (!f.outputColumn) continue
-      if (!levelSets[f.outputColumn]) levelSets[f.outputColumn] = new Set()
-      for (const r of f.rules || []) {
-        const a = (r as Record<string, string>).assignment
-        if (a) levelSets[f.outputColumn].add(a)
-      }
-    }
-  }
-  const levels: Record<string, string[]> = {}
-  for (const [col, s] of Object.entries(levelSets)) {
-    if (s.size > 0) levels[col] = [...s]
-  }
-  return levels
 }
 
 /** Heatmap color for actuarial relativity values. */
@@ -335,7 +301,7 @@ export default function RatingStepEditor({
   allNodes,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   allNodes: SimpleNode[]
@@ -344,8 +310,8 @@ export default function RatingStepEditor({
   const [sliceIdx, setSliceIdx] = useState(0)
   const tables = normaliseRatingTables(config)
   const bandingLevels = extractBandingLevels(allNodes)
-  const operation = (config.operation as string) || "multiply"
-  const combinedColumn = (config.combinedColumn as string) || ""
+  const operation = configField(config, "operation", "multiply")
+  const combinedColumn = configField(config, "combinedColumn", "")
 
   const availableColumns = Object.keys(bandingLevels)
   const safeIdx = Math.min(activeTab, tables.length - 1)

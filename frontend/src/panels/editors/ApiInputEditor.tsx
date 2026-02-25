@@ -1,15 +1,17 @@
 import { Radio, AlertTriangle } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
+import type { OnUpdateConfig } from "./_shared"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
+import { configField } from "../../utils/configField"
 
 export default function ApiInputEditor({
   config,
   onUpdate,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
 }) {
-  const { schema, loading: loadingSchema, fetchForPath } = useSchemaFetch(config.path as string | undefined)
+  const { schema, loading: loadingSchema, fetchForPath } = useSchemaFetch(configField<string | undefined>(config, "path", undefined))
 
   return (
     <>
@@ -27,7 +29,7 @@ export default function ApiInputEditor({
             <span className="ml-1.5 normal-case tracking-normal font-normal">.json or .jsonl</span>
           </label>
           <FileBrowser
-            currentPath={config.path as string | undefined}
+            currentPath={configField<string | undefined>(config, "path", undefined)}
             onSelect={(path) => {
               onUpdate("path", path)
               fetchForPath(path)
@@ -47,7 +49,7 @@ export default function ApiInputEditor({
             )}
           </label>
           <select
-            value={(config.row_id_column as string) || ""}
+            value={configField(config, "row_id_column", "")}
             onChange={(e) => onUpdate("row_id_column", e.target.value || undefined)}
             className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2 appearance-none"
             style={{
@@ -65,7 +67,7 @@ export default function ApiInputEditor({
           </select>
           {Boolean(config.row_id_column) && (
             <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Traces will identify rows by <span className="font-mono font-medium" style={{ color: 'var(--text-secondary)' }}>{config.row_id_column as string}</span>
+              Traces will identify rows by <span className="font-mono font-medium" style={{ color: 'var(--text-secondary)' }}>{configField(config, "row_id_column", "")}</span>
             </div>
           )}
         </div>

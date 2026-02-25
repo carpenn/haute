@@ -1,5 +1,6 @@
 import { ToggleLeft } from "lucide-react"
-import type { InputSource } from "./_shared"
+import type { InputSource, OnUpdateConfig } from "./_shared"
+import { configField } from "../../utils/configField"
 
 export default function LiveSwitchEditor({
   config,
@@ -7,11 +8,11 @@ export default function LiveSwitchEditor({
   inputSources,
 }: {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   inputSources: InputSource[]
 }) {
-  const mode = (config.mode as string) || "live"
-  const inputs = (config.inputs as string[]) || []
+  const mode = configField(config, "mode", "live")
+  const inputs = configField<string[]>(config, "inputs", [])
   const liveInput = inputs[0] || inputSources[0]?.varName || "live"
 
   const modeOptions: { value: string; label: string }[] = [

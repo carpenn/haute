@@ -1,14 +1,16 @@
 import { useState, useCallback, useMemo, useEffect } from "react"
 import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical, RefreshCw } from "lucide-react"
-import type { SimpleNode, SimpleEdge } from "./editors"
+import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
 import { trainModel, exportTraining, logToMlflow } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useUIStore from "../stores/useUIStore"
 import { formatElapsed } from "../utils/formatValue"
+import { configField } from "../utils/configField"
+import { buildGraph } from "../utils/buildGraph"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
-  onUpdate: (key: string, value: unknown) => void
+  onUpdate: OnUpdateConfig
   upstreamColumns?: { name: string; dtype: string }[]
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
@@ -109,14 +111,14 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const monotonicOpen = useUIStore((s) => s.isSectionOpen("modelling.monotonic"))
   const toggleSection = useUIStore((s) => s.toggleSection)
 
-  const target = (config.target as string) || ""
-  const weight = (config.weight as string) || ""
-  const exclude = (config.exclude as string[]) || []
-  const algorithm = (config.algorithm as string) || "catboost"
-  const task = (config.task as string) || "regression"
-  const params = (config.params as Record<string, unknown>) || {}
-  const split = (config.split as Record<string, unknown>) || { strategy: "random", test_size: 0.2, seed: 42 }
-  const metrics = (config.metrics as string[]) || (task === "regression" ? ["gini", "rmse"] : ["auc", "logloss"])
+  const target = configField(config, "target", "")
+  const weight = configField(config, "weight", "")
+  const exclude = configField<string[]>(config, "exclude", [])
+  const algorithm = configField(config, "algorithm", "catboost")
+  const task = configField(config, "task", "regression")
+  const params = configField<Record<string, unknown>>(config, "params", {})
+  const split = configField<Record<string, unknown>>(config, "split", { strategy: "random", test_size: 0.2, seed: 42 })
+  const metrics = configField<string[]>(config, "metrics", task === "regression" ? ["gini", "rmse"] : ["auc", "logloss"])
 
   const columns = upstreamColumns || []
   const featureCount = columns.filter(c => c.name !== target && c.name !== weight && !exclude.includes(c.name)).length
@@ -129,17 +131,16 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     onUpdate("split", { ...split, [key]: value })
   }, [split, onUpdate])
 
-  const buildGraph = useCallback(() => ({
-    nodes: allNodes.map((n) => ({ id: n.id, type: n.type || n.data.nodeType, data: n.data, position: { x: 0, y: 0 } })),
-    edges,
-    submodels,
-  }), [allNodes, edges, submodels])
+  const buildGraphCb = useCallback(
+    () => buildGraph(allNodes, edges, submodels),
+    [allNodes, edges, submodels],
+  )
 
   const handleTrain = useCallback(async () => {
     setMlflowResult(null)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     try {
-      const result = await trainModel({ graph: buildGraph(), node_id: nodeId })
+      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId })
 
       if (result.status === "started" && result.job_id) {
         // Register job in store — background hook picks up polling
@@ -157,19 +158,19 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         model_path: "", train_rows: 0, test_rows: 0, error: String(e),
       })
     }
-  }, [nodeId, allNodes, buildGraph, currentConfigHash, startTrainJob])
+  }, [nodeId, allNodes, buildGraphCb, currentConfigHash, startTrainJob])
 
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      const result = await exportTraining({ graph: buildGraph(), node_id: config._nodeId as string, data_path: "" })
+      const result = await exportTraining({ graph: buildGraphCb(), node_id: config._nodeId as string, data_path: "" })
       setExportedScript(result.script || null)
-    } catch {
-      // silently fail
+    } catch (e) {
+      console.warn("Export failed:", e)
     } finally {
       setExporting(false)
     }
-  }, [config._nodeId, buildGraph])
+  }, [config._nodeId, buildGraphCb])
 
   const handleLogExperiment = useCallback(async () => {
     if (!trainJobId) return
@@ -178,8 +179,8 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     try {
       const result = await logToMlflow({
         job_id: trainJobId,
-        experiment_name: (config.mlflow_experiment as string) || null,
-        model_name: (config.model_name as string) || null,
+        experiment_name: configField(config, "mlflow_experiment", "") || null,
+        model_name: configField(config, "model_name", "") || null,
       })
       setMlflowResult(result)
     } catch (e) {
@@ -224,7 +225,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
           <div>
             <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Offset column (optional, e.g. log-exposure)</label>
             <select
-              value={(config.offset as string) || ""}
+              value={configField(config, "offset", "")}
               onChange={(e) => onUpdate("offset", e.target.value || null)}
               className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
               style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -305,7 +306,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
           <div>
             <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Loss function</label>
             <select
-              value={(config.loss_function as string) || ""}
+              value={configField(config, "loss_function", "")}
               onChange={(e) => onUpdate("loss_function", e.target.value || null)}
               className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
               style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -316,17 +317,17 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               ))}
             </select>
           </div>
-          {(config.loss_function as string) === "Tweedie" && (
+          {configField(config, "loss_function", "") === "Tweedie" && (
             <div>
               <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Variance power (1.0=Poisson, 2.0=Gamma)</label>
               <input
                 type="range" min={1.0} max={2.0} step={0.05}
-                value={(config.variance_power as number) ?? 1.5}
+                value={configField(config, "variance_power", 1.5)}
                 onChange={(e) => onUpdate("variance_power", parseFloat(e.target.value))}
                 className="w-full mt-0.5"
               />
               <div className="text-[11px] font-mono text-right" style={{ color: "var(--text-muted)" }}>
-                {((config.variance_power as number) ?? 1.5).toFixed(2)}
+                {configField(config, "variance_power", 1.5).toFixed(2)}
               </div>
             </div>
           )}
@@ -376,7 +377,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
           <div>
             <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Grow policy</label>
             <select
-              value={(params.grow_policy as string) || "SymmetricTree"}
+              value={configField(params, "grow_policy", "SymmetricTree")}
               onChange={(e) => handleParamUpdate("grow_policy", e.target.value)}
               className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
               style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -469,7 +470,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               <div>
                 <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Date column</label>
                 <select
-                  value={(split.date_column as string) || ""}
+                  value={configField(split, "date_column", "")}
                   onChange={(e) => handleSplitUpdate("date_column", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
                   style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -482,7 +483,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
                 <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Cutoff date</label>
                 <input
                   type="date"
-                  value={(split.cutoff_date as string) || ""}
+                  value={configField(split, "cutoff_date", "")}
                   onChange={(e) => handleSplitUpdate("cutoff_date", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
                   style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -495,7 +496,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               <div>
                 <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Group column</label>
                 <select
-                  value={(split.group_column as string) || ""}
+                  value={configField(split, "group_column", "")}
                   onChange={(e) => handleSplitUpdate("group_column", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
                   style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -535,7 +536,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
                 <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Folds:</label>
                 <input
                   type="number" min={2} max={20} step={1}
-                  value={(config.cv_folds as number) || 5}
+                  value={configField(config, "cv_folds", 5)}
                   onChange={(e) => onUpdate("cv_folds", parseInt(e.target.value) || 5)}
                   className="w-14 px-2 py-0.5 rounded text-xs font-mono"
                   style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -590,7 +591,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               <input
                 type="text"
                 placeholder="/Shared/haute/experiment"
-                value={(config.mlflow_experiment as string) || ""}
+                value={configField(config, "mlflow_experiment", "")}
                 onChange={(e) => onUpdate("mlflow_experiment", e.target.value)}
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
                 style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -601,7 +602,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               <input
                 type="text"
                 placeholder="Optional"
-                value={(config.model_name as string) || ""}
+                value={configField(config, "model_name", "")}
                 onChange={(e) => onUpdate("model_name", e.target.value)}
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
                 style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -628,7 +629,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               {columns
                 .filter(c => c.name !== target && c.name !== weight && !exclude.includes(c.name) && !["Utf8", "Categorical", "String"].includes(c.dtype))
                 .map(c => {
-                  const mc = (config.monotone_constraints as Record<string, number>) || {}
+                  const mc = configField<Record<string, number>>(config, "monotone_constraints", {})
                   const val = mc[c.name] ?? 0
                   return (
                     <div key={c.name} className="flex items-center gap-2">

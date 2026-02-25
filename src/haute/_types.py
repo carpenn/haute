@@ -262,13 +262,14 @@ OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
     "factor_columns", "candidate_min", "candidate_max", "candidate_steps",
     "max_cd_iterations", "cd_tolerance", "structure_mode",
     "scored_input", "factors_input",
+    "data_input", "banding_source",
     "mlflow_experiment", "model_name",
 )
 
 OPTIMISER_APPLY_CONFIG_KEYS: tuple[str, ...] = (
     "artifact_path", "version_column",
     "sourceType", "registered_model", "version",
-    "experiment_id", "run_id",
+    "experiment_id", "experiment_name", "run_id", "run_name",
 )
 
 SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (

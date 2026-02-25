@@ -12,6 +12,13 @@ export function formatValueCompact(v: unknown): string {
   return s.length > 20 ? s.slice(0, 18) + "\u2026" : s
 }
 
+/** Format large numbers compactly: 1234567 → "1.23M", 12345 → "12.3K". */
+export function formatNumber(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M"
+  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + "K"
+  return n.toFixed(4)
+}
+
 export function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(0)}s`
   const mins = Math.floor(seconds / 60)

@@ -62,7 +62,9 @@ export default function usePipelineAPI({
   preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
   nodeIdCounter,
 }: PipelineAPIParams): PipelineAPIReturn {
-  const { rowLimit, setDirty, addToast } = useUIStore()
+  const rowLimit = useUIStore((s) => s.rowLimit)
+  const setDirty = useUIStore((s) => s.setDirty)
+  const addToast = useUIStore((s) => s.addToast)
   const [loading, setLoading] = useState(true)
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "ok" | "error" | "running">>({})
@@ -200,7 +202,8 @@ export default function usePipelineAPI({
         setDirty(false)
         addToast("success", `Saved → ${data.file}`)
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.warn("Pipeline save failed:", err)
         addToast("error", "Failed to save pipeline")
       })
   }, [graphRef, submodelsRef, preambleRef, sourceFileRef, pipelineNameRef, lastSavedRef, setDirty, addToast])

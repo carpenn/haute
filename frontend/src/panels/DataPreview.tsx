@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react"
 import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2, Timer } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { formatValue } from "../utils/formatValue"
+import { useDragResize } from "../hooks/useDragResize"
 import type { ColumnInfo } from "../types/node"
 import type { SchemaWarning, NodeTiming } from "../api/types"
 
@@ -33,9 +34,8 @@ const OVERSCAN = 10
 
 export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const [height, setHeight] = useState(256)
+  const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 256, minHeight: 120, maxHeight: 600 })
   const [showTimings, setShowTimings] = useState(false)
-  const dragging = useRef(false)
 
   // Virtual scrolling state
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -62,6 +62,12 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
     return () => observer.disconnect()
   }, [data])
 
+  // Cancel in-flight RAF on unmount
+  useEffect(() => {
+    const ref = rafRef
+    return () => cancelAnimationFrame(ref.current)
+  }, [])
+
   const timings = data?.timings
   const timingData = useMemo(() => {
     if (!timings?.length) return null
@@ -70,25 +76,6 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
     const totalMs = sorted.reduce((s, t) => s + t.timing_ms, 0)
     return { sorted, maxMs, totalMs }
   }, [timings])
-
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    dragging.current = true
-    const startY = e.clientY
-    const startH = height
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return
-      const newH = Math.max(120, Math.min(600, startH + (startY - ev.clientY)))
-      setHeight(newH)
-    }
-    const onUp = () => {
-      dragging.current = false
-      document.removeEventListener("mousemove", onMove)
-      document.removeEventListener("mouseup", onUp)
-    }
-    document.addEventListener("mousemove", onMove)
-    document.addEventListener("mouseup", onUp)
-  }, [height])
 
   if (!data) return null
 
@@ -114,7 +101,7 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
   }
 
   return (
-    <div style={{ height, borderTop: '1px solid var(--border)', background: 'var(--bg-panel)' }} className="flex flex-col shrink-0 relative">
+    <div ref={containerRef} style={{ height, borderTop: '1px solid var(--border)', background: 'var(--bg-panel)' }} className="flex flex-col shrink-0 relative">
       {/* Drag handle */}
       <div
         onMouseDown={onDragStart}

@@ -199,19 +199,19 @@ def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', run_id='fe9fcd1fe3734556af235b4335837e70')
+@pipeline.node(optimiser_apply=True, version_column='__optimiser_version__', sourceType='run', experiment_id='1297322192316636', experiment_name='/optimisation', run_id='fe9fcd1fe3734556af235b4335837e70', run_name='online_optimisation')
 def apply_online(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
     """Apply Optimisation 23 node"""
     return optimiser_inputs
 
 
-@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06)
+@pipeline.node(optimiser=True, mode='online', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, data_input='optimiser_inputs')
 def online_optimisation(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
     """online_optimisation node"""
     return optimiser_inputs
 
 
-@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']])
+@pipeline.node(optimiser=True, mode='ratebook', quote_id='IDpol', scenario_index='scenario_index', scenario_value='price_multiplier', objective='income', constraints={'volume': {'min': 0.9}}, max_iter=50, tolerance=1e-06, factor_columns=[['DrivAgeBand'], ['RegionBand'], ['VehPowerBand']], data_input='optimiser_inputs', banding_source='optimiser_banding')
 def ratebook_optimisation(optimiser_inputs: pl.LazyFrame, optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
     """Optimiser 24 node"""
     return optimiser_inputs
