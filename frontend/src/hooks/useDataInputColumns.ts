@@ -13,6 +13,7 @@ export function useDataInputColumns(
   allNodes: SimpleNode[],
   edges: SimpleEdge[],
   submodels?: Record<string, unknown>,
+  preamble?: string,
 ): { name: string; dtype: string }[] {
   const setColumnsCache = useNodeResultsStore((s) => s.setColumns)
   // Split into two leaf selectors so Zustand's Object.is check works
@@ -41,7 +42,7 @@ export function useDataInputColumns(
       if (isCacheFresh) return // cache is current, skip API call
     }
     // Fetch fresh columns (cached value shown meanwhile)
-    const graph = buildGraph(allNodes, edges, submodels)
+    const graph = buildGraph(allNodes, edges, submodels, preamble)
     previewNode(graph, dataInput, 1)
       .then((result) => {
         if (result.columns) {
@@ -55,7 +56,7 @@ export function useDataInputColumns(
         console.warn("Column fetch failed", e)
         if (!cachedColumns) setDataInputColumns([])
       })
-  }, [dataInput, allNodes, edges, submodels, setColumnsCache, cachedColumns, isCacheFresh]) // re-fetch when input, graph, or cache updates
+  }, [dataInput, allNodes, edges, submodels, preamble, setColumnsCache, cachedColumns, isCacheFresh]) // re-fetch when input, graph, or cache updates
 
   return dataInputColumns
 }

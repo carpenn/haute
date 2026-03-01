@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 import numpy as np
 import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from haute.graph_utils import NodeType
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 
@@ -43,7 +43,10 @@ def _make_modelling_graph(
         "nodes": [
             {
                 "id": "source",
-                "data": {"label": "source", "nodeType": "dataSource", "config": {"path": data_path}},
+                "data": {
+                    "label": "source", "nodeType": "dataSource",
+                    "config": {"path": data_path},
+                },
             },
             {
                 "id": "train",
@@ -160,6 +163,56 @@ class TestTrainEndpoint:
             assert "feature" in entry
             assert "type" in entry
             assert "bins" in entry
+
+
+    def test_train_rejects_concurrent(self, client, training_data):
+        """A second training request while one is running returns 409."""
+        from haute.routes.modelling import _jobs
+
+        _jobs["fake_running"] = {
+            "status": "running",
+            "progress": 0.5,
+            "message": "Training...",
+            "created_at": time.time(),
+        }
+        try:
+            graph = _make_modelling_graph(training_data)
+            resp = client.post(
+                "/api/modelling/train",
+                json={"graph": graph, "node_id": "train"},
+            )
+            assert resp.status_code == 409
+            assert "already running" in resp.json()["detail"]
+        finally:
+            _jobs.pop("fake_running", None)
+
+
+    def test_train_gpu_falls_back_to_cpu_on_vram_limit(self, client, training_data):
+        """When GPU VRAM is insufficient, training should fall back to CPU."""
+        graph = _make_modelling_graph(
+            training_data,
+            params={"iterations": 10, "depth": 3, "task_type": "GPU"},
+        )
+        # Pretend GPU has only 1 byte VRAM — forces fallback to CPU
+        # (even 100 rows × 3 features needs more than 1 byte)
+        with patch(
+            "haute._ram_estimate.available_vram_bytes",
+            return_value=1,
+        ):
+            resp = client.post(
+                "/api/modelling/train",
+                json={"graph": graph, "node_id": "train"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "started"
+
+        # Poll until done — should succeed on CPU (not crash on GPU OOM)
+        status = _poll_until_done(client, data["job_id"])
+        assert status["status"] == "completed"
+        # The warning should mention GPU fallback
+        warning = status.get("warning") or ""
+        assert "GPU" in warning or "VRAM" in warning or "CPU" in warning
 
 
 class TestExportEndpoint:

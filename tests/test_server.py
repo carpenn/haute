@@ -609,7 +609,7 @@ class TestSelfWriteTracking:
         helpers.mark_self_write()
         assert helpers.is_self_write() is True
 
-        fake_time[0] = 101.5  # 1.5s later, past the 1.0s cooldown
+        fake_time[0] = 102.5  # 2.5s later, past the 2.0s cooldown
         assert helpers.is_self_write() is False
 
 

@@ -309,11 +309,15 @@ export function CodeEditor({
 
   // Debounce parent onChange — local state updates instantly, parent
   // update is deferred by 150ms to avoid re-render storms on fast typing.
+  // Use a ref for onChange to avoid re-triggering the effect when the parent
+  // re-renders (e.g. label rename) — only actual code changes should fire.
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
-    debounceRef.current = setTimeout(() => onChange(code), 150)
+    debounceRef.current = setTimeout(() => onChangeRef.current(code), 150)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [code, onChange])
+  }, [code])
 
   const insertText = useCallback((ta: HTMLTextAreaElement, text: string) => {
     ta.focus()

@@ -295,6 +295,44 @@ class CacheStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# /api/json-cache/*
+# ---------------------------------------------------------------------------
+
+
+class JsonCacheBuildRequest(BaseModel):
+    path: str
+    config_path: str | None = None
+
+
+class JsonCacheBuildResponse(BaseModel):
+    path: str
+    data_path: str
+    row_count: int
+    column_count: int
+    columns: dict[str, str]
+    size_bytes: int
+    cached_at: float
+    cache_seconds: float
+
+
+class JsonCacheProgressResponse(BaseModel):
+    active: bool
+    rows: int = 0
+    elapsed: float = 0.0
+
+
+class JsonCacheStatusResponse(BaseModel):
+    cached: bool
+    path: str | None = None
+    data_path: str = ""
+    row_count: int = 0
+    column_count: int = 0
+    columns: dict[str, str] = Field(default_factory=dict)
+    size_bytes: int = 0
+    cached_at: float = 0
+
+
+# ---------------------------------------------------------------------------
 # /api/submodel/*
 # ---------------------------------------------------------------------------
 
@@ -360,6 +398,8 @@ class TrainResponse(BaseModel):
     feature_importance_loss: list[dict[str, Any]] = Field(default_factory=list)
     cv_results: dict[str, Any] | None = None
     ave_per_feature: list[dict[str, Any]] = Field(default_factory=list)
+    warning: str | None = None
+    total_source_rows: int | None = None
 
 
 class TrainStatusResponse(BaseModel):
@@ -371,6 +411,27 @@ class TrainStatusResponse(BaseModel):
     train_loss: dict[str, float] = Field(default_factory=dict)
     elapsed_seconds: float = 0.0
     result: TrainResponse | None = None
+    warning: str | None = None
+
+
+class TrainEstimateRequest(BaseModel):
+    graph: Graph
+    node_id: str
+
+
+class TrainEstimateResponse(BaseModel):
+    total_rows: int | None = None
+    safe_row_limit: int | None = None
+    estimated_mb: float = 0.0
+    training_mb: float = 0.0
+    available_mb: float = 0.0
+    bytes_per_row: float = 0.0
+    was_downsampled: bool = False
+    warning: str | None = None
+    # GPU VRAM estimation
+    gpu_vram_estimated_mb: float | None = None
+    gpu_vram_available_mb: float | None = None
+    gpu_warning: str | None = None
 
 
 class ExportScriptRequest(BaseModel):

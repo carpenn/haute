@@ -977,7 +977,42 @@ def starter_pipeline(name: str) -> str:
 import polars as pl
 import haute
 
+from helpers.features import to_date, years_between, cols_matching
+
 pipeline = haute.Pipeline("{name}", description="")
+'''
+
+
+def starter_helpers_init() -> str:
+    """Generate ``helpers/__init__.py``."""
+    return '"""Project-level helpers \u2014 reusable utilities for pipeline nodes."""\n'
+
+
+def starter_helpers_features() -> str:
+    """Generate ``helpers/features.py`` with common Polars utilities."""
+    return '''\
+"""Feature engineering helpers for pipeline nodes.
+
+Add project-specific helper functions, constants, and column mappings here.
+These are imported into main.py so your pipeline nodes stay clean and readable.
+"""
+
+import polars as pl
+
+
+def to_date(col_name: str) -> pl.Expr:
+    """Parse a string column to a date."""
+    return pl.col(col_name).str.to_date("%Y-%m-%d")
+
+
+def years_between(earlier: pl.Expr, later: pl.Expr) -> pl.Expr:
+    """Whole years between two date expressions (floor)."""
+    return ((later - earlier).dt.total_days() / 365.25).floor().cast(pl.Int64)
+
+
+def cols_matching(all_cols: list[str], pattern_fn) -> list[str]:
+    """Return columns from *all_cols* where pattern_fn(col) is True."""
+    return [c for c in all_cols if pattern_fn(c)]
 '''
 
 

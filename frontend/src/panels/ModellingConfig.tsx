@@ -1,7 +1,8 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
-import { trainModel, exportTraining, logToMlflow } from "../api/client"
+import { trainModel, exportTraining, logToMlflow, estimateTrainingRam } from "../api/client"
+import type { TrainEstimate } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useUIStore from "../stores/useUIStore"
 import { formatElapsed } from "../utils/formatValue"
@@ -15,6 +16,7 @@ type ModellingConfigProps = {
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
+  preamble?: string
 }
 
 import type { TrainResult, TrainProgress } from "../stores/useNodeResultsStore"
@@ -78,7 +80,7 @@ function LossChart({ lossHistory, bestIteration }: { lossHistory: { iteration: n
   )
 }
 
-export default function ModellingConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels }: ModellingConfigProps) {
+export default function ModellingConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels, preamble }: ModellingConfigProps) {
   // ── Store-backed state (survives panel unmount) ──
   const nodeId = config._nodeId as string
   const trainJob = useNodeResultsStore((s) => s.trainJobs[nodeId])
@@ -100,6 +102,42 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const [importanceType, setImportanceType] = useState<"prediction" | "loss" | "shap">("prediction")
   const [loggingToMlflow, setLoggingToMlflow] = useState(false)
   const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
+
+  // ── RAM estimate (fetched once when modelling node selected) ──
+  const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)
+  const [ramEstimateLoading, setRamEstimateLoading] = useState(false)
+  const estimateAbortRef = useRef<AbortController | null>(null)
+  // Ref to capture latest graph inputs without re-triggering the effect
+  const graphInputsRef = useRef({ allNodes, edges, submodels, preamble })
+  graphInputsRef.current = { allNodes, edges, submodels, preamble }
+
+  useEffect(() => {
+    if (!nodeId) return
+    // Cancel any in-flight estimate
+    estimateAbortRef.current?.abort()
+    const controller = new AbortController()
+    estimateAbortRef.current = controller
+
+    setRamEstimateLoading(true)
+    setRamEstimate(null)
+
+    const { allNodes: n, edges: e, submodels: s, preamble: p } = graphInputsRef.current
+    estimateTrainingRam(
+      { graph: buildGraph(n, e, s, p), node_id: nodeId },
+      { signal: controller.signal },
+    )
+      .then((est) => {
+        if (!controller.signal.aborted) setRamEstimate(est)
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) console.warn("RAM estimate failed:", err)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRamEstimateLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [nodeId])
 
   // Global MLflow status from store (fetched once on app startup)
   const mlflow = useUIStore((s) => s.mlflow)
@@ -132,8 +170,8 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   }, [split, onUpdate])
 
   const buildGraphCb = useCallback(
-    () => buildGraph(allNodes, edges, submodels),
-    [allNodes, edges, submodels],
+    () => buildGraph(allNodes, edges, submodels, preamble),
+    [allNodes, edges, submodels, preamble],
   )
 
   const handleTrain = useCallback(async () => {
@@ -399,6 +437,21 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
           </div>
+          {/* GPU toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={(params.task_type as string) === "GPU"}
+              onChange={(e) => handleParamUpdate("task_type", e.target.checked ? "GPU" : "CPU")}
+              className="accent-purple-500"
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-primary)" }}>
+              GPU training
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              (CUDA)
+            </span>
+          </label>
           <button
             onClick={() => toggleSection("modelling.advanced")}
             className="flex items-center gap-1 text-[11px]"
@@ -676,6 +729,63 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         </div>
       )}
 
+      {/* RAM Estimate */}
+      {ramEstimateLoading && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(168,85,247,.06)", border: "1px solid rgba(168,85,247,.15)" }}>
+          <Loader2 size={12} className="animate-spin" style={{ color: "#a855f7" }} />
+          <span style={{ color: "var(--text-muted)" }}>Estimating dataset size...</span>
+        </div>
+      )}
+      {ramEstimate && !ramEstimateLoading && ramEstimate.total_rows != null && (
+        <div className="px-3 py-2.5 rounded-lg text-xs space-y-1.5" style={{
+          background: ramEstimate.was_downsampled ? "rgba(245,158,11,.06)" : "rgba(34,197,94,.06)",
+          border: `1px solid ${ramEstimate.was_downsampled ? "rgba(245,158,11,.2)" : "rgba(34,197,94,.15)"}`,
+        }}>
+          <div className="flex items-center gap-2">
+            {ramEstimate.was_downsampled && <AlertTriangle size={12} className="shrink-0" style={{ color: "#f59e0b" }} />}
+            <span className="font-medium" style={{ color: ramEstimate.was_downsampled ? "#fbbf24" : "#22c55e" }}>
+              {ramEstimate.was_downsampled ? "Will downsample" : "Dataset fits in memory"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
+            <span>Source rows</span>
+            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.total_rows!.toLocaleString()}</span>
+            <span>Est. training RAM</span>
+            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.training_mb < 1024 ? `${ramEstimate.training_mb.toFixed(0)} MB` : `${(ramEstimate.training_mb / 1024).toFixed(1)} GB`}</span>
+            <span>Available RAM</span>
+            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.available_mb < 1024 ? `${ramEstimate.available_mb.toFixed(0)} MB` : `${(ramEstimate.available_mb / 1024).toFixed(1)} GB`}</span>
+            {ramEstimate.was_downsampled && ramEstimate.safe_row_limit != null && (
+              <>
+                <span>Training rows</span>
+                <span style={{ color: "#f59e0b" }}>{ramEstimate.safe_row_limit.toLocaleString()}</span>
+              </>
+            )}
+            {ramEstimate.gpu_vram_estimated_mb != null && (
+              <>
+                <span>Est. GPU VRAM</span>
+                <span style={{ color: ramEstimate.gpu_warning ? "#f59e0b" : "var(--text-primary)" }}>
+                  {ramEstimate.gpu_vram_estimated_mb < 1024 ? `${ramEstimate.gpu_vram_estimated_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_estimated_mb / 1024).toFixed(1)} GB`}
+                </span>
+                {ramEstimate.gpu_vram_available_mb != null && (
+                  <>
+                    <span>GPU VRAM</span>
+                    <span style={{ color: "var(--text-primary)" }}>
+                      {ramEstimate.gpu_vram_available_mb < 1024 ? `${ramEstimate.gpu_vram_available_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_available_mb / 1024).toFixed(1)} GB`}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          {ramEstimate.gpu_warning && (
+            <div className="flex items-center gap-2 mt-1" style={{ color: "#f59e0b" }}>
+              <AlertTriangle size={12} className="shrink-0" />
+              <span>{ramEstimate.gpu_warning}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
       <div className="space-y-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
         <button
@@ -764,6 +874,12 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
                   </div>
                 )}
               </div>
+              {trainResult.warning && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" style={{ color: "#f59e0b" }} />
+                  <span style={{ color: "#fbbf24" }}>{trainResult.warning}</span>
+                </div>
+              )}
               {/* Log to MLflow button */}
               {mlflowBackend?.installed && trainJobId && (
                 <div className="space-y-1.5">

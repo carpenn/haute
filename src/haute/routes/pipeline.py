@@ -203,7 +203,9 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
             if samples:
                 cfg["flattenSchema"] = infer_schema(samples)
 
-    # Write node config JSON sidecar files
+    # Write node config JSON sidecar files and clean up stale ones
+    from haute._config_io import NODE_TYPE_TO_FOLDER
+
     config_files = collect_node_configs(graph)
     for rel_path, json_content in config_files.items():
         out_path = (cwd / rel_path).resolve()
@@ -211,6 +213,25 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
             continue
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json_content)
+
+    # Remove config files that no longer have a corresponding node
+    config_dir = cwd / "config"
+    if config_dir.is_dir():
+        for folder in NODE_TYPE_TO_FOLDER.values():
+            folder_path = config_dir / folder
+            if not folder_path.is_dir():
+                continue
+            for json_file in folder_path.glob("*.json"):
+                rel = str(json_file.relative_to(cwd))
+                if rel not in config_files:
+                    json_file.unlink()
+                    logger.info("stale_config_removed", path=rel)
+            # Remove empty folder
+            if not any(folder_path.iterdir()):
+                folder_path.rmdir()
+        # Remove empty config dir
+        if config_dir.is_dir() and not any(config_dir.iterdir()):
+            config_dir.rmdir()
 
     # Write sidecar .haute.json (node positions for the GUI)
     save_sidecar(py_path, graph)

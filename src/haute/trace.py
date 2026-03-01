@@ -29,7 +29,7 @@ from typing import Any
 import polars as pl
 
 from haute._logging import get_logger
-from haute.executor import _build_node_fn
+from haute.executor import _build_node_fn, _compile_preamble
 from haute.graph_utils import (
     GraphNode,
     NodeType,
@@ -252,12 +252,14 @@ def execute_trace(
 
     if not cache_hit:
         # Cache miss — execute eagerly via shared core (raises on error)
+        preamble_ns = _compile_preamble(graph.preamble or "")
         result = _execute_eager_core(
             graph,
             _build_node_fn,
             target_node_id=target_node_id,
             row_limit=row_limit,
             swallow_errors=False,
+            preamble_ns=preamble_ns or None,
         )
         # Trace never swallows errors so all values are DataFrames here.
         eager_outputs = {

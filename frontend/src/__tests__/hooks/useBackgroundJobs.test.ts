@@ -280,7 +280,7 @@ describe("useBackgroundJobs", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("max lifetime timeout", () => {
-    it("fails job after 30 minutes with timeout message", async () => {
+    it("fails job after 24 hours with timeout message", async () => {
       const mockGetStatus = vi.mocked(getOptimiserStatus)
       // Always return "running" so the poller doesn't complete naturally
       mockGetStatus.mockResolvedValue(
@@ -293,15 +293,13 @@ describe("useBackgroundJobs", () => {
 
       renderHook(() => useBackgroundJobs())
 
-      // MAX_LIFETIME_MS = 30 * 60 * 1000 = 1,800,000ms
-      // With 500ms polls, we'd need 3600 steps. Instead, advance the full
-      // 30 minutes in one shot. advanceTimersByTimeAsync will process all
-      // the intermediate timers and microtasks.
-      await advance(1_800_500)
+      // MAX_LIFETIME_MS = 24 * 60 * 60 * 1000 = 86,400,000ms
+      // Advance past the lifetime limit in one shot.
+      await advance(86_400_500)
 
       const job = useNodeResultsStore.getState().solveJobs["n1"]
-      expect(job?.error).toBe("Job timed out after 30 minutes")
-    }, 30_000)
+      expect(job?.error).toBe("Job timed out after 24 hours")
+    }, 120_000)
   })
 
   // ────────────────────────────────────────────────────────────────

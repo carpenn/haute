@@ -64,6 +64,7 @@ def _execute_lazy(
     graph: PipelineGraph,
     build_node_fn: Callable,
     target_node_id: str | None = None,
+    preamble_ns: dict | None = None,
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:
     """Execute a graph lazily and return per-node LazyFrames.
 
@@ -96,6 +97,8 @@ def _execute_lazy(
         if orig_src_names is not None:
             kwargs["node_map"] = node_map
             kwargs["orig_source_names"] = orig_src_names
+        if preamble_ns:
+            kwargs["preamble_ns"] = preamble_ns
         _, fn, is_source = build_node_fn(node_map[nid], **kwargs)
         funcs[nid] = (fn, is_source)
 
@@ -134,11 +137,14 @@ def _build_funcs(
     build_node_fn: Callable,
     *,
     row_limit: int | None = None,
+    preamble_ns: dict | None = None,
 ) -> dict[str, tuple[Callable, bool]]:
     """Build per-node executable functions from the graph.
 
     Shared between eager and lazy paths.  ``row_limit`` is forwarded to
     ``build_node_fn`` so Databricks sources can push LIMIT into SQL.
+    ``preamble_ns`` is a compiled namespace of user-defined helpers from
+    the pipeline file's preamble section.
     """
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
@@ -153,6 +159,7 @@ def _build_funcs(
         _, fn, is_source = build_node_fn(
             node_map[nid], source_names=src_names, row_limit=row_limit,
             node_map=node_map, orig_source_names=orig_src_names,
+            preamble_ns=preamble_ns,
         )
         funcs[nid] = (fn, is_source)
     return funcs
@@ -176,6 +183,7 @@ def _execute_eager_core(
     target_node_id: str | None = None,
     row_limit: int | None = None,
     swallow_errors: bool = False,
+    preamble_ns: dict | None = None,
 ) -> EagerResult:
     """Execute the graph eagerly in topo order and collect DataFrames.
 
@@ -202,7 +210,7 @@ def _execute_eager_core(
 
     funcs = _build_funcs(
         order, node_map, parents_of, id_to_name, all_parents,
-        build_node_fn, row_limit=row_limit,
+        build_node_fn, row_limit=row_limit, preamble_ns=preamble_ns,
     )
 
     eager_outputs: dict[str, pl.DataFrame | None] = {}

@@ -16,7 +16,7 @@ import useUIStore from "../stores/useUIStore"
 
 const BASE_INTERVAL_MS = 500
 const MAX_INTERVAL_MS = 5_000
-const MAX_LIFETIME_MS = 30 * 60 * 1_000 // 30 minutes
+const MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000 // 24 hours — training large datasets can take hours
 const CONSECUTIVE_FAILURES_FOR_TOAST = 5
 
 // ── Per-job polling state tracked alongside the timeout handle ──
@@ -93,8 +93,8 @@ function createJobPoller<
       // ── Max lifetime check ──
       if (elapsed >= MAX_LIFETIME_MS) {
         delete stateRef.current[nodeId]
-        onFail(nodeId, "Job timed out after 30 minutes")
-        addToast("error", `${failLabel}: ${labelFn(job)} — Job timed out after 30 minutes`)
+        onFail(nodeId, "Job timed out after 24 hours")
+        addToast("error", `${failLabel}: ${labelFn(job)} — Job timed out after 24 hours`)
         return
       }
 

@@ -194,6 +194,7 @@ function FlowEditor() {
   } = useTracing({
     nodes, edges, selectedNode,
     graphRef, parentGraphRef, submodelsRef,
+    preambleRef,
     nodeStatuses,
   })
 
@@ -526,6 +527,7 @@ function FlowEditor() {
             edges={edges as unknown as SimpleEdge[]}
             allNodes={nodes as unknown as SimpleNode[]}
             submodels={submodelsSnapshot}
+            preamble={preamble}
             onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
             onUpdateNode={onUpdateNode}
             onDeleteEdge={handleDeleteEdge}

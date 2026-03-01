@@ -40,6 +40,7 @@ export type TrainResult = {
   shap_summary?: { feature: string; mean_abs_shap: number }[]
   feature_importance_loss?: { feature: string; importance: number }[]
   cv_results?: { mean_metrics: Record<string, number>; std_metrics: Record<string, number>; n_folds: number } | null
+  warning?: string | null
 }
 
 export type TrainProgress = {
@@ -51,6 +52,7 @@ export type TrainProgress = {
   train_loss: Record<string, number>
   elapsed_seconds: number
   result?: TrainResult
+  warning?: string | null
 }
 
 interface CachedPreview {

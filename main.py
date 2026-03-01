@@ -3,293 +3,111 @@
 import polars as pl
 import haute
 
+from helpers.features import (
+    addon_features,
+    driver_features,
+    to_date,
+    years_between,
+    ADDON_NAMES,
+    DERIVED_COLS,
+    RENAME_MAP,
+)
+
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
 @pipeline.node(config="config/datasource/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    from haute._databricks_io import read_cached_table
-    return read_cached_table("quotes.delta.policies")
+    return pl.scan_parquet("data/batch_quotes.parquet")
 
 
-@pipeline.node(config="config/datasource/claims.json")
-def claims() -> pl.LazyFrame:
-    """claims node"""
-    return pl.scan_parquet("data/claims_amounts.parquet")
-
-
-@pipeline.node
-def claims_aggregate(claims: pl.LazyFrame) -> pl.LazyFrame:
-    """claims_aggregate node"""
-    df = (
-    claims
-    .with_columns(
-        ClaimCount = 
-            pl.when(pl.col('ClaimAmount') > 0)
-            .then(pl.lit(1))
-            .otherwise(pl.lit(0))
-    )
-    .group_by('IDpol')
-    .agg(
-        pl.sum('ClaimCount')
-    )
-    )
-    return df
-
-
-@pipeline.node(config="config/datasource/exposure.json")
-def exposure() -> pl.LazyFrame:
-    """exposure node"""
-    return pl.scan_parquet("data/exposure.parquet")
-
-
-@pipeline.node(config="config/live_switch/policies.json")
-def policies(batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
-    """policies node"""
-    return batch_quotes
-
-
-@pipeline.node(config="config/model_score/Model_Score_19.json")
-def Model_Score_19(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """Model Score 19 node"""
-    df = policies
-    from haute.graph_utils import load_mlflow_model
-    model = load_mlflow_model(source_type="run", run_id="d5aa4ee011594c52bed9fff777376619", artifact_path="Model_Training_17.cbm", task="regression")
-    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
-    df_eager = df.collect()
-    features = [f for f in model.feature_names_ if f in df_eager.columns]
-    X = df_eager.select(features).to_pandas()
-    preds = model.predict(X).flatten()
-    df_eager = df_eager.with_columns(pl.Series("prediction", preds))
-    result = df_eager.lazy()
-    return result
-
-
-@pipeline.node(config="config/external_model/frequency_model.json")
-def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """catboost_load node"""
-    from haute.graph_utils import load_external_object
-    obj = load_external_object("models/freq.cbm", "catboost", "regressor")
-    features = (  # noqa: N806
-        policies
-        .select(obj.feature_names_)
-    ).collect().to_numpy()
-    
-    preds = obj.predict(features)
-    
-    df = (
-        policies
-        .select('IDpol')
-        .with_columns(freq_preds = pl.Series(preds))
-    )
-    return df
-
-
-@pipeline.node
-def frequency_set(exposure: pl.LazyFrame, claims_aggregate: pl.LazyFrame, policies: pl.LazyFrame) -> pl.LazyFrame:
-    """frequency_set node"""
-    df = (
-    policies
-    .join(
-        claims_aggregate, 
-        on = 'IDpol', 
-        how = 'left'
-    )
-    .join(
-        exposure, 
-        on = 'IDpol', 
-        how = 'left'
-    )
-    )
-    return df
-
-
-@pipeline.node(config="config/sink/frequency_write.json")
-def frequency_write(frequency_set: pl.LazyFrame) -> pl.LazyFrame:
-    """frequency_write node"""
-    frequency_set.collect().write_parquet("output/frequency.parquet")
-    return frequency_set
-
-
-@pipeline.node(config="config/factors/optimiser_banding.json")
-def optimiser_banding(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """Banding 15 node"""
-    return df
-
-
-@pipeline.node(config="config/tables/Rating_Step_16.json")
-def Rating_Step_16(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
-    """Rating Step 16 node"""
-    return df
-
-
-@pipeline.node(config="config/optimiser_apply/apply_ratebook.json")
-def apply_ratebook(optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
-    """apply_ratebook node"""
-    return optimiser_banding
+@pipeline.node(config="config/datasource/competitor_insights.json")
+def competitor_insights() -> pl.LazyFrame:
+    """competitor_insights node"""
+    return pl.scan_parquet("data/competitor_insight.parquet")
 
 
 @pipeline.node(config="config/api_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """api_input node"""
     from haute._json_flatten import read_json_flat
-    return read_json_flat("data/sample_quote.json", config_path="config/api_input/quotes.json")
+    return read_json_flat("data/quotes_10m.jsonl", config_path="config/api_input/quotes.json")
 
 
-@pipeline.node(config="config/external_model/severity_model.json")
-def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
-    """catboost_load node"""
-    from haute.graph_utils import load_external_object
-    obj = load_external_object("models/sev.cbm", "catboost", "regressor")
-    features = (  # noqa: N806
-        policies
-        .select(obj.feature_names_)
-    ).collect().to_numpy()
+@pipeline.node
+def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
+    """Feature engineering for insurance pricing"""
+    cols = quotes.collect_schema().names()
+    cover_start = to_date("policy_details.cover_start_date")
     
-    preds = obj.predict(features)
+    # Helpers build the dynamic driver + addon expressions
+    ad_derived, ad_age_cols, ad_renames, ad_keep = driver_features(cols, cover_start)
+    addon_derived, addon_renames, addon_keep = addon_features(cols, ADDON_NAMES)
     
-    df = (
-        policies
-        .select('IDpol')
-        .with_columns(sev_preds = pl.Series(preds))
+    # Step 1 — Add calculated columns
+    df = quotes.with_columns(
+        # Proposer
+        years_between(to_date("proposer.date_of_birth"), cover_start).alias("proposer_age"),
+        years_between(to_date("proposer.licence.licence_date"), cover_start).alias("proposer_licence_length_years"),
+        # Vehicle
+        (cover_start.dt.year() - pl.col("vehicle.year_of_manufacture")).alias("vehicle_age"),
+        # Policy
+        (pl.col("policy_details.voluntary_excess") + pl.col("policy_details.compulsory_excess")).alias("total_excess"),
+        # Address
+        (pl.col("address.years_at_address") * 12 + pl.col("address.months_at_address")).alias("address_total_months"),
+        pl.col("address.postcode").str.split(" ").list.first().alias("postcode_area"),
+        # Additional drivers + counts + addons
+        *ad_derived,
+        *addon_derived,
     )
+    
+    # Step 2 — Youngest driver across proposer + any additional drivers
+    df = df.with_columns(
+        pl.min_horizontal("proposer_age", *ad_age_cols).alias("youngest_driver_age"),
+    )
+    
+    # Step 3 — Rename dot-notation columns to clean names
+    df = df.rename({**RENAME_MAP, **ad_renames, **addon_renames})
+    
+    # Step 4 — Keep only the columns we need
+    df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
+     
+    df
     return df
 
 
-@pipeline.node
-def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFrame) -> pl.LazyFrame:
-    """calculate_premium node"""
-    df = (
-    frequency_model
-    .join(
-        severity_model, 
-        on = 'IDpol', 
-        how = 'left'
-    )
-    .with_columns(technical_price = pl.col('freq_preds') * pl.col('sev_preds'))
-    .with_columns(premium = pl.col('technical_price') / 0.7)
-    )
-    return df
-
-
-@pipeline.node(config="config/output/output.json")
-def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
-    """Output 13 node"""
-    return calculate_premium
-
-
-@pipeline.node(config="config/scenario_expander/price_scenarios.json")
-def price_scenarios(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
-    """price_scenarios node"""
-    return calculate_premium
+@pipeline.node(config="config/live_switch/policies.json")
+def policies(feature_processing: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
+    """policies node"""
+    return batch_quotes
 
 
 @pipeline.node
-def optimiser_inputs(price_scenarios: pl.LazyFrame) -> pl.LazyFrame:
-    """optimiser_inputs node"""
-    df = (
-    price_scenarios
-    .with_columns(
-        price_scenario = pl.col('price_multiplier') * pl.col('premium'),
-        volume = (30-pl.col('scenario_index'))/100
-    )
-    .with_columns(
-        income = (pl.col('price_scenario') - pl.col('technical_price') - 5) * pl.col('volume')
-    )
-    )
-    return df
-
-
-@pipeline.node(config="config/optimiser_apply/apply_online.json")
-def apply_online(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
-    """Apply Optimisation 23 node"""
-    return optimiser_inputs
-
-
-@pipeline.node(config="config/optimiser/online_optimisation.json")
-def online_optimisation(optimiser_inputs: pl.LazyFrame) -> pl.LazyFrame:
-    """online_optimisation node"""
-    return optimiser_inputs
-
-
-@pipeline.node(config="config/optimiser/ratebook_optimisation.json")
-def ratebook_optimisation(optimiser_inputs: pl.LazyFrame, optimiser_banding: pl.LazyFrame) -> pl.LazyFrame:
-    """Optimiser 24 node"""
-    return optimiser_inputs
-
-
-@pipeline.node
-def severity_set(exposure: pl.LazyFrame, claims: pl.LazyFrame, policies: pl.LazyFrame) -> pl.LazyFrame:
-    """claim_exposure_join copy node"""
+def competitor_join(policies: pl.LazyFrame, competitor_insights: pl.LazyFrame) -> pl.LazyFrame:
+    """competitor_join node"""
     df = (
     policies
     .join(
-        claims, 
-        on = 'IDpol', 
-        how = 'left'
+        competitor_insights, 
+        on = 'quote_id', 
+        how = 'inner'
     )
-    .filter(pl.col('ClaimAmount') > 0 )
-    )
-    return df
-
-
-@pipeline.node(config="config/modelling/Model_Training_17.json")
-def Model_Training_17(severity_set: pl.LazyFrame) -> pl.LazyFrame:
-    """Model Training 17 node"""
-    return df
-
-
-@pipeline.node(config="config/sink/severity_write.json")
-def severity_write(severity_set: pl.LazyFrame) -> pl.LazyFrame:
-    """severity_write node"""
-    severity_set.collect().write_parquet("output/severity.parquet")
-    return severity_set
-
-
-@pipeline.node
-def Polars_25(quotes: pl.LazyFrame) -> pl.LazyFrame:
-    """Polars 25 node"""
-    df = (
-    quotes
     )
     return df
 
 
-@pipeline.node(config="config/sink/flattened_json.json")
-def flattened_json(Polars_25: pl.LazyFrame) -> pl.LazyFrame:
-    """flattened_json node"""
-    Polars_25.collect().write_parquet("output/flattened.parquet")
-    return Polars_25
+@pipeline.node(config="config/modelling/avg_top_5.json")
+def avg_top_5(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
+    """avg_top_5 node"""
+    return df
 
 
 
 # Wire nodes together - edges define data flow
-pipeline.connect("exposure", "frequency_set")
-pipeline.connect("exposure", "severity_set")
-pipeline.connect("claims", "severity_set")
-pipeline.connect("claims", "claims_aggregate")
-pipeline.connect("frequency_set", "frequency_write")
-pipeline.connect("severity_set", "severity_write")
+pipeline.connect("quotes", "feature_processing")
+pipeline.connect("feature_processing", "policies")
 pipeline.connect("batch_quotes", "policies")
-pipeline.connect("claims_aggregate", "frequency_set")
-pipeline.connect("policies", "frequency_set")
-pipeline.connect("policies", "severity_set")
-pipeline.connect("calculate_premium", "output")
-pipeline.connect("policies", "frequency_model")
-pipeline.connect("policies", "severity_model")
-pipeline.connect("severity_model", "calculate_premium")
-pipeline.connect("frequency_model", "calculate_premium")
-pipeline.connect("policies", "optimiser_banding")
-pipeline.connect("optimiser_banding", "Rating_Step_16")
-pipeline.connect("severity_set", "Model_Training_17")
-pipeline.connect("policies", "Model_Score_19")
-pipeline.connect("calculate_premium", "price_scenarios")
-pipeline.connect("price_scenarios", "optimiser_inputs")
-pipeline.connect("optimiser_inputs", "online_optimisation")
-pipeline.connect("optimiser_inputs", "ratebook_optimisation")
-pipeline.connect("optimiser_banding", "ratebook_optimisation")
-pipeline.connect("optimiser_inputs", "apply_online")
-pipeline.connect("optimiser_banding", "apply_ratebook")
-pipeline.connect("quotes", "Polars_25")
-pipeline.connect("Polars_25", "flattened_json")
+pipeline.connect("policies", "competitor_join")
+pipeline.connect("competitor_insights", "competitor_join")
+pipeline.connect("competitor_join", "avg_top_5")

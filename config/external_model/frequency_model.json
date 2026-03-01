@@ -1,5 +1,0 @@
-{
-  "path": "models/freq.cbm",
-  "fileType": "catboost",
-  "modelClass": "regressor"
-}

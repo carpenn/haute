@@ -31,6 +31,7 @@ type NodePanelProps = {
   edges: SimpleEdge[]
   allNodes: SimpleNode[]
   submodels?: Record<string, unknown>
+  preamble?: string
   onClose: () => void
   onUpdateNode?: (id: string, data: Record<string, unknown>) => void
   onDeleteEdge?: (edgeId: string) => void
@@ -213,7 +214,7 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 
 // ─── NodePanel ────────────────────────────────────────────────────
 
-export default function NodePanel({ node, edges, allNodes, submodels, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed }: NodePanelProps) {
   const panelWidth = useUIStore((s) => s.nodePanelWidth)
   const setNodePanelWidth = useUIStore((s) => s.setNodePanelWidth)
   const isDragging = useRef(false)
@@ -314,7 +315,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
         return <DataSourceEditor config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} />
 
       case NODE_TYPES.DATA_SINK:
-        return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} />
+        return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} preamble={preamble} />
 
       case NODE_TYPES.EXTERNAL_FILE:
         return <ExternalFileEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
@@ -363,6 +364,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
             allNodes={allNodes}
             edges={edges}
             submodels={submodels}
+            preamble={preamble}
             upstreamColumns={effectiveCols}
           />
         )
@@ -437,7 +439,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, onClose, o
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <input
           type="text"
-          defaultValue={node.data.label}
+          value={node.data.label}
           onChange={(e) => {
             if (onUpdateNode) {
               onUpdateNode(node.id, { ...node.data, label: e.target.value })

@@ -48,6 +48,11 @@ export default function useWebSocketSync({
           const msg = JSON.parse(event.data)
 
           if (msg.type === "graph_update" && msg.graph) {
+            // Skip file-watcher updates when the user has unsaved edits.
+            // Their next save will write the .py file, and the subsequent
+            // broadcast (after save) will be accepted since dirty is false.
+            if (useUIStore.getState().dirty) return
+
             const g = msg.graph
             const newNodes = g.nodes || []
             const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))

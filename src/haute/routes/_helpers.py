@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from haute._logging import get_logger
-from haute.graph_utils import PipelineGraph
+from haute.graph_utils import PipelineGraph, _sanitize_func_name
 
 logger = get_logger(component="server")
 
@@ -18,7 +18,7 @@ logger = get_logger(component="server")
 # Self-write tracking (avoid file-watcher feedback loops)
 # ---------------------------------------------------------------------------
 _last_self_write: float = 0.0
-_SELF_WRITE_COOLDOWN = 1.0  # seconds
+_SELF_WRITE_COOLDOWN = 2.0  # seconds (must exceed save duration + watcher debounce)
 
 
 def mark_self_write() -> None:
@@ -157,8 +157,15 @@ def load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
 
 
 def save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
-    """Write node positions to the sidecar .haute.json file."""
-    positions = {node.id: node.position for node in graph.nodes}
+    """Write node positions to the sidecar .haute.json file.
+
+    Keys are the sanitised function names (which the parser uses as node IDs
+    on re-parse), so positions survive label renames.
+    """
+    positions = {
+        _sanitize_func_name(node.data.label): node.position
+        for node in graph.nodes
+    }
     sidecar = py_path.with_suffix(".haute.json")
     sidecar.write_text(_json.dumps({"positions": positions}, indent=2) + "\n")
 

@@ -5,6 +5,7 @@ import type { TraceResult } from "../types/trace"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { nodeData } from "../types/node"
 import { traceCell } from "../api/client"
+import { resolveGraphFromRefs } from "../utils/buildGraph"
 import useUIStore from "../stores/useUIStore"
 
 interface TracingParams {
@@ -14,6 +15,7 @@ interface TracingParams {
   graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
   parentGraphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, unknown> } | null>
   submodelsRef: React.MutableRefObject<Record<string, unknown>>
+  preambleRef: React.MutableRefObject<string>
   nodeStatuses: Record<string, "ok" | "error" | "running">
 }
 
@@ -29,6 +31,7 @@ export interface TracingReturn {
 export default function useTracing({
   nodes, edges, selectedNode,
   graphRef, parentGraphRef, submodelsRef,
+  preambleRef,
   nodeStatuses,
 }: TracingParams): TracingReturn {
   const { rowLimit, addToast } = useUIStore()
@@ -42,9 +45,7 @@ export default function useTracing({
 
   const handleCellClick = useCallback((rowIndex: number, column: string) => {
     if (!selectedNode) return
-    const graph = parentGraphRef.current
-      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
-      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
+    const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
     setTracedCell({ rowIndex, column })
     traceCell({ graph, row_index: rowIndex, target_node_id: selectedNode.id, column, row_limit: rowLimit })
       .then((data) => {
@@ -59,7 +60,7 @@ export default function useTracing({
         addToast("error", `Trace error: ${err.message}`)
         clearTrace()
       })
-  }, [selectedNode, graphRef, parentGraphRef, submodelsRef, rowLimit, addToast, clearTrace])
+  }, [selectedNode, graphRef, parentGraphRef, submodelsRef, preambleRef, rowLimit, addToast, clearTrace])
 
   // Map child node IDs → submodel placeholder node IDs
   const childToSubmodelId = useMemo(() => {

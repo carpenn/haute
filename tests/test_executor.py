@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import polars as pl
 import pytest
 
-from haute.executor import _build_node_fn, _exec_user_code, execute_graph, execute_sink
+from haute.executor import _build_node_fn, _compile_preamble, _exec_user_code, execute_graph, execute_sink
 from tests.conftest import (
     make_edge as _edge,
     make_graph as _g,
@@ -98,6 +101,68 @@ class TestExecUserCode:
         df = result.collect()
         assert len(df) == 0
         assert set(df.columns) == {"x", "y"}
+
+
+# ---------------------------------------------------------------------------
+# _compile_preamble
+# ---------------------------------------------------------------------------
+
+
+class TestCompilePreamble:
+    def test_empty_preamble_returns_empty_dict(self):
+        assert _compile_preamble("") == {}
+        assert _compile_preamble("   ") == {}
+
+    def test_extracts_functions(self):
+        ns = _compile_preamble("def double(x):\n    return x * 2\n")
+        assert "double" in ns
+        assert ns["double"](5) == 10
+
+    def test_extracts_constants(self):
+        ns = _compile_preamble("MY_MAP = {'a': 1}\nMY_LIST = [1, 2]\n")
+        assert ns["MY_MAP"] == {"a": 1}
+        assert ns["MY_LIST"] == [1, 2]
+
+    def test_functions_can_call_each_other(self):
+        code = (
+            "def helper(x):\n"
+            "    return x + 1\n"
+            "\n"
+            "def main(x):\n"
+            "    return helper(x) * 2\n"
+        )
+        ns = _compile_preamble(code)
+        assert ns["main"](3) == 8  # (3 + 1) * 2
+
+    def test_functions_can_use_polars(self):
+        ns = _compile_preamble("def make_lit():\n    return pl.lit(42)\n")
+        expr = ns["make_lit"]()
+        assert isinstance(expr, pl.Expr)
+
+
+# ---------------------------------------------------------------------------
+# _build_node_fn with preamble_ns
+# ---------------------------------------------------------------------------
+
+
+class TestBuildNodeFnWithPreamble:
+    def test_transform_can_call_preamble_function(self):
+        preamble_ns = _compile_preamble(
+            "def add_ten(col):\n    return pl.col(col) + 10\n"
+        )
+        node = _transform_node("t", code="df = df.with_columns(y=add_ten('x'))")
+        _, fn, _ = _build_node_fn(node, source_names=["df"], preamble_ns=preamble_ns)
+        lf = pl.DataFrame({"x": [1, 2]}).lazy()
+        df = fn(lf).collect()
+        assert df["y"].to_list() == [11, 12]
+
+    def test_transform_can_use_preamble_constant(self):
+        preamble_ns = _compile_preamble("FACTOR = 3\n")
+        node = _transform_node("t", code="df = df.with_columns(y=pl.col('x') * FACTOR)")
+        _, fn, _ = _build_node_fn(node, source_names=["df"], preamble_ns=preamble_ns)
+        lf = pl.DataFrame({"x": [5]}).lazy()
+        df = fn(lf).collect()
+        assert df["y"].to_list() == [15]
 
 
 # ---------------------------------------------------------------------------
@@ -637,3 +702,80 @@ class TestLiveSwitch:
         results = execute_graph(graph, target_node_id="switch")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 4
+
+
+# ---------------------------------------------------------------------------
+# API Input large-file gating
+# ---------------------------------------------------------------------------
+
+
+def _api_input_node(nid: str, path: str) -> _n:
+    """Build a minimal apiInput node."""
+    return _n({
+        "id": nid,
+        "data": {
+            "label": nid,
+            "nodeType": "apiInput",
+            "config": {"path": path},
+        },
+    })
+
+
+class TestApiInputLargeFileGating:
+    def test_large_file_no_cache_raises_error(self, tmp_path, monkeypatch):
+        """Large JSONL files without a cache should produce a descriptive error."""
+        from haute._json_flatten import _LARGE_FILE_THRESHOLD
+
+        monkeypatch.chdir(tmp_path)
+
+        # Create a "large" JSONL file that exceeds the threshold
+        data_file = tmp_path / "large.jsonl"
+        # Write enough valid JSONL lines to exceed threshold
+        line = json.dumps({"x": "a" * 1000}) + "\n"
+        lines_needed = (_LARGE_FILE_THRESHOLD // len(line)) + 1
+        data_file.write_text(line * lines_needed)
+        assert data_file.stat().st_size >= _LARGE_FILE_THRESHOLD
+
+        node = _api_input_node("api", str(data_file))
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True
+
+        with pytest.raises(RuntimeError, match="not been cached yet"):
+            fn()
+
+    def test_large_file_with_cache_succeeds(self, tmp_path, monkeypatch):
+        """Large JSONL files with a valid cache should use the cache directly."""
+        from haute._json_flatten import _LARGE_FILE_THRESHOLD, _json_cache_path
+
+        monkeypatch.chdir(tmp_path)
+
+        # Create a "large" JSONL file
+        data_file = tmp_path / "large.jsonl"
+        line = json.dumps({"x": 1}) + "\n"
+        lines_needed = (_LARGE_FILE_THRESHOLD // len(line)) + 1
+        data_file.write_text(line * lines_needed)
+        assert data_file.stat().st_size >= _LARGE_FILE_THRESHOLD
+
+        # Pre-build the cache manually
+        cache_path = _json_cache_path(str(data_file))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(cache_path)
+
+        node = _api_input_node("api", str(data_file))
+        _, fn, _ = _build_node_fn(node)
+        result = fn()
+        df = result.collect()
+        assert df["x"].to_list() == [1, 2, 3]
+
+    def test_small_file_auto_processes(self, tmp_path, monkeypatch):
+        """Small JSONL files should auto-process without requiring explicit caching."""
+        monkeypatch.chdir(tmp_path)
+
+        data_file = tmp_path / "small.jsonl"
+        data_file.write_text('{"x": 10}\n{"x": 20}\n')
+
+        node = _api_input_node("api", str(data_file))
+        _, fn, _ = _build_node_fn(node)
+        result = fn()
+        df = result.collect()
+        assert df["x"].to_list() == [10, 20]

@@ -84,7 +84,7 @@ function del<T>(url: string, options: { signal?: AbortSignal; timeout?: number }
 }
 
 /** Graph payload accepted by most pipeline endpoints. */
-type GraphPayload = { nodes: Node[]; edges: Edge[]; submodels?: Record<string, unknown> }
+type GraphPayload = { nodes: Node[]; edges: Edge[]; submodels?: Record<string, unknown>; preamble?: string }
 
 // ---------------------------------------------------------------------------
 // Pipeline endpoints
@@ -235,6 +235,28 @@ export function trainModel(
   return post("/api/modelling/train", payload, options)
 }
 
+export type TrainEstimate = {
+  total_rows?: number | null
+  safe_row_limit?: number | null
+  estimated_mb: number
+  training_mb: number
+  available_mb: number
+  bytes_per_row: number
+  was_downsampled: boolean
+  warning?: string | null
+  // GPU VRAM estimation (only populated when task_type is GPU)
+  gpu_vram_estimated_mb?: number | null
+  gpu_vram_available_mb?: number | null
+  gpu_warning?: string | null
+}
+
+export function estimateTrainingRam(
+  payload: { graph: GraphPayload; node_id: string },
+  options?: { signal?: AbortSignal },
+): Promise<TrainEstimate> {
+  return post("/api/modelling/estimate", payload, { timeout: 30_000, ...options })
+}
+
 export function exportTraining(
   payload: { graph: GraphPayload; node_id: string; data_path: string },
   options?: { signal?: AbortSignal },
@@ -352,6 +374,38 @@ export function deleteCache(
   options?: { signal?: AbortSignal },
 ): Promise<{ cached: boolean; path?: string; table: string; row_count: number; column_count: number; size_bytes: number; fetched_at: number }> {
   return del(`/api/databricks/cache?table=${encodeURIComponent(table)}`, options)
+}
+
+// ---------------------------------------------------------------------------
+// JSON cache endpoints
+// ---------------------------------------------------------------------------
+
+export function buildJsonCache(
+  payload: { path: string; config_path?: string },
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<Record<string, unknown>> {
+  return post("/api/json-cache/build", payload, { timeout: 1_800_000, ...options })
+}
+
+export function getJsonCacheProgress(
+  path: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ active?: boolean; rows?: number; elapsed?: number }> {
+  return request(`/api/json-cache/progress?path=${encodeURIComponent(path)}`, options)
+}
+
+export function getJsonCacheStatus(
+  path: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ cached: boolean; path?: string; data_path: string; row_count: number; column_count: number; size_bytes: number; cached_at: number }> {
+  return request(`/api/json-cache/status?path=${encodeURIComponent(path)}`, options)
+}
+
+export function deleteJsonCache(
+  path: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ cached: boolean; data_path: string }> {
+  return del(`/api/json-cache?path=${encodeURIComponent(path)}`, options)
 }
 
 // ---------------------------------------------------------------------------

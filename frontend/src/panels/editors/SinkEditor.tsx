@@ -12,6 +12,7 @@ export default function SinkEditor({
   allNodes,
   edges,
   submodels,
+  preamble,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
@@ -19,6 +20,7 @@ export default function SinkEditor({
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
+  preamble?: string
 }) {
   const format = configField(config, "format", "parquet")
   const [writing, setWriting] = useState(false)
@@ -31,7 +33,7 @@ export default function SinkEditor({
     setWriting(true)
     setWriteResult(null)
 
-    const graph = buildGraph(allNodes, edges, submodels)
+    const graph = buildGraph(allNodes, edges, submodels, preamble)
 
     executeSink(graph, nodeId)
       .then((data) => {

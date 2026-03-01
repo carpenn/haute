@@ -1,4 +1,195 @@
 {
-  "path": "data/sample_quote.json",
-  "row_id_column": "IDpol"
+  "path": "data/quotes_10m.jsonl",
+  "row_id_column": "IDpol",
+  "flattenSchema": {
+    "quote_metadata": {
+      "quote_id": "str",
+      "quote_version": "int",
+      "quote_timestamp": "str",
+      "channel": "str",
+      "aggregator_quote_id": "str"
+    },
+    "policy_details": {
+      "policy_number": "str",
+      "cover_start_date": "str",
+      "cover_end_date": "str",
+      "cover_type": "str",
+      "payment_frequency": "str",
+      "voluntary_excess": "int",
+      "compulsory_excess": "int",
+      "ncd_years": "int",
+      "ncd_protected": "bool",
+      "usage": {
+        "social_domestic_pleasure": "bool",
+        "commuting": "bool",
+        "business_use": "str"
+      },
+      "annual_mileage": "int",
+      "business_mileage": "str",
+      "is_renewal": "bool",
+      "previous_insurer": "str"
+    },
+    "proposer": {
+      "title": "str",
+      "first_name": "str",
+      "last_name": "str",
+      "date_of_birth": "str",
+      "gender": "str",
+      "marital_status": "str",
+      "uk_resident_since_birth": "bool",
+      "uk_resident_since": "str",
+      "employment_status": "str",
+      "primary_occupation": "str",
+      "primary_occupation_industry": "str",
+      "secondary_occupation": "str",
+      "licence": {
+        "licence_type": "str",
+        "licence_held_years": "int",
+        "licence_date": "str",
+        "additional_licence_restrictions": "str"
+      },
+      "has_medical_conditions": "bool",
+      "medical_condition_details": "str",
+      "has_criminal_convictions": "bool",
+      "access_to_other_vehicles": "bool",
+      "is_homeowner": "bool",
+      "is_main_driver": "bool",
+      "relationship_to_main_driver": "str",
+      "claims": {
+        "$max": 0,
+        "$items": {}
+      },
+      "convictions": {
+        "$max": 0,
+        "$items": {}
+      }
+    },
+    "additional_drivers": {
+      "$max": 1,
+      "$items": {
+        "title": "str",
+        "first_name": "str",
+        "last_name": "str",
+        "date_of_birth": "str",
+        "gender": "str",
+        "marital_status": "str",
+        "relationship_to_proposer": "str",
+        "employment_status": "str",
+        "primary_occupation": "str",
+        "primary_occupation_industry": "str",
+        "licence": {
+          "licence_type": "str",
+          "licence_held_years": "int",
+          "licence_date": "str",
+          "additional_licence_restrictions": "str"
+        },
+        "has_medical_conditions": "bool",
+        "has_criminal_convictions": "bool",
+        "access_to_other_vehicles": "bool",
+        "uk_resident_since_birth": "bool",
+        "uk_resident_since": "str",
+        "claims": {
+          "$max": 0,
+          "$items": {}
+        },
+        "convictions": {
+          "$max": 0,
+          "$items": {}
+        }
+      }
+    },
+    "vehicle": {
+      "registration_number": "str",
+      "make": "str",
+      "model": "str",
+      "variant": "str",
+      "year_of_manufacture": "int",
+      "year_of_registration": "int",
+      "body_type": "str",
+      "fuel_type": "str",
+      "transmission": "str",
+      "engine_size_cc": "int",
+      "engine_power_bhp": "int",
+      "number_of_doors": "int",
+      "number_of_seats": "int",
+      "insurance_group": "int",
+      "abi_code": "str",
+      "estimated_value": "int",
+      "is_imported": "bool",
+      "is_right_hand_drive": "bool",
+      "has_been_modified": "bool",
+      "modifications": {
+        "$max": 0,
+        "$items": {}
+      },
+      "security": {
+        "alarm": "str",
+        "immobiliser": "str",
+        "tracker": "str"
+      },
+      "overnight_location": "str",
+      "daytime_location": "str",
+      "owner": "str",
+      "registered_keeper": "str",
+      "purchase_date": "str",
+      "current_mileage": "int"
+    },
+    "address": {
+      "house_number_or_name": "str",
+      "address_line_1": "str",
+      "address_line_2": "str",
+      "city": "str",
+      "county": "str",
+      "postcode": "str",
+      "years_at_address": "int",
+      "months_at_address": "int"
+    },
+    "previous_address": "str",
+    "add_ons": {
+      "breakdown_cover": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "legal_expenses": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "motor_legal_protection": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "key_cover": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "courtesy_car": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "windscreen_cover": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "excess_protection": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "no_claims_step_back": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "personal_accident": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "personal_belongings": {
+        "selected": "bool",
+        "level": "str"
+      },
+      "tools_in_transit": {
+        "selected": "bool",
+        "level": "str"
+      }
+    }
+  }
 }

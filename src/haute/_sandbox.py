@@ -100,14 +100,20 @@ _SAFE_BUILTINS: dict[str, Any] = {
 _SAFE_BUILTINS["__builtins__"] = _SAFE_BUILTINS
 
 
-def safe_globals(**extra: Any) -> dict[str, Any]:
+def safe_globals(*, allow_imports: bool = False, **extra: Any) -> dict[str, Any]:
     """Build a restricted global namespace for ``exec()``.
 
     Includes safe builtins + any extra bindings (e.g. ``pl=polars``).
     Blocks ``__import__``, ``open``, ``eval``, ``exec``, ``compile``,
     ``breakpoint``, ``globals``, ``locals``, and ``input``.
+
+    *allow_imports* restores ``__import__`` — used for preamble code
+    that legitimately imports from project helpers.
     """
     ns = dict(_SAFE_BUILTINS)
+    if allow_imports:
+        ns["__import__"] = builtins.__import__
+        ns["__builtins__"] = {**_SAFE_BUILTINS, "__import__": builtins.__import__}
     ns.update(extra)
     return ns
 
@@ -178,10 +184,14 @@ class _ASTValidator(ast.NodeVisitor):
     Blocks:
     - Dunder attribute access (``obj.__class__``, ``obj.__subclasses__()``)
     - Calls to reflection helpers (``getattr``, ``type``, ``vars``, etc.)
-    - Import statements
+    - Import statements (unless ``allow_imports=True``)
     - Class, async, and lambda definitions
     - Star expressions in assignments (``a, *b = ...``)
     """
+
+    def __init__(self, *, allow_imports: bool = False) -> None:
+        super().__init__()
+        self.allow_imports = allow_imports
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__") and node.attr.endswith("__"):
@@ -200,10 +210,12 @@ class _ASTValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import) -> None:
-        raise UnsafeCodeError("import statements are blocked in pipeline code")
+        if not self.allow_imports:
+            raise UnsafeCodeError("import statements are blocked in pipeline code")
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        raise UnsafeCodeError("import statements are blocked in pipeline code")
+        if not self.allow_imports:
+            raise UnsafeCodeError("import statements are blocked in pipeline code")
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         raise UnsafeCodeError("class definitions are blocked in pipeline code")
@@ -223,9 +235,10 @@ class _ASTValidator(ast.NodeVisitor):
 
 
 _validator = _ASTValidator()
+_preamble_validator = _ASTValidator(allow_imports=True)
 
 
-def validate_user_code(code: str) -> None:
+def validate_user_code(code: str, *, allow_imports: bool = False) -> None:
     """Parse *code* and check for dangerous AST patterns.
 
     Raises ``UnsafeCodeError`` if the code contains blocked constructs
@@ -235,28 +248,39 @@ def validate_user_code(code: str) -> None:
     is rejected at the structural level — not just at runtime via
     restricted builtins.
 
+    *allow_imports* permits ``import`` / ``from … import`` statements,
+    used for preamble code which legitimately imports from helpers.
+
     Results for safe code are cached by code string so repeated
     executions of the same node (preview, trace) skip the AST parse.
     """
-    _validate_user_code_cached(code)
+    _validate_user_code_cached(code, allow_imports=allow_imports)
 
 
-def _validate_user_code_cached(code: str, _cache: dict[str, bool] = {}) -> None:  # noqa: B006
+def _validate_user_code_cached(
+    code: str,
+    *,
+    allow_imports: bool = False,
+    _cache: dict[tuple[str, bool], bool] = {},  # noqa: B006
+) -> None:
     """Inner validation with per-code-string caching.
 
     Uses a mutable default dict as a simple cache.  Safe-code results
     (``True``) are cached; unsafe code always raises before caching.
     """
-    if code in _cache:
+    cache_key = (code, allow_imports)
+    if cache_key in _cache:
         return
 
     try:
         tree = ast.parse(code)
     except SyntaxError:
         # Let exec() produce the proper SyntaxError with line numbers
-        _cache[code] = True
+        _cache[cache_key] = True
         return
-    _validator.visit(tree)
+    v = _preamble_validator if allow_imports else _validator
+    v.visit(tree)
+    _cache[cache_key] = True
     _cache[code] = True
 
 

@@ -3,6 +3,7 @@ import type { Node, Edge } from "@xyflow/react"
 import type { PreviewData } from "../panels/DataPreview"
 import { makePreviewData } from "../utils/makePreviewData"
 import { loadPipeline, previewNode, runPipeline, savePipeline, ApiError } from "../api/client"
+import { resolveGraphFromRefs } from "../utils/buildGraph"
 import type { NodeResult } from "../api/types"
 import useUIStore from "../stores/useUIStore"
 import useNodeResultsStore from "../stores/useNodeResultsStore"
@@ -117,9 +118,7 @@ export default function usePipelineAPI({
       setPreviewData(makePreviewData(node.id, label, { status: "loading" }))
     }
 
-    const graph = parentGraphRef.current
-      ? { nodes: parentGraphRef.current.nodes, edges: parentGraphRef.current.edges, submodels: parentGraphRef.current.submodels }
-      : { nodes: graphRef.current.nodes, edges: graphRef.current.edges, submodels: submodelsRef.current }
+    const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
 
     previewNode(graph, node.id, rowLimit, { signal: controller.signal })
       .then((result) => {
@@ -136,7 +135,7 @@ export default function usePipelineAPI({
           setPreviewData(makePreviewData(node.id, label, { status: "error", error: err.message }))
         }
       })
-  }, [rowLimit, graphRef, parentGraphRef, submodelsRef, setNodes])
+  }, [rowLimit, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
 
   const fetchPreview = useCallback((node: Node) => {
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
@@ -160,7 +159,7 @@ export default function usePipelineAPI({
     nodes.forEach((n) => { running[n.id] = "running" })
     setNodeStatuses(running)
 
-    runPipeline({ nodes, edges })
+    runPipeline({ nodes, edges, preamble: preambleRef.current })
       .then((data) => {
         const statuses: Record<string, "ok" | "error"> = {}
         const results = data.results ?? {}

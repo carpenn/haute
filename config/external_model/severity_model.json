@@ -1,5 +1,0 @@
-{
-  "path": "models/sev.cbm",
-  "fileType": "catboost",
-  "modelClass": "regressor"
-}

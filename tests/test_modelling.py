@@ -8,7 +8,7 @@ import pytest
 
 from haute.modelling._algorithms import ALGORITHM_REGISTRY, CatBoostAlgorithm, FitResult, resolve_loss_function
 from haute.modelling._metrics import compute_double_lift, compute_metrics
-from haute.modelling._split import SplitConfig, split_data
+from haute.modelling._split import SplitConfig, split_data, split_mask
 from haute.modelling._training_job import TrainResult, TrainingJob
 
 
@@ -112,6 +112,63 @@ class TestSplitData:
         config = SplitConfig(strategy="group", group_column="nonexistent")
         with pytest.raises(ValueError, match="not found"):
             split_data(sample_df, config)
+
+
+# ---------------------------------------------------------------------------
+# split_mask (Boolean mask variant — no DataFrame copies)
+# ---------------------------------------------------------------------------
+
+
+class TestSplitMask:
+    def test_random_mask_correct_ratio(self):
+        n = 1000
+        mask = split_mask(n, SplitConfig(test_size=0.2, seed=42))
+        assert len(mask) == n
+        assert mask.dtype == pl.Boolean
+        train_n = mask.sum()
+        assert 750 < train_n < 850  # ~80% train ± tolerance
+
+    def test_random_mask_deterministic(self):
+        cfg = SplitConfig(test_size=0.2, seed=42)
+        m1 = split_mask(500, cfg)
+        m2 = split_mask(500, cfg)
+        assert m1.to_list() == m2.to_list()
+
+    def test_random_mask_different_seed(self):
+        m1 = split_mask(500, SplitConfig(test_size=0.2, seed=42))
+        m2 = split_mask(500, SplitConfig(test_size=0.2, seed=99))
+        assert m1.to_list() != m2.to_list()
+
+    def test_temporal_mask_splits_by_date(self):
+        df = pl.DataFrame({"date": ["2024-01-01", "2024-06-15", "2024-12-31"]})
+        cfg = SplitConfig(
+            strategy="temporal", date_column="date", cutoff_date="2024-07-01",
+        )
+        mask = split_mask(len(df), cfg, df=df)
+        assert mask.to_list() == [True, True, False]
+
+    def test_temporal_mask_missing_df_raises(self):
+        cfg = SplitConfig(
+            strategy="temporal", date_column="date", cutoff_date="2024-07-01",
+        )
+        with pytest.raises(ValueError, match="requires df"):
+            split_mask(10, cfg, df=None)
+
+    def test_group_mask_keeps_groups_intact(self):
+        df = pl.DataFrame({
+            "group": [f"g{i % 5}" for i in range(100)],
+        })
+        cfg = SplitConfig(strategy="group", group_column="group", test_size=0.3, seed=42)
+        mask = split_mask(len(df), cfg, df=df)
+        # Each group should be entirely in train or entirely in test
+        labeled = df.with_columns(mask)
+        for group_val in df["group"].unique().to_list():
+            group_masks = labeled.filter(pl.col("group") == group_val)["_is_train"].to_list()
+            assert len(set(group_masks)) == 1, f"Group {group_val} split across train/test"
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            split_mask(0, SplitConfig())
 
 
 # ---------------------------------------------------------------------------

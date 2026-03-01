@@ -222,6 +222,9 @@ src/haute/static/
 # Haute container build directory
 .haute_build/
 
+# datat
+/data
+
 # Internal docs - not for public repos
 WTW_RADAR_REPORT.md
 CLAUDE.md

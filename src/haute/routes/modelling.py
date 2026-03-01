@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import gc
+import os
+import tempfile
 import threading
 import time
 import uuid
@@ -18,6 +21,8 @@ from haute.schemas import (
     LogExperimentRequest,
     LogExperimentResponse,
     MlflowCheckResponse,
+    TrainEstimateRequest,
+    TrainEstimateResponse,
     TrainRequest,
     TrainResponse,
     TrainStatusResponse,
@@ -90,6 +95,61 @@ def _friendly_error(exc: Exception) -> str:
     return f"Training failed ({exc_type}): {msg}"
 
 
+class _VramCheck:
+    """Result of a GPU VRAM feasibility check."""
+
+    __slots__ = ("estimated_mb", "available_mb", "warning")
+
+    def __init__(
+        self,
+        estimated_mb: float | None = None,
+        available_mb: float | None = None,
+        warning: str | None = None,
+    ) -> None:
+        self.estimated_mb = estimated_mb
+        self.available_mb = available_mb
+        self.warning = warning
+
+
+def _check_gpu_vram(
+    effective_rows: int,
+    probe_columns: int,
+    params: dict[str, Any],
+) -> _VramCheck:
+    """Estimate GPU VRAM requirements and return a check result.
+
+    Returns a ``_VramCheck`` with estimated/available VRAM in MB and an
+    optional warning string if VRAM is insufficient.
+    """
+    if effective_rows <= 0 or probe_columns <= 0:
+        return _VramCheck()
+
+    from haute._ram_estimate import available_vram_bytes, estimate_gpu_vram_bytes
+
+    vram_needed = estimate_gpu_vram_bytes(
+        effective_rows, probe_columns,
+        border_count=params.get("border_count", 128),
+        depth=params.get("depth", 6),
+    )
+    estimated_mb = round(vram_needed / 1024**2, 1)
+
+    vram = available_vram_bytes()
+    available_mb = round(vram / 1024**2, 1) if vram is not None else None
+
+    warning: str | None = None
+    if vram is not None and vram_needed > vram:
+        warning = (
+            f"GPU training needs ~{vram_needed / 1024**3:.1f} GB VRAM "
+            f"but GPU has {vram / 1024**3:.1f} GB."
+        )
+
+    return _VramCheck(
+        estimated_mb=estimated_mb,
+        available_mb=available_mb,
+        warning=warning,
+    )
+
+
 @router.post("/train", response_model=TrainResponse)
 def train_model(body: TrainRequest) -> TrainResponse:
     """Start model training for a modelling node.
@@ -120,6 +180,16 @@ def train_model(body: TrainRequest) -> TrainResponse:
         )
 
     _evict_stale_jobs()
+
+    # Reject if a training job is already running — concurrent runs double
+    # memory and can easily OOM on 32 GB machines with 10M-row datasets.
+    running = [jid for jid, j in _jobs.items() if j.get("status") == "running"]
+    if running:
+        raise HTTPException(
+            status_code=409,
+            detail="A training job is already running. Please wait for it to finish.",
+        )
+
     job_id = uuid.uuid4().hex[:12]
     _jobs[job_id] = {
         "status": "running",
@@ -130,47 +200,133 @@ def train_model(body: TrainRequest) -> TrainResponse:
         "created_at": time.time(),
     }
 
-    # --- Execute pipeline to get training DataFrame ---
+    # --- Estimate RAM and decide on row limit ---
+
+    from haute._execute_lazy import _execute_lazy
+    from haute.executor import _build_node_fn, _compile_preamble
+
+    preamble_ns = _compile_preamble(body.graph.preamble or "") or None
+    ram_warning: str | None = None
+    total_source_rows: int | None = None
+    probe_columns: int = 0
 
     try:
-        from haute.executor import _build_node_fn
-        from haute.graph_utils import _execute_eager_core
+        from haute._ram_estimate import estimate_safe_training_rows
 
-        result = _execute_eager_core(
+        _jobs[job_id].update({"message": "Estimating memory requirements"})
+        ram_est = estimate_safe_training_rows(
+            body.graph, body.node_id, _build_node_fn,
+            preamble_ns=preamble_ns,
+        )
+        row_limit = ram_est.safe_row_limit
+        ram_warning = ram_est.warning
+        total_source_rows = ram_est.total_rows
+        probe_columns = ram_est.probe_columns
+        if ram_warning:
+            _jobs[job_id]["warning"] = ram_warning
+    except Exception as exc:
+        logger.warning("ram_estimate_failed", error=str(exc))
+        row_limit = None
+
+    # --- Check GPU VRAM if task_type is GPU ---
+    train_params = {**config.get("params", {})}
+
+    if str(train_params.get("task_type", "")).upper() == "GPU":
+        try:
+            effective_rows = row_limit or (total_source_rows or 0)
+            vram_check = _check_gpu_vram(effective_rows, probe_columns, train_params)
+            if vram_check.warning:
+                train_params["task_type"] = "CPU"
+                gpu_warning = f"{vram_check.warning} Falling back to CPU."
+                logger.warning(
+                    "gpu_vram_fallback",
+                    estimated_mb=vram_check.estimated_mb,
+                    available_mb=vram_check.available_mb,
+                )
+                _jobs[job_id]["gpu_warning"] = gpu_warning
+                ram_warning = (
+                    f"{ram_warning}\n{gpu_warning}" if ram_warning
+                    else gpu_warning
+                )
+                _jobs[job_id]["warning"] = ram_warning
+        except Exception as exc:
+            logger.warning("vram_estimate_failed", error=str(exc))
+
+    # --- Execute pipeline lazily, collect only the target node ---
+    #
+    # Uses the lazy path so Polars builds a single optimised query plan
+    # across all nodes and only materialises once at .collect().
+    # The eager path materialises every intermediate node, which for
+    # 10M+ rows can exceed available RAM.
+
+    from haute.modelling._algorithms import _MEM_LOG, _mem_checkpoint
+    _MEM_LOG.write_text("")
+    _mem_checkpoint("train_model endpoint START")
+
+    # Free the preview cache — it holds eagerly-materialised DataFrames
+    # from node clicks, which can consume tens of GB with large datasets.
+    from haute.executor import _preview_cache
+    _preview_cache.invalidate()
+    gc.collect()
+    _mem_checkpoint("cleared preview cache")
+
+    # --- Sink pipeline to temp parquet (optimiser pattern) ---
+    #
+    # Instead of .collect() (which holds the full DataFrame in Python),
+    # sink the LazyFrame directly to a temp parquet file.  Python never
+    # holds the full dataset; TrainingJob reads train/test partitions
+    # from disk with predicate pushdown.
+    tmp_fd, tmp_parquet = tempfile.mkstemp(suffix=".parquet", prefix="haute_train_")
+    os.close(tmp_fd)
+
+    try:
+        _jobs[job_id].update({"message": "Executing pipeline"})
+        _mem_checkpoint("before _execute_lazy")
+        lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
             body.graph, _build_node_fn,
             target_node_id=body.node_id,
-            row_limit=None,
-            swallow_errors=True,
+            preamble_ns=preamble_ns,
         )
+
+        target_lf = lazy_outputs.get(body.node_id)
+        if target_lf is None:
+            raise ValueError(
+                "No training data arrived at the modelling node. "
+                "Make sure an upstream data source is connected and producing data."
+            )
+
+        if row_limit:
+            target_lf = target_lf.head(row_limit)
+
+        _mem_checkpoint("before sink_parquet")
+        try:
+            target_lf.sink_parquet(tmp_parquet)
+        except Exception as sink_exc:
+            # Fallback: some lazy plans don't support streaming sink
+            # (e.g. Python UDFs in transform nodes).
+            logger.info("sink_streaming_fallback", node_id=body.node_id, reason=str(sink_exc))
+            _mem_checkpoint("sink_parquet failed, collecting")
+            df = target_lf.collect()
+            df.write_parquet(tmp_parquet)
+            del df
+
+        # Free the lazy plan and return malloc pages to the OS.
+        # The streaming fallback collects the full DataFrame — del + gc
+        # frees it in Python but glibc holds the pages.  malloc_trim
+        # forces them back to the OS (can recover 10+ GB).
+        del lazy_outputs, target_lf
+        gc.collect()
+        from haute.modelling._algorithms import _malloc_trim
+        _malloc_trim()
+        _mem_checkpoint("sunk to temp parquet")
     except Exception as exc:
+        # Clean up temp file on pipeline failure
+        if os.path.exists(tmp_parquet):
+            os.unlink(tmp_parquet)
         error_msg = f"Pipeline execution failed: {exc}"
         logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
         _jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=500, detail=error_msg)
-
-    # Check for upstream errors that prevented data from reaching this node
-    train_df = result.outputs.get(body.node_id)
-    if train_df is None:
-        # Find the actual failing node for a better message
-        upstream_errors = {
-            nid: err for nid, err in result.errors.items() if nid != body.node_id
-        }
-        if upstream_errors:
-            failed_node = next(iter(upstream_errors))
-            failed_name = result.id_to_name.get(failed_node, failed_node)
-            error_msg = (
-                f"Upstream node '{failed_name}' failed: {upstream_errors[failed_node]}. "
-                f"Fix the error in that node before training."
-            )
-        elif body.node_id in result.errors:
-            error_msg = f"Modelling node error: {result.errors[body.node_id]}"
-        else:
-            error_msg = (
-                "No training data arrived at the modelling node. "
-                "Make sure an upstream data source is connected and producing data."
-            )
-        _jobs[job_id] = {"status": "error", "message": error_msg}
-        raise HTTPException(status_code=400, detail=error_msg)
 
     # --- Build TrainingJob and start in background ---
 
@@ -199,13 +355,13 @@ def train_model(body: TrainRequest) -> TrainResponse:
 
     job = TrainingJob(
         name=name,
-        data=train_df,
+        data=tmp_parquet,
         target=target,
         weight=config.get("weight") or None,
         exclude=config.get("exclude", []),
         algorithm=algorithm,
         task=config.get("task", "regression"),
-        params=config.get("params", {}),
+        params=train_params,
         split=split_raw,
         metrics=config.get("metrics", ["gini", "rmse"]),
         mlflow_experiment=config.get("mlflow_experiment") or None,
@@ -239,6 +395,8 @@ def train_model(body: TrainRequest) -> TrainResponse:
                 feature_importance_loss=train_result.feature_importance_loss,
                 cv_results=train_result.cv_results,
                 ave_per_feature=train_result.ave_per_feature,
+                warning=ram_warning,
+                total_source_rows=total_source_rows,
             )
             _jobs[job_id].update({
                 "status": "completed",
@@ -253,6 +411,10 @@ def train_model(body: TrainRequest) -> TrainResponse:
             error_msg = _friendly_error(exc)
             logger.error("training_failed", error=str(exc), node_id=node_id)
             _jobs[job_id].update({"status": "error", "message": error_msg})
+        finally:
+            # Clean up route-level temp parquet (optimiser pattern)
+            if os.path.exists(tmp_parquet):
+                os.unlink(tmp_parquet)
 
     thread = threading.Thread(target=_train_background, daemon=True)
     thread.start()
@@ -275,6 +437,61 @@ async def train_status(job_id: str) -> TrainStatusResponse:
         train_loss=job.get("train_loss", {}),
         elapsed_seconds=job.get("elapsed_seconds", 0.0),
         result=job.get("result"),
+        warning=job.get("warning"),
+    )
+
+
+@router.post("/estimate", response_model=TrainEstimateResponse)
+def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
+    """Estimate RAM and row requirements for training a modelling node.
+
+    Runs a small probe (1 000 rows) through the pipeline to measure
+    per-row memory, then extrapolates to the full dataset.  Returns
+    immediately — typically <1 s.  Also estimates GPU VRAM if the
+    node's params specify ``task_type: GPU``.
+    """
+    node = _find_modelling_node(body.graph, body.node_id)
+
+    from haute._ram_estimate import estimate_safe_training_rows
+    from haute.executor import _build_node_fn, _compile_preamble
+
+    preamble_ns = _compile_preamble(body.graph.preamble or "") or None
+
+    try:
+        ram_est = estimate_safe_training_rows(
+            body.graph, body.node_id, _build_node_fn,
+            preamble_ns=preamble_ns,
+        )
+    except Exception as exc:
+        logger.warning("estimate_failed", error=str(exc), node_id=body.node_id)
+        return TrainEstimateResponse()
+
+    from haute._ram_estimate import _CATBOOST_OVERHEAD_MULTIPLIER
+
+    data_mb = ram_est.estimated_bytes / 1024**2
+    training_mb = data_mb * _CATBOOST_OVERHEAD_MULTIPLIER
+
+    # GPU VRAM estimation
+    vram_check = _VramCheck()
+    node_params = node.data.config.get("params", {})
+    if str(node_params.get("task_type", "")).upper() == "GPU":
+        effective_rows = ram_est.safe_row_limit or ram_est.total_rows or 0
+        vram_check = _check_gpu_vram(effective_rows, ram_est.probe_columns, node_params)
+        if vram_check.warning:
+            vram_check.warning += " Training will fall back to CPU automatically."
+
+    return TrainEstimateResponse(
+        total_rows=ram_est.total_rows,
+        safe_row_limit=ram_est.safe_row_limit,
+        estimated_mb=round(data_mb, 1),
+        training_mb=round(training_mb, 1),
+        available_mb=round(ram_est.available_bytes / 1024**2, 1),
+        bytes_per_row=round(ram_est.bytes_per_row, 1),
+        was_downsampled=ram_est.was_downsampled,
+        warning=ram_est.warning,
+        gpu_vram_estimated_mb=vram_check.estimated_mb,
+        gpu_vram_available_mb=vram_check.available_mb,
+        gpu_warning=vram_check.warning,
     )
 
 

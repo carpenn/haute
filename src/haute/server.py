@@ -9,6 +9,8 @@ Route handlers live in ``haute.routes.*`` — see:
 """
 
 import asyncio
+import time
+import traceback
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,7 +19,7 @@ from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -34,6 +36,7 @@ from haute.routes._helpers import (
 )
 from haute.routes.databricks import router as databricks_router
 from haute.routes.files import router as files_router
+from haute.routes.json_cache import router as json_cache_router
 from haute.routes.mlflow import router as mlflow_router
 from haute.routes.modelling import router as modelling_router
 from haute.routes.optimiser import router as optimiser_router
@@ -46,10 +49,19 @@ logger = get_logger(component="server")
 _watcher_task: asyncio.Task | None = None
 
 
+def _clear_bytecache() -> None:
+    """Remove all .pyc files so stale bytecode never masks code changes."""
+    import shutil
+    src_dir = Path(__file__).resolve().parent
+    for pycache in src_dir.rglob("__pycache__"):
+        shutil.rmtree(pycache, ignore_errors=True)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     from haute.deploy._config import _load_env
 
+    _clear_bytecache()
     configure_logging()
     _load_env(Path.cwd())
 
@@ -64,14 +76,45 @@ app = FastAPI(title="Haute", version="0.1.0", lifespan=_lifespan)
 
 
 class _RequestIdMiddleware(BaseHTTPMiddleware):
-    """Bind a unique request_id to structlog context for every HTTP request."""
+    """Bind request_id, log every request with timing, capture 500 tracebacks."""
 
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         rid = request.headers.get("x-request-id", uuid.uuid4().hex[:12])
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=rid)
-        response = await call_next(request)
+
+        method = request.method
+        path = request.url.path
+        t0 = time.monotonic()
+
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.error(
+                "unhandled_exception",
+                method=method,
+                path=path,
+                duration_ms=duration_ms,
+                traceback=traceback.format_exc(),
+            )
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"},
+            )
+
+        duration_ms = round((time.monotonic() - t0) * 1000, 1)
+        status = response.status_code
         response.headers["x-request-id"] = rid
+
+        kw = dict(method=method, path=path, status=status, duration_ms=duration_ms)
+        if status >= 500:
+            logger.error("request_error", **kw)
+        elif status >= 400:
+            logger.warning("request_client_error", **kw)
+        elif path.startswith("/api/"):
+            logger.info("request_ok", **kw)
+
         return response
 
 
@@ -95,6 +138,7 @@ if not STATIC_DIR.exists():
 app.include_router(pipeline_router)
 app.include_router(databricks_router)
 app.include_router(files_router)
+app.include_router(json_cache_router)
 app.include_router(submodel_router)
 app.include_router(modelling_router)
 app.include_router(optimiser_router)

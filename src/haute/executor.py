@@ -45,6 +45,36 @@ from haute.schemas import ColumnInfo, NodeResult, SchemaWarning, SinkResponse
 logger = get_logger(component="executor")
 
 
+def _compile_preamble(preamble: str) -> dict[str, Any]:
+    """Compile user-defined preamble code into a namespace dict.
+
+    The preamble (helper functions, constants, lambdas) is defined at the
+    top of a pipeline file between imports and the first ``@pipeline.node``.
+    This compiles it once and returns a dict of bindings that can be
+    injected into ``_exec_user_code`` via ``extra_ns``.
+
+    Uses a single dict for globals/locals so preamble functions can call
+    each other (they share the same ``__globals__``).
+    """
+    if not preamble or not preamble.strip():
+        return {}
+    # Preamble may contain imports (e.g. from helpers.features import …)
+    # which are legitimate, but still validate against other dangerous
+    # patterns (dunder access, eval, exec, etc.).
+    validate_user_code(preamble, allow_imports=True)
+    # Ensure project root is importable so `from helpers.xxx import …` works
+    # even when the server process was spawned by uvicorn reload.
+    import os  # noqa: E401
+    import sys
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+    ns = safe_globals(pl=pl, allow_imports=True)
+    base_keys = set(ns.keys())
+    exec(preamble, ns)  # noqa: S102  — single dict = shared globals
+    return {k: v for k, v in ns.items() if k not in base_keys}
+
+
 def _exec_user_code(
     code: str,
     src_names: list[str],
@@ -145,6 +175,7 @@ def _build_node_fn(
     row_limit: int | None = None,
     node_map: dict[str, GraphNode] | None = None,
     orig_source_names: list[str] | None = None,
+    preamble_ns: dict[str, Any] | None = None,
 ) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
@@ -172,9 +203,25 @@ def _build_node_fn(
         flat_schema = config.get("flattenSchema")
 
         if path.endswith((".json", ".jsonl")):
-            def api_source_fn() -> _Frame:
-                from haute._json_flatten import read_json_flat
-                return read_json_flat(path, schema=flat_schema)
+            def api_source_fn(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
+                from haute._json_flatten import (
+                    _json_cache_path,
+                    is_large_json,
+                    read_json_flat,
+                )
+
+                cache_path = _json_cache_path(_path)
+                if is_large_json(_path) and not cache_path.exists():
+                    from pathlib import Path
+
+                    size_mb = round(Path(_path).stat().st_size / (1024 * 1024), 1)
+                    raise RuntimeError(
+                        f"Data file ({size_mb} MB) has not been cached yet. "
+                        "Click 'Cache as Parquet' on the API Input node to process it."
+                    )
+                if cache_path.exists():
+                    return pl.scan_parquet(cache_path)
+                return read_json_flat(_path, schema=_schema)
         else:
             def api_source_fn() -> _Frame:
                 return read_source(path)
@@ -253,13 +300,15 @@ def _build_node_fn(
 
         _orig_src = list(orig_source_names) if orig_source_names else None
         _in_map = dict(config.get("inputMapping", {})) or None
+        _preamble_ext = dict(preamble_ns) if preamble_ns else {}
         if code:
 
             def external_fn(*dfs: _Frame) -> _Frame:
-                obj = load_external_object(path, file_type, model_class)
+                ens = {"obj": load_external_object(path, file_type, model_class)}
+                ens.update(_preamble_ext)
                 return _exec_user_code(
                     code, _src_names, dfs,
-                    extra_ns={"obj": obj},
+                    extra_ns=ens,
                     orig_source_names=_orig_src,
                     input_mapping=_in_map,
                 )
@@ -489,12 +538,14 @@ def _build_node_fn(
         _src_names = list(source_names)
         _orig_src = list(orig_source_names) if orig_source_names else None
         _in_map = dict(config.get("inputMapping", {})) or None
+        _preamble = dict(preamble_ns) if preamble_ns else None
 
         if code:
 
             def transform_fn(*dfs: _Frame) -> _Frame:
                 return _exec_user_code(
                     code, _src_names, dfs,
+                    extra_ns=_preamble,
                     orig_source_names=_orig_src,
                     input_mapping=_in_map,
                 )
@@ -816,12 +867,14 @@ def _eager_execute(
     node_id → message for nodes that failed, and timings maps
     node_id → execution milliseconds.
     """
+    preamble_ns = _compile_preamble(graph.preamble or "")
     result = _execute_eager_core(
         graph,
         _build_node_fn,
         target_node_id=target_node_id,
         row_limit=row_limit,
         swallow_errors=True,
+        preamble_ns=preamble_ns or None,
     )
     return result.outputs, result.order, result.errors, result.timings
 
@@ -851,10 +904,12 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
     if not path:
         raise ValueError("Sink node has no output path configured")
 
+    preamble_ns = _compile_preamble(graph.preamble or "")
     lazy_outputs, _order, _parents, _names = _execute_lazy(
         graph,
         _build_node_fn,
         target_node_id=sink_node_id,
+        preamble_ns=preamble_ns or None,
     )
 
     lf = lazy_outputs.get(sink_node_id)

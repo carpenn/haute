@@ -1,0 +1,71 @@
+"""JSON cache endpoints — explicit parquet caching for large JSONL files."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+
+from haute._logging import get_logger
+from haute.schemas import (
+    JsonCacheBuildRequest,
+    JsonCacheBuildResponse,
+    JsonCacheProgressResponse,
+    JsonCacheStatusResponse,
+)
+
+logger = get_logger(component="server.json_cache")
+
+router = APIRouter(prefix="/api/json-cache", tags=["json-cache"])
+
+
+@router.post("/build", response_model=JsonCacheBuildResponse)
+async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildResponse:
+    """Flatten a JSON/JSONL file and cache it as parquet."""
+    try:
+        import asyncio
+
+        from haute._json_flatten import build_json_cache as _build
+
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _build,
+                data_path=body.path,
+                config_path=body.config_path,
+            ),
+            timeout=1800.0,
+        )
+        return JsonCacheBuildResponse.model_validate(result)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="JSON cache build timed out (30 min limit)")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/progress", response_model=JsonCacheProgressResponse)
+async def get_json_cache_progress(path: str) -> JsonCacheProgressResponse:
+    """Poll flatten progress for a file currently being cached."""
+    from haute._json_flatten import flatten_progress
+
+    progress = flatten_progress(path)
+    if progress is None:
+        return JsonCacheProgressResponse(active=False)
+    return JsonCacheProgressResponse.model_validate({"active": True, **progress})
+
+
+@router.get("/status", response_model=JsonCacheStatusResponse)
+async def get_json_cache_status(path: str) -> JsonCacheStatusResponse:
+    """Check whether a JSON file has been cached as parquet."""
+    from haute._json_flatten import json_cache_info
+
+    info = json_cache_info(path)
+    if info is None:
+        return JsonCacheStatusResponse(cached=False, data_path=path)
+    return JsonCacheStatusResponse.model_validate({"cached": True, **info})
+
+
+@router.delete("", response_model=JsonCacheStatusResponse)
+async def delete_json_cache(path: str) -> JsonCacheStatusResponse:
+    """Delete the local parquet cache for a JSON file."""
+    from haute._json_flatten import clear_json_cache
+
+    clear_json_cache(path)
+    return JsonCacheStatusResponse(cached=False, data_path=path)
