@@ -113,9 +113,10 @@ export function previewNode(
 
 export function runPipeline(
   graph: GraphPayload,
+  scenario?: string,
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<RunPipelineResponse> {
-  return post("/api/pipeline/run", { graph }, { timeout: 300_000, ...options })
+  return post("/api/pipeline/run", { graph, scenario: scenario ?? "live" }, { timeout: 300_000, ...options })
 }
 
 export function savePipeline(
@@ -125,6 +126,8 @@ export function savePipeline(
     graph: GraphPayload
     preamble: string
     source_file: string
+    scenarios?: string[]
+    active_scenario?: string
   },
   options?: { signal?: AbortSignal },
 ): Promise<SavePipelineResponse> {
@@ -147,9 +150,10 @@ export function traceCell(
 export function executeSink(
   graph: GraphPayload,
   nodeId: string,
+  scenario?: string,
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<SinkResponse> {
-  return post("/api/pipeline/sink", { graph, node_id: nodeId }, { timeout: 300_000, ...options })
+  return post("/api/pipeline/sink", { graph, node_id: nodeId, scenario: scenario ?? "live" }, { timeout: 300_000, ...options })
 }
 
 // ---------------------------------------------------------------------------
@@ -229,10 +233,10 @@ export function getTrainStatus<T = unknown>(
 }
 
 export function trainModel(
-  payload: { graph: GraphPayload; node_id: string },
+  payload: { graph: GraphPayload; node_id: string; scenario?: string },
   options?: { signal?: AbortSignal },
 ): Promise<Record<string, unknown>> {
-  return post("/api/modelling/train", payload, options)
+  return post("/api/modelling/train", { ...payload, scenario: payload.scenario ?? "live" }, options)
 }
 
 export type TrainEstimate = {
@@ -268,7 +272,7 @@ export function logToMlflow(
   payload: { job_id: string; experiment_name?: string | null; model_name?: string | null },
   options?: { signal?: AbortSignal },
 ): Promise<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string }> {
-  return post("/api/modelling/mlflow/log", payload, options)
+  return post("/api/modelling/mlflow/log", payload, { timeout: 120_000, ...options })
 }
 
 // ---------------------------------------------------------------------------

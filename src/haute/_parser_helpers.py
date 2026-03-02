@@ -413,7 +413,7 @@ def _build_node_config(
         else:
             config["sourceType"] = "flat_file"
     elif node_type == NodeType.LIVE_SWITCH:
-        config["mode"] = decorator_kwargs.get("mode", "live")
+        config["input_scenario_map"] = decorator_kwargs.get("input_scenario_map", {})
         config["inputs"] = param_names
     elif node_type == NodeType.MODEL_SCORE:
         model_score_keys = (

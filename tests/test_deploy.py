@@ -170,7 +170,7 @@ class TestPruner:
             "nodes": [
                 {"id": "live_src", "data": {"label": "live_src", "nodeType": "apiInput", "config": {"path": "d.json"}}},
                 {"id": "batch_src", "data": {"label": "batch_src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "switch", "data": {"label": "switch", "nodeType": "liveSwitch", "config": {"mode": "live", "inputs": ["live_src", "batch_src"]}}},
+                {"id": "switch", "data": {"label": "switch", "nodeType": "liveSwitch", "config": {"input_scenario_map": {"live_src": "live", "batch_src": "test_batch"}, "inputs": ["live_src", "batch_src"]}}},
                 {"id": "score", "data": {"label": "score", "nodeType": "transform", "config": {}}},
                 {"id": "out", "data": {"label": "out", "nodeType": "output", "config": {}}},
             ],
@@ -810,5 +810,5 @@ class TestParserApiInput:
             f"Expected liveSwitch nodeType, got: {policies_node.data.nodeType}"
         )
         config = policies_node.data.config
-        assert config["mode"] == "live"
+        assert config["input_scenario_map"] == {"quotes": "live", "batch_quotes": "test_batch"}
         assert config["inputs"] == ["quotes", "batch_quotes"]

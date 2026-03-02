@@ -38,6 +38,18 @@ _jobs: dict[str, dict[str, Any]] = {}
 _JOB_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
 
+def _clamp_row_limit(
+    current_limit: int | None,
+    user_limit: object,
+) -> int | None:
+    """Apply a user-specified row_limit, taking the minimum with *current_limit*."""
+    if user_limit and isinstance(user_limit, (int, float)):
+        clamped = int(user_limit)
+        if clamped > 0:
+            return min(current_limit, clamped) if current_limit else clamped
+    return current_limit
+
+
 def _evict_stale_jobs() -> None:
     """Remove jobs older than TTL to bound memory usage."""
     cutoff = time.time() - _JOB_TTL_SECONDS
@@ -228,6 +240,9 @@ def train_model(body: TrainRequest) -> TrainResponse:
         logger.warning("ram_estimate_failed", error=str(exc))
         row_limit = None
 
+    # --- Apply user-specified row limit (take minimum of user + RAM limits) ---
+    row_limit = _clamp_row_limit(row_limit, config.get("row_limit"))
+
     # --- Check GPU VRAM if task_type is GPU ---
     train_params = {**config.get("params", {})}
 
@@ -286,6 +301,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
             body.graph, _build_node_fn,
             target_node_id=body.node_id,
             preamble_ns=preamble_ns,
+            scenario=body.scenario,
         )
 
         target_lf = lazy_outputs.get(body.node_id)
@@ -471,18 +487,21 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
     data_mb = ram_est.estimated_bytes / 1024**2
     training_mb = data_mb * _CATBOOST_OVERHEAD_MULTIPLIER
 
+    # Apply user row limit to the estimate
+    safe_limit = _clamp_row_limit(ram_est.safe_row_limit, node.data.config.get("row_limit"))
+
     # GPU VRAM estimation
     vram_check = _VramCheck()
     node_params = node.data.config.get("params", {})
     if str(node_params.get("task_type", "")).upper() == "GPU":
-        effective_rows = ram_est.safe_row_limit or ram_est.total_rows or 0
+        effective_rows = safe_limit or ram_est.total_rows or 0
         vram_check = _check_gpu_vram(effective_rows, ram_est.probe_columns, node_params)
         if vram_check.warning:
             vram_check.warning += " Training will fall back to CPU automatically."
 
     return TrainEstimateResponse(
         total_rows=ram_est.total_rows,
-        safe_row_limit=ram_est.safe_row_limit,
+        safe_row_limit=safe_limit,
         estimated_mb=round(data_mb, 1),
         training_mb=round(training_mb, 1),
         available_mb=round(ram_est.available_bytes / 1024**2, 1),

@@ -192,7 +192,7 @@ class TestPrepareGraph:
 
 class TestExecuteLazy:
     @staticmethod
-    def _simple_build_fn(node, source_names=None):
+    def _simple_build_fn(node, source_names=None, **kwargs):
         """Minimal build_node_fn for testing."""
         nid = node.id
         nt = node.data.nodeType
@@ -243,7 +243,7 @@ class TestExecuteLazy:
 
     def test_dataframe_converted_to_lazy(self):
         """If a node fn returns a DataFrame, it should be auto-converted to LazyFrame."""
-        def build_fn(node, source_names=None):
+        def build_fn(node, source_names=None, **kwargs):
             if node.id == "src":
                 return "src", lambda: pl.DataFrame({"x": [1]}), True
             return "t", lambda *dfs: dfs[0], False
@@ -259,7 +259,7 @@ class TestExecuteLazy:
 
     def test_non_source_no_input_raises(self):
         """A non-source node with no parents and no prior outputs raises ValueError."""
-        def build_fn(node, source_names=None):
+        def build_fn(node, source_names=None, **kwargs):
             return node.id, lambda *dfs: dfs[0], False
 
         g = _make_graph([("lonely", "Lonely")], [])
@@ -268,7 +268,7 @@ class TestExecuteLazy:
 
     def test_no_edge_non_source_raises(self):
         """A non-source with no edges raises even when prior outputs exist."""
-        def build_fn(node, source_names=None):
+        def build_fn(node, source_names=None, **kwargs):
             nid = node.id
             if nid == "src":
                 return nid, lambda: pl.DataFrame({"x": [1]}).lazy(), True
@@ -336,7 +336,7 @@ class TestLoadExternalObjectCache:
 class TestExecuteLazyMultiInput:
     def test_multi_input_node(self):
         """A node with two parents receives both LazyFrames."""
-        def build_fn(node, source_names=None):
+        def build_fn(node, source_names=None, **kwargs):
             nid = node.id
             if nid in ("a", "b"):
                 data = {"x": [1]} if nid == "a" else {"y": [2]}

@@ -52,8 +52,8 @@ class TestModelScoreCodegen:
         assert 'pl.Series("prediction"' in code
         # Generated code must be valid Python
         compile(code, "<test_run_based>", "exec")
-        # Upstream is named "source", template must alias df = source
-        assert "df = source" in code
+        # Upstream is named "source", template must alias lf = source
+        assert "lf = source" in code
 
     def test_codegen_registered(self):
         """Generates correct code for registered model scoring."""

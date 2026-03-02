@@ -333,33 +333,40 @@ class TestGraphToCode:
 
 
 class TestLiveSwitchCodegen:
-    def _switch_node(self, mode="live"):
+    def _switch_node(self, scenario_map=None):
+        if scenario_map is None:
+            scenario_map = {"live_src": "live", "batch_src": "test_batch"}
         return _n({
             "id": "switch",
             "data": {
                 "label": "Switch",
                 "nodeType": "liveSwitch",
-                "config": {"mode": mode, "inputs": ["live_src", "batch_src"]},
+                "config": {"input_scenario_map": scenario_map, "inputs": ["live_src", "batch_src"]},
             },
         })
 
-    def test_live_mode_emits_config_ref(self):
-        code = _node_to_code(self._switch_node("live"), source_names=["live_src", "batch_src"])
+    def test_emits_config_ref_with_live_active(self):
+        code = _node_to_code(self._switch_node(), source_names=["live_src", "batch_src"])
         assert 'config="config/live_switch/Switch.json"' in code
         assert "return live_src" in code
         _compile_node_code(code)
 
-    def test_non_live_mode_emits_config_ref(self):
-        code = _node_to_code(self._switch_node("batch_src"), source_names=["live_src", "batch_src"])
+    def test_emits_config_ref_with_no_live_mapping(self):
+        code = _node_to_code(
+            self._switch_node({"live_src": "test_batch", "batch_src": "prod"}),
+            source_names=["live_src", "batch_src"],
+        )
         assert 'config="config/live_switch/Switch.json"' in code
-        assert "return batch_src" in code
+        # Falls back to first param when no input mapped to "live"
+        assert "return live_src" in code
         _compile_node_code(code)
 
-    def test_round_trip_preserves_live_mode(self, tmp_path):
-        """Codegen → parse round-trip must preserve mode='live'."""
+    def test_round_trip_preserves_scenario_map(self, tmp_path):
+        """Codegen → parse round-trip must preserve input_scenario_map."""
         import json
 
-        node = self._switch_node("live")
+        scenario_map = {"live_src": "live", "batch_src": "test_batch"}
+        node = self._switch_node(scenario_map)
         code = _node_to_code(node, source_names=["live_src", "batch_src"])
         full_code = (
             "import polars as pl\nimport haute\n"
@@ -377,7 +384,7 @@ class TestLiveSwitchCodegen:
         # Write config JSON files so the parser can resolve them
         cfg_dir = tmp_path / "config" / "live_switch"
         cfg_dir.mkdir(parents=True)
-        (cfg_dir / "Switch.json").write_text(json.dumps({"mode": "live", "inputs": ["live_src", "batch_src"]}))
+        (cfg_dir / "Switch.json").write_text(json.dumps({"input_scenario_map": scenario_map, "inputs": ["live_src", "batch_src"]}))
         for name in ("live_src", "batch_src"):
             ds_dir = tmp_path / "config" / "datasource"
             ds_dir.mkdir(parents=True, exist_ok=True)
@@ -389,43 +396,7 @@ class TestLiveSwitchCodegen:
         graph = parse_pipeline_file(py_file)
         switch_nodes = [n for n in graph.nodes if n.data.nodeType == "liveSwitch"]
         assert len(switch_nodes) == 1
-        assert switch_nodes[0].data.config["mode"] == "live"
-
-    def test_round_trip_preserves_non_live_mode(self, tmp_path):
-        """Codegen → parse round-trip must preserve non-live mode."""
-        import json
-
-        node = self._switch_node("batch_src")
-        code = _node_to_code(node, source_names=["live_src", "batch_src"])
-        full_code = (
-            "import polars as pl\nimport haute\n"
-            'pipeline = haute.Pipeline("test")\n\n'
-            '@pipeline.node(path="a.parquet")\n'
-            "def live_src() -> pl.LazyFrame:\n"
-            '    return pl.scan_parquet("a.parquet")\n\n'
-            '@pipeline.node(path="b.parquet")\n'
-            "def batch_src() -> pl.LazyFrame:\n"
-            '    return pl.scan_parquet("b.parquet")\n\n'
-            f"{code}\n"
-            'pipeline.connect("live_src", "Switch")\n'
-            'pipeline.connect("batch_src", "Switch")\n'
-        )
-        # Write config JSON files so the parser can resolve them
-        cfg_dir = tmp_path / "config" / "live_switch"
-        cfg_dir.mkdir(parents=True)
-        (cfg_dir / "Switch.json").write_text(json.dumps({"mode": "batch_src", "inputs": ["live_src", "batch_src"]}))
-        for name in ("live_src", "batch_src"):
-            ds_dir = tmp_path / "config" / "datasource"
-            ds_dir.mkdir(parents=True, exist_ok=True)
-            (ds_dir / f"{name}.json").write_text(json.dumps({"path": "b.parquet"}))
-
-        py_file = tmp_path / "test.py"
-        py_file.write_text(full_code)
-        from haute.parser import parse_pipeline_file
-        graph = parse_pipeline_file(py_file)
-        switch_nodes = [n for n in graph.nodes if n.data.nodeType == "liveSwitch"]
-        assert len(switch_nodes) == 1
-        assert switch_nodes[0].data.config["mode"] == "batch_src"
+        assert switch_nodes[0].data.config["input_scenario_map"] == scenario_map
 
 
 # ---------------------------------------------------------------------------
@@ -449,19 +420,22 @@ def _find_pipeline_files() -> list[Path]:
 
 
 class TestLiveSwitchSafety:
-    """Ensure no pipeline file is accidentally committed with mode != 'live'.
+    """Ensure the global active_scenario is 'live' before committing.
 
-    If this test fails, a liveSwitch node is pointing at a non-live data
-    source. Change the mode back to 'live' before committing.
+    The scenario is now a global setting stored in the .haute.json sidecar,
+    not a per-node config value. If this test fails, someone left the
+    active_scenario on a non-live value — reset it to 'live' before committing.
     """
 
     @pytest.mark.parametrize("pipeline_file", _find_pipeline_files(), ids=lambda p: str(p.relative_to(PROJECT_ROOT)))
-    def test_live_switch_mode_is_live(self, pipeline_file: Path):
-        graph = parse_pipeline_source(pipeline_file.read_text(), source_file=str(pipeline_file))
-        for node in graph.nodes:
-            if node.data.nodeType == "liveSwitch":
-                mode = node.data.config.get("mode", "live")
-                assert mode == "live", (
-                    f"{pipeline_file.relative_to(PROJECT_ROOT)}: liveSwitch node "
-                    f"'{node.data.label}' has mode='{mode}' — must be 'live' before committing."
-                )
+    def test_active_scenario_is_live(self, pipeline_file: Path):
+        import json
+        sidecar = pipeline_file.with_suffix(".haute.json")
+        if not sidecar.exists():
+            return  # no sidecar → defaults to "live", nothing to check
+        data = json.loads(sidecar.read_text())
+        active = data.get("active_scenario", "live")
+        assert active == "live", (
+            f"{sidecar.relative_to(PROJECT_ROOT)}: active_scenario is "
+            f"'{active}' — must be 'live' before committing."
+        )

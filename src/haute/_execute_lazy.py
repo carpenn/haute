@@ -65,6 +65,7 @@ def _execute_lazy(
     build_node_fn: Callable,
     target_node_id: str | None = None,
     preamble_ns: dict | None = None,
+    scenario: str = "live",
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:
     """Execute a graph lazily and return per-node LazyFrames.
 
@@ -77,6 +78,7 @@ def _execute_lazy(
         graph: React Flow graph with "nodes" and "edges".
         build_node_fn: Function (node_dict, source_names) -> (name, fn, is_source).
         target_node_id: If set, only execute ancestors of this node.
+        scenario: Active execution scenario (``"live"`` = eager scoring).
 
     Returns:
         (lazy_outputs, order, parents_of, id_to_name)
@@ -93,7 +95,7 @@ def _execute_lazy(
         orig_src_names = resolve_orig_source_names(
             node_map[nid], node_map, all_parents, id_to_name,
         )
-        kwargs: dict[str, Any] = {"source_names": source_names}
+        kwargs: dict[str, Any] = {"source_names": source_names, "scenario": scenario}
         if orig_src_names is not None:
             kwargs["node_map"] = node_map
             kwargs["orig_source_names"] = orig_src_names
@@ -138,6 +140,7 @@ def _build_funcs(
     *,
     row_limit: int | None = None,
     preamble_ns: dict | None = None,
+    scenario: str = "live",
 ) -> dict[str, tuple[Callable, bool]]:
     """Build per-node executable functions from the graph.
 
@@ -145,6 +148,7 @@ def _build_funcs(
     ``build_node_fn`` so Databricks sources can push LIMIT into SQL.
     ``preamble_ns`` is a compiled namespace of user-defined helpers from
     the pipeline file's preamble section.
+    ``scenario`` is the active execution scenario forwarded to build_node_fn.
     """
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
@@ -159,7 +163,7 @@ def _build_funcs(
         _, fn, is_source = build_node_fn(
             node_map[nid], source_names=src_names, row_limit=row_limit,
             node_map=node_map, orig_source_names=orig_src_names,
-            preamble_ns=preamble_ns,
+            preamble_ns=preamble_ns, scenario=scenario,
         )
         funcs[nid] = (fn, is_source)
     return funcs
@@ -184,6 +188,7 @@ def _execute_eager_core(
     row_limit: int | None = None,
     swallow_errors: bool = False,
     preamble_ns: dict | None = None,
+    scenario: str = "live",
 ) -> EagerResult:
     """Execute the graph eagerly in topo order and collect DataFrames.
 
@@ -196,6 +201,7 @@ def _execute_eager_core(
         row_limit: Cap source-node output to this many rows.
         swallow_errors: If ``True``, record per-node errors and continue
             (preview behaviour).  If ``False``, raise immediately (trace).
+        scenario: Active execution scenario (``"live"`` = eager scoring).
 
     Returns:
         An ``EagerResult`` with named fields for outputs, order,
@@ -211,6 +217,7 @@ def _execute_eager_core(
     funcs = _build_funcs(
         order, node_map, parents_of, id_to_name, all_parents,
         build_node_fn, row_limit=row_limit, preamble_ns=preamble_ns,
+        scenario=scenario,
     )
 
     eager_outputs: dict[str, pl.DataFrame | None] = {}

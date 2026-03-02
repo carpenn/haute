@@ -88,6 +88,13 @@ export default function usePipelineAPI({
         if (data.pipeline_name) pipelineNameRef.current = data.pipeline_name
         if (data.source_file) sourceFileRef.current = data.source_file
         if (data.submodels) submodelsRef.current = data.submodels
+        // Populate scenario state from backend sidecar
+        if (data.scenarios && Array.isArray(data.scenarios)) {
+          useUIStore.getState().setScenarios(data.scenarios)
+        }
+        if (data.active_scenario) {
+          useUIStore.getState().setActiveScenario(data.active_scenario)
+        }
         nodeIdCounter.current = pipelineNodes.length
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
         setLoading(false)
@@ -159,7 +166,7 @@ export default function usePipelineAPI({
     nodes.forEach((n) => { running[n.id] = "running" })
     setNodeStatuses(running)
 
-    runPipeline({ nodes, edges, preamble: preambleRef.current })
+    runPipeline({ nodes, edges, preamble: preambleRef.current }, useUIStore.getState().activeScenario)
       .then((data) => {
         const statuses: Record<string, "ok" | "error"> = {}
         const results = data.results ?? {}
@@ -189,12 +196,15 @@ export default function usePipelineAPI({
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
+    const { scenarios: sc, activeScenario: as_ } = useUIStore.getState()
     savePipeline({
       name: pipelineNameRef.current,
       description: "",
       graph: { nodes: n, edges: e, submodels: submodelsRef.current },
       preamble: preambleRef.current,
       source_file: sourceFileRef.current,
+      scenarios: sc,
+      active_scenario: as_,
     })
       .then((data) => {
         lastSavedRef.current = JSON.stringify({ nodes: n, edges: e, preamble: preambleRef.current })

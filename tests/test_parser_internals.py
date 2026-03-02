@@ -283,10 +283,10 @@ class TestBuildNodeConfig:
     def test_live_switch(self):
         config = _build_node_config(
             "liveSwitch",
-            {"live_switch": True},
+            {"live_switch": True, "input_scenario_map": {"live": "live", "nb": "test_batch"}},
             "", ["live", "nb", "rn"],
         )
-        assert config["mode"] == "live"
+        assert config["input_scenario_map"] == {"live": "live", "nb": "test_batch"}
         assert config["inputs"] == ["live", "nb", "rn"]
 
     def test_data_source_databricks(self):

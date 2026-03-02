@@ -143,21 +143,28 @@ def lookup_pipeline_by_name(name: str) -> Path | None:
     return index.get(name)
 
 
-def load_sidecar_positions(py_path: Path) -> dict[str, dict[str, float]]:
-    """Load node positions from the sidecar .haute.json file."""
+def load_sidecar(py_path: Path) -> dict[str, Any]:
+    """Load the full sidecar .haute.json file as a dict.
+
+    Returns a dict with ``positions``, ``scenarios``, and ``active_scenario``
+    keys (all optional — callers should use ``.get()``).
+    """
     sidecar = py_path.with_suffix(".haute.json")
     if sidecar.exists():
         try:
-            data = _json.loads(sidecar.read_text())
-            positions: dict[str, dict[str, float]] = data.get("positions", {})
-            return positions
+            return _json.loads(sidecar.read_text())
         except Exception as e:
             logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}
 
 
+def load_sidecar_positions(py_path: Path) -> dict[str, Any]:
+    """Return only the positions dict — backward-compatible alias for submodel.py."""
+    return load_sidecar(py_path).get("positions", {})
+
+
 def save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
-    """Write node positions to the sidecar .haute.json file.
+    """Write node positions + scenario state to the sidecar .haute.json file.
 
     Keys are the sanitised function names (which the parser uses as node IDs
     on re-parse), so positions survive label renames.
@@ -166,19 +173,39 @@ def save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
         _sanitize_func_name(node.data.label): node.position
         for node in graph.nodes
     }
+    sidecar_data: dict[str, Any] = {"positions": positions}
+    # Persist scenario state
+    if graph.scenarios and graph.scenarios != ["live"]:
+        sidecar_data["scenarios"] = graph.scenarios
+    if graph.active_scenario and graph.active_scenario != "live":
+        sidecar_data["active_scenario"] = graph.active_scenario
     sidecar = py_path.with_suffix(".haute.json")
-    sidecar.write_text(_json.dumps({"positions": positions}, indent=2) + "\n")
+    sidecar.write_text(_json.dumps(sidecar_data, indent=2) + "\n")
 
 
 def parse_pipeline_to_graph(py_path: Path) -> PipelineGraph:
-    """Parse a .py file and merge with sidecar positions."""
+    """Parse a .py file and merge with sidecar positions + scenario state."""
     from haute.parser import parse_pipeline_file
 
     graph = parse_pipeline_file(py_path)
-    positions = load_sidecar_positions(py_path)
+    sidecar = load_sidecar(py_path)
+    positions: dict[str, dict[str, float]] = sidecar.get("positions", {})
 
     for node in graph.nodes:
         if node.id in positions:
             node.position = positions[node.id]
+
+    # Populate scenario state from sidecar
+    raw_scenarios = sidecar.get("scenarios")
+    if isinstance(raw_scenarios, list) and raw_scenarios:
+        # Ensure "live" is always first
+        if "live" not in raw_scenarios:
+            raw_scenarios = ["live", *raw_scenarios]
+        elif raw_scenarios[0] != "live":
+            raw_scenarios = ["live", *(s for s in raw_scenarios if s != "live")]
+        graph.scenarios = raw_scenarios
+    active = sidecar.get("active_scenario", "live")
+    if isinstance(active, str) and active in graph.scenarios:
+        graph.active_scenario = active
 
     return graph

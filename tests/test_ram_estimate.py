@@ -176,7 +176,7 @@ class TestEstimateSourceRows:
 
 def _build_dummy_node_fn(node, *, source_names=None, row_limit=None,
                          node_map=None, orig_source_names=None,
-                         preamble_ns=None):
+                         preamble_ns=None, scenario="live", **_kwargs):
     """Minimal build_node_fn that creates a dummy source or passthrough."""
     label = node.data.label
     nt = node.data.nodeType

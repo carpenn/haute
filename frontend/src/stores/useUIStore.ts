@@ -56,6 +56,14 @@ interface UIState {
   _mlflowLastAttempt: number
   fetchMlflow: () => void
 
+  // Scenario system
+  scenarios: string[]
+  activeScenario: string
+  setScenarios: (scenarios: string[]) => void
+  setActiveScenario: (scenario: string) => void
+  addScenario: (name: string) => void
+  removeScenario: (name: string) => void
+
   // File listing cache (keyed by "dir|extensions")
   fileListCache: Record<string, { items: { name: string; path: string; type: "file" | "directory"; size?: number }[]; fetchedAt: number }>
   setFileListCache: (key: string, items: { name: string; path: string; type: "file" | "directory"; size?: number }[]) => void
@@ -154,6 +162,25 @@ const useUIStore = create<UIState>()((set, get) => ({
         set({ _mlflowFetching: false })
       })
   },
+
+  // Scenario system
+  scenarios: ["live"],
+  activeScenario: "live",
+  setScenarios: (scenarios) => set({ scenarios }),
+  setActiveScenario: (scenario) => set({ activeScenario: scenario }),
+  addScenario: (name) => set((s) => {
+    const trimmed = name.trim().toLowerCase().replace(/\s+/g, "_")
+    if (!trimmed || s.scenarios.includes(trimmed)) return s
+    return { scenarios: [...s.scenarios, trimmed] }
+  }),
+  removeScenario: (name) => set((s) => {
+    if (name === "live") return s
+    const next = s.scenarios.filter((sc) => sc !== name)
+    return {
+      scenarios: next,
+      activeScenario: s.activeScenario === name ? "live" : s.activeScenario,
+    }
+  }),
 
   // File listing cache
   fileListCache: {},

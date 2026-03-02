@@ -1,6 +1,7 @@
 import { ToggleLeft } from "lucide-react"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
+import useUIStore from "../../stores/useUIStore"
 
 export default function LiveSwitchEditor({
   config,
@@ -11,23 +12,13 @@ export default function LiveSwitchEditor({
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
 }) {
-  const mode = configField(config, "mode", "live")
-  const inputs = configField<string[]>(config, "inputs", [])
-  const liveInput = inputs[0] || inputSources[0]?.varName || "live"
+  const scenarios = useUIStore((s) => s.scenarios)
+  const activeScenario = useUIStore((s) => s.activeScenario)
+  const inputScenarioMap = configField<Record<string, string>>(config, "input_scenario_map", {})
 
-  const modeOptions: { value: string; label: string }[] = [
-    { value: "live", label: `${liveInput} (live)` },
-    ...inputSources.slice(1).map((s) => ({
-      value: s.varName,
-      label: s.sourceLabel,
-    })),
-  ]
-
-  // If inputs list is populated from parser but inputSources doesn't match yet, use inputs
-  if (modeOptions.length <= 1 && inputs.length > 1) {
-    for (let i = 1; i < inputs.length; i++) {
-      modeOptions.push({ value: inputs[i], label: inputs[i] })
-    }
+  /** Update the mapping for a single input. */
+  const setMapping = (inputName: string, scenario: string) => {
+    onUpdate("input_scenario_map", { ...inputScenarioMap, [inputName]: scenario })
   }
 
   return (
@@ -36,44 +27,31 @@ export default function LiveSwitchEditor({
         style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: '#f59e0b' }}
       >
         <ToggleLeft size={14} />
-        <span>Routes live API or batch data into the pipeline</span>
+        <span>Routes inputs based on the active scenario</span>
       </div>
 
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 block" style={{ color: 'var(--text-muted)' }}>
-          Active Input
+          Active Scenario
         </label>
-        <select
-          value={mode}
-          onChange={(e) => onUpdate("mode", e.target.value)}
-          className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2 appearance-none"
-          style={{
-            background: 'var(--bg-input)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-primary)',
-          }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+        <div className="px-2.5 py-1.5 text-xs rounded-lg font-mono"
+          style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
         >
-          {modeOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+          {activeScenario === "live" ? "● live" : activeScenario}
+        </div>
         <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          {mode === "live"
-            ? "Using live API input — this is what runs in production"
-            : `Using batch input "${mode}" — switch to live for deployment`
-          }
+          Change the active scenario in the toolbar dropdown
         </div>
       </div>
 
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-          Connected Inputs ({inputSources.length})
+          Input → Scenario Mapping ({inputSources.length})
         </label>
-        <div className="space-y-1">
-          {inputSources.map((src, i) => {
-            const isActive = (i === 0 && mode === "live") || src.varName === mode
+        <div className="space-y-1.5">
+          {inputSources.map((src) => {
+            const mappedScenario = inputScenarioMap[src.varName] || ""
+            const isActive = mappedScenario === activeScenario
             return (
               <div
                 key={src.varName}
@@ -87,18 +65,26 @@ export default function LiveSwitchEditor({
                   className="w-1.5 h-1.5 rounded-full shrink-0"
                   style={{ background: isActive ? '#f59e0b' : 'var(--text-muted)' }}
                 />
-                <span className="font-mono truncate" style={{ color: 'var(--text-primary)' }}>
+                <span className="font-mono truncate min-w-0 flex-1" style={{ color: 'var(--text-primary)' }}>
                   {src.sourceLabel}
                 </span>
-                {i === 0 && (
-                  <span className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded"
-                    style={{ background: 'rgba(34,197,94,.15)', color: '#22c55e' }}
-                  >
-                    LIVE
-                  </span>
-                )}
+                <select
+                  value={mappedScenario}
+                  onChange={(e) => setMapping(src.varName, e.target.value)}
+                  className="px-1.5 py-0.5 text-[11px] font-mono rounded focus:outline-none"
+                  style={{
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <option value="">—</option>
+                  {scenarios.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
                 {isActive && (
-                  <span className="ml-auto text-[10px] font-medium" style={{ color: '#f59e0b' }}>
+                  <span className="text-[10px] font-medium shrink-0" style={{ color: '#f59e0b' }}>
                     active
                   </span>
                 )}

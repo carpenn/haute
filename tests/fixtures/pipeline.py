@@ -25,7 +25,7 @@ def batch_quotes() -> pl.LazyFrame:
     return pl.scan_parquet("tests/fixtures/data/policies.parquet")
 
 
-@pipeline.node(live_switch=True, mode="live")
+@pipeline.node(live_switch=True, input_scenario_map={"quotes": "live", "batch_quotes": "test_batch"})
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Live/batch switch."""
     return quotes

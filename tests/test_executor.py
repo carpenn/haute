@@ -651,8 +651,10 @@ class TestInstanceAliasInjection:
 
 
 class TestLiveSwitch:
-    def _switch_graph(self, tmp_path, mode="live", reverse_edges=False):
+    def _switch_graph(self, tmp_path, scenario_map=None, reverse_edges=False):
         """Build a graph with two sources feeding a liveSwitch."""
+        if scenario_map is None:
+            scenario_map = {"live_src": "live", "batch_src": "test_batch"}
         p1 = tmp_path / "live.parquet"
         p2 = tmp_path / "batch.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p1)
@@ -674,7 +676,7 @@ class TestLiveSwitch:
                         "label": "switch",
                         "nodeType": "liveSwitch",
                         "config": {
-                            "mode": mode,
+                            "input_scenario_map": scenario_map,
                             "inputs": ["live_src", "batch_src"],
                         },
                     },
@@ -684,24 +686,31 @@ class TestLiveSwitch:
             "edges": edges,
         })
 
-    def test_live_mode_selects_first_input(self, tmp_path):
-        graph = self._switch_graph(tmp_path, mode="live")
-        results = execute_graph(graph, target_node_id="switch")
+    def test_live_scenario_selects_mapped_input(self, tmp_path):
+        graph = self._switch_graph(tmp_path)
+        results = execute_graph(graph, target_node_id="switch", scenario="live")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
-    def test_live_mode_works_regardless_of_edge_order(self, tmp_path):
+    def test_live_scenario_works_regardless_of_edge_order(self, tmp_path):
         """Edge order in the graph JSON is arbitrary — live must still pick the correct input."""
-        graph = self._switch_graph(tmp_path, mode="live", reverse_edges=True)
-        results = execute_graph(graph, target_node_id="switch")
+        graph = self._switch_graph(tmp_path, reverse_edges=True)
+        results = execute_graph(graph, target_node_id="switch", scenario="live")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
-    def test_batch_mode_selects_named_input(self, tmp_path):
-        graph = self._switch_graph(tmp_path, mode="batch_src")
-        results = execute_graph(graph, target_node_id="switch")
+    def test_batch_scenario_selects_mapped_input(self, tmp_path):
+        graph = self._switch_graph(tmp_path)
+        results = execute_graph(graph, target_node_id="switch", scenario="test_batch")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 4
+
+    def test_unmapped_scenario_falls_back_to_first_input(self, tmp_path):
+        """An unmapped scenario should fall back to the first input."""
+        graph = self._switch_graph(tmp_path)
+        results = execute_graph(graph, target_node_id="switch", scenario="unknown_scenario")
+        assert results["switch"].status == "ok"
+        assert results["switch"].row_count == 3
 
 
 # ---------------------------------------------------------------------------

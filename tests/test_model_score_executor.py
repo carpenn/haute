@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import glob
+import os
+import tempfile
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -202,7 +205,11 @@ class TestModelScoreMissingFeatures:
         # Verify predict was called with only the available features
         call_args = mock_model.predict.call_args
         X = call_args[0][0]
-        assert list(X.columns) == ["x1", "x2"]
+        # X may be a numpy array (pure numeric) or pandas DataFrame (has cats)
+        if hasattr(X, "columns"):
+            assert list(X.columns) == ["x1", "x2"]
+        else:
+            assert X.shape[1] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -284,3 +291,55 @@ class TestBuildNodeFnModelScore:
         assert is_source is False
         # fn should be the model_score_fn (not passthrough) — callable
         assert callable(fn)
+
+
+# ---------------------------------------------------------------------------
+# Scenario-based scoring path selection
+# ---------------------------------------------------------------------------
+
+
+class TestModelScoreScenarioRouting:
+    """scenario='live' → eager (in-memory), any other → batched (parquet)."""
+
+    def test_live_scenario_uses_eager_path(self, sample_data):
+        """Live scenario scores in-memory — no temp parquet files created."""
+        mock_model = _make_mock_model("regression")
+
+        graph = _make_model_score_graph(data_path=sample_data)
+
+        # Snapshot existing temp parquets so we can detect new ones
+        tmp_dir = tempfile.gettempdir()
+        before = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
+
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+            results = execute_graph(graph, target_node_id="score", scenario="live")
+
+        assert results["score"].status == "ok"
+        assert results["score"].row_count == 5
+
+        after = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
+        new_parquets = after - before
+        assert not new_parquets, (
+            f"Live scenario should not create temp parquets, found: {new_parquets}"
+        )
+
+        # Eager path calls predict once with the full dataset
+        mock_model.predict.assert_called_once()
+
+    def test_batch_scenario_uses_parquet_path(self, sample_data):
+        """Non-live scenario sinks to parquet, batch-scores, then scans back."""
+        mock_model = _make_mock_model("regression")
+
+        graph = _make_model_score_graph(data_path=sample_data)
+
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+            results = execute_graph(graph, target_node_id="score", scenario="test_batch")
+
+        assert results["score"].status == "ok"
+        assert results["score"].row_count == 5
+        cols = [c.name for c in results["score"].columns]
+        assert "prediction" in cols
+
+        # Batched path goes through _batch_score_to_parquet which calls predict
+        # on chunks — still should have been called at least once
+        assert mock_model.predict.call_count >= 1

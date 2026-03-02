@@ -163,9 +163,13 @@ class ExternalFileConfig(TypedDict, total=False):
 
 
 class LiveSwitchConfig(TypedDict, total=False):
-    """Config for liveSwitch nodes."""
+    """Config for liveSwitch nodes.
 
-    mode: str  # "live" | <input_name>
+    ``input_scenario_map`` maps each connected input name to the scenario
+    that should route to it.  E.g. ``{"quotes": "live", "batch_quotes": "test_batch"}``.
+    """
+
+    input_scenario_map: dict[str, str]
     inputs: list[str]
 
 
@@ -343,6 +347,8 @@ class PipelineGraph(BaseModel):
     source_file: str | None = None
     submodels: dict[str, Any] | None = None
     warning: str | None = None
+    scenarios: list[str] = Field(default_factory=lambda: ["live"])
+    active_scenario: str = "live"
 
     @cached_property
     def node_map(self) -> dict[str, GraphNode]:

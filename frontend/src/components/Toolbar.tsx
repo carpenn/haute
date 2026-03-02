@@ -1,4 +1,5 @@
-import { Settings, Undo2, Redo2, Grid3X3, Keyboard } from "lucide-react"
+import { useState } from "react"
+import { Settings, Undo2, Redo2, Grid3X3, Keyboard, Plus, X } from "lucide-react"
 import type { WsStatus } from "../hooks/useWebSocketSync"
 import useUIStore from "../stores/useUIStore"
 
@@ -38,6 +39,13 @@ export default function Toolbar({
 }: ToolbarProps) {
   const rowLimit = useUIStore((s) => s.rowLimit)
   const setRowLimit = useUIStore((s) => s.setRowLimit)
+  const scenarios = useUIStore((s) => s.scenarios)
+  const activeScenario = useUIStore((s) => s.activeScenario)
+  const setActiveScenario = useUIStore((s) => s.setActiveScenario)
+  const addScenario = useUIStore((s) => s.addScenario)
+  const removeScenario = useUIStore((s) => s.removeScenario)
+  const [addingScenario, setAddingScenario] = useState(false)
+  const [newScenarioName, setNewScenarioName] = useState("")
   const wsConfig = WS_STATUS_CONFIG[wsStatus]
 
   return (
@@ -116,6 +124,70 @@ export default function Toolbar({
             className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
             style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
           />
+        </div>
+        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
+        {/* Scenario selector */}
+        <div className="flex items-center gap-1 mr-1" title="Execution scenario">
+          <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Scenario</label>
+          <div className="flex items-center gap-0.5">
+            <select
+              value={activeScenario}
+              onChange={(e) => setActiveScenario(e.target.value)}
+              className="px-1.5 py-0.5 text-[12px] font-mono rounded focus:outline-none"
+              style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
+            >
+              {scenarios.map((s) => (
+                <option key={s} value={s}>{s === "live" ? "● live" : s}</option>
+              ))}
+            </select>
+            {activeScenario !== "live" && (
+              <button
+                onClick={() => removeScenario(activeScenario)}
+                className="p-0.5 rounded transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+                title={`Remove scenario "${activeScenario}"`}
+              >
+                <X size={11} />
+              </button>
+            )}
+            {addingScenario ? (
+              <form
+                className="flex items-center gap-0.5"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (newScenarioName.trim()) {
+                    addScenario(newScenarioName)
+                    setActiveScenario(newScenarioName.trim().toLowerCase().replace(/\s+/g, "_"))
+                  }
+                  setAddingScenario(false)
+                  setNewScenarioName("")
+                }}
+              >
+                <input
+                  autoFocus
+                  value={newScenarioName}
+                  onChange={(e) => setNewScenarioName(e.target.value)}
+                  onBlur={() => { setAddingScenario(false); setNewScenarioName("") }}
+                  placeholder="name"
+                  className="w-20 px-1 py-0.5 text-[11px] font-mono rounded focus:outline-none"
+                  style={{ background: 'var(--chrome-hover)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}
+                />
+              </form>
+            ) : (
+              <button
+                onClick={() => setAddingScenario(true)}
+                className="p-0.5 rounded transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+                title="Add scenario"
+              >
+                <Plus size={12} />
+              </button>
+            )}
+          </div>
         </div>
         <button
           onClick={onOpenSettings}

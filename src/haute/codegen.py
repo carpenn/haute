@@ -64,7 +64,7 @@ def {func_name}() -> pl.LazyFrame:
 '''
 
 _LIVE_SWITCH = '''\
-@pipeline.node(live_switch=True, mode="{mode}")
+@pipeline.node(live_switch=True, input_scenario_map={input_scenario_map_repr})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {active_param}
@@ -96,16 +96,74 @@ _MODEL_SCORE = '''\
 @pipeline.node({decorator_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    df = {first_param}
+    import atexit
+    import os
+    import tempfile
+
+    import pyarrow.parquet as pq
+
     from haute.graph_utils import load_mlflow_model
+
+    lf = {first_param}
     model = load_mlflow_model({load_kwargs})
-    # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
-    df_eager = df.collect()
-    features = [f for f in model.feature_names_ if f in df_eager.columns]
-    X = df_eager.select(features).to_pandas()
-    preds = model.predict(X).flatten()
-    df_eager = df_eager.with_columns(pl.Series("{output_column}", preds))
-{proba_block}    result = df_eager.lazy()
+    features = [
+        f for f in model.feature_names_
+        if f in set(lf.collect_schema().names())
+    ]
+
+    # Null handling: float32 for numerics (null→NaN), sentinel for cats
+    cat_idx = (
+        set(model.get_cat_feature_indices())
+        if hasattr(model, "get_cat_feature_indices") else set()
+    )
+    cat_names = {{features[i] for i in cat_idx if i < len(features)}}
+    _num = [c for c in features if c not in cat_names]
+    _cat = [c for c in features if c in cat_names]
+
+    def _prepare(chunk: pl.DataFrame):
+        sel = chunk.select(features)
+        if _num:
+            sel = sel.with_columns(
+                [pl.col(c).cast(pl.Float32) for c in _num]
+            )
+        if _cat:
+            sel = sel.with_columns(
+                [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical)
+                 for c in _cat]
+            )
+        return sel.to_pandas() if _cat else sel.to_numpy()
+
+    # 1. Sink upstream to temp parquet (streaming — low memory)
+    fd1, in_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_score_in_")
+    os.close(fd1)
+    try:
+        lf.sink_parquet(in_path)
+    except Exception:
+        lf.collect(engine="streaming").write_parquet(in_path)
+
+    # 2. Score in batches → scored parquet
+    fd2, out_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_score_out_")
+    os.close(fd2)
+    atexit.register(lambda p=out_path: os.unlink(p) if os.path.exists(p) else None)
+    pf = pq.ParquetFile(in_path)
+    writer = None
+    try:
+        for batch in pf.iter_batches(batch_size=500_000):
+            chunk = pl.from_arrow(batch)
+            X = _prepare(chunk)
+            preds = model.predict(X).flatten()
+            chunk = chunk.with_columns(pl.Series("{output_column}", preds))
+{proba_block_batched}            table = chunk.to_arrow()
+            if writer is None:
+                writer = pq.ParquetWriter(out_path, table.schema)
+            writer.write_table(table)
+            del chunk, X, table
+    finally:
+        if writer is not None:
+            writer.close()
+    os.unlink(in_path)
+
+    result = pl.scan_parquet(out_path)
 {user_code_block}    return result
 '''
 
@@ -322,17 +380,19 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
 
     elif node_type == NodeType.LIVE_SWITCH:
         params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
-        mode = config.get("mode", "live")
+        input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
         first_param = source_names[0] if source_names else "df"
-        if mode == "live" or mode not in source_names:
-            active_param = first_param
-        else:
-            active_param = mode
+        # Generated code always routes to the "live" input
+        active_param = first_param
+        for inp, scn in input_scenario_map.items():
+            if scn == "live" and inp in source_names:
+                active_param = inp
+                break
         return _LIVE_SWITCH.format(
             func_name=func_name,
             description=description,
             params=params,
-            mode=mode,
+            input_scenario_map_repr=repr(input_scenario_map),
             active_param=active_param,
         )
 
@@ -399,15 +459,16 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
         params = _build_params(source_names)
         first_param = source_names[0] if source_names else "df"
 
-        proba_block = ""
+        proba_block_batched = ""
         if task_val == "classification":
-            proba_block = (
-                f'    if hasattr(model, "predict_proba"):\n'
-                f"        probas = model.predict_proba(X)\n"
-                f"        if probas.ndim == 2:\n"
-                f"            probas = probas[:, 1]\n"
-                f'        df_eager = df_eager.with_columns(\n'
-                f'            pl.Series("{output_column}_proba", probas))\n'
+            proba_block_batched = (
+                f'            if hasattr(model, "predict_proba"):\n'
+                f"                probas = model.predict_proba(X)\n"
+                f"                if probas.ndim == 2:\n"
+                f"                    probas = probas[:, 1]\n"
+                f"                chunk = chunk.with_columns(\n"
+                f'                    pl.Series("{output_column}_proba",'
+                f" probas))\n"
             )
 
         user_code_block = ""
@@ -461,7 +522,7 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
             decorator_kwargs=decorator_kwargs,
             load_kwargs=load_kwargs,
             output_column=output_column,
-            proba_block=proba_block,
+            proba_block_batched=proba_block_batched,
             user_code_block=user_code_block,
         )
 

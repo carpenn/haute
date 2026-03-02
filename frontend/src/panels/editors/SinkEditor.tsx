@@ -4,6 +4,7 @@ import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./_shared"
 import { executeSink } from "../../api/client"
 import { configField } from "../../utils/configField"
 import { buildGraph } from "../../utils/buildGraph"
+import useUIStore from "../../stores/useUIStore"
 
 export default function SinkEditor({
   config,
@@ -35,7 +36,7 @@ export default function SinkEditor({
 
     const graph = buildGraph(allNodes, edges, submodels, preamble)
 
-    executeSink(graph, nodeId)
+    executeSink(graph, nodeId, useUIStore.getState().activeScenario)
       .then((data) => {
         setWriteResult({ status: data.status || "ok", message: data.message || "Written successfully" })
         setWriting(false)

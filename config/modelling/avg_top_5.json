@@ -20,5 +20,6 @@
   "metrics": [
     "gini",
     "rmse"
-  ]
+  ],
+  "row_limit": 1000000
 }

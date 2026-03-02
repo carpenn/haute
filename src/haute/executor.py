@@ -176,6 +176,7 @@ def _build_node_fn(
     node_map: dict[str, GraphNode] | None = None,
     orig_source_names: list[str] | None = None,
     preamble_ns: dict[str, Any] | None = None,
+    scenario: str | None = None,
 ) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
@@ -184,6 +185,8 @@ def _build_node_fn(
     row_limit: if set, Databricks sources push this into SQL LIMIT so the
         full table is never fetched during preview/trace.
     node_map: full graph node_map — used to resolve ``instanceOf`` references.
+    scenario: the active execution scenario (``"live"`` for eager scoring,
+        anything else for batched parquet scoring).
     """
     # Resolve instance → use original's config/nodeType
     if node_map:
@@ -268,17 +271,25 @@ def _build_node_fn(
         return func_name, constant_fn, True
 
     elif node_type == NodeType.LIVE_SWITCH:
-        mode = config.get("mode", "live")
+        input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
         input_names = list(source_names)
-        param_names = config.get("inputs", [])
-        live_name = param_names[0] if param_names else None
+        _scenario = scenario or "live"
 
         def switch_fn(*dfs: _Frame) -> _Frame:
-            target = live_name if mode == "live" else mode
-            if target:
-                for i, name in enumerate(input_names):
-                    if name == target:
-                        return dfs[i]
+            # Find the input mapped to the active scenario
+            for inp, scn in input_scenario_map.items():
+                if scn == _scenario:
+                    for i, name in enumerate(input_names):
+                        if name == inp:
+                            return dfs[i]
+            # Fallback: first input + log warning
+            if input_scenario_map:
+                logger.warning(
+                    "live_switch_unmapped_scenario",
+                    scenario=_scenario,
+                    mapped_scenarios=list(input_scenario_map.values()),
+                    falling_back_to=input_names[0] if input_names else "<none>",
+                )
             return dfs[0]
 
         return func_name, switch_fn, False
@@ -493,6 +504,146 @@ def _build_node_fn(
 
             return func_name, model_score_passthrough, False
 
+        def _prepare_predict_frame(
+            model: Any, df_eager: pl.DataFrame, features: list[str],
+        ) -> Any:
+            """Prepare a DataFrame for CatBoost predict — match _build_pool null handling."""
+            cat_idx = (
+                set(model.get_cat_feature_indices())
+                if hasattr(model, "get_cat_feature_indices") else set()
+            )
+            cat_names = {features[i] for i in cat_idx if i < len(features)}
+            numeric_cols = [c for c in features if c not in cat_names]
+            cat_cols = [c for c in features if c in cat_names]
+            selected = df_eager.select(features)
+            if numeric_cols:
+                selected = selected.with_columns(
+                    [pl.col(c).cast(pl.Float32) for c in numeric_cols]
+                )
+            if cat_cols:
+                selected = selected.with_columns(
+                    [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical) for c in cat_cols]
+                )
+            return selected.to_pandas() if cat_cols else selected.to_numpy()
+
+        def _sink_to_temp(lf: pl.LazyFrame) -> str:
+            """Sink a LazyFrame to a temp parquet file via streaming."""
+            import os
+            import tempfile
+
+            fd, path = tempfile.mkstemp(
+                suffix=".parquet", prefix="haute_score_in_",
+            )
+            os.close(fd)
+            try:
+                lf.sink_parquet(path)
+            except Exception:
+                lf.collect(engine="streaming").write_parquet(path)
+            return path
+
+        _score_batch = 500_000
+
+        def _batch_score_to_parquet(
+            model: Any,
+            input_path: str,
+            features: list[str],
+            output_col: str,
+            task: str,
+        ) -> str:
+            """Score a parquet file in batches, return path to scored output."""
+            import os
+            import tempfile
+
+            import pyarrow.parquet as pq
+
+            fd, out_path = tempfile.mkstemp(
+                suffix=".parquet", prefix="haute_score_out_",
+            )
+            os.close(fd)
+
+            pf = pq.ParquetFile(input_path)
+            writer = None
+            want_proba = (
+                task == "classification"
+                and hasattr(model, "predict_proba")
+            )
+
+            try:
+                for batch in pf.iter_batches(
+                    batch_size=_score_batch,
+                ):
+                    chunk = pl.from_arrow(batch)
+                    x_data = _prepare_predict_frame(
+                        model, chunk, features,
+                    )
+                    preds = model.predict(x_data).flatten()
+                    chunk = chunk.with_columns(
+                        pl.Series(output_col, preds),
+                    )
+                    if want_proba:
+                        probas = model.predict_proba(x_data)
+                        if probas.ndim == 2:
+                            probas = probas[:, 1]
+                        chunk = chunk.with_columns(
+                            pl.Series(
+                                f"{output_col}_proba", probas,
+                            ),
+                        )
+                    table = chunk.to_arrow()
+                    if writer is None:
+                        writer = pq.ParquetWriter(
+                            out_path, table.schema,
+                        )
+                    writer.write_table(table)
+                    del chunk, x_data, table
+            finally:
+                if writer is not None:
+                    writer.close()
+            return out_path
+
+        def _score_eager(
+            model: Any, lf: pl.LazyFrame, features: list[str],
+        ) -> pl.LazyFrame:
+            """Collect and score in-memory — fast path for preview/trace."""
+            df_eager = lf.collect()
+            x_data = _prepare_predict_frame(model, df_eager, features)
+            preds = model.predict(x_data).flatten()
+            df_eager = df_eager.with_columns(
+                pl.Series(_output_col, preds),
+            )
+            if (
+                _task == "classification"
+                and hasattr(model, "predict_proba")
+            ):
+                probas = model.predict_proba(x_data)
+                if probas.ndim == 2:
+                    probas = probas[:, 1]
+                df_eager = df_eager.with_columns(
+                    pl.Series(f"{_output_col}_proba", probas),
+                )
+            return df_eager.lazy()
+
+        def _score_batched(
+            model: Any, lf: pl.LazyFrame, features: list[str],
+        ) -> pl.LazyFrame:
+            """Sink → batch score → lazy scan — low-memory path."""
+            import atexit
+            import os
+
+            input_path = _sink_to_temp(lf)
+            scored_path = _batch_score_to_parquet(
+                model, input_path, features,
+                _output_col, _task,
+            )
+            atexit.register(
+                lambda p=scored_path: os.unlink(p)
+                if os.path.exists(p) else None,
+            )
+            os.unlink(input_path)
+            return pl.scan_parquet(scored_path)
+
+        _scenario = scenario or "live"
+
         def model_score_fn(*dfs: _Frame) -> _Frame:
             from haute._mlflow_io import load_mlflow_model
 
@@ -505,25 +656,19 @@ def _build_node_fn(
                 task=_task,
             )
             lf = dfs[0] if dfs else pl.LazyFrame()
-            # Determine feature intersection before collecting so Polars
-            # can (in theory) apply projection pushdown on upstream scans.
             available_cols = set(lf.collect_schema().names())
-            features = [f for f in model.feature_names_ if f in available_cols]
-            # CatBoost requires numpy arrays; collect → predict → lazy is the minimum conversion
-            df_eager = lf.collect()
-            x_data = df_eager.select(features).to_pandas()
-            preds = model.predict(x_data).flatten()
-            df_eager = df_eager.with_columns(pl.Series(_output_col, preds))
+            features = [
+                f for f in model.feature_names_
+                if f in available_cols
+            ]
 
-            if _task == "classification" and hasattr(model, "predict_proba"):
-                probas = model.predict_proba(x_data)
-                if probas.ndim == 2:
-                    probas = probas[:, 1]
-                df_eager = df_eager.with_columns(
-                    pl.Series(f"{_output_col}_proba", probas)
-                )
+            # "live" scenario → eager collect+predict (small data, fast)
+            # Any other scenario → sink→batch score→scan parquet (large data, low memory)
+            if _scenario == "live":
+                result_lf = _score_eager(model, lf, features)
+            else:
+                result_lf = _score_batched(model, lf, features)
 
-            result_lf = df_eager.lazy()
             if code:
                 result_lf = _exec_user_code(
                     code, _src_names, (result_lf,),
@@ -722,6 +867,7 @@ def execute_graph(
     target_node_id: str | None = None,
     row_limit: int | None = None,
     max_preview_rows: int = 100,
+    scenario: str = "live",
 ) -> dict[str, NodeResult]:
     """Execute a graph and return per-node results.
 
@@ -747,7 +893,7 @@ def execute_graph(
     if not graph.nodes:
         return {}
 
-    fp = graph_fingerprint(graph, str(row_limit))
+    fp = graph_fingerprint(graph, f"{row_limit}:{scenario}")
 
     errors: dict[str, str] = {}
 
@@ -762,7 +908,7 @@ def execute_graph(
                 timings = _preview_cache.timings
             else:
                 raw_outputs, order, errors, timings = _eager_execute(
-                    graph, target_node_id, row_limit,
+                    graph, target_node_id, row_limit, scenario=scenario,
                 )
                 eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
                 merged = {**cached, **eager_outputs}
@@ -778,7 +924,7 @@ def execute_graph(
                 order = _preview_cache.order
         else:
             raw_outputs, order, errors, timings = _eager_execute(
-                graph, target_node_id, row_limit,
+                graph, target_node_id, row_limit, scenario=scenario,
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
             _preview_cache.fingerprint = fp
@@ -860,6 +1006,7 @@ def _eager_execute(
     graph: PipelineGraph,
     target_node_id: str | None,
     row_limit: int | None,
+    scenario: str = "live",
 ) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str], dict[str, float]]:
     """Execute the graph eagerly in topo order.
 
@@ -875,11 +1022,12 @@ def _eager_execute(
         row_limit=row_limit,
         swallow_errors=True,
         preamble_ns=preamble_ns or None,
+        scenario=scenario,
     )
     return result.outputs, result.order, result.errors, result.timings
 
 
-def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
+def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live") -> SinkResponse:
     """Execute the pipeline up to a sink node and write its input to disk.
 
     Uses Polars streaming sinks (``sink_parquet`` / ``sink_csv``) so the
@@ -910,6 +1058,7 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str) -> SinkResponse:
         _build_node_fn,
         target_node_id=sink_node_id,
         preamble_ns=preamble_ns or None,
+        scenario=scenario,
     )
 
     lf = lazy_outputs.get(sink_node_id)

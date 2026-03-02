@@ -233,7 +233,9 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
         if config_dir.is_dir() and not any(config_dir.iterdir()):
             config_dir.rmdir()
 
-    # Write sidecar .haute.json (node positions for the GUI)
+    # Write sidecar .haute.json (node positions + scenarios for the GUI)
+    graph.scenarios = body.scenarios
+    graph.active_scenario = body.active_scenario
     save_sidecar(py_path, graph)
 
     return SavePipelineResponse(
@@ -254,7 +256,7 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
 
     try:
         results = await asyncio.wait_for(
-            asyncio.to_thread(execute_graph, graph), timeout=300.0,
+            asyncio.to_thread(execute_graph, graph, scenario=body.scenario), timeout=300.0,
         )
         return RunPipelineResponse(status="ok", results=results)
     except TimeoutError:
@@ -376,7 +378,9 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(execute_sink, graph, sink_node_id=body.node_id),
+            asyncio.to_thread(
+                execute_sink, graph, sink_node_id=body.node_id, scenario=body.scenario,
+            ),
             timeout=300.0,
         )
         return result

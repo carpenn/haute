@@ -1,0 +1,12 @@
+{
+  "sourceType": "run",
+  "registered_model": "",
+  "version": "latest",
+  "task": "regression",
+  "output_column": "prediction",
+  "experiment_id": "2877726531663969",
+  "experiment_name": "/Shared/haute/avg_top_5",
+  "run_id": "c3b608b349e946e88dd9b26fade68ed7",
+  "run_name": "avg_top_5",
+  "artifact_path": "avg_top_5.cbm"
+}

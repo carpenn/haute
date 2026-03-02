@@ -178,7 +178,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     setMlflowResult(null)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     try {
-      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId })
+      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useUIStore.getState().activeScenario })
 
       if (result.status === "started" && result.job_id) {
         // Register job in store — background hook picks up polling
@@ -597,6 +597,31 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               </div>
             )}
           </div>
+          {/* Row limit */}
+          {(() => {
+            const rowLimit = typeof config.row_limit === "number" ? config.row_limit : null
+            return (
+              <div className="flex items-center gap-2 mt-2">
+                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Row limit</label>
+                <input
+                  type="number" min={0} step={100000}
+                  value={rowLimit ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    onUpdate("row_limit", v === "" ? null : Math.max(0, parseInt(v) || 0));
+                  }}
+                  placeholder="All rows"
+                  className="w-32 px-2 py-0.5 rounded text-xs font-mono"
+                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                />
+                {rowLimit != null && rowLimit > 0 && (
+                  <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    {rowLimit.toLocaleString()} rows
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 

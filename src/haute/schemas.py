@@ -34,6 +34,8 @@ class SavePipelineRequest(BaseModel):
     preamble: str = ""
     preserved_blocks: list[str] = Field(default_factory=list)
     source_file: str = ""
+    scenarios: list[str] = Field(default_factory=lambda: ["live"])
+    active_scenario: str = "live"
 
 
 class SavePipelineResponse(BaseModel):
@@ -50,6 +52,7 @@ class SavePipelineResponse(BaseModel):
 class RunPipelineRequest(BaseModel):
     graph: Graph
     row_limit: int = 100_000
+    scenario: str = "live"
 
 
 class NodeResult(BaseModel):
@@ -160,6 +163,7 @@ class TraceResponse(BaseModel):
 class SinkRequest(BaseModel):
     graph: Graph
     node_id: str
+    scenario: str = "live"
 
 
 class SinkResponse(BaseModel):
@@ -380,6 +384,7 @@ class SubmodelGraphResponse(BaseModel):
 class TrainRequest(BaseModel):
     graph: Graph
     node_id: str
+    scenario: str = "live"
 
 
 class TrainResponse(BaseModel):

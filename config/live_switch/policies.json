@@ -1,5 +1,9 @@
 {
-  "mode": "batch_quotes",
+  "input_scenario_map": {
+    "quotes": "live",
+    "batch_quotes": "nb_batch",
+    "feature_processing": "live"
+  },
   "inputs": [
     "quotes",
     "batch_quotes"

@@ -175,10 +175,13 @@ def score_graph(
         NodeBuildHooks(before_build=_intercept),
     )
 
+    # Deployed API always runs in "live" scenario — eager scoring, live
+    # switch routes to the live input.
     lazy_outputs, order, _parents, _names = _execute_lazy(
         graph,
         builder,
         target_node_id=output_node_id,
+        scenario="live",
     )
 
     output_lf = lazy_outputs.get(output_node_id)
