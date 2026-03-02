@@ -286,6 +286,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
                 target_node_id=body.target_node_id,
                 column=body.column,
                 row_limit=body.row_limit,
+                scenario=body.scenario,
             ),
             timeout=120.0,
         )
@@ -308,8 +309,12 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     Accepts an optional ``row_limit`` (default 1000) that is pushed into
     the Polars lazy query plan so only that many rows are scanned.
     """
+    from haute._topo import ancestors
     from haute.executor import execute_graph
-    from haute.graph_utils import flatten_graph
+    from haute.graph_utils import (
+        _prune_live_switch_edges,
+        flatten_graph,
+    )
 
     graph = flatten_graph(body.graph)
     if not graph.nodes:
@@ -322,6 +327,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 graph,
                 target_node_id=body.node_id,
                 row_limit=body.row_limit,
+                scenario=body.scenario,
             ),
             timeout=120.0,
         )
@@ -333,6 +339,20 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             )
 
         node_map = graph.node_map
+
+        # Only include timings/memory for ancestors of the target node
+        # (+ itself), pruned by the active scenario so the unused
+        # live_switch branch is excluded.
+        if body.node_id:
+            pruned = _prune_live_switch_edges(
+                graph.edges, node_map, body.scenario,
+            )
+            relevant = ancestors(
+                body.node_id, pruned, set(node_map.keys()),
+            )
+        else:
+            relevant = set(results.keys())
+
         timings = [
             {
                 "node_id": nid,
@@ -340,7 +360,17 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 "timing_ms": r.timing_ms,
             }
             for nid, r in results.items()
-            if nid in node_map
+            if nid in node_map and nid in relevant
+        ]
+
+        memory = [
+            {
+                "node_id": nid,
+                "label": node_map[nid].data.label,
+                "memory_bytes": r.memory_bytes,
+            }
+            for nid, r in results.items()
+            if nid in node_map and nid in relevant
         ]
 
         return PreviewNodeResponse(
@@ -352,7 +382,9 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             preview=node_result.preview,
             error=node_result.error,
             timing_ms=node_result.timing_ms,
+            memory_bytes=node_result.memory_bytes,
             timings=timings,
+            memory=memory,
             schema_warnings=node_result.schema_warnings,
         )
     except TimeoutError:

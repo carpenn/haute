@@ -63,6 +63,7 @@ class NodeResult(BaseModel):
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
     timing_ms: float = 0
+    memory_bytes: int = 0
     schema_warnings: list[SchemaWarning] = Field(default_factory=list)
 
 
@@ -80,12 +81,19 @@ class PreviewNodeRequest(BaseModel):
     graph: Graph
     node_id: str
     row_limit: int = 1000
+    scenario: str = "live"
 
 
 class NodeTimingInfo(BaseModel):
     node_id: str
     label: str
     timing_ms: float
+
+
+class NodeMemoryInfo(BaseModel):
+    node_id: str
+    label: str
+    memory_bytes: int
 
 
 class SchemaWarning(BaseModel):
@@ -102,7 +110,9 @@ class PreviewNodeResponse(BaseModel):
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
     timing_ms: float = 0
+    memory_bytes: int = 0
     timings: list[NodeTimingInfo] = Field(default_factory=list)
+    memory: list[NodeMemoryInfo] = Field(default_factory=list)
     schema_warnings: list[SchemaWarning] = Field(default_factory=list)
 
 
@@ -117,6 +127,7 @@ class TraceRequest(BaseModel):
     target_node_id: str | None = None
     column: str | None = None
     row_limit: int = 1000
+    scenario: str = "live"
 
 
 class SchemaDiffResponse(BaseModel):

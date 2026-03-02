@@ -30,7 +30,9 @@ export interface NodeResult {
   preview?: Record<string, unknown>[]
   error?: string | null
   timing_ms?: number
+  memory_bytes?: number
   timings?: NodeTiming[]
+  memory?: NodeMemory[]
   schema_warnings?: SchemaWarning[]
 }
 
@@ -38,6 +40,12 @@ export interface NodeTiming {
   node_id: string
   label: string
   timing_ms: number
+}
+
+export interface NodeMemory {
+  node_id: string
+  label: string
+  memory_bytes: number
 }
 
 export interface RunPipelineResponse {

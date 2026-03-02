@@ -51,7 +51,9 @@ function resultToPreview(nodeId: string, label: string, r: NodeResult): PreviewD
     preview: r.preview ?? [],
     error: r.error ?? null,
     timing_ms: r.timing_ms ?? 0,
+    memory_bytes: r.memory_bytes ?? 0,
     timings: r.timings ?? [],
+    memory: r.memory ?? [],
     schema_warnings: r.schema_warnings ?? [],
   })
 }
@@ -64,6 +66,7 @@ export default function usePipelineAPI({
   nodeIdCounter,
 }: PipelineAPIParams): PipelineAPIReturn {
   const rowLimit = useUIStore((s) => s.rowLimit)
+  const activeScenario = useUIStore((s) => s.activeScenario)
   const setDirty = useUIStore((s) => s.setDirty)
   const addToast = useUIStore((s) => s.addToast)
   const [loading, setLoading] = useState(true)
@@ -127,7 +130,7 @@ export default function usePipelineAPI({
 
     const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
 
-    previewNode(graph, node.id, rowLimit, { signal: controller.signal })
+    previewNode(graph, node.id, rowLimit, activeScenario, { signal: controller.signal })
       .then((result) => {
         const preview = resultToPreview(node.id, label, result)
         setPreviewData(preview)
@@ -142,7 +145,7 @@ export default function usePipelineAPI({
           setPreviewData(makePreviewData(node.id, label, { status: "error", error: err.message }))
         }
       })
-  }, [rowLimit, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+  }, [rowLimit, activeScenario, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
 
   const fetchPreview = useCallback((node: Node) => {
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
@@ -183,7 +186,23 @@ export default function usePipelineAPI({
         }))
 
         if (selectedNode && results[selectedNode.id]) {
-          setPreviewData(resultToPreview(selectedNode.id, nodeLabel(selectedNode), results[selectedNode.id]))
+          // Build timings from all run results so the toolbar can show the full breakdown
+          const allTimings = Object.entries(results).map(([nid, r]) => {
+            const matchingNode = nodes.find((n) => n.id === nid)
+            return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, timing_ms: r.timing_ms ?? 0 }
+          })
+          const allMemory = Object.entries(results).map(([nid, r]) => {
+            const matchingNode = nodes.find((n) => n.id === nid)
+            return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, memory_bytes: r.memory_bytes ?? 0 }
+          })
+          const totalMs = allTimings.reduce((s, t) => s + t.timing_ms, 0)
+          const totalMemory = allMemory.reduce((s, m) => s + m.memory_bytes, 0)
+          const preview = resultToPreview(selectedNode.id, nodeLabel(selectedNode), results[selectedNode.id])
+          preview.timings = allTimings
+          preview.timing_ms = totalMs
+          preview.memory = allMemory
+          preview.memory_bytes = totalMemory
+          setPreviewData(preview)
         }
       })
       .catch((err) => {

@@ -286,6 +286,45 @@ class TestExecuteTrace:
         with pytest.raises(ValueError, match="not found"):
             execute_trace(graph, target_node_id="nonexistent")
 
+    def test_trace_respects_scenario_pruning(self, tmp_path):
+        """Trace with a non-live scenario should exclude the live branch
+        behind a live_switch node (regression test for scenario threading)."""
+        from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+
+        p_live = tmp_path / "live.parquet"
+        p_batch = tmp_path / "batch.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p_live)
+        pl.DataFrame({"x": [10, 20]}).write_parquet(p_batch)
+
+        graph = PipelineGraph(nodes=[
+            GraphNode(id="live_src", data=NodeData(
+                label="live_src", nodeType="dataSource",
+                config={"path": str(p_live)},
+            )),
+            GraphNode(id="batch_src", data=NodeData(
+                label="batch_src", nodeType="dataSource",
+                config={"path": str(p_batch)},
+            )),
+            GraphNode(id="sw", data=NodeData(
+                label="switch", nodeType="liveSwitch",
+                config={"input_scenario_map": {
+                    "live_src": "live",
+                    "batch_src": "nb_batch",
+                }},
+            )),
+        ], edges=[
+            GraphEdge(id="e1", source="live_src", target="sw"),
+            GraphEdge(id="e2", source="batch_src", target="sw"),
+        ])
+
+        result = execute_trace(
+            graph, row_index=0, target_node_id="sw",
+            scenario="nb_batch",
+        )
+        step_ids = {s.node_id for s in result.steps}
+        assert "batch_src" in step_ids
+        assert "live_src" not in step_ids
+
 
 # ---------------------------------------------------------------------------
 # trace_result_to_dict

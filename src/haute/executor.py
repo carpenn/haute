@@ -841,7 +841,10 @@ def _apply_ratebook(
 class _PreviewCache:
     """Thread-safe single-entry cache for the most recent pipeline execution."""
 
-    __slots__ = ("fingerprint", "eager_outputs", "errors", "order", "timings", "_lock")
+    __slots__ = (
+        "fingerprint", "eager_outputs", "errors", "order",
+        "timings", "memory_bytes", "_lock",
+    )
 
     def __init__(self) -> None:
         self.fingerprint: str | None = None
@@ -849,6 +852,7 @@ class _PreviewCache:
         self.errors: dict[str, str] = {}
         self.order: list[str] = []
         self.timings: dict[str, float] = {}
+        self.memory_bytes: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def invalidate(self) -> None:
@@ -857,6 +861,7 @@ class _PreviewCache:
             self.eager_outputs.clear()
             self.errors.clear()
             self.timings.clear()
+            self.memory_bytes.clear()
 
 
 _preview_cache = _PreviewCache()
@@ -906,8 +911,9 @@ def execute_graph(
                 order = _preview_cache.order
                 errors = _preview_cache.errors
                 timings = _preview_cache.timings
+                memory_bytes = _preview_cache.memory_bytes
             else:
-                raw_outputs, order, errors, timings = _eager_execute(
+                raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
                     graph, target_node_id, row_limit, scenario=scenario,
                 )
                 eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -915,15 +921,17 @@ def execute_graph(
                 _preview_cache.eager_outputs = merged
                 _preview_cache.errors = {**_preview_cache.errors, **errors}
                 _preview_cache.timings = {**_preview_cache.timings, **timings}
+                _preview_cache.memory_bytes = {**_preview_cache.memory_bytes, **memory_bytes}
                 _preview_cache.order = list(
                     dict.fromkeys(_preview_cache.order + order),
                 )
                 eager_outputs = merged
                 errors = _preview_cache.errors
                 timings = _preview_cache.timings
+                memory_bytes = _preview_cache.memory_bytes
                 order = _preview_cache.order
         else:
-            raw_outputs, order, errors, timings = _eager_execute(
+            raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
                 graph, target_node_id, row_limit, scenario=scenario,
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -931,6 +939,7 @@ def execute_graph(
             _preview_cache.eager_outputs = eager_outputs
             _preview_cache.errors = errors
             _preview_cache.timings = timings
+            _preview_cache.memory_bytes = memory_bytes
             _preview_cache.order = order
 
     # Pre-compute schema warnings for instance nodes by comparing the
@@ -968,6 +977,7 @@ def execute_graph(
                 status="error",
                 error=errors[nid],
                 timing_ms=timings.get(nid, 0),
+                memory_bytes=memory_bytes.get(nid, 0),
                 schema_warnings=schema_warnings.get(nid, []),
             )
             continue
@@ -977,6 +987,7 @@ def execute_graph(
                 status="error",
                 error="No output",
                 timing_ms=timings.get(nid, 0),
+                memory_bytes=memory_bytes.get(nid, 0),
             )
             continue
         columns = [
@@ -989,6 +1000,7 @@ def execute_graph(
             columns=columns,
             preview=df.head(max_preview_rows).to_dicts(),
             timing_ms=timings.get(nid, 0),
+            memory_bytes=memory_bytes.get(nid, 0),
             schema_warnings=schema_warnings.get(nid, []),
         )
 
@@ -1007,12 +1019,16 @@ def _eager_execute(
     target_node_id: str | None,
     row_limit: int | None,
     scenario: str = "live",
-) -> tuple[dict[str, pl.DataFrame | None], list[str], dict[str, str], dict[str, float]]:
+) -> tuple[
+    dict[str, pl.DataFrame | None], list[str],
+    dict[str, str], dict[str, float], dict[str, int],
+]:
     """Execute the graph eagerly in topo order.
 
-    Returns (outputs, order, errors, timings) where errors maps
-    node_id → message for nodes that failed, and timings maps
-    node_id → execution milliseconds.
+    Returns (outputs, order, errors, timings, memory_bytes) where errors maps
+    node_id → message for nodes that failed, timings maps
+    node_id → execution milliseconds, and memory_bytes maps
+    node_id → output DataFrame size in bytes.
     """
     preamble_ns = _compile_preamble(graph.preamble or "")
     result = _execute_eager_core(
@@ -1024,7 +1040,7 @@ def _eager_execute(
         preamble_ns=preamble_ns or None,
         scenario=scenario,
     )
-    return result.outputs, result.order, result.errors, result.timings
+    return result.outputs, result.order, result.errors, result.timings, result.memory_bytes
 
 
 def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live") -> SinkResponse:

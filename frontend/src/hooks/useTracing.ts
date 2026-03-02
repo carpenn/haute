@@ -34,7 +34,7 @@ export default function useTracing({
   preambleRef,
   nodeStatuses,
 }: TracingParams): TracingReturn {
-  const { rowLimit, addToast } = useUIStore()
+  const { rowLimit, activeScenario, addToast } = useUIStore()
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
   const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
 
@@ -47,7 +47,7 @@ export default function useTracing({
     if (!selectedNode) return
     const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
     setTracedCell({ rowIndex, column })
-    traceCell({ graph, row_index: rowIndex, target_node_id: selectedNode.id, column, row_limit: rowLimit })
+    traceCell({ graph, row_index: rowIndex, target_node_id: selectedNode.id, column, row_limit: rowLimit, scenario: activeScenario })
       .then((data) => {
         if (data.status === "ok" && data.trace) {
           setTraceResult(data.trace as unknown as TraceResult)
@@ -60,7 +60,7 @@ export default function useTracing({
         addToast("error", `Trace error: ${err.message}`)
         clearTrace()
       })
-  }, [selectedNode, graphRef, parentGraphRef, submodelsRef, preambleRef, rowLimit, addToast, clearTrace])
+  }, [selectedNode, graphRef, parentGraphRef, submodelsRef, preambleRef, rowLimit, activeScenario, addToast, clearTrace])
 
   // Map child node IDs → submodel placeholder node IDs
   const childToSubmodelId = useMemo(() => {

@@ -204,6 +204,7 @@ def execute_trace(
     target_node_id: str | None = None,
     column: str | None = None,
     row_limit: int = 1000,
+    scenario: str = "live",
 ) -> TraceResult:
     """Execute a pipeline graph and return a single-row trace.
 
@@ -214,6 +215,7 @@ def execute_trace(
         column: Optional column name - if set, only include nodes that touch it.
         row_limit: Max rows to process per source node (matches the preview limit
                    so the trace operates on the same data the user sees).
+        scenario: Active execution scenario (``"live"`` = API path).
 
     Returns:
         TraceResult with per-node steps showing how the row was produced.
@@ -238,7 +240,7 @@ def execute_trace(
     # The pipeline structure doesn't change between trace clicks — only the
     # row_index and column change.  Cache the materialized DataFrames and
     # reuse them: first click ~1.7s, subsequent clicks <10ms.
-    fp = graph_fingerprint(graph, target_node_id, str(row_limit))
+    fp = graph_fingerprint(graph, target_node_id, f"{row_limit}:{scenario}")
 
     cache_hit = False
     with _cache._lock:
@@ -260,6 +262,7 @@ def execute_trace(
             row_limit=row_limit,
             swallow_errors=False,
             preamble_ns=preamble_ns or None,
+            scenario=scenario,
         )
         # Trace never swallows errors so all values are DataFrames here.
         eager_outputs = {

@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from "react"
-import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2, Timer } from "lucide-react"
+import { useState, useCallback, useRef, useEffect } from "react"
+import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2 } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { formatValue } from "../utils/formatValue"
 import { useDragResize } from "../hooks/useDragResize"
 import type { ColumnInfo } from "../types/node"
-import type { SchemaWarning, NodeTiming } from "../api/types"
+import type { SchemaWarning, NodeTiming, NodeMemory } from "../api/types"
 
 export interface PreviewData {
   nodeId: string
@@ -16,7 +16,9 @@ export interface PreviewData {
   preview: Record<string, unknown>[]
   error: string | null
   timing_ms?: number
+  memory_bytes?: number
   timings?: NodeTiming[]
+  memory?: NodeMemory[]
   schema_warnings?: SchemaWarning[]
 }
 
@@ -35,8 +37,6 @@ const OVERSCAN = 10
 export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 256, minHeight: 120, maxHeight: 600 })
-  const [showTimings, setShowTimings] = useState(false)
-
   // Virtual scrolling state
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -67,15 +67,6 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
     const ref = rafRef
     return () => cancelAnimationFrame(ref.current)
   }, [])
-
-  const timings = data?.timings
-  const timingData = useMemo(() => {
-    if (!timings?.length) return null
-    const sorted = [...timings].sort((a, b) => b.timing_ms - a.timing_ms)
-    const maxMs = sorted[0]?.timing_ms || 1
-    const totalMs = sorted.reduce((s, t) => s + t.timing_ms, 0)
-    return { sorted, maxMs, totalMs }
-  }, [timings])
 
   if (!data) return null
 
@@ -121,21 +112,6 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
             <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
               {data.row_count.toLocaleString()} rows · {data.column_count} cols
             </span>
-            {data.timings && data.timings.length > 0 && (
-              <button
-                onClick={() => setShowTimings((v) => !v)}
-                className="ml-1 p-0.5 rounded transition-colors"
-                style={{
-                  color: showTimings ? 'var(--accent)' : 'var(--text-muted)',
-                  background: showTimings ? 'var(--accent-soft)' : 'transparent',
-                }}
-                onMouseEnter={(e) => { if (!showTimings) e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { if (!showTimings) e.currentTarget.style.color = 'var(--text-muted)' }}
-                title="Toggle node timing breakdown"
-              >
-                <Timer size={13} />
-              </button>
-            )}
           </>
         )}
 
@@ -171,51 +147,6 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
       </div>
 
       {/* Timing breakdown */}
-      {showTimings && timingData && (
-        <div className="px-4 py-2 overflow-y-auto" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)', maxHeight: 160 }}>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-              Pipeline Timing
-            </span>
-            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
-              {timingData.totalMs < 1000 ? `${timingData.totalMs.toFixed(0)}ms` : `${(timingData.totalMs / 1000).toFixed(2)}s`} total
-            </span>
-          </div>
-          {timingData.sorted.map((t) => {
-            const pct = t.timing_ms / timingData.maxMs
-            const barColor = pct > 0.7 ? '#ef4444' : pct > 0.3 ? '#eab308' : '#22c55e'
-            return (
-              <div key={t.node_id} className="flex items-center gap-2 py-0.5">
-                <span
-                  className="text-[11px] truncate shrink-0"
-                  style={{
-                    width: 100,
-                    color: t.node_id === data.nodeId ? 'var(--accent)' : 'var(--text-secondary)',
-                    fontWeight: t.node_id === data.nodeId ? 600 : 400,
-                  }}
-                  title={t.label}
-                >
-                  {t.label}
-                </span>
-                <div className="flex-1 h-3 rounded-sm overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
-                  <div
-                    className="h-full rounded-sm transition-all"
-                    style={{
-                      width: `${Math.max(2, (t.timing_ms / timingData.maxMs) * 100)}%`,
-                      background: barColor,
-                      opacity: t.node_id === data.nodeId ? 1 : 0.6,
-                    }}
-                  />
-                </div>
-                <span className="text-[10px] font-mono shrink-0 w-12 text-right" style={{ color: 'var(--text-muted)' }}>
-                  {t.timing_ms < 1000 ? `${t.timing_ms.toFixed(1)}ms` : `${(t.timing_ms / 1000).toFixed(2)}s`}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
       {/* Data table */}
       {data.status === "loading" ? (
         <div className="flex-1 flex items-center justify-center">

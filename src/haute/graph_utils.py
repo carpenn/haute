@@ -18,6 +18,9 @@ from haute._execute_lazy import EagerResult as EagerResult
 from haute._execute_lazy import _execute_eager_core as _execute_eager_core
 from haute._execute_lazy import _execute_lazy as _execute_lazy
 from haute._execute_lazy import _prepare_graph as _prepare_graph
+from haute._execute_lazy import (
+    _prune_live_switch_edges as _prune_live_switch_edges,
+)
 from haute._flatten import flatten_graph as flatten_graph
 from haute._io import _object_cache as _object_cache
 from haute._io import load_external_object as load_external_object

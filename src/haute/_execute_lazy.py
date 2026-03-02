@@ -11,7 +11,9 @@ import polars as pl
 from haute._logging import get_logger
 from haute._topo import ancestors, topo_sort_ids
 from haute._types import (
+    GraphEdge,
     GraphNode,
+    NodeType,
     PipelineGraph,
     _Frame,
     _sanitize_func_name,
@@ -21,9 +23,61 @@ from haute._types import (
 logger = get_logger(component="execute")
 
 
+def _prune_live_switch_edges(
+    edges: list[GraphEdge],
+    node_map: dict[str, GraphNode],
+    scenario: str,
+) -> list[GraphEdge]:
+    """Remove edges to live_switch nodes from inputs inactive for *scenario*.
+
+    A live_switch node's config contains ``input_scenario_map`` which maps
+    each input name to the scenario it serves.  Only edges from inputs
+    matching the active scenario are kept; the unused branch is pruned so
+    it is neither executed nor shown in profilers.
+    """
+    switch_nodes = {
+        nid: node for nid, node in node_map.items()
+        if node.data.nodeType == NodeType.LIVE_SWITCH
+    }
+    if not switch_nodes:
+        return edges
+
+    exclude: set[tuple[str, str]] = set()
+    for nid, node in switch_nodes.items():
+        ism: dict[str, str] = node.data.config.get(
+            "input_scenario_map", {},
+        )
+        if not ism:
+            continue
+        # If no input matches the active scenario, keep all edges
+        # so the runtime fallback in switch_fn still works.
+        if scenario not in ism.values():
+            continue
+        # For each direct parent edge, check if its name maps to a
+        # different scenario — if so, exclude the edge.
+        for e in edges:
+            if e.target != nid:
+                continue
+            parent = node_map.get(e.source)
+            if parent is None:
+                continue
+            parent_name = _sanitize_func_name(parent.data.label)
+            mapped = ism.get(parent_name)
+            if mapped is not None and mapped != scenario:
+                exclude.add((e.source, nid))
+
+    if not exclude:
+        return edges
+    return [
+        e for e in edges
+        if (e.source, e.target) not in exclude
+    ]
+
+
 def _prepare_graph(
     graph: PipelineGraph,
     target_node_id: str | None = None,
+    scenario: str = "live",
 ) -> tuple[
     dict[str, GraphNode],  # node_map
     list[str],  # order (topo-sorted node IDs)
@@ -34,9 +88,8 @@ def _prepare_graph(
 
     Returns (node_map, order, parents_of, id_to_name).
     """
-    edges = graph.edges
-
     node_map = graph.node_map
+    edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
     all_ids = set(node_map.keys())
 
     if target_node_id:
@@ -83,7 +136,9 @@ def _execute_lazy(
     Returns:
         (lazy_outputs, order, parents_of, id_to_name)
     """
-    node_map, order, parents_of, id_to_name = _prepare_graph(graph, target_node_id)
+    node_map, order, parents_of, id_to_name = _prepare_graph(
+        graph, target_node_id, scenario=scenario,
+    )
 
     # Full parent lookup from ALL edges for instance resolution
     all_parents = graph.parents_of
@@ -179,6 +234,7 @@ class EagerResult(NamedTuple):
     id_to_name: dict[str, str]
     errors: dict[str, str]
     timings: dict[str, float]
+    memory_bytes: dict[str, int]
 
 
 def _execute_eager_core(
@@ -205,10 +261,11 @@ def _execute_eager_core(
 
     Returns:
         An ``EagerResult`` with named fields for outputs, order,
-        parents_of, node_map, id_to_name, errors, and timings.
+        parents_of, node_map, id_to_name, errors, timings, and
+        memory_bytes.
     """
     node_map, order, parents_of, id_to_name = _prepare_graph(
-        graph, target_node_id,
+        graph, target_node_id, scenario=scenario,
     )
 
     # Full parent lookup from ALL edges for instance resolution
@@ -223,6 +280,7 @@ def _execute_eager_core(
     eager_outputs: dict[str, pl.DataFrame | None] = {}
     errors: dict[str, str] = {}
     timings: dict[str, float] = {}
+    memory_bytes: dict[str, int] = {}
 
     for nid in order:
         fn, is_source = funcs[nid]
@@ -247,6 +305,7 @@ def _execute_eager_core(
 
             df = result.collect(engine="streaming") if isinstance(result, pl.LazyFrame) else result
             eager_outputs[nid] = df
+            memory_bytes[nid] = df.estimated_size("b")
         except Exception as exc:
             if not swallow_errors:
                 raise
@@ -255,4 +314,7 @@ def _execute_eager_core(
             errors[nid] = str(exc)
         timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
 
-    return EagerResult(eager_outputs, order, parents_of, node_map, id_to_name, errors, timings)
+    return EagerResult(
+        eager_outputs, order, parents_of, node_map,
+        id_to_name, errors, timings, memory_bytes,
+    )

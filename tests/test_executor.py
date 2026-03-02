@@ -338,6 +338,117 @@ class TestBuildNodeFn:
 
 
 # ---------------------------------------------------------------------------
+# _prune_live_switch_edges
+# ---------------------------------------------------------------------------
+
+
+class TestPruneLiveSwitchEdges:
+    """Verify that live_switch edge pruning excludes the inactive branch."""
+
+    def _make_live_switch_graph(self):
+        """Build a graph with a live_switch: api → feat → switch ← batch."""
+        from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
+
+        return PipelineGraph(nodes=[
+            GraphNode(id="api", data=NodeData(
+                label="quotes", nodeType="apiInput",
+                config={"path": "data/q.jsonl"},
+            )),
+            GraphNode(id="feat", data=NodeData(
+                label="feature_processing", nodeType="transform",
+                config={"code": ""},
+            )),
+            GraphNode(id="batch", data=NodeData(
+                label="batch_quotes", nodeType="dataSource",
+                config={"path": "data/batch.parquet"},
+            )),
+            GraphNode(id="sw", data=NodeData(
+                label="policies", nodeType="liveSwitch",
+                config={"input_scenario_map": {
+                    "feature_processing": "live",
+                    "batch_quotes": "nb_batch",
+                }},
+            )),
+            GraphNode(id="down", data=NodeData(
+                label="downstream", nodeType="transform",
+                config={"code": ""},
+            )),
+        ], edges=[
+            GraphEdge(id="e1", source="api", target="feat"),
+            GraphEdge(id="e2", source="feat", target="sw"),
+            GraphEdge(id="e3", source="batch", target="sw"),
+            GraphEdge(id="e4", source="sw", target="down"),
+        ])
+
+    def test_live_scenario_prunes_batch_branch(self):
+        from haute._execute_lazy import _prune_live_switch_edges
+
+        g = self._make_live_switch_graph()
+        pruned = _prune_live_switch_edges(g.edges, g.node_map, "live")
+        edge_pairs = {(e.source, e.target) for e in pruned}
+        # batch→sw edge should be removed
+        assert ("batch", "sw") not in edge_pairs
+        # feat→sw edge should remain
+        assert ("feat", "sw") in edge_pairs
+        assert ("api", "feat") in edge_pairs
+
+    def test_nb_batch_scenario_prunes_live_branch(self):
+        from haute._execute_lazy import _prune_live_switch_edges
+
+        g = self._make_live_switch_graph()
+        pruned = _prune_live_switch_edges(
+            g.edges, g.node_map, "nb_batch",
+        )
+        edge_pairs = {(e.source, e.target) for e in pruned}
+        # feat→sw edge should be removed
+        assert ("feat", "sw") not in edge_pairs
+        # batch→sw edge should remain
+        assert ("batch", "sw") in edge_pairs
+
+    def test_no_live_switch_returns_all_edges(self):
+        """Graph without live_switch nodes should return edges unchanged."""
+        from haute._execute_lazy import _prune_live_switch_edges
+
+        g = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _transform_node("t", ""),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        pruned = _prune_live_switch_edges(g.edges, g.node_map, "live")
+        assert len(pruned) == len(g.edges)
+
+    def test_prepare_graph_excludes_pruned_ancestors(self):
+        """_prepare_graph with scenario should exclude the inactive branch
+        from the topo order entirely."""
+        from haute._execute_lazy import _prepare_graph
+
+        g = self._make_live_switch_graph()
+        _, order, parents_of, id_to_name = _prepare_graph(
+            g, target_node_id="down", scenario="live",
+        )
+        # batch should not be in the execution order
+        assert "batch" not in order
+        assert "api" in order
+        assert "feat" in order
+        assert "sw" in order
+
+    def test_prepare_graph_nb_batch_excludes_live_branch(self):
+        from haute._execute_lazy import _prepare_graph
+
+        g = self._make_live_switch_graph()
+        _, order, parents_of, id_to_name = _prepare_graph(
+            g, target_node_id="down", scenario="nb_batch",
+        )
+        # api and feat should not be in the execution order
+        assert "api" not in order
+        assert "feat" not in order
+        assert "batch" in order
+        assert "sw" in order
+
+
+# ---------------------------------------------------------------------------
 # execute_graph
 # ---------------------------------------------------------------------------
 
@@ -374,6 +485,37 @@ class TestExecuteGraph:
         for nid in ("src", "t"):
             assert isinstance(results[nid].timing_ms, float)
             assert results[nid].timing_ms >= 0
+
+    def test_memory_bytes_present(self, tmp_path):
+        p = tmp_path / "mem.parquet"
+        pl.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t", ".with_columns(z=pl.col('x') * 2)"),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        results = execute_graph(graph)
+        for nid in ("src", "t"):
+            assert isinstance(results[nid].memory_bytes, int)
+            assert results[nid].memory_bytes > 0
+
+    def test_memory_bytes_zero_on_error(self, tmp_path):
+        p = tmp_path / "ok.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("bad", "df.select('nonexistent_column')"),
+            ],
+            "edges": [_edge("src", "bad")],
+        })
+        results = execute_graph(graph)
+        assert results["bad"].status == "error"
+        assert results["bad"].memory_bytes == 0
 
     def test_empty_graph(self):
         assert execute_graph(_g({"nodes": [], "edges": []})) == {}

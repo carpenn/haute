@@ -429,6 +429,9 @@ function FlowEditor() {
         runStatus={runStatus}
         onSave={handleSave}
         wsStatus={wsStatus}
+        lastRunMs={previewData?.timing_ms}
+        timings={previewData?.timings}
+        memory={previewData?.memory}
       />
 
       <div className="flex-1 flex min-h-0">

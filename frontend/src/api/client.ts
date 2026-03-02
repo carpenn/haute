@@ -103,9 +103,12 @@ export function previewNode(
   graph: GraphPayload,
   nodeId: string,
   rowLimit: number,
+  scenario?: string,
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<NodeResult & { node_id: string }> {
-  return post("/api/pipeline/preview", { graph, node_id: nodeId, row_limit: rowLimit }, {
+  return post("/api/pipeline/preview", {
+    graph, node_id: nodeId, row_limit: rowLimit, scenario: scenario ?? "live",
+  }, {
     timeout: 120_000,
     ...options,
   })
@@ -141,6 +144,7 @@ export function traceCell(
     target_node_id: string
     column?: string | null
     row_limit?: number
+    scenario?: string
   },
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<TraceResponse> {
