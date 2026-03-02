@@ -504,27 +504,8 @@ def _build_node_fn(
 
             return func_name, model_score_passthrough, False
 
-        def _prepare_predict_frame(
-            model: Any, df_eager: pl.DataFrame, features: list[str],
-        ) -> Any:
-            """Prepare a DataFrame for CatBoost predict — match _build_pool null handling."""
-            cat_idx = (
-                set(model.get_cat_feature_indices())
-                if hasattr(model, "get_cat_feature_indices") else set()
-            )
-            cat_names = {features[i] for i in cat_idx if i < len(features)}
-            numeric_cols = [c for c in features if c not in cat_names]
-            cat_cols = [c for c in features if c in cat_names]
-            selected = df_eager.select(features)
-            if numeric_cols:
-                selected = selected.with_columns(
-                    [pl.col(c).cast(pl.Float32) for c in numeric_cols]
-                )
-            if cat_cols:
-                selected = selected.with_columns(
-                    [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical) for c in cat_cols]
-                )
-            return selected.to_pandas() if cat_cols else selected.to_numpy()
+        # Import shared scoring helper (avoids duplication with deploy scorer)
+        from haute._mlflow_io import _prepare_predict_frame
 
         def _sink_to_temp(lf: pl.LazyFrame) -> str:
             """Sink a LazyFrame to a temp parquet file via streaming."""
@@ -604,24 +585,9 @@ def _build_node_fn(
         def _score_eager(
             model: Any, lf: pl.LazyFrame, features: list[str],
         ) -> pl.LazyFrame:
-            """Collect and score in-memory — fast path for preview/trace."""
-            df_eager = lf.collect()
-            x_data = _prepare_predict_frame(model, df_eager, features)
-            preds = model.predict(x_data).flatten()
-            df_eager = df_eager.with_columns(
-                pl.Series(_output_col, preds),
-            )
-            if (
-                _task == "classification"
-                and hasattr(model, "predict_proba")
-            ):
-                probas = model.predict_proba(x_data)
-                if probas.ndim == 2:
-                    probas = probas[:, 1]
-                df_eager = df_eager.with_columns(
-                    pl.Series(f"{_output_col}_proba", probas),
-                )
-            return df_eager.lazy()
+            """Collect and score in-memory — delegates to shared helper."""
+            from haute._mlflow_io import _score_eager as score_eager_
+            return score_eager_(model, lf, features, _output_col, _task)
 
         def _score_batched(
             model: Any, lf: pl.LazyFrame, features: list[str],
@@ -643,6 +609,7 @@ def _build_node_fn(
             return pl.scan_parquet(scored_path)
 
         _scenario = scenario or "live"
+        _row_limit = row_limit
 
         def model_score_fn(*dfs: _Frame) -> _Frame:
             from haute._mlflow_io import load_mlflow_model
@@ -662,9 +629,10 @@ def _build_node_fn(
                 if f in available_cols
             ]
 
-            # "live" scenario → eager collect+predict (small data, fast)
-            # Any other scenario → sink→batch score→scan parquet (large data, low memory)
-            if _scenario == "live":
+            # Eager path: "live" scenario or row-limited preview/trace
+            # (data is small, no need for disk round-trip).
+            # Batched path: non-live production scoring (large data, low memory).
+            if _scenario == "live" or _row_limit:
                 result_lf = _score_eager(model, lf, features)
             else:
                 result_lf = _score_batched(model, lf, features)

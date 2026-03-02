@@ -156,6 +156,45 @@ def score_graph(
 
                 return func_name, optimiser_apply_mlflow_fn, False
 
+        # Intercept: modelScore with remapped artifact path — load from
+        # bundled .cbm instead of downloading from MLflow at runtime.
+        if node_type == NodeType.MODEL_SCORE and remap:
+            artifact_name_part = config.get("artifact_path", "")
+            artifact_key = f"{nid}__{PurePosixPath(artifact_name_part).name}"
+            if artifact_key in remap:
+                remapped_path = remap[artifact_key]
+                _task = config.get("task", "regression")
+                _output_col = config.get("output_column", "prediction")
+                _code = config.get("code", "").strip()
+                _src_names = list(source_names)
+
+                def model_score_fn(
+                    *dfs: _Frame,
+                    _p: str = remapped_path,
+                    _t: str = _task,
+                    _oc: str = _output_col,
+                    _c: str = _code,
+                    _sn: list[str] = _src_names,
+                ) -> _Frame:
+                    from haute._mlflow_io import _load_catboost_model, _score_eager
+
+                    model = _load_catboost_model(_p, _t)
+                    lf = dfs[0] if dfs else pl.LazyFrame()
+                    available = set(lf.collect_schema().names())
+                    features = [
+                        f for f in model.feature_names_
+                        if f in available
+                    ]
+                    result_lf = _score_eager(model, lf, features, _oc, _t)
+                    if _c:
+                        result_lf = _exec_user_code(
+                            _c, _sn, (result_lf,),
+                            extra_ns={"model": model},
+                        )
+                    return result_lf
+
+                return func_name, model_score_fn, False
+
         # Intercept: static dataSource with remapped artifact path
         if node_type == NodeType.DATA_SOURCE and nid not in input_set and remap:
             raw_path = config.get("path", "")

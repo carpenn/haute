@@ -11,8 +11,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.executor import _build_node_fn, execute_graph
+from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from tests.conftest import make_edge, make_graph
 
 
@@ -43,7 +43,11 @@ def _make_model_score_graph(
         "nodes": [
             {
                 "id": "source",
-                "data": {"label": "source", "nodeType": "dataSource", "config": {"path": data_path}},
+                "data": {
+                    "label": "source",
+                    "nodeType": "dataSource",
+                    "config": {"path": data_path},
+                },
             },
             {
                 "id": "score",
@@ -148,7 +152,11 @@ class TestModelScorePassthrough:
             "nodes": [
                 {
                     "id": "source",
-                    "data": {"label": "source", "nodeType": "dataSource", "config": {"path": sample_data}},
+                    "data": {
+                        "label": "source",
+                        "nodeType": "dataSource",
+                        "config": {"path": sample_data},
+                    },
                 },
                 {
                     "id": "score",
@@ -204,12 +212,12 @@ class TestModelScoreMissingFeatures:
         assert results["score"].status == "ok"
         # Verify predict was called with only the available features
         call_args = mock_model.predict.call_args
-        X = call_args[0][0]
-        # X may be a numpy array (pure numeric) or pandas DataFrame (has cats)
-        if hasattr(X, "columns"):
-            assert list(X.columns) == ["x1", "x2"]
+        x_data = call_args[0][0]
+        # x_data may be a numpy array (pure numeric) or pandas DataFrame (has cats)
+        if hasattr(x_data, "columns"):
+            assert list(x_data.columns) == ["x1", "x2"]
         else:
-            assert X.shape[1] == 2
+            assert x_data.shape[1] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +351,126 @@ class TestModelScoreScenarioRouting:
         # Batched path goes through _batch_score_to_parquet which calls predict
         # on chunks — still should have been called at least once
         assert mock_model.predict.call_count >= 1
+
+    def test_row_limited_preview_uses_eager_path(self, sample_data):
+        """Non-live scenario with row_limit still uses eager path (preview)."""
+        mock_model = _make_mock_model("regression")
+
+        graph = _make_model_score_graph(data_path=sample_data)
+
+        tmp_dir = tempfile.gettempdir()
+        before = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
+
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+            results = execute_graph(
+                graph, target_node_id="score",
+                scenario="nb_batch", row_limit=1000,
+            )
+
+        assert results["score"].status == "ok"
+
+        after = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
+        new_parquets = after - before
+        assert not new_parquets, (
+            f"Row-limited preview should use eager path, found: {new_parquets}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Shared scoring helpers
+# ---------------------------------------------------------------------------
+
+
+class TestScoreEager:
+    """Tests for the shared _score_eager / _prepare_predict_frame helpers."""
+
+    def _mock_model(self, task="regression", n_rows=5):
+        model = MagicMock()
+        model.feature_names_ = ["x1", "x2"]
+        model.predict.return_value = np.arange(n_rows, dtype=float)
+        if task == "classification":
+            model.predict_proba.return_value = np.column_stack([
+                np.linspace(0.9, 0.1, n_rows),
+                np.linspace(0.1, 0.9, n_rows),
+            ])
+        return model
+
+    def test_score_eager_adds_prediction(self):
+        from haute._mlflow_io import _score_eager
+
+        model = self._mock_model(n_rows=2)
+        lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
+
+        result = _score_eager(model, lf, ["x1", "x2"])
+        df = result.collect()
+        assert "prediction" in df.columns
+        assert len(df) == 2
+
+    def test_score_eager_classification_proba(self):
+        from haute._mlflow_io import _score_eager
+
+        model = self._mock_model(task="classification", n_rows=2)
+        lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
+
+        result = _score_eager(
+            model, lf, ["x1", "x2"], task="classification",
+        )
+        df = result.collect()
+        assert "prediction" in df.columns
+        assert "prediction_proba" in df.columns
+
+    def test_score_eager_custom_output_col(self):
+        from haute._mlflow_io import _score_eager
+
+        model = self._mock_model(n_rows=2)
+        lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
+
+        result = _score_eager(model, lf, ["x1", "x2"], output_col="my_pred")
+        assert "my_pred" in result.collect().columns
+
+
+# ---------------------------------------------------------------------------
+# Persistent disk artifact cache
+# ---------------------------------------------------------------------------
+
+
+class TestResolveArtifactLocal:
+    """Tests for _resolve_artifact_local disk caching."""
+
+    def test_disk_cache_hit(self, tmp_path, monkeypatch):
+        """Returns cached path without calling download_artifacts."""
+        from haute._mlflow_io import _resolve_artifact_local
+
+        monkeypatch.chdir(tmp_path)
+        cache_dir = tmp_path / ".cache" / "models" / "run123"
+        cache_dir.mkdir(parents=True)
+        cached_file = cache_dir / "model.cbm"
+        cached_file.write_bytes(b"fake model")
+
+        mock_mlflow = MagicMock()
+        result = _resolve_artifact_local(mock_mlflow, "run123", "model.cbm")
+
+        assert result == str(cached_file)
+        mock_mlflow.artifacts.download_artifacts.assert_not_called()
+
+    def test_disk_cache_miss_downloads(self, tmp_path, monkeypatch):
+        """Downloads artifact when not cached locally."""
+        from pathlib import Path
+
+        from haute._mlflow_io import _resolve_artifact_local
+
+        monkeypatch.chdir(tmp_path)
+
+        def fake_download(uri, dst_path):
+            Path(dst_path).mkdir(parents=True, exist_ok=True)
+            out = Path(dst_path) / "model.cbm"
+            out.write_bytes(b"downloaded model")
+            return str(out)
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.artifacts.download_artifacts.side_effect = fake_download
+
+        result = _resolve_artifact_local(mock_mlflow, "run456", "model.cbm")
+
+        assert Path(result).is_file()
+        mock_mlflow.artifacts.download_artifacts.assert_called_once()

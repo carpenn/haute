@@ -20,6 +20,8 @@ def collect_artifacts(
     Walks the pruned graph and finds files that must be bundled:
 
     - ``externalFile`` nodes: model files (``.cbm``, ``.pkl``, etc.)
+    - ``optimiserApply`` nodes: optimiser artifact files
+    - ``modelScore`` nodes: CatBoost ``.cbm`` models (downloaded from MLflow)
     - ``dataSource`` nodes that are NOT deploy inputs: static data files
 
     Args:
@@ -60,6 +62,19 @@ def collect_artifacts(
             _check_exists(abs_path, nid, "optimiserApply")
             artifacts[artifact_name] = abs_path
 
+        elif node_type == NodeType.MODEL_SCORE:
+            run_id = config.get("run_id", "")
+            artifact_path = config.get("artifact_path", "")
+            if not run_id or not artifact_path:
+                continue
+            # Download from MLflow at deploy time so the artifact is
+            # bundled into the container / MLflow model package.
+            local_path = _download_model_artifact(
+                run_id, artifact_path, pipeline_dir,
+            )
+            artifact_name = _artifact_name(nid, local_path)
+            artifacts[artifact_name] = local_path
+
         elif node_type == NodeType.DATA_SOURCE and nid not in input_set:
             raw_path = config.get("path", "")
             if not raw_path:
@@ -91,6 +106,38 @@ def _resolve_path(raw_path: str, pipeline_dir: Path) -> Path:
 def _artifact_name(node_id: str, path: Path) -> str:
     """Generate a unique artifact name from node ID and filename."""
     return f"{node_id}__{path.name}"
+
+
+def _download_model_artifact(
+    run_id: str, artifact_path: str, pipeline_dir: Path,
+) -> Path:
+    """Download a MODEL_SCORE .cbm artifact from MLflow, with local caching.
+
+    Uses the same ``.cache/models/`` directory as ``_mlflow_io`` so that
+    previously downloaded models aren't re-fetched.
+    """
+    from haute._mlflow_io import _resolve_artifact_local
+
+    try:
+        import mlflow
+    except ImportError:
+        raise ImportError(
+            "mlflow is required to bundle MODEL_SCORE artifacts. "
+            "Install it with: pip install mlflow"
+        ) from None
+
+    from haute.modelling._mlflow_log import resolve_tracking_backend
+
+    tracking_uri, _ = resolve_tracking_backend()
+    mlflow.set_tracking_uri(tracking_uri)
+
+    local_path = _resolve_artifact_local(mlflow, run_id, artifact_path)
+    resolved = Path(local_path)
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"MODEL_SCORE artifact not found after download: {local_path}"
+        )
+    return resolved
 
 
 def _check_exists(path: Path, node_id: str, node_type: str) -> None:

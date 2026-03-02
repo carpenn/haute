@@ -168,9 +168,36 @@ class TestPruner:
 
         graph = _g({
             "nodes": [
-                {"id": "live_src", "data": {"label": "live_src", "nodeType": "apiInput", "config": {"path": "d.json"}}},
-                {"id": "batch_src", "data": {"label": "batch_src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "switch", "data": {"label": "switch", "nodeType": "liveSwitch", "config": {"input_scenario_map": {"live_src": "live", "batch_src": "test_batch"}, "inputs": ["live_src", "batch_src"]}}},
+                {
+                    "id": "live_src",
+                    "data": {
+                        "label": "live_src",
+                        "nodeType": "apiInput",
+                        "config": {"path": "d.json"},
+                    },
+                },
+                {
+                    "id": "batch_src",
+                    "data": {
+                        "label": "batch_src",
+                        "nodeType": "dataSource",
+                        "config": {"path": "d.parquet"},
+                    },
+                },
+                {
+                    "id": "switch",
+                    "data": {
+                        "label": "switch",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {
+                                "live_src": "live",
+                                "batch_src": "test_batch",
+                            },
+                            "inputs": ["live_src", "batch_src"],
+                        },
+                    },
+                },
                 {"id": "score", "data": {"label": "score", "nodeType": "transform", "config": {}}},
                 {"id": "out", "data": {"label": "out", "nodeType": "output", "config": {}}},
             ],
@@ -244,6 +271,59 @@ class TestBundler:
         with pytest.raises(FileNotFoundError, match="[Aa]rtifact.*not found"):
             collect_artifacts(graph, [], Path("."))
 
+    def test_collect_model_score_artifact(self, tmp_path, monkeypatch):
+        """MODEL_SCORE nodes download .cbm from MLflow and include in artifacts."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        # Pre-populate the disk cache so download is skipped
+        cache_dir = tmp_path / ".cache" / "models" / "run_abc"
+        cache_dir.mkdir(parents=True)
+        cbm_file = cache_dir / "model.cbm"
+        cbm_file.write_bytes(b"fake model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms1",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "run",
+                            "run_id": "run_abc",
+                            "artifact_path": "model.cbm",
+                        },
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], tmp_path)
+        assert len(artifacts) == 1
+        name = next(iter(artifacts))
+        assert name == "ms1__model.cbm"
+        assert artifacts[name].is_file()
+
+    def test_model_score_skipped_without_run_id(self):
+        """MODEL_SCORE nodes without run_id are silently skipped."""
+        from haute.deploy._bundler import collect_artifacts
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms1",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {"sourceType": "run"},
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], Path("."))
+        assert len(artifacts) == 0
+
 
 # ---------------------------------------------------------------------------
 # Scorer tests
@@ -298,6 +378,62 @@ class TestScorer:
         # Input columns should survive through to output
         assert "VehPower" in result.columns
         assert "Area" in result.columns
+
+    def test_model_score_intercept_uses_bundled_path(self, tmp_path):
+        """MODEL_SCORE scorer intercept loads from remapped local path."""
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from haute.deploy._scorer import score_graph
+
+        # Write a fake .cbm to the bundled artifacts dir
+        cbm_path = tmp_path / "model.cbm"
+        cbm_path.write_bytes(b"fake")
+
+        mock_model = MagicMock()
+        mock_model.feature_names_ = ["x1"]
+        mock_model.predict.return_value = np.array([42.0, 43.0])
+
+        graph = _g({
+            "nodes": [
+                {"id": "src", "data": {
+                    "nodeType": "apiInput",
+                    "config": {"path": ""},
+                }},
+                {"id": "ms", "data": {
+                    "nodeType": "modelScore",
+                    "config": {
+                        "sourceType": "run",
+                        "run_id": "r1",
+                        "artifact_path": "model.cbm",
+                        "task": "regression",
+                        "output_column": "pred",
+                    },
+                }},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "ms"}],
+        })
+
+        input_df = pl.DataFrame({"x1": [1.0, 2.0]})
+        remap = {"ms__model.cbm": str(cbm_path)}
+
+        with patch(
+            "haute._mlflow_io._load_catboost_model",
+            return_value=mock_model,
+        ):
+            result = score_graph(
+                graph=graph,
+                input_df=input_df,
+                input_node_ids=["src"],
+                output_node_id="ms",
+                artifact_paths=remap,
+            )
+
+        assert "pred" in result.columns
+        assert result["pred"].to_list() == [42.0, 43.0]
+        # Model loaded from bundled path, not from MLflow
+        mock_model.predict.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

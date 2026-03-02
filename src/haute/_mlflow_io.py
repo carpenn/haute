@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import polars as pl
 
 from haute._logging import get_logger
 
@@ -107,8 +109,10 @@ def load_mlflow_model(
             logger.info("mlflow_model_cache_hit", key=str(cache_key))
             return cached
 
-    local_path = mlflow.artifacts.download_artifacts(
-        f"runs:/{resolved_run_id}/{resolved_artifact}"
+    # Persistent local artifact cache — avoids re-downloading from remote
+    # tracking servers (e.g. Databricks) on every server restart.
+    local_path = _resolve_artifact_local(
+        mlflow, resolved_run_id, resolved_artifact,
     )
 
     model = _load_catboost_model(local_path, task)
@@ -165,6 +169,43 @@ def _find_cbm_artifact(client: MlflowClient, run_id: str) -> str:
     )
 
 
+def _resolve_artifact_local(
+    mlflow: Any, run_id: str, artifact_path: str,
+) -> str:
+    """Return a local path to the model artifact, downloading only if needed.
+
+    Saves downloaded artifacts under ``.cache/models/<run_id>/`` so they
+    survive server restarts without re-downloading from remote tracking
+    servers (saves ~30 s+ for Databricks-hosted artifacts).
+    """
+    from pathlib import Path
+
+    cache_dir = Path.cwd() / ".cache" / "models" / run_id
+    local_path = cache_dir / Path(artifact_path).name
+
+    if local_path.is_file():
+        logger.info(
+            "mlflow_artifact_disk_cache_hit",
+            path=str(local_path),
+        )
+        return str(local_path)
+
+    # Cache miss — download from tracking server
+    logger.info(
+        "mlflow_artifact_downloading",
+        run_id=run_id,
+        artifact=artifact_path,
+    )
+    downloaded = mlflow.artifacts.download_artifacts(
+        f"runs:/{run_id}/{artifact_path}",
+        dst_path=str(cache_dir),
+    )
+    # download_artifacts may nest inside a subdirectory; prefer exact path
+    if local_path.is_file():
+        return str(local_path)
+    return str(downloaded)
+
+
 def _load_catboost_model(path: str, task: str) -> CatBoostRegressor | CatBoostClassifier:
     """Load a CatBoost model from a local file path."""
     if task == "classification":
@@ -177,3 +218,68 @@ def _load_catboost_model(path: str, task: str) -> CatBoostRegressor | CatBoostCl
         model = CatBoostRegressor()
     model.load_model(path)
     return model
+
+
+# ---------------------------------------------------------------------------
+# Shared CatBoost scoring helpers (used by executor + deploy scorer)
+# ---------------------------------------------------------------------------
+
+
+def _prepare_predict_frame(
+    model: CatBoostRegressor | CatBoostClassifier,
+    df_eager: pl.DataFrame,
+    features: list[str],
+) -> Any:
+    """Prepare a Polars DataFrame for CatBoost predict.
+
+    Handles null values: float32 cast for numerics (null→NaN),
+    sentinel fill + Categorical cast for categorical features.
+
+    Returns numpy array or pandas DataFrame (depending on whether
+    categorical features are present), so the return type is ``Any``.
+    """
+
+    cat_idx = (
+        set(model.get_cat_feature_indices())
+        if hasattr(model, "get_cat_feature_indices") else set()
+    )
+    cat_names = {features[i] for i in cat_idx if i < len(features)}
+    numeric_cols = [c for c in features if c not in cat_names]
+    cat_cols = [c for c in features if c in cat_names]
+    selected = df_eager.select(features)
+    if numeric_cols:
+        selected = selected.with_columns(
+            [pl.col(c).cast(pl.Float32) for c in numeric_cols]
+        )
+    if cat_cols:
+        selected = selected.with_columns(
+            [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical) for c in cat_cols]
+        )
+    return selected.to_pandas() if cat_cols else selected.to_numpy()
+
+
+def _score_eager(
+    model: CatBoostRegressor | CatBoostClassifier,
+    lf: pl.LazyFrame,
+    features: list[str],
+    output_col: str = "prediction",
+    task: str = "regression",
+) -> pl.LazyFrame:
+    """Collect a LazyFrame and score in-memory. Returns a LazyFrame.
+
+    Shared between the dev executor and the deploy scorer.
+    """
+    df_eager = lf.collect()
+    x_data = _prepare_predict_frame(model, df_eager, features)
+    preds = model.predict(x_data).flatten()
+    df_eager = df_eager.with_columns(
+        pl.Series(output_col, preds),
+    )
+    if task == "classification" and hasattr(model, "predict_proba"):
+        probas = model.predict_proba(x_data)
+        if probas.ndim == 2:
+            probas = probas[:, 1]
+        df_eager = df_eager.with_columns(
+            pl.Series(f"{output_col}_proba", probas),
+        )
+    return df_eager.lazy()
