@@ -461,12 +461,13 @@ class TestArtifactLoader:
             a1 = load_optimiser_artifact(path)
             assert a1["version"] == "v1"
 
-            # Overwrite file with different content
-            import time
-            time.sleep(0.05)  # ensure mtime differs
+            # Overwrite file with different content — bump mtime explicitly
             artifact["version"] = "v2"
             with open(path, "w") as f:
                 json.dump(artifact, f)
+            # Force mtime forward so cache invalidation triggers
+            stat = os.stat(path)
+            os.utime(path, (stat.st_atime + 1, stat.st_mtime + 1))
 
             a2 = load_optimiser_artifact(path)
             assert a2["version"] == "v2"

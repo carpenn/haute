@@ -428,7 +428,9 @@ def good_node(df: pl.DataFrame) -> pl.DataFrame:
         # Should still extract nodes despite syntax error
         assert graph.pipeline_name == "broken"
         assert graph.warning is not None
-        assert len(graph.nodes) >= 2  # at least source and good_node
+        assert len(graph.nodes) == 3
+        node_ids = {n.id for n in graph.nodes}
+        assert {"source", "bad_node", "good_node"} == node_ids
 
     def test_fallback_extracts_edges(self, tmp_path):
         """Regex fallback should find pipeline.connect() calls."""
@@ -540,6 +542,11 @@ pipeline.connect("transform", "output")
         out1 = next(n for n in graph1.nodes if n.id == "output")
         out2 = next(n for n in graph2.nodes if n.id == "output")
         assert out1.data.config.get("fields") == out2.data.config.get("fields")
+
+        # Transform code preserved
+        t1 = next(n for n in graph1.nodes if n.id == "transform")
+        t2 = next(n for n in graph2.nodes if n.id == "transform")
+        assert t1.data.config.get("code") == t2.data.config.get("code")
 
         # Pipeline name preserved
         assert graph1.pipeline_name == graph2.pipeline_name

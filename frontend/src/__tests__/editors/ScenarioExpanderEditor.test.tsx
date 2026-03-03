@@ -2,7 +2,8 @@
  * Render tests for ScenarioExpanderEditor.
  *
  * Tests: quote id label, select vs text input, value column, range section,
- * default values, editing min, step column, preview line, selecting a column.
+ * default values, editing min, editing steps with clamping, step column,
+ * preview line, selecting a column, InputSourcesBar rendering.
  */
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
@@ -29,9 +30,21 @@ const DEFAULT_PROPS = {
 }
 
 describe("ScenarioExpanderEditor", () => {
-  it("renders Quote ID Column label", () => {
+  it("renders all form fields with default config values", () => {
     render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
     expect(screen.getByText("Quote ID Column")).toBeTruthy()
+    expect(screen.getByText("Value Column")).toBeTruthy()
+    expect(screen.getByText("Range")).toBeTruthy()
+    expect(screen.getByText("Min")).toBeTruthy()
+    expect(screen.getByText("Max")).toBeTruthy()
+    expect(screen.getByText("Steps")).toBeTruthy()
+    expect(screen.getByText("Step Column")).toBeTruthy()
+    // Default values
+    expect(screen.getByDisplayValue("scenario_value")).toBeTruthy()
+    expect(screen.getByDisplayValue("0.8")).toBeTruthy()
+    expect(screen.getByDisplayValue("1.2")).toBeTruthy()
+    expect(screen.getByDisplayValue("21")).toBeTruthy()
+    expect(screen.getByDisplayValue("scenario_index")).toBeTruthy()
   })
 
   it("shows select dropdown when upstreamColumns provided", () => {
@@ -46,39 +59,22 @@ describe("ScenarioExpanderEditor", () => {
     expect(select).toBeTruthy()
     expect(screen.getByText("quote_id")).toBeTruthy()
     expect(screen.getByText("product")).toBeTruthy()
+    // Should show the placeholder option too
+    expect(screen.getByText("-- select column --")).toBeTruthy()
   })
 
-  it("shows text input when upstreamColumns is empty", () => {
+  it("falls back to text input when no upstream columns", () => {
     const { container } = render(
       <ScenarioExpanderEditor {...DEFAULT_PROPS} upstreamColumns={[]} />,
     )
     const select = container.querySelector("select")
     expect(select).toBeNull()
-    expect(screen.getByPlaceholderText("quote_id")).toBeTruthy()
+    const textInput = screen.getByPlaceholderText("quote_id")
+    expect(textInput).toBeTruthy()
+    expect(textInput.tagName).toBe("INPUT")
   })
 
-  it("renders Value Column input with default scenario_value", () => {
-    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
-    expect(screen.getByText("Value Column")).toBeTruthy()
-    expect(screen.getByDisplayValue("scenario_value")).toBeTruthy()
-  })
-
-  it("renders Range section with Min, Max, Steps inputs", () => {
-    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
-    expect(screen.getByText("Range")).toBeTruthy()
-    expect(screen.getByText("Min")).toBeTruthy()
-    expect(screen.getByText("Max")).toBeTruthy()
-    expect(screen.getByText("Steps")).toBeTruthy()
-  })
-
-  it("uses default values: min=0.8, max=1.2, steps=21", () => {
-    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
-    expect(screen.getByDisplayValue("0.8")).toBeTruthy()
-    expect(screen.getByDisplayValue("1.2")).toBeTruthy()
-    expect(screen.getByDisplayValue("21")).toBeTruthy()
-  })
-
-  it("editing min calls onUpdate with parsed float", () => {
+  it("changing min value calls onUpdate with parsed number", () => {
     const onUpdate = vi.fn()
     render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
     const minInput = screen.getByDisplayValue("0.8")
@@ -86,17 +82,84 @@ describe("ScenarioExpanderEditor", () => {
     expect(onUpdate).toHaveBeenCalledWith("min_value", 0.5)
   })
 
-  it("renders Step Column input with default scenario_index", () => {
-    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
-    expect(screen.getByText("Step Column")).toBeTruthy()
-    expect(screen.getByDisplayValue("scenario_index")).toBeTruthy()
+  it("changing min to invalid value falls back to 0", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const minInput = screen.getByDisplayValue("0.8")
+    fireEvent.change(minInput, { target: { value: "abc" } })
+    expect(onUpdate).toHaveBeenCalledWith("min_value", 0)
   })
 
-  it("shows preview line with step count", () => {
+  it("changing max value calls onUpdate with parsed number", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const maxInput = screen.getByDisplayValue("1.2")
+    fireEvent.change(maxInput, { target: { value: "2.0" } })
+    expect(onUpdate).toHaveBeenCalledWith("max_value", 2.0)
+  })
+
+  it("changing steps calls onUpdate with value clamped to min 1", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const stepsInput = screen.getByDisplayValue("21")
+
+    // Normal value
+    fireEvent.change(stepsInput, { target: { value: "10" } })
+    expect(onUpdate).toHaveBeenCalledWith("steps", 10)
+
+    // Zero should clamp to 1
+    fireEvent.change(stepsInput, { target: { value: "0" } })
+    expect(onUpdate).toHaveBeenCalledWith("steps", 1)
+
+    // Negative should clamp to 1
+    fireEvent.change(stepsInput, { target: { value: "-5" } })
+    expect(onUpdate).toHaveBeenCalledWith("steps", 1)
+
+    // Non-numeric should default to 1
+    fireEvent.change(stepsInput, { target: { value: "abc" } })
+    expect(onUpdate).toHaveBeenCalledWith("steps", 1)
+  })
+
+  it("preview section shows step count and range", () => {
     const { container } = render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
     const previewText = container.textContent || ""
     expect(previewText).toContain("21")
     expect(previewText).toContain("output rows")
+    // Shows range: "scenario_value: 0.8 → 1.2 (21 steps)"
+    expect(previewText).toContain("0.8")
+    expect(previewText).toContain("1.2")
+    expect(previewText).toContain("21 steps")
+  })
+
+  it("preview uses custom config values", () => {
+    const config = {
+      column_name: "my_column",
+      min_value: 0.5,
+      max_value: 2.0,
+      steps: 11,
+    }
+    const { container } = render(
+      <ScenarioExpanderEditor {...DEFAULT_PROPS} config={config} />,
+    )
+    const previewText = container.textContent || ""
+    expect(previewText).toContain("11")
+    expect(previewText).toContain("0.5")
+    expect(previewText).toContain("2")
+    expect(previewText).toContain("my_column")
+  })
+
+  it("InputSourcesBar renders when inputSources provided", () => {
+    const inputSources = [
+      { varName: "upstream_data", sourceLabel: "Upstream", edgeId: "e1" },
+    ]
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} inputSources={inputSources} />)
+    expect(screen.getByTestId("input-sources")).toBeTruthy()
+    expect(screen.getByTestId("input-sources").textContent).toContain("1 inputs")
+  })
+
+  it("InputSourcesBar not rendered when inputSources is empty", () => {
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} inputSources={[]} />)
+    expect(screen.getByTestId("input-sources").textContent).toContain("0 inputs")
   })
 
   it("selecting a quote_id column calls onUpdate", () => {
@@ -115,5 +178,38 @@ describe("ScenarioExpanderEditor", () => {
     const select = container.querySelector("select")!
     fireEvent.change(select, { target: { value: "product" } })
     expect(onUpdate).toHaveBeenCalledWith("quote_id", "product")
+  })
+
+  it("changing column_name calls onUpdate", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const columnInput = screen.getByDisplayValue("scenario_value")
+    fireEvent.change(columnInput, { target: { value: "my_value" } })
+    expect(onUpdate).toHaveBeenCalledWith("column_name", "my_value")
+  })
+
+  it("changing step_column calls onUpdate", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const stepColInput = screen.getByDisplayValue("scenario_index")
+    fireEvent.change(stepColInput, { target: { value: "step_idx" } })
+    expect(onUpdate).toHaveBeenCalledWith("step_column", "step_idx")
+  })
+
+  it("uses config values instead of defaults when provided", () => {
+    const config = {
+      quote_id: "my_quote",
+      column_name: "custom_col",
+      min_value: 0.5,
+      max_value: 2.0,
+      steps: 11,
+      step_column: "my_step",
+    }
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} config={config} />)
+    expect(screen.getByDisplayValue("custom_col")).toBeTruthy()
+    expect(screen.getByDisplayValue("0.5")).toBeTruthy()
+    expect(screen.getByDisplayValue("2")).toBeTruthy()
+    expect(screen.getByDisplayValue("11")).toBeTruthy()
+    expect(screen.getByDisplayValue("my_step")).toBeTruthy()
   })
 })

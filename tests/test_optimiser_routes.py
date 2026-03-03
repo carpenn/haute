@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import polars as pl
@@ -12,6 +14,10 @@ from fastapi.testclient import TestClient
 from haute._parser_helpers import _build_node_config, _infer_node_type
 from haute._sandbox import set_project_root
 from haute.graph_utils import NodeType
+from haute.routes.optimiser import (
+    _build_artifact_payload,
+    _compute_scenario_value_stats,
+)
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 
@@ -19,6 +25,21 @@ from tests.conftest import make_edge, make_graph
 @pytest.fixture()
 def client():
     return TestClient(app)
+
+
+@pytest.fixture()
+def clean_job_store():
+    """Snapshot and restore the optimiser job store after each test.
+
+    Tests that inject fake jobs into _store.jobs no longer need
+    manual try/finally cleanup.
+    """
+    from haute.routes.optimiser import _store
+
+    snapshot = dict(_store.jobs)
+    yield _store
+    _store.jobs.clear()
+    _store.jobs.update(snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -798,3 +819,330 @@ class TestFrontierRoute:
         )
         # Either 400 (still running) or 200 (already done) is acceptable
         assert resp.status_code in (200, 400)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: Pure function tests
+# ---------------------------------------------------------------------------
+
+
+class TestComputeScenarioValueStats:
+    """Unit tests for _compute_scenario_value_stats."""
+
+    def test_no_dataframe_attribute(self):
+        """Object without .dataframe returns empty dicts."""
+        result = SimpleNamespace()  # no .dataframe
+        stats, hist = _compute_scenario_value_stats(result)
+        assert stats == {}
+        assert hist == {}
+
+    def test_missing_column(self):
+        """DataFrame without optimal_scenario_value returns empty dicts."""
+        df = pl.DataFrame({"other_col": [1.0, 2.0, 3.0]})
+        result = SimpleNamespace(dataframe=df)
+        stats, hist = _compute_scenario_value_stats(result)
+        assert stats == {}
+        assert hist == {}
+
+    def test_valid_scenario_values(self):
+        """Normal case with optimal_scenario_value column."""
+        df = pl.DataFrame({
+            "optimal_scenario_value": [0.9, 1.0, 1.1, 1.2, 0.8],
+        })
+        result = SimpleNamespace(dataframe=df)
+        stats, hist = _compute_scenario_value_stats(result)
+        assert "mean" in stats
+        assert "p50" in stats
+        assert "pct_increase" in stats
+        assert "pct_decrease" in stats
+        assert stats["pct_increase"] > 0  # 1.1 and 1.2 are > 1.0
+        assert stats["pct_decrease"] > 0  # 0.9 and 0.8 are < 1.0
+        assert "counts" in hist
+        assert "edges" in hist
+        assert len(hist["counts"]) == 20
+        assert len(hist["edges"]) == 21
+
+
+class TestBuildArtifactPayload:
+    """Unit tests for _build_artifact_payload."""
+
+    def test_online_mode_basic(self):
+        """Online mode produces a payload with expected keys."""
+        job = {
+            "node_label": "my_opt",
+            "config": {
+                "mode": "online",
+                "constraints": {"volume": {"min": 0.9}},
+                "objective": "income",
+            },
+        }
+        solve_result = SimpleNamespace(
+            lambdas={"volume": 0.5},
+            total_objective=1000.0,
+            baseline_objective=950.0,
+            total_constraints={"volume": 0.92},
+            baseline_constraints={"volume": 0.88},
+            converged=True,
+            iterations=10,
+        )
+        payload = _build_artifact_payload(job, solve_result)
+        assert payload["mode"] == "online"
+        assert payload["lambdas"] == {"volume": 0.5}
+        assert payload["converged"] is True
+        assert "factor_tables" not in payload  # only for ratebook
+
+    def test_ratebook_mode_includes_factor_tables(self):
+        """Ratebook mode includes factor_tables and clamp_rate."""
+        job = {
+            "node_label": "rb_opt",
+            "config": {"mode": "ratebook", "constraints": {}, "objective": "income"},
+            "result": {
+                "factor_tables": {"region": [{"__factor_group__": "North", "optimal_scenario_value": 1.1}]},
+            },
+        }
+        solve_result = SimpleNamespace(
+            lambdas={},
+            total_objective=1000.0,
+            total_constraints={},
+            converged=True,
+            clamp_rate=0.05,
+        )
+        payload = _build_artifact_payload(job, solve_result)
+        assert payload["mode"] == "ratebook"
+        assert "factor_tables" in payload
+        assert payload["clamp_rate"] == 0.05
+
+    def test_version_override(self):
+        """User-specified version overrides auto-generated one."""
+        job = {"node_label": "opt", "config": {"mode": "online"}}
+        solve_result = SimpleNamespace(
+            lambdas={}, total_objective=0.0, total_constraints={}, converged=True,
+        )
+        payload = _build_artifact_payload(job, solve_result, version_override="v2.0")
+        assert payload["version"] == "v2.0"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: MLflow log endpoint tests
+# ---------------------------------------------------------------------------
+
+
+class TestOptimiserMlflowLog:
+    """Tests for /mlflow/log endpoint."""
+
+    def test_mlflow_log_missing_job(self, client):
+        resp = client.post("/api/optimiser/mlflow/log", json={
+            "job_id": "nonexistent",
+            "experiment_name": "/test",
+        })
+        assert resp.status_code == 404
+
+    def test_mlflow_log_not_completed(self, client, clean_job_store):
+        clean_job_store.jobs["running_job"] = {
+            "status": "running", "progress": 0.5,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/mlflow/log", json={
+            "job_id": "running_job",
+            "experiment_name": "/test",
+        })
+        assert resp.status_code == 400
+        assert "not completed" in resp.json()["detail"]
+
+    def test_mlflow_log_no_solve_result(self, client, clean_job_store):
+        clean_job_store.jobs["no_result"] = {
+            "status": "completed",
+            "solver": None,
+            "solve_result": None,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/mlflow/log", json={
+            "job_id": "no_result",
+            "experiment_name": "/test",
+        })
+        assert resp.status_code == 400
+        assert "no solve result" in resp.json()["detail"].lower()
+
+    def test_mlflow_log_import_error(self, client, clean_job_store):
+        """If mlflow is not installed, return 400."""
+        mock_solver = MagicMock()
+        mock_solve = MagicMock(lambdas={}, total_objective=0, total_constraints={}, converged=True)
+        clean_job_store.jobs["import_err"] = {
+            "status": "completed",
+            "solver": mock_solver,
+            "solve_result": mock_solve,
+            "config": {"mode": "online"},
+            "node_label": "opt",
+            "created_at": time.time(),
+        }
+
+        with patch.dict("sys.modules", {"mlflow": None}):
+            resp = client.post("/api/optimiser/mlflow/log", json={
+                "job_id": "import_err",
+                "experiment_name": "/test",
+            })
+        assert resp.status_code == 400
+        assert "mlflow" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: Background thread error tests
+# ---------------------------------------------------------------------------
+
+
+class TestSolveBackgroundErrors:
+    """Test error categorization in the _solve_background thread."""
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_value_error(self, client, scored_data):
+        """ValueError in solver produces 'Data error' message."""
+        graph = _make_optimiser_graph(scored_data)
+        with patch(
+            "haute.routes.optimiser._solve_online",
+            side_effect=ValueError("Invalid constraint column"),
+        ):
+            resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+            status = _poll_until_done(client, resp.json()["job_id"])
+            assert status["status"] == "error"
+            assert "Data error" in status["message"]
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_runtime_error(self, client, scored_data):
+        """RuntimeError in solver produces 'Algorithm error' message."""
+        graph = _make_optimiser_graph(scored_data)
+        with patch(
+            "haute.routes.optimiser._solve_online",
+            side_effect=RuntimeError("Solver diverged"),
+        ):
+            resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+            status = _poll_until_done(client, resp.json()["job_id"])
+            assert status["status"] == "error"
+            assert "Algorithm error" in status["message"]
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_generic_exception(self, client, scored_data):
+        """Generic Exception in solver produces 'Unexpected error' message."""
+        graph = _make_optimiser_graph(scored_data)
+        with patch(
+            "haute.routes.optimiser._solve_online",
+            side_effect=Exception("something broke"),
+        ):
+            resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+            status = _poll_until_done(client, resp.json()["job_id"])
+            assert status["status"] == "error"
+            assert "Unexpected error" in status["message"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: Job state guard tests
+# ---------------------------------------------------------------------------
+
+
+class TestJobStateGuards:
+    """Test that endpoints properly reject incomplete or missing jobs."""
+
+    def test_apply_not_completed(self, client, clean_job_store):
+        clean_job_store.jobs["running"] = {
+            "status": "running", "progress": 0.5,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/apply", json={"job_id": "running"})
+        assert resp.status_code == 400
+        assert "not completed" in resp.json()["detail"]
+
+    def test_apply_no_solve_result(self, client, clean_job_store):
+        clean_job_store.jobs["no_sr"] = {
+            "status": "completed", "solve_result": None,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/apply", json={"job_id": "no_sr"})
+        assert resp.status_code == 400
+        assert "no solve result" in resp.json()["detail"].lower()
+
+    def test_frontier_not_completed(self, client, clean_job_store):
+        clean_job_store.jobs["running2"] = {
+            "status": "running", "progress": 0.1,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/frontier", json={
+            "job_id": "running2",
+            "threshold_ranges": {"volume": [0.85, 0.95]},
+        })
+        assert resp.status_code == 400
+        assert "not completed" in resp.json()["detail"]
+
+    def test_frontier_no_solver(self, client, clean_job_store):
+        clean_job_store.jobs["no_solver"] = {
+            "status": "completed",
+            "solver": None,
+            "quote_grid": None,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/frontier", json={
+            "job_id": "no_solver",
+            "threshold_ranges": {"volume": [0.85, 0.95]},
+        })
+        assert resp.status_code == 400
+        assert "no solver" in resp.json()["detail"].lower()
+
+    def test_save_not_completed(self, client, clean_job_store):
+        clean_job_store.jobs["running3"] = {
+            "status": "running", "progress": 0.1,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/save", json={
+            "job_id": "running3", "output_path": "/tmp/x.json",
+        })
+        assert resp.status_code == 400
+        assert "not completed" in resp.json()["detail"]
+
+    def test_save_no_solve_result(self, client, clean_job_store):
+        clean_job_store.jobs["no_sr2"] = {
+            "status": "completed",
+            "solve_result": None,
+            "solver": None,
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/save", json={
+            "job_id": "no_sr2", "output_path": "/tmp/x.json",
+        })
+        assert resp.status_code == 400
+        assert "no solve result" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: Timeout detection
+# ---------------------------------------------------------------------------
+
+
+class TestStatusTimeout:
+    """Test that polling a timed-out job returns error."""
+
+    def test_timeout_detection(self, client, clean_job_store):
+        # Inject a "running" job whose start_time is far in the past
+        clean_job_store.jobs["timed_out"] = {
+            "status": "running",
+            "progress": 0.5,
+            "message": "Solving",
+            "start_time": time.monotonic() - 999,
+            "timeout": 10,
+            "created_at": time.time(),
+        }
+        resp = client.get("/api/optimiser/solve/status/timed_out")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "error"
+        assert "timed out" in data["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: Unsupported mode and ratebook edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestUnsupportedMode:
+    def test_unsupported_mode_returns_400(self, client, scored_data):
+        graph = _make_optimiser_graph(scored_data, config={"mode": "quantum"})
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        assert resp.status_code == 400
+        assert "quantum" in resp.json()["detail"]

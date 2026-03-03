@@ -38,7 +38,10 @@ class TestValidKeysRegistry:
             NodeType.CONSTANT,
             NodeType.SUBMODEL,
         }
-        assert expected.issubset(VALID_KEYS.keys())
+        assert expected == set(VALID_KEYS.keys()), (
+            f"Missing: {expected - set(VALID_KEYS.keys())}, "
+            f"Extra: {set(VALID_KEYS.keys()) - expected}"
+        )
 
     def test_universal_keys_included(self):
         """instanceOf and inputMapping should be valid for every type."""

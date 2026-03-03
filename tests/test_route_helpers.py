@@ -143,13 +143,6 @@ class TestRaiseValidationError:
 
 
 class TestSelfWriteTracking:
-    def test_initially_false(self):
-        """Before any write, is_self_write should be False (unless very recent call)."""
-        # We cannot guarantee state isolation across tests due to module-level
-        # global, but with the cooldown being 2s, after >2s it's False.
-        # We'll just test the mark/check cycle.
-        pass
-
     def test_mark_then_check(self):
         mark_self_write()
         assert is_self_write() is True
@@ -308,8 +301,11 @@ class TestSaveSidecar:
             ],
         )
         save_sidecar(py_path, graph)
+        from haute._types import _sanitize_func_name
+
         data = json.loads((tmp_path / "pipeline.haute.json").read_text())
-        assert "My_Node" in data["positions"]
+        expected_key = _sanitize_func_name("My Node")
+        assert expected_key in data["positions"]
 
 
 # ===========================================================================
@@ -365,6 +361,41 @@ class TestBroadcast:
 # ===========================================================================
 # invalidate_pipeline_index
 # ===========================================================================
+
+
+class TestScenarioNormalization:
+    """Tests for scenario normalization in parse_pipeline_to_graph."""
+
+    def test_live_is_moved_to_first_position(self, tmp_path):
+        """When sidecar has 'live' not in first position, it must be normalized to first."""
+        from haute.routes._helpers import parse_pipeline_to_graph
+
+        # Write a minimal pipeline file
+        py_path = tmp_path / "pipeline.py"
+        py_path.write_text(
+            "import haute\n"
+            "pipeline = haute.Pipeline('test')\n"
+            "@pipeline.node\n"
+            "def transform(df):\n"
+            "    return df\n"
+        )
+
+        # Write sidecar with "live" NOT in first position
+        sidecar = py_path.with_suffix(".haute.json")
+        sidecar.write_text(json.dumps({
+            "scenarios": ["test_batch", "live", "scenario_b"],
+            "active_scenario": "live",
+        }))
+
+        graph = parse_pipeline_to_graph(py_path)
+
+        assert graph.scenarios[0] == "live", (
+            f"Expected 'live' first, got: {graph.scenarios}"
+        )
+        # All original scenarios must still be present
+        assert set(graph.scenarios) == {"live", "test_batch", "scenario_b"}
+        # No duplicates
+        assert len(graph.scenarios) == 3
 
 
 class TestInvalidatePipelineIndex:

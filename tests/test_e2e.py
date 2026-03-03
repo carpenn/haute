@@ -20,17 +20,32 @@ FIXTURE_DIR = Path("tests/fixtures")
 PIPELINE_FILE = FIXTURE_DIR / "pipeline.py"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_json_cache(tmp_path, monkeypatch):
+    """Redirect the JSON parquet cache to a temp dir.
+
+    Without this, a stale .haute_cache/ in the working directory (from a
+    previous real-data run) can poison the fixture pipeline's api-input node
+    with columns from a completely different schema.
+    """
+    import haute._json_flatten as jf
+
+    monkeypatch.setattr(jf, "_CACHE_DIR", str(tmp_path / "json_cache"))
+
+
 class TestEndToEnd:
     """Full round-trip: parse → execute → trace → codegen → re-parse."""
 
     def test_parse_fixture_pipeline(self):
         """Fixture pipeline parses into a valid graph."""
         graph = parse_pipeline_file(PIPELINE_FILE)
-        assert len(graph.nodes) >= 5
-        assert len(graph.edges) >= 5
         node_ids = {n.id for n in graph.nodes}
-        assert "quotes" in node_ids
-        assert "output" in node_ids
+        expected_nodes = {
+            "quotes", "batch_quotes", "policies", "area_lookup",
+            "calculate_premium", "output", "results_write",
+        }
+        assert node_ids == expected_nodes
+        assert len(graph.edges) == 6
 
     def test_execute_all_nodes(self):
         """All nodes execute successfully with status='ok'."""
@@ -72,9 +87,9 @@ class TestEndToEnd:
         """Code generated from the parsed graph is non-empty and valid Python text."""
         graph = parse_pipeline_file(PIPELINE_FILE)
         code = graph_to_code(graph, pipeline_name="roundtrip")
-        assert len(code) > 100
+        compile(code, "<test_codegen>", "exec")
         assert "Pipeline" in code
-        assert "pipeline.node" in code or "@pipeline.node" in code
+        assert "@pipeline.node" in code
 
     def test_codegen_roundtrip_preserves_structure(self, tmp_path):
         """parse → codegen → re-parse preserves node types."""

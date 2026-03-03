@@ -506,6 +506,53 @@ def _assert_config_equivalence(
                 f"[{node_id}] table entries mismatch"
             )
 
+    elif node_type == NodeType.EXTERNAL_FILE:
+        assert parsed.get("path") == orig.get("path"), (
+            f"[{node_id}] externalFile path mismatch"
+        )
+        assert parsed.get("fileType") == orig.get("fileType"), (
+            f"[{node_id}] externalFile fileType mismatch"
+        )
+
+    elif node_type == NodeType.LIVE_SWITCH:
+        assert parsed.get("input_scenario_map") == orig.get("input_scenario_map"), (
+            f"[{node_id}] liveSwitch input_scenario_map mismatch"
+        )
+
+    elif node_type == NodeType.MODEL_SCORE:
+        for key in ("sourceType", "task", "output_column"):
+            assert parsed.get(key) == orig.get(key), (
+                f"[{node_id}] modelScore {key} mismatch"
+            )
+
+    elif node_type == NodeType.MODELLING:
+        for key in ("name", "target", "algorithm", "task"):
+            if orig.get(key):
+                assert parsed.get(key) == orig.get(key), (
+                    f"[{node_id}] modelling {key} mismatch"
+                )
+
+    elif node_type == NodeType.OPTIMISER:
+        for key in ("mode", "objective"):
+            if orig.get(key):
+                assert parsed.get(key) == orig.get(key), (
+                    f"[{node_id}] optimiser {key} mismatch"
+                )
+
+    elif node_type == NodeType.OPTIMISER_APPLY:
+        for key in ("artifact_path", "version_column"):
+            if orig.get(key):
+                assert parsed.get(key) == orig.get(key), (
+                    f"[{node_id}] optimiserApply {key} mismatch"
+                )
+
+    elif node_type == NodeType.SCENARIO_EXPANDER:
+        for key in ("column_name", "steps"):
+            if orig.get(key):
+                assert parsed.get(key) == orig.get(key), (
+                    f"[{node_id}] scenarioExpander {key} mismatch"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Property-based round-trip tests
@@ -528,8 +575,8 @@ class TestRoundTrip:
     )
     def test_roundtrip_structural_equivalence(self, graph: PipelineGraph) -> None:
         """Graph -> codegen -> parse preserves structure."""
-        base_dir = Path(tempfile.mkdtemp())
-        parsed = _parse_roundtrip(graph, base_dir)
+        with tempfile.TemporaryDirectory() as td:
+            parsed = _parse_roundtrip(graph, Path(td))
         _assert_structural_equivalence(graph, parsed)
 
     @given(graph=_pipeline_graph())
@@ -551,8 +598,8 @@ class TestRoundTrip:
     )
     def test_roundtrip_pipeline_name_preserved(self, graph: PipelineGraph) -> None:
         """Pipeline name survives the round-trip."""
-        base_dir = Path(tempfile.mkdtemp())
-        parsed = _parse_roundtrip(graph, base_dir)
+        with tempfile.TemporaryDirectory() as td:
+            parsed = _parse_roundtrip(graph, Path(td))
         assert parsed.pipeline_name == "roundtrip_test"
 
     @given(graph=_pipeline_graph())
@@ -563,8 +610,8 @@ class TestRoundTrip:
     )
     def test_roundtrip_node_descriptions_preserved(self, graph: PipelineGraph) -> None:
         """Node descriptions survive the round-trip."""
-        base_dir = Path(tempfile.mkdtemp())
-        parsed = _parse_roundtrip(graph, base_dir)
+        with tempfile.TemporaryDirectory() as td:
+            parsed = _parse_roundtrip(graph, Path(td))
         orig_descs = {n.id: n.data.description for n in graph.nodes}
         parsed_descs = {n.id: n.data.description for n in parsed.nodes}
         for nid, orig_desc in orig_descs.items():
@@ -586,8 +633,8 @@ class TestRoundTrip:
         (when a function parameter matches another node's function name),
         so the parsed edge count may be >= the original.
         """
-        base_dir = Path(tempfile.mkdtemp())
-        parsed = _parse_roundtrip(graph, base_dir)
+        with tempfile.TemporaryDirectory() as td:
+            parsed = _parse_roundtrip(graph, Path(td))
         assert len(parsed.edges) >= len(graph.edges), (
             f"Edge count decreased: original={len(graph.edges)}, parsed={len(parsed.edges)}"
         )
@@ -600,8 +647,8 @@ class TestRoundTrip:
     )
     def test_roundtrip_node_types_stable(self, graph: PipelineGraph) -> None:
         """Node type distribution is identical after round-trip."""
-        base_dir = Path(tempfile.mkdtemp())
-        parsed = _parse_roundtrip(graph, base_dir)
+        with tempfile.TemporaryDirectory() as td:
+            parsed = _parse_roundtrip(graph, Path(td))
         orig_types = sorted(n.data.nodeType.value for n in graph.nodes)
         parsed_types = sorted(n.data.nodeType.value for n in parsed.nodes)
         assert parsed_types == orig_types
@@ -1159,6 +1206,218 @@ class TestEdgeCases:
                 ),
             ],
             edges=[GraphEdge(id="e1", source="source", target="rating")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+
+class TestExcludedTypeRoundTrips:
+    """Deterministic round-trip tests for node types previously excluded.
+
+    Covers: externalFile, liveSwitch, modelScore, modelling,
+    optimiser, optimiserApply, scenarioExpander.
+    (submodel is handled by a separate multi-file codegen path.)
+    """
+
+    def _source_node(self, nid: str = "source") -> GraphNode:
+        return GraphNode(
+            id=nid,
+            data=NodeData(
+                label=nid,
+                nodeType=NodeType.DATA_SOURCE,
+                config={"path": "data.parquet", "sourceType": "flat_file"},
+            ),
+        )
+
+    def test_external_file_pickle(self, tmp_path: Path) -> None:
+        """externalFile (pickle) round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="ext_lookup",
+                    data=NodeData(
+                        label="ext_lookup",
+                        nodeType=NodeType.EXTERNAL_FILE,
+                        config={
+                            "path": "models/lookup.pkl",
+                            "fileType": "pickle",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="ext_lookup")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_external_file_json(self, tmp_path: Path) -> None:
+        """externalFile (json) round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="json_lookup",
+                    data=NodeData(
+                        label="json_lookup",
+                        nodeType=NodeType.EXTERNAL_FILE,
+                        config={
+                            "path": "data/factors.json",
+                            "fileType": "json",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="json_lookup")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_live_switch(self, tmp_path: Path) -> None:
+        """liveSwitch round-trips with input_scenario_map."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node("live_src"),
+                self._source_node("batch_src"),
+                GraphNode(
+                    id="switch",
+                    data=NodeData(
+                        label="switch",
+                        nodeType=NodeType.LIVE_SWITCH,
+                        config={"input_scenario_map": {
+                            "live_src": "live",
+                            "batch_src": "batch",
+                        }},
+                    ),
+                ),
+            ],
+            edges=[
+                GraphEdge(id="e1", source="live_src", target="switch"),
+                GraphEdge(id="e2", source="batch_src", target="switch"),
+            ],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_model_score(self, tmp_path: Path) -> None:
+        """modelScore round-trips with minimal config."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="scorer",
+                    data=NodeData(
+                        label="scorer",
+                        nodeType=NodeType.MODEL_SCORE,
+                        config={
+                            "sourceType": "run",
+                            "task": "regression",
+                            "output_column": "prediction",
+                            "run_id": "abc123",
+                            "artifact_path": "models/model.cbm",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="scorer")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_modelling(self, tmp_path: Path) -> None:
+        """modelling round-trips with core config keys."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="train",
+                    data=NodeData(
+                        label="train",
+                        nodeType=NodeType.MODELLING,
+                        config={
+                            "name": "freq_model",
+                            "target": "ClaimNb",
+                            "algorithm": "catboost",
+                            "task": "regression",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="train")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_optimiser(self, tmp_path: Path) -> None:
+        """optimiser round-trips with minimal config."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="opt",
+                    data=NodeData(
+                        label="opt",
+                        nodeType=NodeType.OPTIMISER,
+                        config={
+                            "mode": "online",
+                            "objective": "profit",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="opt")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_optimiser_apply(self, tmp_path: Path) -> None:
+        """optimiserApply round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="apply",
+                    data=NodeData(
+                        label="apply",
+                        nodeType=NodeType.OPTIMISER_APPLY,
+                        config={
+                            "artifact_path": "artifacts/opt.json",
+                            "version_column": "__opt_v__",
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="apply")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_scenario_expander(self, tmp_path: Path) -> None:
+        """scenarioExpander round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="expand",
+                    data=NodeData(
+                        label="expand",
+                        nodeType=NodeType.SCENARIO_EXPANDER,
+                        config={
+                            "column_name": "discount",
+                            "steps": 5,
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="expand")],
             pipeline_name="roundtrip_test",
         )
         parsed = _parse_roundtrip(graph, tmp_path)

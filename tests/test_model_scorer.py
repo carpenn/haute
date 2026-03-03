@@ -110,9 +110,12 @@ class TestModelScorerScore:
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
-        scorer.score(lf)
+        result = scorer.score(lf)
 
         mock_eager.assert_called_once()
+        assert isinstance(result, pl.LazyFrame)
+        collected = result.collect()
+        assert "prediction" in collected.columns
 
     @patch("haute._model_scorer.ModelScorer._score_batched")
     @patch("haute._mlflow_io.load_mlflow_model")
@@ -123,9 +126,10 @@ class TestModelScorerScore:
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
-        scorer.score(lf)
+        result = scorer.score(lf)
 
         mock_batched.assert_called_once()
+        assert isinstance(result, pl.LazyFrame)
 
     @patch("haute._model_scorer.ModelScorer._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
@@ -137,9 +141,10 @@ class TestModelScorerScore:
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch", row_limit=10)
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
-        scorer.score(lf)
+        result = scorer.score(lf)
 
         mock_eager.assert_called_once()
+        assert isinstance(result, pl.LazyFrame)
 
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_feature_intersection(self, mock_load):
@@ -172,8 +177,9 @@ class TestModelScorerScore:
 
         with patch.object(scorer, "_score_eager") as mock_eager:
             mock_eager.return_value = pl.LazyFrame()
-            scorer.score()  # no dfs passed
+            result = scorer.score()  # no dfs passed
             mock_eager.assert_called_once()
+            assert isinstance(result, pl.LazyFrame)
 
     @patch("haute.executor._exec_user_code")
     @patch("haute._mlflow_io.load_mlflow_model")

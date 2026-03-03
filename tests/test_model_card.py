@@ -36,6 +36,14 @@ class TestModelCardValidHtml:
         assert "test-model" in html
 
 
+    def test_xss_in_name_escaped(self):
+        """Malicious model names should be escaped in HTML output."""
+        kwargs = _minimal_kwargs()
+        kwargs["name"] = '<script>alert("xss")</script>'
+        html = generate_model_card(**kwargs)
+        assert "<script>" not in html
+
+
 class TestModelCardContainsMetrics:
     def test_metric_names_present(self):
         html = generate_model_card(**_minimal_kwargs())

@@ -136,11 +136,11 @@ class TestCodegenMultiFile:
     def test_graph_to_code_multi_returns_files(self, submodel_graph):
         """graph_to_code_multi should return a dict with main + submodel files."""
         files = graph_to_code_multi(submodel_graph, pipeline_name="main")
-        assert isinstance(files, dict)
         assert len(files) >= 1
-        # Should have at least the main file
         main_files = [k for k in files if not k.startswith("modules/")]
         assert len(main_files) >= 1
+        for name, code in files.items():
+            compile(code, f"<{name}>", "exec")
 
     def test_submodel_file_generated(self, submodel_graph):
         """The submodel .py file should be generated."""
@@ -148,6 +148,7 @@ class TestCodegenMultiFile:
         sm_files = [k for k in files if k.startswith("modules/")]
         assert len(sm_files) >= 1
         sm_code = files[sm_files[0]]
+        compile(sm_code, "<submodel>", "exec")
         assert "haute" in sm_code
 
     def test_main_file_compiles(self, submodel_graph):

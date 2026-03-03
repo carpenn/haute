@@ -1,0 +1,161 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { renderHook, cleanup, act } from "@testing-library/react"
+import type { Node, Edge } from "@xyflow/react"
+import useNodeHandlers from "../useNodeHandlers"
+import useToastStore from "../../stores/useToastStore"
+import useNodeResultsStore from "../../stores/useNodeResultsStore"
+
+vi.mock("../../utils/layout", () => ({
+  getLayoutedElements: vi.fn(async (nodes: Node[]) => nodes),
+}))
+
+function makeParams(overrides: Partial<Parameters<typeof useNodeHandlers>[0]> = {}) {
+  return {
+    graphRef: { current: { nodes: [] as Node[], edges: [] as Edge[] } },
+    nodeIdCounter: { current: 10 },
+    lastSelectedNodeRef: { current: null as Node | null },
+    setNodes: vi.fn(),
+    setEdges: vi.fn(),
+    setSelectedNode: vi.fn(),
+    setPreviewData: vi.fn(),
+    onUpdateNode: vi.fn(),
+    fitView: vi.fn(),
+    ...overrides,
+  }
+}
+
+function makeNode(id: string, overrides: Partial<Node> = {}): Node {
+  return {
+    id,
+    position: { x: 0, y: 0 },
+    type: "transform",
+    data: { label: `Node ${id}`, nodeType: "transform", config: {} },
+    ...overrides,
+  } as Node
+}
+
+describe("useNodeHandlers", () => {
+  beforeEach(() => {
+    useToastStore.setState({ toasts: [], _toastCounter: 0 })
+    useNodeResultsStore.setState({ previews: {}, columnCache: {} })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("handleDeleteNode removes node and connected edges", () => {
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    const n2 = makeNode("n2")
+    params.graphRef.current = {
+      nodes: [n1, n2],
+      edges: [{ id: "e1", source: "n1", target: "n2" } as Edge],
+    }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleDeleteNode("n1")
+    })
+    // Nodes are set directly (not via updater) in this implementation
+    expect(params.setNodes).toHaveBeenCalledWith([n2])
+    expect(params.setEdges).toHaveBeenCalledWith([])
+  })
+
+  it("handleDeleteNode clears selected node if it was selected", () => {
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    params.graphRef.current = { nodes: [n1], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleDeleteNode("n1")
+    })
+    // setSelectedNode is called with a function that returns null when prev.id === id
+    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node | null
+    expect(updater(n1)).toBeNull()
+  })
+
+  it("handleDeleteNode preserves selected node if different", () => {
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    const n2 = makeNode("n2")
+    params.graphRef.current = { nodes: [n1, n2], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleDeleteNode("n1")
+    })
+    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node | null
+    expect(updater(n2)).toBe(n2)
+  })
+
+  it("handleDuplicateNode creates a copy with offset position", () => {
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    n1.position = { x: 100, y: 200 }
+    params.graphRef.current = { nodes: [n1], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleDuplicateNode("n1")
+    })
+    expect(params.setNodes).toHaveBeenCalledOnce()
+    expect(params.nodeIdCounter.current).toBe(11)
+    expect(params.setSelectedNode).toHaveBeenCalledOnce()
+    const newNode = params.setSelectedNode.mock.calls[0][0] as Node
+    expect(newNode.position).toEqual({ x: 140, y: 240 })
+    expect(newNode.data.label).toContain("copy")
+  })
+
+  it("handleDuplicateNode does nothing if node not found", () => {
+    const params = makeParams()
+    params.graphRef.current = { nodes: [], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleDuplicateNode("nonexistent")
+    })
+    expect(params.setNodes).not.toHaveBeenCalled()
+  })
+
+  it("handleCreateInstance creates an instance node with toast", () => {
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    params.graphRef.current = { nodes: [n1], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    act(() => {
+      result.current.handleCreateInstance("n1")
+    })
+    expect(params.setNodes).toHaveBeenCalledOnce()
+    expect(params.setSelectedNode).toHaveBeenCalledOnce()
+    const newNode = params.setSelectedNode.mock.calls[0][0] as Node
+    expect(newNode.data.config).toEqual({ instanceOf: "n1" })
+    expect(newNode.data.label).toContain("instance")
+    const toasts = useToastStore.getState().toasts
+    expect(toasts[toasts.length - 1]).toMatchObject({ type: "info" })
+  })
+
+  it("handleAutoLayout applies layout and toasts", async () => {
+    vi.useFakeTimers()
+    const params = makeParams()
+    const n1 = makeNode("n1")
+    params.graphRef.current = { nodes: [n1], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    await act(async () => {
+      await result.current.handleAutoLayout()
+    })
+    expect(params.setNodes).toHaveBeenCalledOnce()
+    const toasts = useToastStore.getState().toasts
+    expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Auto-layout applied" })
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(params.fitView).toHaveBeenCalledWith({ padding: 0.8 })
+    vi.useRealTimers()
+  })
+
+  it("handleAutoLayout does nothing with empty graph", async () => {
+    const params = makeParams()
+    params.graphRef.current = { nodes: [], edges: [] }
+    const { result } = renderHook(() => useNodeHandlers(params))
+    await act(async () => {
+      await result.current.handleAutoLayout()
+    })
+    expect(params.setNodes).not.toHaveBeenCalled()
+  })
+})

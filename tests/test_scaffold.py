@@ -257,7 +257,7 @@ class TestGithubDeployYmlImprovements:
 
     def test_timeouts_on_all_jobs(self) -> None:
         result = github_deploy_yml("databricks")
-        assert result.count("timeout-minutes:") >= 4
+        assert result.count("timeout-minutes:") == 4
 
     def test_python_version_pinned(self) -> None:
         result = github_deploy_yml("databricks")
@@ -269,7 +269,7 @@ class TestGithubCiYmlImprovements:
 
     def test_timeouts_on_all_jobs(self) -> None:
         result = github_ci_yml()
-        assert result.count("timeout-minutes:") >= 4
+        assert result.count("timeout-minutes:") == 4
 
     def test_python_version_pinned(self) -> None:
         result = github_ci_yml()
@@ -312,7 +312,9 @@ class TestGitlabCiYml:
         # Secrets should appear in the deploy-staging, smoke-test, impact, production sections
         assert "DATABRICKS_RATING_HOST" in result
         # The lint section should NOT have variables with secrets
-        lint_section = result.split("# ── Validate")[1].split("# ── Staging")[0]
+        parts = result.split("# ── Validate")
+        assert len(parts) == 2, "Expected exactly one '# ── Validate' sentinel"
+        lint_section = parts[1].split("# ── Staging")[0]
         assert "DATABRICKS_RATING_HOST" not in lint_section
 
     def test_concurrency_control(self) -> None:
@@ -399,14 +401,18 @@ class TestAzureDevopsYml:
         from haute._scaffold import azure_devops_yml
 
         result = azure_devops_yml("databricks")
-        validate_section = result.split("# ── Deploy to staging")[0]
+        parts = result.split("# ── Deploy to staging")
+        assert len(parts) == 2, "Expected exactly one '# ── Deploy to staging' sentinel"
+        validate_section = parts[0]
         assert "haute-credentials" not in validate_section
 
     def test_secrets_in_deploy_stages(self) -> None:
         from haute._scaffold import azure_devops_yml
 
         result = azure_devops_yml("databricks")
-        deploy_onwards = result.split("# ── Deploy to staging")[1]
+        parts = result.split("# ── Deploy to staging")
+        assert len(parts) == 2, "Expected exactly one '# ── Deploy to staging' sentinel"
+        deploy_onwards = parts[1]
         assert "haute-credentials" in deploy_onwards
 
     def test_python_version_pinned(self) -> None:

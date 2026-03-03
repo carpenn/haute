@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.codegen import graph_to_code
@@ -148,63 +149,32 @@ class TestRatingStepExecutor:
         result = fn(lf).collect()
         assert result.columns == ["x"]
 
-    def test_combine_multiply(self):
-        """Two tables combined via multiply."""
+    @pytest.mark.parametrize(
+        "operation, col_name, expected",
+        [
+            ("multiply", "combined", [6.0, 1.0]),
+            ("add", "total", [5.0, 2.0]),
+            ("min", "mn", [2.0, 1.0]),
+            ("max", "mx", [3.0, 1.0]),
+        ],
+        ids=["multiply", "add", "min", "max"],
+    )
+    def test_combine_operations(self, operation, col_name, expected):
+        """Two tables combined via the given operation."""
         tables = [
             {"name": "T1", "factors": ["band"], "outputColumn": "f1",
              "defaultValue": "1.0", "entries": [{"band": "A", "value": 2.0}]},
             {"name": "T2", "factors": ["band"], "outputColumn": "f2",
              "defaultValue": "1.0", "entries": [{"band": "A", "value": 3.0}]},
         ]
-        node = _rating_node("rc1", tables, combined_column="combined")
+        node = _rating_node(
+            f"rc_{operation}", tables,
+            operation=operation, combined_column=col_name,
+        )
         _, fn, _ = _build_node_fn(node)
         lf = pl.DataFrame({"band": ["A", "B"]}).lazy()
         result = fn(lf).collect()
-        assert result["f1"].to_list() == [2.0, 1.0]
-        assert result["f2"].to_list() == [3.0, 1.0]
-        assert result["combined"].to_list() == [6.0, 1.0]
-
-    def test_combine_add(self):
-        """Two tables combined via add."""
-        tables = [
-            {"name": "T1", "factors": ["band"], "outputColumn": "f1",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 2.0}]},
-            {"name": "T2", "factors": ["band"], "outputColumn": "f2",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 3.0}]},
-        ]
-        node = _rating_node("rc2", tables, operation="add", combined_column="total")
-        _, fn, _ = _build_node_fn(node)
-        lf = pl.DataFrame({"band": ["A", "B"]}).lazy()
-        result = fn(lf).collect()
-        assert result["total"].to_list() == [5.0, 2.0]
-
-    def test_combine_min(self):
-        """Two tables combined via min."""
-        tables = [
-            {"name": "T1", "factors": ["band"], "outputColumn": "f1",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 2.0}]},
-            {"name": "T2", "factors": ["band"], "outputColumn": "f2",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 3.0}]},
-        ]
-        node = _rating_node("rc3", tables, operation="min", combined_column="mn")
-        _, fn, _ = _build_node_fn(node)
-        lf = pl.DataFrame({"band": ["A", "B"]}).lazy()
-        result = fn(lf).collect()
-        assert result["mn"].to_list() == [2.0, 1.0]
-
-    def test_combine_max(self):
-        """Two tables combined via max."""
-        tables = [
-            {"name": "T1", "factors": ["band"], "outputColumn": "f1",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 2.0}]},
-            {"name": "T2", "factors": ["band"], "outputColumn": "f2",
-             "defaultValue": "1.0", "entries": [{"band": "A", "value": 3.0}]},
-        ]
-        node = _rating_node("rc4", tables, operation="max", combined_column="mx")
-        _, fn, _ = _build_node_fn(node)
-        lf = pl.DataFrame({"band": ["A", "B"]}).lazy()
-        result = fn(lf).collect()
-        assert result["mx"].to_list() == [3.0, 1.0]
+        assert result[col_name].to_list() == expected
 
     def test_no_combined_column_skips_combine(self):
         """Without combinedColumn, no combination column is created."""

@@ -6,11 +6,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from haute._types import GraphNode, NodeData, PipelineGraph
+from haute.deploy._config import DeployConfig, ResolvedDeploy
 from haute.deploy._utils import build_manifest, get_haute_version, get_user
 
 # ---------------------------------------------------------------------------
-# Helpers — minimal stubs for ResolvedDeploy and its dependencies
+# Helpers — real ResolvedDeploy with sensible defaults
 # ---------------------------------------------------------------------------
+
+
+def _make_graph(
+    pipeline_name: str | None = "my_pipeline",
+    nodes_count: int = 3,
+) -> PipelineGraph:
+    """Build a minimal real PipelineGraph."""
+    nodes = [
+        GraphNode(
+            id=f"n{i}",
+            data=NodeData(label=f"node_{i}", nodeType="transform", config={}),
+        )
+        for i in range(nodes_count)
+    ]
+    return PipelineGraph(nodes=nodes, edges=[], pipeline_name=pipeline_name)
 
 
 def _make_resolved(
@@ -27,39 +44,33 @@ def _make_resolved(
     output_schema: dict[str, str] | None = None,
     removed_node_ids: list[str] | None = None,
     nodes_count: int = 3,
-) -> MagicMock:
-    """Build a minimal mock ResolvedDeploy with sensible defaults."""
-    config = MagicMock()
-    config.model_name = model_name
-    config.pipeline_file = pipeline_file
-    config.target = target
-    config.output_fields = output_fields or ["premium"]
-
-    pruned_graph = MagicMock()
-    pruned_graph.pipeline_name = pipeline_name
-    pruned_graph.nodes = [MagicMock() for _ in range(nodes_count)]
-    pruned_graph.model_dump.return_value = {
-        "nodes": [{"id": f"n{i}"} for i in range(nodes_count)],
-        "edges": [],
-        "pipeline_name": pipeline_name,
-    }
-
-    resolved = MagicMock()
-    resolved.config = config
-    resolved.pruned_graph = pruned_graph
-    resolved.input_node_ids = input_node_ids or ["api_input_1"]
-    resolved.output_node_id = output_node_id
-    resolved.artifacts = artifacts if artifacts is not None else {
-        "model.pkl": Path("/repo/artifacts/model.pkl"),
-        "scaler.pkl": Path("/repo/artifacts/scaler.pkl"),
-    }
-    resolved.input_schema = input_schema or {"age": "int", "postcode": "str"}
-    resolved.output_schema = output_schema or {"premium": "float"}
-    resolved.removed_node_ids = (
-        removed_node_ids if removed_node_ids is not None
-        else ["train_node", "eval_node"]
+) -> ResolvedDeploy:
+    """Build a real ResolvedDeploy with sensible defaults."""
+    config = DeployConfig(
+        pipeline_file=pipeline_file,
+        model_name=model_name,
+        target=target,
+        output_fields=output_fields or ["premium"],
     )
-    return resolved
+    graph = _make_graph(pipeline_name=pipeline_name, nodes_count=nodes_count)
+
+    return ResolvedDeploy(
+        config=config,
+        full_graph=graph,
+        pruned_graph=graph,
+        input_node_ids=input_node_ids or ["api_input_1"],
+        output_node_id=output_node_id,
+        artifacts=artifacts if artifacts is not None else {
+            "model.pkl": Path("/repo/artifacts/model.pkl"),
+            "scaler.pkl": Path("/repo/artifacts/scaler.pkl"),
+        },
+        input_schema=input_schema or {"age": "int", "postcode": "str"},
+        output_schema=output_schema or {"premium": "float"},
+        removed_node_ids=(
+            removed_node_ids if removed_node_ids is not None
+            else ["train_node", "eval_node"]
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,10 +158,6 @@ class TestBuildManifest:
         manifest = build_manifest(resolved)
         assert set(manifest.keys()) == _EXPECTED_KEYS
 
-    def test_exactly_16_keys(self) -> None:
-        resolved = _make_resolved()
-        manifest = build_manifest(resolved)
-        assert len(manifest) == 16
 
     def test_pipeline_name_from_pruned_graph(self) -> None:
         resolved = _make_resolved(pipeline_name="graph_pipeline")
@@ -271,10 +278,8 @@ class TestBuildManifest:
     def test_pruned_graph_is_model_dump(self) -> None:
         resolved = _make_resolved(pipeline_name="test_pipe", nodes_count=2)
         manifest = build_manifest(resolved)
-        expected = {
-            "nodes": [{"id": "n0"}, {"id": "n1"}],
-            "edges": [],
-            "pipeline_name": "test_pipe",
-        }
-        assert manifest["pruned_graph"] == expected
-        resolved.pruned_graph.model_dump.assert_called_once()
+        graph_dict = manifest["pruned_graph"]
+        assert isinstance(graph_dict, dict)
+        assert graph_dict["pipeline_name"] == "test_pipe"
+        assert len(graph_dict["nodes"]) == 2
+        assert graph_dict["edges"] == []

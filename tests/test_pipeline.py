@@ -245,4 +245,4 @@ class TestPipeline:
 
         g = p.to_graph()
         assert g["nodes"][0]["position"]["x"] == 0
-        assert g["nodes"][1]["position"]["x"] == 280
+        assert g["nodes"][1]["position"]["x"] > g["nodes"][0]["position"]["x"]

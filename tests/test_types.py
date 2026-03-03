@@ -54,26 +54,14 @@ class TestNodeType:
         "SUBMODEL_PORT": "submodelPort",
     }
 
-    def test_all_expected_members_present(self):
-        for member_name in self.EXPECTED_MEMBERS:
-            assert hasattr(NodeType, member_name), f"Missing NodeType.{member_name}"
-
     def test_no_unexpected_members(self):
         actual = {m.name for m in NodeType}
         expected = set(self.EXPECTED_MEMBERS.keys())
         assert actual == expected, f"Unexpected members: {actual - expected}"
 
-    def test_member_count(self):
-        assert len(NodeType) == len(self.EXPECTED_MEMBERS)
-
     def test_string_values_match(self):
         for member_name, value in self.EXPECTED_MEMBERS.items():
             assert NodeType[member_name].value == value
-
-    def test_str_enum_string_equality(self):
-        """NodeType members should be directly comparable to plain strings."""
-        assert NodeType.API_INPUT == "apiInput"
-        assert NodeType.TRANSFORM == "transform"
 
     def test_str_enum_in_json_serialization(self):
         """StrEnum values serialize to plain strings in JSON."""
@@ -95,9 +83,6 @@ class TestNodeType:
 
 
 class TestHauteError:
-    def test_is_exception(self):
-        assert issubclass(HauteError, Exception)
-
     def test_can_be_raised_and_caught(self):
         with pytest.raises(HauteError, match="test message"):
             raise HauteError("test message")

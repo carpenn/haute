@@ -8,7 +8,7 @@ import pytest
 
 from haute.modelling._algorithms import ALGORITHM_REGISTRY, CatBoostAlgorithm, FitResult, resolve_loss_function
 from haute.modelling._metrics import compute_double_lift, compute_metrics
-from haute.modelling._split import SplitConfig, split_data, split_mask
+from haute.modelling._split import SplitConfig, _assign_group_split, split_data, split_mask
 from haute.modelling._training_job import TrainResult, TrainingJob
 
 
@@ -126,7 +126,7 @@ class TestSplitMask:
         assert len(mask) == n
         assert mask.dtype == pl.Boolean
         train_n = mask.sum()
-        assert 750 < train_n < 850  # ~80% train ± tolerance
+        assert train_n == 800
 
     def test_random_mask_deterministic(self):
         cfg = SplitConfig(test_size=0.2, seed=42)
@@ -172,6 +172,50 @@ class TestSplitMask:
 
 
 # ---------------------------------------------------------------------------
+# _assign_group_split — hash-based group assignment
+# ---------------------------------------------------------------------------
+
+
+class TestAssignGroupSplit:
+    def test_deterministic(self):
+        """Same inputs always produce the same test groups."""
+        groups = ["alpha", "beta", "gamma", "delta"]
+        r1 = _assign_group_split(groups, 0.3, seed=42)
+        r2 = _assign_group_split(groups, 0.3, seed=42)
+        assert r1 == r2
+
+    def test_different_seed_different_assignment(self):
+        groups = ["alpha", "beta", "gamma", "delta"]
+        r1 = _assign_group_split(groups, 0.3, seed=42)
+        r2 = _assign_group_split(groups, 0.3, seed=99)
+        # With 4 groups, very likely to differ (not guaranteed but astronomically unlikely to match)
+        assert r1 != r2
+
+    def test_fallback_forces_first_sorted_group(self):
+        """When all groups hash to train, fallback forces first sorted group to test.
+
+        With seed=0 and groups=['A', 'B'], test_size=0.3, both A (frac=0.93)
+        and B (frac=0.60) hash above the threshold, so no groups are
+        initially assigned to test.  The fallback should force 'A' (first
+        sorted) into the test set.
+        """
+        result = _assign_group_split(["A", "B"], test_size=0.3, seed=0)
+        assert result == {"A"}, f"Expected fallback to force 'A', got {result}"
+
+    def test_single_group_no_fallback(self):
+        """A single group should NOT trigger the fallback (needs >1 group)."""
+        result = _assign_group_split(["only"], test_size=0.3, seed=0)
+        # With 1 group, the condition `len(unique_groups) > 1` is False
+        assert result == set()
+
+    def test_returns_set_of_strings(self):
+        """Even if input groups are integers, result should be string set."""
+        result = _assign_group_split([1, 2, 3, 4, 5], test_size=0.5, seed=42)
+        assert all(isinstance(g, str) for g in result)
+        assert len(result) > 0
+
+
+# ---------------------------------------------------------------------------
 # compute_metrics
 # ---------------------------------------------------------------------------
 
@@ -182,27 +226,39 @@ class TestComputeMetrics:
             compute_metrics(np.array([1]), np.array([1]), None, ["nonexistent"])
 
     @pytest.mark.parametrize(
-        "metric, y_true, y_pred, expected, tolerance",
+        "metric, y_true, y_pred, sklearn_fn, sklearn_kwargs",
         [
-            pytest.param("rmse", [1.0, 2.0, 3.0], [1.0, 2.0, 3.0], 0.0, 1e-10, id="rmse_perfect"),
-            pytest.param("rmse", [1.0, 2.0, 3.0], [1.0, 2.0, 4.0], None, None, id="rmse_known"),
-            pytest.param("mae", [1.0, 2.0, 3.0], [1.5, 2.5, 3.5], 0.5, None, id="mae_known"),
-            pytest.param("mse", [1.0, 2.0, 3.0], [2.0, 2.0, 2.0], None, None, id="mse_known"),
-            pytest.param("r2", [1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0], 1.0, 1e-10, id="r2_perfect"),
+            pytest.param(
+                "rmse", [1.0, 2.0, 3.0], [1.0, 2.0, 3.0],
+                "root_mean_squared_error", {}, id="rmse_perfect",
+            ),
+            pytest.param(
+                "rmse", [1.0, 2.0, 3.0, 4.0, 5.0], [1.1, 2.3, 2.8, 4.2, 5.5],
+                "root_mean_squared_error", {}, id="rmse_known",
+            ),
+            pytest.param(
+                "mae", [1.0, 2.0, 3.0], [1.5, 2.5, 3.5],
+                "mean_absolute_error", {}, id="mae_known",
+            ),
+            pytest.param(
+                "mse", [1.0, 2.0, 3.0], [2.0, 2.0, 2.0],
+                "mean_squared_error", {}, id="mse_known",
+            ),
+            pytest.param(
+                "r2", [1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0],
+                "r2_score", {}, id="r2_perfect",
+            ),
         ],
     )
-    def test_core_metric(self, metric, y_true, y_pred, expected, tolerance):
+    def test_core_metric_against_sklearn(self, metric, y_true, y_pred, sklearn_fn, sklearn_kwargs):
+        """Validate metric computation against sklearn as independent oracle."""
+        from sklearn import metrics as sk_metrics
+
         yt = np.array(y_true)
         yp = np.array(y_pred)
         result = compute_metrics(yt, yp, None, [metric])
-        if expected is None:
-            # Compute expected from numpy for known-value tests
-            if metric == "rmse":
-                expected = np.sqrt(np.mean((yt - yp) ** 2))
-            elif metric == "mse":
-                expected = np.mean((yt - yp) ** 2)
-        approx_kwargs = {"abs": tolerance} if tolerance else {}
-        assert result[metric] == pytest.approx(expected, **approx_kwargs)
+        expected = getattr(sk_metrics, sklearn_fn)(yt, yp, **sklearn_kwargs)
+        assert result[metric] == pytest.approx(expected, rel=1e-6)
 
     def test_gini_perfect_ranking(self):
         """Perfect ranking gives Gini = 1.0."""
@@ -211,21 +267,41 @@ class TestComputeMetrics:
         result = compute_metrics(y_true, y_pred, None, ["gini"])
         assert result["gini"] == pytest.approx(1.0, abs=0.01)
 
-    def test_gini_random(self):
-        """Random predictions give Gini close to 0."""
+    def test_gini_inverted_model(self):
+        """Inverted predictions should produce negative Gini."""
+        y_true = np.array([0, 0, 0, 1, 1, 1])
+        y_pred = np.array([0.9, 0.8, 0.7, 0.1, 0.2, 0.3])  # inverted ranking
+        result = compute_metrics(y_true, y_pred, None, ["gini"])
+        assert result["gini"] < -0.8, "Inverted model should have strongly negative Gini"
+
+    def test_gini_random_seeded(self):
+        """Random predictions with seed 42 give a specific known Gini value."""
         rng = np.random.RandomState(42)
         y_true = rng.choice([0, 1], size=1000)
         y_pred = rng.random(1000)
         result = compute_metrics(y_true, y_pred, None, ["gini"])
-        assert abs(result["gini"]) < 0.15
+        assert result["gini"] == pytest.approx(0.0339417125, abs=1e-6)
+
+    def test_metrics_are_finite(self):
+        """All returned metrics must be finite numbers."""
+        y_true = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y_pred = np.array([1.5, 2.5, 2.8, 4.2, 5.1])
+        result = compute_metrics(y_true, y_pred, None, ["rmse", "mse", "mae", "r2"])
+        for name, value in result.items():
+            assert np.isfinite(value), f"{name} is not finite: {value}"
+        assert result["rmse"] >= 0
+        assert result["mse"] >= 0
+        assert result["mae"] >= 0
 
     def test_weighted_rmse(self):
+        from sklearn.metrics import root_mean_squared_error
+
         y_true = np.array([1.0, 2.0, 3.0])
         y_pred = np.array([1.0, 2.0, 4.0])
         weights = np.array([1.0, 1.0, 2.0])
         result = compute_metrics(y_true, y_pred, weights, ["rmse"])
-        expected = np.sqrt(np.average((y_true - y_pred) ** 2, weights=weights))
-        assert result["rmse"] == pytest.approx(expected)
+        expected = root_mean_squared_error(y_true, y_pred, sample_weight=weights)
+        assert result["rmse"] == pytest.approx(expected, rel=1e-6)
 
     def test_multiple_metrics(self):
         y = np.array([1.0, 2.0, 3.0])
@@ -474,7 +550,9 @@ class TestTrainingJob:
             output_dir=str(tmp_path),
         )
         result = job.run()
-        assert result.metrics
+        assert result.metrics, "metrics dict should not be empty"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
 
     def test_classification_task(self, tmp_path):
         rng = np.random.RandomState(42)
@@ -513,7 +591,11 @@ class TestTrainingJob:
         )
         job.run(progress=_progress)
         assert len(messages) > 0
-        assert messages[-1][1] == 1.0
+        # Progress fractions should be monotonically non-decreasing and in [0, 1]
+        fracs = [frac for _, frac in messages]
+        assert all(0.0 <= f <= 1.0 for f in fracs)
+        assert fracs == sorted(fracs)
+        assert fracs[-1] == 1.0
 
     def test_split_config_from_dict(self, synth_data, tmp_path):
         job = TrainingJob(
@@ -563,7 +645,9 @@ class TestTrainingJob:
             output_dir=str(tmp_path),
         )
         result = job.run()
-        assert result.metrics
+        assert result.metrics, "Poisson loss should produce metrics"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
 
     def test_tweedie_loss(self, synth_data, tmp_path):
         job = TrainingJob(
@@ -577,7 +661,9 @@ class TestTrainingJob:
             output_dir=str(tmp_path),
         )
         result = job.run()
-        assert result.metrics
+        assert result.metrics, "Tweedie loss should produce metrics"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
 
     def test_offset_column(self, synth_data, tmp_path):
         # Add a log-exposure offset column
@@ -593,7 +679,9 @@ class TestTrainingJob:
             output_dir=str(tmp_path),
         )
         result = job.run()
-        assert result.metrics
+        assert result.metrics, "Offset column training should produce metrics"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
         # Offset column should not be in features
         assert "log_exposure" not in result.features
 
@@ -723,7 +811,9 @@ class TestMonotonicConstraints:
             output_dir="/tmp/test_mono",
         )
         result = job.run()
-        assert result.metrics
+        assert result.metrics, "Monotone constraint training should produce metrics"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
 
     def test_monotone_constraint_decreasing(self):
         """With monotone_constraints x1=-1, predictions must decrease with x1."""
@@ -837,6 +927,8 @@ class TestSHAP:
         )
         result = job.run()
         assert len(result.shap_summary) == 2
+        shap_features = {s["feature"] for s in result.shap_summary}
+        assert shap_features == {"x1", "x2"}
         assert len(result.feature_importance_loss) == 2
 
 
@@ -886,7 +978,9 @@ class TestCrossValidation:
         assert result.cv_results["n_folds"] == 3
         assert len(result.cv_results["mean_metrics"]) > 0
         # Normal model should still be trained
-        assert result.metrics
+        assert result.metrics, "CV training should also produce hold-out metrics"
+        for k, v in result.metrics.items():
+            assert np.isfinite(v), f"metric '{k}' is not finite: {v}"
         assert result.train_rows > 0
 
     def test_training_job_without_cv(self, tmp_path):

@@ -573,7 +573,7 @@ class TestJsonCache:
         # (write to a path that is a directory, not a file)
         bad_cache = tmp_path / "dir_not_file.parquet"
         bad_cache.mkdir()
-        with pytest.raises(Exception):
+        with pytest.raises(IsADirectoryError):
             _flatten_and_write([{"x": 1}], {"x": "int"}, bad_cache)
 
     def test_read_json_flat_caches_and_reuses(self, tmp_path, monkeypatch):
@@ -836,13 +836,16 @@ class TestInferSchemaStreaming:
         assert "y" in schema
 
     def test_stops_after_max_samples(self, tmp_path):
-        """Should not read the entire file — stops after max_samples."""
+        """Should stop reading after max_samples records."""
         p = tmp_path / "data.jsonl"
-        lines = [json.dumps({"x": i}) for i in range(1000)]
-        p.write_text("\n".join(lines) + "\n")
-        # This should complete quickly even with a huge file
+        # 5 valid records followed by records with a different schema
+        valid = [json.dumps({"x": i}) for i in range(5)]
+        extra = [json.dumps({"x": i, "extra_col": "v"}) for i in range(100)]
+        p.write_text("\n".join(valid + extra) + "\n")
         schema = _infer_schema_streaming(p, max_samples=5)
         assert "x" in schema
+        # If early stop works, "extra_col" should not appear in schema
+        assert "extra_col" not in schema
 
     def test_empty_file_returns_empty_schema(self, tmp_path):
         p = tmp_path / "empty.jsonl"

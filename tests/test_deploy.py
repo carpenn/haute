@@ -324,6 +324,51 @@ class TestBundler:
         artifacts = collect_artifacts(graph, [], Path("."))
         assert len(artifacts) == 0
 
+    def test_external_file_no_path_skipped(self):
+        """externalFile node with no path should be silently skipped."""
+        from haute.deploy._bundler import collect_artifacts
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ext_no_path",
+                    "data": {
+                        "nodeType": "externalFile",
+                        "config": {},
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], Path("."))
+        assert len(artifacts) == 0
+
+    def test_datasource_not_input_collects_artifact(self, tmp_path):
+        """dataSource node NOT listed as input should be collected as an artifact."""
+        from haute.deploy._bundler import collect_artifacts
+
+        data_file = tmp_path / "lookup.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "static_ds",
+                    "data": {
+                        "nodeType": "dataSource",
+                        "config": {"path": str(data_file)},
+                    },
+                },
+            ],
+        })
+
+        # input_node_ids=[] means static_ds is NOT a deploy input
+        artifacts = collect_artifacts(graph, [], tmp_path)
+        assert len(artifacts) == 1
+        name = next(iter(artifacts))
+        assert name == "static_ds__lookup.csv"
+        assert artifacts[name].is_file()
+
 
 # ---------------------------------------------------------------------------
 # Scorer tests
@@ -467,6 +512,15 @@ class TestSchema:
 
         assert isinstance(schema, dict)
         assert len(schema) > 0
+        # The fixture pipeline produces premium from VehPower * area_factor * Exposure,
+        # so the output must contain at least the source columns plus the computed premium.
+        assert "premium" in schema, "Output schema must include the 'premium' column"
+        assert "VehPower" in schema, "Output schema must include input columns"
+        # All dtype values must be non-empty Polars dtype strings
+        for col_name, dtype_str in schema.items():
+            assert isinstance(dtype_str, str) and len(dtype_str) > 0, (
+                f"Column '{col_name}' has invalid dtype: {dtype_str!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

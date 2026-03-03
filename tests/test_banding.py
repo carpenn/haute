@@ -139,6 +139,7 @@ class TestApplyBandingContinuous:
         result = _apply_banding(lf, "x", "band", "continuous", rules, default="dflt").collect()
         bands = result["band"].to_list()
         assert bands[0] == "low"
+        assert bands[1] == "dflt", f"Null row should get default value, got {bands[1]!r}"
         assert bands[2] == "high"
 
 

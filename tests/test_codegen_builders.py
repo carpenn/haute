@@ -657,3 +657,157 @@ class TestGraphToCodeWithBuilders:
         assert 'pipeline.connect("Band", "Expand")' in code
         assert 'pipeline.connect("Expand", "Opt")' in code
         assert 'pipeline.connect("Opt", "Result")' in code
+
+
+# ---------------------------------------------------------------------------
+# Exec-based validation: run generated function bodies against real data
+# ---------------------------------------------------------------------------
+
+
+class TestCodegenExecValidation:
+    """Execute generated code against real DataFrames to verify bodies work.
+
+    Goes beyond ``compile()`` (syntax-only) to catch undefined names,
+    wrong column references, and type errors in generated function bodies.
+    """
+
+    @staticmethod
+    def _exec_generated(code: str, input_df=None):
+        """Exec the pipeline code and call the last defined function.
+
+        Returns the result of calling the function with *input_df*.
+        """
+        ns: dict = {}
+        exec(
+            "import polars as pl\nimport haute\n"
+            "pipeline = haute.Pipeline('exec_test')\n\n"
+            f"{code}\n",
+            ns,
+        )
+        # Find all functions defined via @pipeline.node
+        func_names = [
+            name for name, obj in ns.items()
+            if callable(obj) and not name.startswith("_") and name not in (
+                "pl", "haute", "pipeline",
+            )
+        ]
+        assert func_names, "No functions found in generated code"
+        fn = ns[func_names[-1]]
+        if input_df is not None:
+            return fn(input_df)
+        return fn()
+
+    def test_data_source_exec_produces_lazyframe(self) -> None:
+        """dataSource code that references a real parquet file executes."""
+        import polars as pl
+
+        node = _make_codegen_node(
+            "dataSource",
+            {"path": "tests/fixtures/data/policies.parquet", "sourceType": "flat_file"},
+            label="load_policies",
+        )
+        code = _node_to_code(node)
+        result = self._exec_generated(code)
+        assert isinstance(result, pl.LazyFrame)
+        assert len(result.collect()) > 0
+
+    def test_api_input_exec_produces_lazyframe(self) -> None:
+        """apiInput code that references a real JSON file executes."""
+        import polars as pl
+
+        node = _make_codegen_node(
+            "apiInput",
+            {"path": "tests/fixtures/data/api_input.json"},
+            label="quotes",
+        )
+        code = _node_to_code(node)
+        result = self._exec_generated(code)
+        assert isinstance(result, pl.LazyFrame)
+        collected = result.collect()
+        assert len(collected) > 0
+        assert len(collected.columns) > 0
+
+    def test_output_exec_selects_fields(self) -> None:
+        """output code with fields actually filters columns."""
+        import polars as pl
+
+        node = _make_codegen_node(
+            "output",
+            {"fields": ["premium", "Area"]},
+            label="result",
+        )
+        code = _node_to_code(node, source_names=["upstream"])
+        input_lf = pl.DataFrame({
+            "premium": [1.0], "Area": ["A"], "extra": [99],
+        }).lazy()
+        result = self._exec_generated(code, input_df=input_lf)
+        assert isinstance(result, pl.LazyFrame)
+        collected = result.collect()
+        assert set(collected.columns) == {"premium", "Area"}
+
+    def test_banding_exec_returns_lazyframe(self) -> None:
+        """banding code body is 'return df' — the runtime executor injects df.
+
+        Here we verify the function can be called when the parameter name
+        matches 'df' (no upstream source), confirming the body references
+        the correct variable.
+        """
+        import polars as pl
+
+        node = _make_codegen_node(
+            "banding",
+            {
+                "factors": [{
+                    "column": "age",
+                    "outputColumn": "age_band",
+                    "banding": "continuous",
+                    "rules": [
+                        {"op1": ">=", "val1": 0, "op2": "<", "val2": 50, "assignment": "young"},
+                    ],
+                }],
+            },
+            label="band_age",
+        )
+        # No source_names → param is 'df', matching the body's `return df`
+        code = _node_to_code(node, source_names=[])
+        input_lf = pl.DataFrame({"age": [25, 55]}).lazy()
+        result = self._exec_generated(code, input_df=input_lf)
+        assert isinstance(result, pl.LazyFrame)
+        assert len(result.collect()) == 2
+
+    def test_model_score_body_references_valid_names(self) -> None:
+        """modelScore generated code compiles and defines a callable function.
+
+        Full exec not possible without a live MLflow backend, but we verify
+        the generated function is syntactically valid and defines the expected
+        function name.
+        """
+        node = _make_codegen_node(
+            "modelScore",
+            {
+                "sourceType": "run",
+                "task": "regression",
+                "output_column": "prediction",
+                "run_id": "abc123",
+            },
+            label="score",
+        )
+        code = _node_to_code(node, source_names=["features"])
+        _compile_node_code(code)
+        assert "def score(features: pl.LazyFrame)" in code
+
+    def test_transform_with_code_exec(self) -> None:
+        """transform code with real Polars expression executes correctly."""
+        import polars as pl
+
+        node = _make_codegen_node(
+            "transform",
+            {"code": '.with_columns(doubled=pl.col("x") * 2)'},
+            label="double_it",
+        )
+        code = _node_to_code(node, source_names=["src"])
+        input_lf = pl.DataFrame({"x": [1.0, 2.0, 3.0]}).lazy()
+        result = self._exec_generated(code, input_df=input_lf)
+        collected = result.collect()
+        assert "doubled" in collected.columns
+        assert collected["doubled"].to_list() == [2.0, 4.0, 6.0]

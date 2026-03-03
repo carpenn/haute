@@ -10,6 +10,7 @@ import string
 from pathlib import Path
 
 import polars as pl
+import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
@@ -52,9 +53,18 @@ class TestSanitizeFuncNameProperties:
 
     @given(label=label_strategy)
     @settings(max_examples=200)
-    def test_is_deterministic(self, label: str):
-        """Same input always produces same output."""
-        assert _sanitize_func_name(label) == _sanitize_func_name(label)
+    def test_idempotent(self, label: str):
+        """Sanitizing twice produces the same result as sanitizing once."""
+        once = _sanitize_func_name(label)
+        twice = _sanitize_func_name(once)
+        assert once == twice
+
+    @given(label=label_strategy)
+    @settings(max_examples=200)
+    def test_result_is_valid_identifier(self, label: str):
+        """Output is always a valid Python identifier."""
+        result = _sanitize_func_name(label)
+        assert result.isidentifier()
 
     @given(label=st.text(alphabet=string.ascii_letters + "_", min_size=1, max_size=20))
     @settings(max_examples=100)
@@ -113,10 +123,15 @@ class TestTopoSortProperties:
 
     @given(data=dag_strategy())
     @settings(max_examples=200)
-    def test_is_deterministic(self, data):
-        """Same DAG always produces same ordering."""
+    def test_respects_edge_ordering(self, data):
+        """Every edge (u, v) has u before v in the sort."""
         ids, edges = data
-        assert topo_sort_ids(ids, edges) == topo_sort_ids(ids, edges)
+        result = topo_sort_ids(ids, edges)
+        pos = {node: i for i, node in enumerate(result)}
+        for edge in edges:
+            assert pos[edge.source] < pos[edge.target], (
+                f"{edge.source} should come before {edge.target}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -260,10 +275,10 @@ def _roundtrip(graph: PipelineGraph) -> PipelineGraph:
     import tempfile
 
     code = graph_to_code(graph, pipeline_name="gen_pipeline")
-    td = Path(tempfile.mkdtemp())
-    py_file = td / "gen_pipeline.py"
-    py_file.write_text(code)
-    return parse_pipeline_file(py_file)
+    with tempfile.TemporaryDirectory() as td:
+        py_file = Path(td) / "gen_pipeline.py"
+        py_file.write_text(code)
+        return parse_pipeline_file(py_file)
 
 
 class TestCodegenRoundtripProperties:
@@ -332,34 +347,24 @@ class TestCodegenRoundtripProperties:
 
 
 # Strategy for decorator kwargs dicts that should map to known node types
-_KNOWN_TYPE_KWARGS = [
-    {"external": "model.pkl"},
-    {"sink": "out.parquet"},
-    {"output": True},
-    {"model_score": True},
-    {"table": "t", "key": "k"},
-    {"path": "data.parquet"},
-    {},
-    {"live_switch": True},
-    {"api_input": True, "path": "d.json"},
-]
+_KNOWN_TYPE_KWARGS = {
+    "externalFile": {"external": "model.pkl"},
+    "dataSink": {"sink": "out.parquet"},
+    "output": {"output": True},
+    "modelScore": {"model_score": True},
+    "ratingStep": {"table": "t", "key": "k"},
+    "dataSource": {"path": "data.parquet"},
+    "liveSwitch": {"live_switch": True},
+    "apiInput": {"api_input": True, "path": "d.json"},
+}
 
 
 class TestInferNodeTypeProperties:
-    @given(
-        kwargs=st.sampled_from(_KNOWN_TYPE_KWARGS),
-        n_params=st.integers(min_value=0, max_value=5),
-    )
-    @settings(max_examples=100)
-    def test_always_returns_valid_node_type(self, kwargs, n_params):
-        """_infer_node_type never raises for known kwargs."""
-        result = _infer_node_type(kwargs, n_params)
-        valid_types = {
-            "dataSource", "transform", "output", "dataSink",
-            "externalFile", "modelScore", "ratingStep", "liveSwitch",
-            "apiInput", "banding", "submodel", "submodelPort",
-        }
-        assert result in valid_types
+    @pytest.mark.parametrize("expected_type,kwargs", list(_KNOWN_TYPE_KWARGS.items()))
+    def test_known_kwargs_map_to_expected_type(self, expected_type, kwargs):
+        """Each known decorator kwarg set maps to the correct node type."""
+        result = _infer_node_type(kwargs, n_params=1)
+        assert result == expected_type
 
     @given(n_params=st.integers(min_value=0, max_value=10))
     @settings(max_examples=50)

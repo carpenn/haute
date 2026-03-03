@@ -243,7 +243,7 @@ class TestWriteCodeMultiFile:
         assert "scoring submodel" in (tmp_path / "modules" / "scoring.py").read_text()
 
     def test_single_file_no_submodels(self, tmp_path: Path) -> None:
-        """Without submodels, _write_code generates a single file."""
+        """Without submodels, _write_code generates a single file via real codegen."""
         svc = SavePipelineService(tmp_path)
         graph = _make_graph(
             _make_node("src", "Source", "dataSource", {"path": "data.parquet"}),
@@ -256,11 +256,12 @@ class TestWriteCodeMultiFile:
         )
         py_path = tmp_path / "pipe.py"
 
-        with patch("haute.codegen.graph_to_code", return_value="# generated\nimport haute\n"):
-            svc._write_code(body, graph, py_path)
+        svc._write_code(body, graph, py_path)
 
         assert py_path.exists()
-        assert "generated" in py_path.read_text()
+        code = py_path.read_text()
+        assert "import haute" in code
+        assert "pipe" in code  # pipeline name
 
     def test_submodel_path_traversal_skipped(self, tmp_path: Path) -> None:
         """Files with paths that escape project root are silently skipped."""
@@ -304,8 +305,7 @@ class TestRemoveStaleConfigFiles:
         stale_file.write_text("{}")
 
         graph = _make_graph()  # No banding nodes
-        # Simulate that _write_config_files was called and produced no files
-        svc._last_config_files = {}
+        svc._write_config_files(graph)  # Populates _last_config_files (empty for no-config nodes)
 
         with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
             svc._remove_stale_config_files(graph)
@@ -316,21 +316,15 @@ class TestRemoveStaleConfigFiles:
         """Config files that match current graph nodes should be kept."""
         svc = SavePipelineService(tmp_path)
 
-        config_dir = tmp_path / "config" / "factors"
-        config_dir.mkdir(parents=True)
-        fresh_file = config_dir / "my_banding.json"
-        fresh_file.write_text("{}")
-
         graph = _make_graph(
-            _make_node("b1", "My Banding", "banding", {"bands": []}),
+            _make_node("b1", "my_banding", "banding", {"bands": []}),
         )
-        svc._last_config_files = {"config/factors/my_banding.json": "{}"}
+        svc._write_config_files(graph)  # Writes config/factors/my_banding.json
 
-        with patch(
-            "haute._config_io.NODE_TYPE_TO_FOLDER",
-            {NodeType.BANDING: "factors"},
-        ):
-            svc._remove_stale_config_files(graph)
+        fresh_file = tmp_path / "config" / "factors" / "my_banding.json"
+        assert fresh_file.exists(), "Config file should be written by _write_config_files"
+
+        svc._remove_stale_config_files(graph)
 
         assert fresh_file.exists()
 
@@ -344,7 +338,7 @@ class TestRemoveStaleConfigFiles:
         stale_file.write_text("{}")
 
         graph = _make_graph()
-        svc._last_config_files = {}
+        svc._write_config_files(graph)  # No banding nodes → empty config files
 
         with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
             svc._remove_stale_config_files(graph)
@@ -357,7 +351,7 @@ class TestRemoveStaleConfigFiles:
         """If config/ doesn't exist, _remove_stale_config_files is a no-op."""
         svc = SavePipelineService(tmp_path)
         graph = _make_graph()
-        svc._last_config_files = {}
+        svc._write_config_files(graph)
 
         with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
             # Should not raise
@@ -367,19 +361,24 @@ class TestRemoveStaleConfigFiles:
         """Only stale files are removed; fresh files remain."""
         svc = SavePipelineService(tmp_path)
 
-        config_dir = tmp_path / "config" / "factors"
-        config_dir.mkdir(parents=True)
+        # Build a graph with one banding node that produces
+        # config/factors/current_banding.json via _write_config_files
+        graph = _make_graph(
+            _make_node("b1", "current_banding", "banding", {"bands": []}),
+        )
+        svc._write_config_files(graph)
 
+        config_dir = tmp_path / "config" / "factors"
+        assert config_dir.exists(), "_write_config_files should create the factors dir"
+
+        fresh = config_dir / "current_banding.json"
+        assert fresh.exists(), "Config for current_banding should exist"
+
+        # Plant an extra stale file that doesn't correspond to any node
         stale = config_dir / "old_banding.json"
         stale.write_text("{}")
-        fresh = config_dir / "current_banding.json"
-        fresh.write_text("{}")
 
-        graph = _make_graph()
-        svc._last_config_files = {"config/factors/current_banding.json": "{}"}
-
-        with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
-            svc._remove_stale_config_files(graph)
+        svc._remove_stale_config_files(graph)
 
         assert not stale.exists()
         assert fresh.exists()

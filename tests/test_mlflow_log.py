@@ -165,6 +165,7 @@ class TestLogExperiment:
             assert "model_card" in artifact_dirs
             # No direct model artifact (only model_card)
             assert m_artifact.call_count == 1
+            assert m_artifact.call_args[0][1] == "model_card"
 
     def test_with_artifacts(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """SHAP, importance, and CV results are all logged as artifacts."""
@@ -204,8 +205,15 @@ class TestLogExperiment:
             )
 
             assert result.run_id == "abc123"
-            # model_path + shap + importance + cv + model_card = 5 artifact calls
-            assert m_artifact.call_count == 5
+            artifact_dirs = [
+                call.args[1] if len(call.args) > 1 else call.kwargs.get("artifact_path", "")
+                for call in m_artifact.call_args_list
+            ]
+            for expected in ("shap", "importance", "cv", "model_card"):
+                assert expected in artifact_dirs, f"Missing artifact dir: {expected}"
+            # model artifact logged without artifact_path subdir
+            artifact_files = [call.args[0] for call in m_artifact.call_args_list]
+            assert any(str(model_file) in str(f) for f in artifact_files)
             # CV mean metric logged
             m_metric.assert_called_once_with("cv_mean_rmse", 0.45)
 

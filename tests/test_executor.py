@@ -318,7 +318,9 @@ class TestBuildNodeFn:
         """Unknown nodeType should be rejected by NodeType enum validation."""
         import pytest
 
-        with pytest.raises(Exception):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Input should be"):
             _n({
                 "id": "unk",
                 "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
@@ -854,6 +856,14 @@ class TestLiveSwitch:
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
+    def test_empty_scenario_map_falls_back_to_first_input(self, tmp_path):
+        """Empty input_scenario_map {} should fall back to the first input."""
+        graph = self._switch_graph(tmp_path, scenario_map={})
+        results = execute_graph(graph, target_node_id="switch", scenario="live")
+        assert results["switch"].status == "ok"
+        # With empty map, should fall back to first input (live_src, 3 rows)
+        assert results["switch"].row_count == 3
+
 
 # ---------------------------------------------------------------------------
 # API Input large-file gating
@@ -994,7 +1004,7 @@ class TestBuildNodeFnErrorPaths:
         node = _source_node("src", "")
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="[Uu]nsupported file"):
             fn()
 
     def test_data_source_nonexistent_file(self):
@@ -1002,7 +1012,7 @@ class TestBuildNodeFnErrorPaths:
         node = _source_node("src", "/nonexistent/path/data.parquet")
         _, fn, _ = _build_node_fn(node)
         # scan_parquet is lazy — the error occurs at collect() time
-        with pytest.raises(Exception):
+        with pytest.raises(FileNotFoundError):
             fn().collect()
 
     def test_transform_with_syntax_error_in_code(self):
@@ -1037,7 +1047,7 @@ class TestBuildNodeFnErrorPaths:
         })
         _, fn, _ = _build_node_fn(node, source_names=["df"])
         lf = pl.DataFrame({"x": [1]}).lazy()
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, FileNotFoundError)):
             fn(lf)
 
 

@@ -109,6 +109,8 @@ class TestSmokeDatabricks:
             result = runner.invoke(cli, ["smoke"])
 
         assert result.exit_code == 0, result.output
+        # Polling occurred: endpoint.get() called twice (once PENDING, once READY)
+        assert mock_ws.serving_endpoints.get.call_count == 2
 
     def test_databricks_query_failure(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -172,6 +174,9 @@ class TestSmokeDatabricks:
             result = runner.invoke(cli, ["smoke", "--endpoint-suffix", "-canary"])
 
         assert result.exit_code == 0, result.output
+        # Verify the suffix was used in the endpoint name lookup
+        call_args = mock_ws.serving_endpoints.get.call_args
+        assert "-canary" in str(call_args)
 
 
 class TestSmokeHttp:

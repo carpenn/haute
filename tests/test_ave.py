@@ -162,6 +162,92 @@ class TestAveMaxFeatures:
         assert len(result) == 3
 
 
+class TestAveCategoricalNulls:
+    def test_none_values_become_missing_label(self):
+        """None values in a categorical column should appear as 'Missing'."""
+        df = pl.DataFrame({"c": ["a", "b", None, None, "a"]})
+        y_true = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y_pred = np.array([1.1, 2.1, 3.1, 4.1, 5.1])
+
+        result = compute_ave_per_feature(df, ["c"], ["c"], y_true, y_pred)
+        labels = [b["label"] for b in result[0]["bins"]]
+        assert "Missing" in labels, f"Expected 'Missing' label, got {labels}"
+        # __MISSING__ should NOT appear as a raw label
+        assert "__MISSING__" not in labels
+
+    def test_all_none_categorical(self):
+        """Categorical column of all Nones should produce a single 'Missing' bin."""
+        n = 10
+        df = pl.DataFrame({"c": pl.Series([None] * n, dtype=pl.Utf8)})
+        y_true = np.ones(n)
+        y_pred = np.ones(n) * 0.9
+
+        result = compute_ave_per_feature(df, ["c"], ["c"], y_true, y_pred)
+        labels = [b["label"] for b in result[0]["bins"]]
+        assert labels == ["Missing"]
+
+    def test_none_values_weighted_correctly(self):
+        """Missing category should have correct weighted average."""
+        df = pl.DataFrame({"c": ["a", None]})
+        y_true = np.array([10.0, 20.0])
+        y_pred = np.array([11.0, 22.0])
+        w = np.array([1.0, 3.0])
+
+        result = compute_ave_per_feature(df, ["c"], ["c"], y_true, y_pred, w)
+        bins_map = {b["label"]: b for b in result[0]["bins"]}
+        missing_bin = bins_map["Missing"]
+        assert missing_bin["exposure"] == pytest.approx(3.0)
+        assert missing_bin["avg_actual"] == pytest.approx(20.0)
+        assert missing_bin["avg_predicted"] == pytest.approx(22.0)
+
+
+class TestAveNumericAllNan:
+    def test_all_nan_produces_only_missing_bin(self):
+        """A column of all NaN values should produce only a 'Missing' bin."""
+        n = 10
+        df = pl.DataFrame({"x": [float("nan")] * n})
+        y_true = np.ones(n)
+        y_pred = np.ones(n) * 1.5
+
+        result = compute_ave_per_feature(df, ["x"], [], y_true, y_pred, n_bins=5)
+        bins = result[0]["bins"]
+        assert len(bins) == 1
+        assert bins[0]["label"] == "Missing"
+        assert bins[0]["exposure"] == pytest.approx(float(n))
+
+    def test_nan_bin_has_correct_averages(self):
+        """NaN bin should compute correct weighted AvE."""
+        n = 20
+        vals = np.arange(n, dtype=float)
+        vals[:4] = np.nan
+        df = pl.DataFrame({"x": vals})
+        y_true = np.arange(n, dtype=float) * 2.0
+        y_pred = np.arange(n, dtype=float) * 2.5
+        w = np.ones(n) * 2.0
+
+        result = compute_ave_per_feature(df, ["x"], [], y_true, y_pred, w, n_bins=5)
+        bins_map = {b["label"]: b for b in result[0]["bins"]}
+        missing = bins_map["Missing"]
+        # NaN rows are indices 0-3: y_true=[0,2,4,6], y_pred=[0,2.5,5,7.5], w=[2,2,2,2]
+        assert missing["exposure"] == pytest.approx(8.0)
+        assert missing["avg_actual"] == pytest.approx(3.0)  # (0+2+4+6)/4
+        assert missing["avg_predicted"] == pytest.approx(3.75)  # (0+2.5+5+7.5)/4
+
+
+class TestAveMissingFeature:
+    def test_missing_feature_in_df_skipped(self):
+        """A feature not present in the DataFrame should be silently skipped."""
+        df = pl.DataFrame({"x": [1.0, 2.0, 3.0]})
+        y_true = np.array([1.0, 2.0, 3.0])
+        y_pred = np.array([1.1, 2.1, 3.1])
+
+        result = compute_ave_per_feature(
+            df, ["x", "nonexistent"], [], y_true, y_pred,
+        )
+        assert len(result) == 1
+        assert result[0]["feature"] == "x"
+
+
 class TestAveEmpty:
     def test_empty_features(self):
         result = compute_ave_per_feature(

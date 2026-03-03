@@ -21,12 +21,6 @@ def _make_node(config: dict, label: str = "test_expander") -> GraphNode:
     )
 
 
-class TestEnumValue:
-    def test_enum_value(self):
-        assert NodeType.SCENARIO_EXPANDER == "scenarioExpander"
-        assert NodeType.SCENARIO_EXPANDER.value == "scenarioExpander"
-
-
 class TestInferType:
     def test_infer_type(self):
         result = _infer_node_type({"scenario_expander": True}, 1)

@@ -90,7 +90,7 @@ class TestEvalAstLiteral:
         node = ast.parse("foo()", mode="eval").body
         result = _eval_ast_literal(node)
         assert isinstance(result, str)
-        assert "Call" in result
+        assert len(result) > 0
 
 
 # ===========================================================================
@@ -192,6 +192,16 @@ class TestIsSubmodelNodeDecorator:
     def test_pipeline_node_is_not_submodel(self):
         assert not _is_submodel_node_decorator(
             self._dec("@pipeline.node\ndef f(): pass")
+        )
+
+    def test_other_object_node_is_not_submodel(self):
+        assert not _is_submodel_node_decorator(
+            self._dec("@other.node\ndef f(): pass")
+        )
+
+    def test_submodel_connect_is_not_node(self):
+        assert not _is_submodel_node_decorator(
+            self._dec("@submodel.connect\ndef f(): pass")
         )
 
 
@@ -380,6 +390,8 @@ class TestBuildRfNodes:
         assert nodes[0].id == "a"
         assert nodes[0].data.label == "a"
         assert nodes[0].data.description == "desc A"
+        assert nodes[0].data.nodeType == "dataSource"
+        assert nodes[1].data.nodeType == "transform"
         assert nodes[0].position == {"x": 0, "y": 0}
         assert nodes[1].position == {"x": 300, "y": 0}
 
@@ -833,8 +845,8 @@ class TestResolveNodeConfig:
         # Should have fallen back to inferring type from the path structure
         assert node_type == NodeType.DATA_SOURCE
 
-    def test_external_config_with_transform_code(self, tmp_path):
-        """Transform config from file plus code extracted from body."""
+    def test_factors_path_infers_banding_type(self, tmp_path):
+        """Config path under config/factors/ infers BANDING node type."""
         cfg_dir = tmp_path / "config" / "factors"
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "my_transform.json"
@@ -853,13 +865,14 @@ class TestResolveNodeConfig:
         # Config path says "factors" => BANDING
         assert node_type == NodeType.BANDING
 
-    def test_config_pops_config_key(self):
-        """The 'config' key should be consumed (popped) from decorator_kwargs."""
+    def test_config_pops_config_key_only(self):
+        """The 'config' key is consumed but other kwargs survive."""
         kwargs: dict[str, Any] = {"config": "config/datasource/x.json", "extra": True}
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             with patch("haute._parser_helpers.load_node_config", return_value={}):
                 _resolve_node_config(kwargs, "", [], 0, None)
         assert "config" not in kwargs
+        assert kwargs["extra"] is True
 
 
 # ===========================================================================

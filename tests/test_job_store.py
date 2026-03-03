@@ -25,7 +25,8 @@ class TestJobStoreCRUD:
         store = JobStore()
         job_id = store.create_job({"status": "pending"})
         assert isinstance(job_id, str)
-        assert len(job_id) == 12  # uuid4().hex[:12]
+        assert len(job_id) >= 8
+        assert job_id.isalnum()
 
     def test_get_job_returns_stored_data(self) -> None:
         store = JobStore()

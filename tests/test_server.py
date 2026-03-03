@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import polars as pl
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -91,7 +89,9 @@ class TestGetFirstPipeline:
         assert len(graph["nodes"]) >= 2
         assert graph["pipeline_name"] == "test_pipeline"
 
-    def test_empty_project_returns_empty_graph(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_empty_project_returns_empty_graph(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         monkeypatch.chdir(tmp_path)
         from haute.server import app
         c = TestClient(app)
@@ -205,7 +205,8 @@ class TestSavePipeline:
         graph = {
             "nodes": [
                 {"id": "s", "type": "pipelineNode", "position": {"x": 0, "y": 0},
-                 "data": {"label": "Source", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
+                 "data": {"label": "Source", "nodeType": "dataSource",
+                          "config": {"path": "d.parquet"}}},
             ],
             "edges": [],
         }
@@ -739,3 +740,783 @@ class TestFileWatcher:
                 loop.close()
 
         assert len(broadcast_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 1C: Pipeline route timeout + exception paths
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineTimeouts:
+    """Timeout paths — mock asyncio.wait_for to raise TimeoutError."""
+
+    def test_run_timeout(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import AsyncMock, patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+
+        with patch(
+            "haute.routes.pipeline.asyncio.wait_for",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError,
+        ):
+            resp = client.post("/api/pipeline/run", json={"graph": graph.model_dump()})
+        assert resp.status_code == 504
+        assert "timed out" in resp.json()["detail"].lower()
+
+    def test_trace_timeout(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import AsyncMock, patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+
+        with patch(
+            "haute.routes.pipeline.asyncio.wait_for",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError,
+        ):
+            resp = client.post("/api/pipeline/trace", json={
+                "graph": graph.model_dump(), "row_index": 0,
+            })
+        assert resp.status_code == 504
+
+    def test_preview_timeout(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import AsyncMock, patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+        node_id = graph.nodes[0].id
+
+        with patch(
+            "haute.routes.pipeline.asyncio.wait_for",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError,
+        ):
+            resp = client.post("/api/pipeline/preview", json={
+                "graph": graph.model_dump(), "node_id": node_id,
+            })
+        assert resp.status_code == 504
+
+    def test_sink_timeout(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import AsyncMock, patch
+
+        data_path = pipeline_dir / "data" / "input.parquet"
+        graph = {
+            "nodes": [
+                {"id": "src", "type": "pipelineNode", "position": {"x": 0, "y": 0},
+                 "data": {"label": "src", "nodeType": "dataSource",
+                          "config": {"path": str(data_path)}}},
+                {"id": "sink", "type": "pipelineNode", "position": {"x": 300, "y": 0},
+                 "data": {"label": "sink", "nodeType": "dataSink",
+                          "config": {"path": "/tmp/test_sink.parquet", "format": "parquet"}}},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "sink"}],
+        }
+        with patch(
+            "haute.routes.pipeline.asyncio.wait_for",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError,
+        ):
+            resp = client.post("/api/pipeline/sink", json={"graph": graph, "node_id": "sink"})
+        assert resp.status_code == 504
+
+
+class TestPipelineExceptions:
+    """Exception paths — mock execute_graph to raise RuntimeError → 500."""
+
+    def test_run_exception(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+
+        with patch(
+            "haute.executor.execute_graph",
+            side_effect=RuntimeError("segfault in transform"),
+        ):
+            resp = client.post("/api/pipeline/run", json={"graph": graph.model_dump()})
+        assert resp.status_code == 500
+        assert "segfault in transform" in resp.json()["detail"]
+
+    def test_trace_exception(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+
+        with patch(
+            "haute.trace.execute_trace",
+            side_effect=RuntimeError("trace error"),
+        ):
+            resp = client.post("/api/pipeline/trace", json={
+                "graph": graph.model_dump(), "row_index": 0,
+            })
+        assert resp.status_code == 500
+        assert "trace error" in resp.json()["detail"]
+
+    def test_preview_exception(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+        node_id = graph.nodes[0].id
+
+        with patch(
+            "haute.executor.execute_graph",
+            side_effect=RuntimeError("preview error"),
+        ):
+            resp = client.post("/api/pipeline/preview", json={
+                "graph": graph.model_dump(), "node_id": node_id,
+            })
+        assert resp.status_code == 500
+        assert "preview error" in resp.json()["detail"]
+
+    def test_sink_exception(self, client: TestClient, pipeline_dir: Path):
+        from unittest.mock import patch
+
+        data_path = pipeline_dir / "data" / "input.parquet"
+        graph = {
+            "nodes": [
+                {"id": "src", "type": "pipelineNode", "position": {"x": 0, "y": 0},
+                 "data": {"label": "src", "nodeType": "dataSource",
+                          "config": {"path": str(data_path)}}},
+                {"id": "sink", "type": "pipelineNode", "position": {"x": 300, "y": 0},
+                 "data": {"label": "sink", "nodeType": "dataSink",
+                          "config": {"path": "/tmp/test_sink.parquet", "format": "parquet"}}},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "sink"}],
+        }
+        with patch(
+            "haute.executor.execute_sink",
+            side_effect=RuntimeError("sink error"),
+        ):
+            resp = client.post("/api/pipeline/sink", json={"graph": graph, "node_id": "sink"})
+        assert resp.status_code == 500
+        assert "sink error" in resp.json()["detail"]
+
+
+class TestPreviewEdgeCases:
+    """Preview edge cases: missing node in results."""
+
+    def test_preview_node_not_in_results(self, client: TestClient, pipeline_dir: Path):
+        """If the node_id is valid but not found in execute_graph results → 404."""
+        from unittest.mock import patch
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+
+        # Mock execute_graph to return results without the target node
+        with patch(
+            "haute.executor.execute_graph",
+            return_value={},  # empty results
+        ):
+            resp = client.post("/api/pipeline/preview", json={
+                "graph": graph.model_dump(), "node_id": "nonexistent_node",
+            })
+        assert resp.status_code == 404
+        assert "not found in results" in resp.json()["detail"]
+
+
+class TestListPipelinesParseError:
+    """Test that a broken pipeline file returns an entry with error field."""
+
+    def test_broken_pipeline_in_list(self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """A pipeline with a parse exception should appear with error field."""
+        from unittest.mock import patch
+
+        monkeypatch.chdir(pipeline_dir)
+        from haute.routes._helpers import invalidate_pipeline_index
+
+        invalidate_pipeline_index()
+        from haute.server import app
+
+        # Mock parse_pipeline_file to raise for a specific file
+        original_parse = None
+
+        def _patch_parse(f, **kw):
+            if "test_pipeline" in str(f):
+                return original_parse(f, **kw)
+            raise RuntimeError("Simulated parse failure")
+
+        from haute import parser
+
+        original_parse = parser.parse_pipeline_file
+
+        # Create a second "pipeline" file that will fail
+        (pipeline_dir / "bad_pipe.py").write_text(
+            "import haute\npipeline = haute.Pipeline('bad_pipe')\n"
+        )
+        invalidate_pipeline_index()
+
+        c = TestClient(app)
+        with patch.object(parser, "parse_pipeline_file", side_effect=_patch_parse):
+            resp = c.get("/api/pipelines")
+        assert resp.status_code == 200
+        data = resp.json()
+        bad = [p for p in data if p["name"] == "bad_pipe"]
+        assert len(bad) == 1
+        assert bad[0]["error"] is not None
+        assert "Simulated parse failure" in bad[0]["error"]
+
+
+class TestGetPipelineParseError:
+    """Test that get_pipeline handles parse failures on the indexed file."""
+
+    def test_indexed_file_unparseable(self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """If the indexed file becomes unparseable, fall back to linear scan."""
+        monkeypatch.chdir(pipeline_dir)
+        from haute.server import app
+
+        c = TestClient(app)
+        # Corrupt the file after it's been indexed
+        original_path = pipeline_dir / "test_pipeline.py"
+        original_content = original_path.read_text()
+
+        # First request indexes the file
+        resp = c.get("/api/pipeline/test_pipeline")
+        assert resp.status_code == 200
+
+        # Corrupt the file
+        original_path.write_text("def (\n")
+        # Invalidate cache
+        from haute.routes._helpers import invalidate_pipeline_index
+
+        invalidate_pipeline_index()
+
+        resp = c.get("/api/pipeline/test_pipeline")
+        # Should be 404 since the file is now broken and no fallback matches
+        assert resp.status_code == 404
+
+        # Restore
+        original_path.write_text(original_content)
+
+
+class TestSinkEmptyGraph:
+    """Sink with empty graph returns 400."""
+
+    def test_sink_empty_graph(self, client: TestClient):
+        resp = client.post("/api/pipeline/sink", json={
+            "graph": {"nodes": [], "edges": []}, "node_id": "x",
+        })
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Server infrastructure tests
+# ---------------------------------------------------------------------------
+
+
+class TestClearBytecache:
+    """Test _clear_bytecache removes __pycache__ dirs."""
+
+    def test_removes_pycache_directories(self, tmp_path: Path):
+        from unittest.mock import patch
+
+        # Create a fake source tree with __pycache__
+        fake_src = tmp_path / "haute"
+        fake_src.mkdir()
+        pycache = fake_src / "__pycache__"
+        pycache.mkdir()
+        (pycache / "foo.cpython-312.pyc").write_bytes(b"\x00")
+        nested = fake_src / "routes" / "__pycache__"
+        nested.mkdir(parents=True)
+
+        # Patch Path(__file__).resolve().parent to point at our fake dir
+        import haute.server as _srv
+
+        with patch.object(_srv, "__file__", str(fake_src / "server.py")):
+            _srv._clear_bytecache()
+
+        assert not pycache.exists()
+        assert not nested.exists()
+
+    def test_handles_missing_pycache(self):
+        """_clear_bytecache should not raise even when there are no __pycache__ dirs."""
+        from haute.server import _clear_bytecache
+
+        _clear_bytecache()  # should not raise
+        assert True
+
+
+class TestMiddleware500:
+    """Middleware dispatch method: exception path returns JSON 500."""
+
+    def test_dispatch_exception_returns_json_500(self):
+        """Directly test _RequestIdMiddleware.dispatch when call_next raises."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        from haute.server import _RequestIdMiddleware
+
+        middleware = _RequestIdMiddleware(app=MagicMock())
+
+        # Build a fake Request
+        request = MagicMock()
+        request.headers = {}
+        request.method = "GET"
+        request.url.path = "/api/test"
+
+        # call_next that raises
+        call_next = AsyncMock(side_effect=RuntimeError("boom"))
+
+        loop = asyncio.new_event_loop()
+        try:
+            resp = loop.run_until_complete(middleware.dispatch(request, call_next))
+        finally:
+            loop.close()
+
+        assert resp.status_code == 500
+        import json
+        body = json.loads(resp.body)
+        assert body == {"detail": "Internal server error"}
+
+    def test_request_id_header_passthrough(self, client: TestClient):
+        """Middleware adds x-request-id header to successful responses."""
+        resp = client.get("/api/pipelines")
+        assert resp.status_code == 200
+        assert "x-request-id" in resp.headers
+
+    def test_custom_request_id_preserved(self, client: TestClient):
+        """Client-supplied x-request-id is preserved in the response."""
+        resp = client.get("/api/pipelines", headers={"x-request-id": "custom-123"})
+        assert resp.headers["x-request-id"] == "custom-123"
+
+
+class TestFileWatcherJsonConfig:
+    """JSON config changes in config/ re-parse all pipelines."""
+
+    def test_json_config_change_triggers_full_reparse(
+        self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        # Create a config directory with a JSON file
+        config_dir = pipeline_dir / "config"
+        config_dir.mkdir()
+        (config_dir / "factors" ).mkdir(parents=True)
+        (config_dir / "factors" / "test.json").write_text('{"key": "value"}')
+
+        json_file = str(config_dir / "factors" / "test.json")
+        fake_changes = [(Change.modified, json_file)]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+        ):
+            from haute.server import _file_watcher
+
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_run())
+            finally:
+                loop.close()
+
+        # JSON config change should trigger a graph_update broadcast
+        assert len(broadcast_calls) >= 1
+        assert broadcast_calls[0]["type"] == "graph_update"
+
+    def test_json_config_without_pipeline_no_broadcast(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """If config JSON changes but there are no pipelines, no broadcast."""
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(tmp_path)
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "test.json").write_text("{}")
+
+        fake_changes = [(Change.modified, str(config_dir / "test.json"))]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+        ):
+            from haute.server import _file_watcher
+
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_run())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) == 0
+
+
+class TestFileWatcherModuleChange:
+    """Module .py changes in modules/ only re-parse importing pipelines."""
+
+    def test_module_change_triggers_importing_pipeline(
+        self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        # Create a modules directory
+        modules_dir = pipeline_dir / "modules"
+        modules_dir.mkdir()
+        (modules_dir / "helper.py").write_text("def helper(): pass")
+
+        # Mock pipelines_importing_module to return our test pipeline
+        test_py = pipeline_dir / "test_pipeline.py"
+
+        fake_changes = [(Change.modified, str(modules_dir / "helper.py"))]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+            patch("haute.server.pipelines_importing_module", return_value=[test_py]),
+        ):
+            from haute.server import _file_watcher
+
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_run())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) >= 1
+        assert broadcast_calls[0]["type"] == "graph_update"
+
+
+class TestFileWatcherParseError:
+    """Parse error broadcasts a parse_error message."""
+
+    def test_parse_error_broadcasts_error(
+        self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        py_file = str(pipeline_dir / "test_pipeline.py")
+        fake_changes = [(Change.modified, py_file)]
+
+        async def _fake_awatch(*dirs, **kw):
+            yield fake_changes
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+            patch(
+                "haute.server.parse_pipeline_to_graph",
+                side_effect=SyntaxError("bad syntax"),
+            ),
+        ):
+            from haute.server import _file_watcher
+
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(0.5)
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_run())
+            finally:
+                loop.close()
+
+        assert len(broadcast_calls) >= 1
+        assert broadcast_calls[0]["type"] == "parse_error"
+        assert "bad syntax" in broadcast_calls[0]["error"]
+
+
+class TestFileWatcherFingerprintDedup:
+    """Unchanged graph fingerprint skips re-broadcast."""
+
+    def test_same_fingerprint_skips_second_broadcast(
+        self, pipeline_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import asyncio
+        from unittest.mock import patch
+
+        from watchfiles import Change
+
+        monkeypatch.chdir(pipeline_dir)
+
+        py_file = str(pipeline_dir / "test_pipeline.py")
+
+        async def _fake_awatch(*dirs, **kw):
+            yield [(Change.modified, py_file)]
+            # Allow first flush to complete before yielding second
+            await asyncio.sleep(0.5)
+            yield [(Change.modified, py_file)]
+
+        broadcast_calls: list[dict] = []
+
+        async def _capture_broadcast(data: dict) -> None:
+            broadcast_calls.append(data)
+
+        # Pre-clear the fingerprint cache
+        from haute.server import _last_broadcast_fp
+        _last_broadcast_fp.clear()
+
+        with (
+            patch("watchfiles.awatch", _fake_awatch),
+            patch("haute.server.broadcast", _capture_broadcast),
+            patch("haute.server.is_self_write", return_value=False),
+        ):
+            from haute.server import _file_watcher
+
+            async def _run() -> None:
+                await _file_watcher()
+                await asyncio.sleep(1.0)
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_run())
+            finally:
+                loop.close()
+
+        # First change broadcasts, second with same fingerprint is skipped
+        graph_updates = [c for c in broadcast_calls if c["type"] == "graph_update"]
+        assert len(graph_updates) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Submodel route edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestSubmodelOutputPorts:
+    """Cross-edge detection: output_ports from outgoing edges."""
+
+    def test_create_with_outgoing_cross_edges(
+        self, client: TestClient, pipeline_dir: Path,
+    ):
+        """When a selected node has edges going OUT to unselected nodes,
+        those should become output ports on the submodel."""
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
+        graph_dict = graph.model_dump()
+
+        # Select only "source" — it has an edge to "transform" which is outside
+        # Need at least 2 nodes for submodel creation
+        nodes = graph_dict["nodes"]
+        assert len(nodes) >= 2
+
+        # Select the first two nodes (source + transform)
+        selected = [n["id"] for n in nodes[:2]]
+
+        resp = client.post("/api/submodel/create", json={
+            "name": "output_test",
+            "node_ids": selected,
+            "graph": graph_dict,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Verify the submodel node was created
+        sm_node = next(
+            n for n in data["graph"]["nodes"]
+            if n["id"] == "submodel__output_test"
+        )
+        config = sm_node["data"]["config"]
+        # childNodeIds should match selected
+        assert set(config["childNodeIds"]) == set(selected)
+
+
+class TestSubmodelEdgeRewiring:
+    """Edge rewiring: both incoming and outgoing cross-boundary edges
+    are rewired through the submodel node."""
+
+    def test_cross_edges_rewired(
+        self, client: TestClient, pipeline_dir: Path,
+    ):
+        """Add a third transform node so we can test outgoing edge rewiring."""
+        # Create a 3-node pipeline: source -> transform -> transform2
+        code = '''\
+import polars as pl
+import haute
+
+pipeline = haute.Pipeline("rewire_test", description="Rewire test")
+
+@pipeline.node(path="data/input.parquet")
+def source() -> pl.LazyFrame:
+    return pl.scan_parquet("data/input.parquet")
+
+@pipeline.node
+def middle(source: pl.LazyFrame) -> pl.LazyFrame:
+    return source
+
+@pipeline.node
+def final(middle: pl.LazyFrame) -> pl.LazyFrame:
+    return middle
+
+pipeline.connect("source", "middle")
+pipeline.connect("middle", "final")
+'''
+        (pipeline_dir / "rewire_test.py").write_text(code)
+        from haute.parser import parse_pipeline_file
+        graph = parse_pipeline_file(pipeline_dir / "rewire_test.py")
+        graph_dict = graph.model_dump()
+
+        # Select only "middle" and "source" (2 nodes) — "final" stays outside
+        selected = ["source", "middle"]
+
+        resp = client.post("/api/submodel/create", json={
+            "name": "inner",
+            "node_ids": selected,
+            "graph": graph_dict,
+            "source_file": "rewire_test.py",
+            "pipeline_name": "rewire_test",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Parent graph should have: submodel__inner + final
+        parent_ids = {n["id"] for n in data["graph"]["nodes"]}
+        assert "submodel__inner" in parent_ids
+        assert "final" in parent_ids
+        assert "source" not in parent_ids
+        assert "middle" not in parent_ids
+
+        # There should be a rewired edge from submodel__inner -> final
+        parent_edges = data["graph"]["edges"]
+        outgoing = [e for e in parent_edges if e["source"] == "submodel__inner"]
+        assert len(outgoing) >= 1
+        assert any(e["target"] == "final" for e in outgoing)
+        # The outgoing edge should have a sourceHandle referencing "middle"
+        assert any("middle" in (e.get("sourceHandle") or "") for e in outgoing)
+
+
+class TestGetSubmodelSidecarPositions:
+    """GET /api/submodel/{name} merges sidecar positions."""
+
+    def test_sidecar_positions_applied(
+        self, client: TestClient, pipeline_dir: Path, three_node_graph: dict,
+    ):
+        # Create submodel first
+        node_ids = [n["id"] for n in three_node_graph["nodes"][:2]]
+        create_resp = client.post("/api/submodel/create", json={
+            "name": "positioned",
+            "node_ids": node_ids,
+            "graph": three_node_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert create_resp.status_code == 200
+
+        # Write a sidecar with custom positions
+        sm_path = pipeline_dir / "modules" / "positioned.py"
+        sidecar = sm_path.with_suffix(".haute.json")
+        sidecar.write_text(json.dumps({
+            "positions": {
+                node_ids[0]: {"x": 100, "y": 200},
+                node_ids[1]: {"x": 300, "y": 400},
+            },
+        }))
+
+        # Fetch the submodel
+        resp = client.get("/api/submodel/positioned")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Check positions were merged
+        for node in data["graph"]["nodes"]:
+            if node["id"] == node_ids[0]:
+                assert node["position"]["x"] == 100
+                assert node["position"]["y"] == 200
+            elif node["id"] == node_ids[1]:
+                assert node["position"]["x"] == 300
+                assert node["position"]["y"] == 400
+
+
+class TestDissolveEdgeCases:
+    """Dissolve submodel edge cases."""
+
+    def test_dissolve_missing_source_file_returns_400(
+        self, client: TestClient, three_node_graph: dict,
+    ):
+        """Dissolve with empty source_file returns 400."""
+        # First create a submodel to get a valid graph with submodels
+        node_ids = [n["id"] for n in three_node_graph["nodes"][:2]]
+        create_resp = client.post("/api/submodel/create", json={
+            "name": "will_dissolve",
+            "node_ids": node_ids,
+            "graph": three_node_graph,
+            "source_file": "test_pipeline.py",
+            "pipeline_name": "test_pipeline",
+        })
+        assert create_resp.status_code == 200
+        updated_graph = create_resp.json()["graph"]
+
+        resp = client.post("/api/submodel/dissolve", json={
+            "submodel_name": "will_dissolve",
+            "graph": updated_graph,
+            "source_file": "",
+            "pipeline_name": "test_pipeline",
+        })
+        assert resp.status_code == 400
+        assert "source_file" in resp.json()["detail"]

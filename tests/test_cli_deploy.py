@@ -192,3 +192,4 @@ class TestDeploy:
             result = runner.invoke(cli, ["deploy", "--dry-run", "--endpoint-suffix", "-staging"])
 
         assert result.exit_code == 0, result.output
+        assert "-staging" in result.output

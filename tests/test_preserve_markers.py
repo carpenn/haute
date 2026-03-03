@@ -150,6 +150,7 @@ class TestExtractPreservedBlocks:
         )
         graph = parse_pipeline_source(source)
         assert graph.preserved_blocks == []
+        assert len(graph.nodes) == 1  # source node still parsed
 
     def test_empty_preserved_block(self):
         source = _make_pipeline(
@@ -359,3 +360,5 @@ class TestPreservedBlocksRoundTrip:
         code1 = _roundtrip(source, base_dir=tmp_path)
         code2 = _roundtrip(code1, base_dir=tmp_path)
         assert code1 == code2
+        assert "TODAY = date.today()" in code2
+        assert "MAX_ROWS = 10_000" in code2

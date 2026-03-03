@@ -45,4 +45,43 @@ describe("ConfigInput", () => {
     expect(input.type).toBe("number")
     expect(input.value).toBe("42")
   })
+
+  it("applies focus styling on focus", () => {
+    render(<ConfigInput value="test" onChange={vi.fn()} label="Field" />)
+    const input = screen.getByRole("textbox") as HTMLInputElement
+    fireEvent.focus(input)
+    // jsdom normalizes rgba values with spaces
+    expect(input.style.borderColor).toContain("rgba")
+    expect(input.style.borderColor).toContain("59")
+    expect(input.style.boxShadow).toBe("0 0 0 2px var(--accent-soft)")
+  })
+
+  it("removes focus styling on blur", () => {
+    render(<ConfigInput value="test" onChange={vi.fn()} label="Field" />)
+    const input = screen.getByRole("textbox") as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.blur(input)
+    expect(input.style.borderColor).toBe("var(--border)")
+    expect(input.style.boxShadow).toBe("none")
+  })
+
+  it("label htmlFor matches input id", () => {
+    const { container } = render(<ConfigInput value="" onChange={vi.fn()} label="MyField" />)
+    const label = container.querySelector("label") as HTMLLabelElement
+    const input = screen.getByLabelText("MyField") as HTMLInputElement
+    expect(label.htmlFor).toBe(input.id)
+  })
+
+  it("uses external id when provided", () => {
+    render(<ConfigInput value="" onChange={vi.fn()} label="Field" id="custom-id" />)
+    const input = screen.getByLabelText("Field") as HTMLInputElement
+    expect(input.id).toBe("custom-id")
+  })
+
+  it("disabled input has correct styling class", () => {
+    render(<ConfigInput value="val" onChange={vi.fn()} disabled />)
+    const input = screen.getByRole("textbox") as HTMLInputElement
+    expect(input.className).toContain("disabled:opacity-50")
+    expect(input.className).toContain("disabled:cursor-not-allowed")
+  })
 })

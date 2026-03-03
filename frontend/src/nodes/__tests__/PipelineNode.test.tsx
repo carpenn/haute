@@ -1,0 +1,279 @@
+import { describe, it, expect, afterEach } from "vitest"
+import { render, screen, cleanup } from "@testing-library/react"
+import { ReactFlowProvider } from "@xyflow/react"
+import PipelineNode from "../PipelineNode"
+import type { PipelineNodeData } from "../PipelineNode"
+import { NODE_TYPES, nodeTypeLabels, nodeTypeColors } from "../../utils/nodeTypes"
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Render PipelineNode inside a ReactFlowProvider (required for Handles). */
+function renderNode(
+  data: Partial<PipelineNodeData> & { label: string; nodeType: string },
+  selected = false,
+) {
+  const fullData: PipelineNodeData = {
+    description: "",
+    ...data,
+  }
+  // NodeProps expects `id`, `data`, `type`, plus some internals.
+  // We cast to `any` to satisfy the memo wrapper while testing render output.
+  const props = {
+    id: "test-node",
+    type: "custom",
+    data: fullData as unknown as Record<string, unknown>,
+    selected,
+    isConnectable: true,
+    positionAbsoluteX: 0,
+    positionAbsoluteY: 0,
+    zIndex: 0,
+    dragging: false,
+    deletable: true,
+    selectable: true,
+    parentId: undefined,
+    sourcePosition: undefined,
+    targetPosition: undefined,
+    dragHandle: undefined,
+  }
+  return render(
+    <ReactFlowProvider>
+      <PipelineNode {...(props as any)} />
+    </ReactFlowProvider>,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("PipelineNode", () => {
+  afterEach(cleanup)
+
+  // ── Render per node type ───────────────────────────────────────────
+
+  it("renders a transform node with label and type badge", () => {
+    renderNode({ label: "Clean Data", nodeType: NODE_TYPES.TRANSFORM })
+    expect(screen.getByText("Clean Data")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.TRANSFORM])).toBeInTheDocument()
+  })
+
+  it("renders a dataSource node", () => {
+    renderNode({ label: "Load CSV", nodeType: NODE_TYPES.DATA_SOURCE })
+    expect(screen.getByText("Load CSV")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.DATA_SOURCE])).toBeInTheDocument()
+  })
+
+  it("renders an apiInput node with API badge", () => {
+    renderNode({ label: "API Input", nodeType: NODE_TYPES.API_INPUT, config: { row_id_column: "id" } })
+    expect(screen.getByText("API Input")).toBeInTheDocument()
+    expect(screen.getByText("API")).toBeInTheDocument()
+  })
+
+  it("renders an output node", () => {
+    renderNode({ label: "Final Output", nodeType: NODE_TYPES.OUTPUT })
+    expect(screen.getByText("Final Output")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.OUTPUT])).toBeInTheDocument()
+  })
+
+  it("renders a dataSink node", () => {
+    renderNode({ label: "Write Parquet", nodeType: NODE_TYPES.DATA_SINK })
+    expect(screen.getByText("Write Parquet")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.DATA_SINK])).toBeInTheDocument()
+  })
+
+  it("renders a modelScore node", () => {
+    renderNode({ label: "Score Model", nodeType: NODE_TYPES.MODEL_SCORE })
+    expect(screen.getByText("Score Model")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.MODEL_SCORE])).toBeInTheDocument()
+  })
+
+  it("renders a modelling node", () => {
+    renderNode({ label: "Train XGBoost", nodeType: NODE_TYPES.MODELLING })
+    expect(screen.getByText("Train XGBoost")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.MODELLING])).toBeInTheDocument()
+  })
+
+  it("renders an optimiser node", () => {
+    renderNode({ label: "Optimise Portfolio", nodeType: NODE_TYPES.OPTIMISER })
+    expect(screen.getByText("Optimise Portfolio")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.OPTIMISER])).toBeInTheDocument()
+  })
+
+  it("renders a banding node", () => {
+    renderNode({ label: "Age Bands", nodeType: NODE_TYPES.BANDING })
+    expect(screen.getByText("Age Bands")).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.BANDING])).toBeInTheDocument()
+  })
+
+  // ── Handles (source/target) ────────────────────────────────────────
+
+  it("source-only types do NOT render a target handle", () => {
+    const { container } = renderNode({ label: "Source", nodeType: NODE_TYPES.DATA_SOURCE })
+    // ReactFlow renders handles as div with class containing "target" or "source"
+    const targetHandle = container.querySelector(".react-flow__handle-left")
+    expect(targetHandle).toBeNull()
+    // Should have a source handle on the right
+    const sourceHandle = container.querySelector(".react-flow__handle-right")
+    expect(sourceHandle).not.toBeNull()
+  })
+
+  it("sink-only types do NOT render a source handle", () => {
+    const { container } = renderNode({ label: "Sink", nodeType: NODE_TYPES.OUTPUT })
+    const sourceHandle = container.querySelector(".react-flow__handle-right")
+    expect(sourceHandle).toBeNull()
+    // Should have a target handle on the left
+    const targetHandle = container.querySelector(".react-flow__handle-left")
+    expect(targetHandle).not.toBeNull()
+  })
+
+  it("transform nodes render both source and target handles", () => {
+    const { container } = renderNode({ label: "Transform", nodeType: NODE_TYPES.TRANSFORM })
+    expect(container.querySelector(".react-flow__handle-left")).not.toBeNull()
+    expect(container.querySelector(".react-flow__handle-right")).not.toBeNull()
+  })
+
+  // ── Selection state ────────────────────────────────────────────────
+
+  it("applies accent border when selected", () => {
+    const { container } = renderNode(
+      { label: "Selected", nodeType: NODE_TYPES.TRANSFORM },
+      true,
+    )
+    // The outer rendered div is the node root with inline style
+    const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
+    const rawStyle = nodeEl.getAttribute("style") || ""
+    // jsdom normalizes hex to rgb; #06b6d4 -> rgb(6, 182, 212)
+    expect(rawStyle).toContain("1.5px solid")
+    expect(rawStyle).not.toContain("var(--border-bright)")
+  })
+
+  it("applies default border when not selected", () => {
+    const { container } = renderNode(
+      { label: "Not Selected", nodeType: NODE_TYPES.TRANSFORM },
+      false,
+    )
+    const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
+    const rawStyle = nodeEl.getAttribute("style") || ""
+    expect(rawStyle).toContain("var(--border-bright)")
+  })
+
+  // ── Node label ─────────────────────────────────────────────────────
+
+  it("displays the node label text", () => {
+    renderNode({ label: "My Custom Label", nodeType: NODE_TYPES.TRANSFORM })
+    expect(screen.getByText("My Custom Label")).toBeInTheDocument()
+  })
+
+  // ── Error / status state ───────────────────────────────────────────
+
+  it("shows a status indicator for ok status", () => {
+    const { container } = renderNode({
+      label: "OK Node",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _status: "ok",
+    })
+    // jsdom converts hex to rgb: #22c55e -> rgb(34, 197, 94)
+    const allSpans = Array.from(container.querySelectorAll("span"))
+    const greenDot = allSpans.find((s) => {
+      const style = s.getAttribute("style") || ""
+      return style.includes("rgb(34, 197, 94)") || style.includes("#22c55e")
+    })
+    expect(greenDot).toBeTruthy()
+  })
+
+  it("shows a status indicator for error status", () => {
+    const { container } = renderNode({
+      label: "Error Node",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _status: "error",
+    })
+    // #ef4444 -> rgb(239, 68, 68)
+    const allSpans = Array.from(container.querySelectorAll("span"))
+    const redDot = allSpans.find((s) => {
+      const style = s.getAttribute("style") || ""
+      return style.includes("rgb(239, 68, 68)") || style.includes("#ef4444")
+    })
+    expect(redDot).toBeTruthy()
+  })
+
+  it("shows a pulsing dot for running status", () => {
+    const { container } = renderNode({
+      label: "Running Node",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _status: "running",
+    })
+    const dot = container.querySelector(".animate-pulse-dot") as HTMLElement
+    expect(dot).not.toBeNull()
+    const rawStyle = dot.getAttribute("style") || ""
+    // #6366f1 -> rgb(99, 102, 241) in jsdom
+    expect(rawStyle).toMatch(/rgb\(99, 102, 241\)|#6366f1/)
+  })
+
+  // ── Instance badge ─────────────────────────────────────────────────
+
+  it("shows Instance badge when config.instanceOf is set", () => {
+    renderNode({
+      label: "Instance Node",
+      nodeType: NODE_TYPES.TRANSFORM,
+      config: { instanceOf: "base_transform" },
+    })
+    expect(screen.getByText("Instance")).toBeInTheDocument()
+  })
+
+  it("uses dashed border for instance nodes", () => {
+    const { container } = renderNode({
+      label: "Instance",
+      nodeType: NODE_TYPES.TRANSFORM,
+      config: { instanceOf: "base" },
+    })
+    const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
+    const rawStyle = nodeEl.getAttribute("style") || ""
+    expect(rawStyle).toContain("dashed")
+  })
+
+  // ── Live switch mode badge ─────────────────────────────────────────
+
+  it("shows LIVE badge when liveSwitch mode is live", () => {
+    renderNode({
+      label: "Switch",
+      nodeType: NODE_TYPES.LIVE_SWITCH,
+      config: { mode: "live" },
+    })
+    expect(screen.getByText("LIVE")).toBeInTheDocument()
+  })
+
+  it("shows mode name when liveSwitch mode is not live", () => {
+    renderNode({
+      label: "Switch",
+      nodeType: NODE_TYPES.LIVE_SWITCH,
+      config: { mode: "backtest" },
+    })
+    expect(screen.getByText("backtest")).toBeInTheDocument()
+  })
+
+  // ── Trace state ────────────────────────────────────────────────────
+
+  it("dims node when _traceDimmed is true", () => {
+    const { container } = renderNode({
+      label: "Dimmed",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _traceDimmed: true,
+    })
+    const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
+    const rawStyle = nodeEl.getAttribute("style") || ""
+    expect(rawStyle).toContain("opacity: 0.3")
+  })
+
+  it("shows trace value when _traceActive and _traceValue are set", () => {
+    renderNode({
+      label: "Traced",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _traceActive: true,
+      _traceValue: 42.5,
+    })
+    // formatValueCompact(42.5) -> "42.5"
+    expect(screen.getByText("42.5")).toBeInTheDocument()
+  })
+})

@@ -231,7 +231,18 @@ uv add haute
 ```
 src/haute/
 ├── __init__.py              # Public API surface
-├── cli.py                   # Click CLI: init, serve, run, deploy, lint, smoke, status, impact
+├── cli/                     # Click CLI subpackage
+│   ├── __init__.py          #   Entry point & group registration
+│   ├── _init_cmd.py         #   `haute init` command
+│   ├── _serve.py            #   `haute serve` command
+│   ├── _run.py              #   `haute run` command
+│   ├── _deploy.py           #   `haute deploy` command
+│   ├── _train.py            #   `haute train` command
+│   ├── _lint.py             #   `haute lint` command
+│   ├── _smoke.py            #   `haute smoke` command
+│   ├── _status.py           #   `haute status` command
+│   ├── _impact.py           #   `haute impact` command
+│   └── _helpers.py          #   Shared CLI utilities
 ├── pipeline.py              # Pipeline DSL: Node, NodeRegistry, Pipeline, Submodel
 ├── parser.py                # AST parser: .py → PipelineGraph
 ├── _parser_helpers.py       #   Shared helper functions for all parser modules

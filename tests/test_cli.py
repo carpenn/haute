@@ -315,12 +315,16 @@ class TestRun:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(cli, ["run"])
         assert result.exit_code == 1
-        assert "no pipeline file" in result.output.lower() or "Error" in result.output
+        assert "no pipeline file" in result.output.lower(), (
+            f"Expected 'no pipeline file' in output, got: {result.output!r}"
+        )
 
     def test_run_file_not_found(self, runner: CliRunner):
         result = runner.invoke(cli, ["run", "/nonexistent/pipeline.py"])
         assert result.exit_code == 1
-        assert "not found" in result.output.lower() or "Error" in result.output
+        assert "not found" in result.output.lower(), (
+            f"Expected 'not found' in output, got: {result.output!r}"
+        )
 
     def test_run_empty_pipeline(self, runner: CliRunner, tmp_path: Path):
         """A .py file with no @pipeline.node functions should fail."""

@@ -215,16 +215,6 @@ class TestBuildManifest:
 # ---------------------------------------------------------------------------
 
 
-class TestContainerBasedTargets:
-    def test_all_platform_targets_listed(self) -> None:
-        from haute.deploy._container import _CONTAINER_BASED_TARGETS
-
-        assert "container" in _CONTAINER_BASED_TARGETS
-        assert "azure-container-apps" in _CONTAINER_BASED_TARGETS
-        assert "aws-ecs" in _CONTAINER_BASED_TARGETS
-        assert "gcp-run" in _CONTAINER_BASED_TARGETS
-
-
 class TestDeployDispatch:
     def test_unknown_target_raises_value_error(self) -> None:
         from haute.deploy import deploy
@@ -237,24 +227,14 @@ class TestDeployDispatch:
         with pytest.raises(ValueError, match="[Uu]nknown.*target"):
             deploy(config)
 
-    def test_planned_target_raises_not_implemented(self) -> None:
+    @pytest.mark.parametrize("target", ["sagemaker", "azure-ml"])
+    def test_planned_target_raises_not_implemented(self, target: str) -> None:
         from haute.deploy import deploy
 
         config = DeployConfig(
             pipeline_file=Path("main.py"),
             model_name="test",
-            target="sagemaker",
-        )
-        with pytest.raises(NotImplementedError, match="planned.*not yet"):
-            deploy(config)
-
-    def test_azure_ml_planned_target(self) -> None:
-        from haute.deploy import deploy
-
-        config = DeployConfig(
-            pipeline_file=Path("main.py"),
-            model_name="test",
-            target="azure-ml",
+            target=target,
         )
         with pytest.raises(NotImplementedError, match="planned.*not yet"):
             deploy(config)

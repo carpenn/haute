@@ -324,10 +324,10 @@ class TestFetchAndCache:
                     project_root=tmp_path,
                 )
 
-        cache_dir = tmp_path / CACHE_DIR
-        if cache_dir.exists():
-            tmp_files = list(cache_dir.glob("*.tmp"))
-            assert len(tmp_files) == 0, f"Temp file left behind: {tmp_files}"
+        # Verify no temp files leaked — unconditional, not guarded by exists()
+        assert not any(tmp_path.rglob("*.tmp")), (
+            f"Temp file left behind: {list(tmp_path.rglob('*.tmp'))}"
+        )
 
     def test_uses_custom_query(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

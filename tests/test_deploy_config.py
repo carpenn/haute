@@ -78,8 +78,6 @@ model_name = "simple"
         p = tmp_path / "haute.toml"
         p.write_text(content)
         config = DeployConfig.from_toml(p)
-        assert isinstance(config.safety, SafetyConfig)
-        assert isinstance(config.ci, CIConfig)
         assert config.safety.min_approvers == 2
         assert config.ci.provider == "github"
 

@@ -38,6 +38,34 @@ def _clear_caches():
     _mlflow_cache.clear()
 
 
+@pytest.fixture()
+def mlflow_mocks(tmp_path):
+    """Common MLflow mock stack for load_mlflow_optimiser_artifact tests.
+
+    Yields a namespace with mock_backend, mock_set_uri, mock_download,
+    and a helper to write artifact JSON.
+    """
+    with (
+        patch("mlflow.artifacts.download_artifacts") as mock_download,
+        patch("mlflow.set_tracking_uri") as mock_set_uri,
+        patch("haute.modelling._mlflow_log.resolve_tracking_backend") as mock_backend,
+    ):
+        mock_backend.return_value = ("http://localhost:5000", "local")
+
+        def write_artifact(data: dict) -> str:
+            path = tmp_path / "optimiser_result.json"
+            path.write_text(json.dumps(data))
+            mock_download.return_value = str(path)
+            return str(path)
+
+        yield type("Mocks", (), {
+            "download": mock_download,
+            "set_uri": mock_set_uri,
+            "backend": mock_backend,
+            "write_artifact": staticmethod(write_artifact),
+        })()
+
+
 # ===========================================================================
 # load_optimiser_artifact
 # ===========================================================================
@@ -100,41 +128,24 @@ class TestLoadOptimiserArtifact:
 
 
 class TestLoadMlflowOptimiserArtifactRun:
-    @patch("mlflow.artifacts.download_artifacts")
-    @patch("mlflow.set_tracking_uri")
-    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
-    def test_run_source_loads_artifact(
-        self, mock_backend, mock_set_uri, mock_download, tmp_path,
-    ):
-        # Set up temp artifact file
-        artifact_file = tmp_path / "optimiser_result.json"
-        artifact_file.write_text(json.dumps({"mode": "online", "version": "v1"}))
-        mock_download.return_value = str(artifact_file)
-        mock_backend.return_value = ("http://localhost:5000", "local")
+    def test_run_source_loads_artifact(self, mlflow_mocks):
+        mlflow_mocks.write_artifact({"mode": "online", "version": "v1"})
 
         result = load_mlflow_optimiser_artifact(
             source_type="run",
             run_id="run_abc123",
         )
         assert result["mode"] == "online"
-        mock_download.assert_called_once()
+        mlflow_mocks.download.assert_called_once()
 
-    @patch("mlflow.artifacts.download_artifacts")
-    @patch("mlflow.set_tracking_uri")
-    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
-    def test_run_source_caches(
-        self, mock_backend, mock_set_uri, mock_download, tmp_path,
-    ):
-        artifact_file = tmp_path / "optimiser_result.json"
-        artifact_file.write_text(json.dumps({"mode": "online"}))
-        mock_download.return_value = str(artifact_file)
-        mock_backend.return_value = ("http://localhost:5000", "local")
+    def test_run_source_caches(self, mlflow_mocks):
+        mlflow_mocks.write_artifact({"mode": "online"})
 
         result1 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
         result2 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
         assert result1 is result2
         # download_artifacts called only once due to caching
-        mock_download.assert_called_once()
+        mlflow_mocks.download.assert_called_once()
 
     def test_run_without_run_id_raises(self):
         with pytest.raises(ValueError, match="run_id is required"):
@@ -158,24 +169,16 @@ class TestLoadMlflowOptimiserArtifactRun:
 
 
 class TestLoadMlflowOptimiserArtifactRegistered:
-    @patch("mlflow.artifacts.download_artifacts")
-    @patch("mlflow.set_tracking_uri")
-    @patch("mlflow.tracking.MlflowClient")
-    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
-    def test_registered_source(
-        self, mock_backend, mock_client, mock_set_uri, mock_download, tmp_path,
-    ):
-        artifact_file = tmp_path / "optimiser_result.json"
-        artifact_file.write_text(json.dumps({"mode": "ratebook"}))
-        mock_download.return_value = str(artifact_file)
-        mock_backend.return_value = ("http://localhost:5000", "local")
+    def test_registered_source(self, mlflow_mocks):
+        mlflow_mocks.write_artifact({"mode": "ratebook"})
 
-        client_instance = mock_client.return_value
-        # Mock _resolve_version
-        with patch("haute._optimiser_io._resolve_version", return_value="2"):
+        with (
+            patch("mlflow.tracking.MlflowClient") as mock_client,
+            patch("haute._optimiser_io._resolve_version", return_value="2"),
+        ):
             mv = MagicMock()
             mv.run_id = "resolved_run_id"
-            client_instance.get_model_version.return_value = mv
+            mock_client.return_value.get_model_version.return_value = mv
 
             result = load_mlflow_optimiser_artifact(
                 source_type="registered",
@@ -192,42 +195,27 @@ class TestLoadMlflowOptimiserArtifactRegistered:
                 tracking_uri="http://x",
             )
 
-    @patch("mlflow.artifacts.download_artifacts")
-    @patch("mlflow.set_tracking_uri")
-    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
-    def test_tracking_uri_auto_detected(
-        self, mock_backend, mock_set_uri, mock_download, tmp_path,
-    ):
+    def test_tracking_uri_auto_detected(self, mlflow_mocks):
         """When tracking_uri is empty, resolve_tracking_backend is called."""
-        artifact_file = tmp_path / "optimiser_result.json"
-        artifact_file.write_text(json.dumps({"mode": "online"}))
-        mock_download.return_value = str(artifact_file)
-        mock_backend.return_value = ("http://auto-detected:5000", "local")
+        mlflow_mocks.write_artifact({"mode": "online"})
 
         load_mlflow_optimiser_artifact(
             source_type="run",
             run_id="run_1",
             tracking_uri="",  # empty => auto-detect
         )
-        mock_backend.assert_called_once()
+        mlflow_mocks.backend.assert_called_once()
 
-    @patch("mlflow.artifacts.download_artifacts")
-    @patch("mlflow.set_tracking_uri")
-    def test_explicit_tracking_uri_skips_auto_detect(
-        self, mock_set_uri, mock_download, tmp_path,
-    ):
+    def test_explicit_tracking_uri_skips_auto_detect(self, mlflow_mocks):
         """When tracking_uri is provided, resolve_tracking_backend is not called."""
-        artifact_file = tmp_path / "optimiser_result.json"
-        artifact_file.write_text(json.dumps({"mode": "online"}))
-        mock_download.return_value = str(artifact_file)
+        mlflow_mocks.write_artifact({"mode": "online"})
 
-        with patch("haute.modelling._mlflow_log.resolve_tracking_backend") as mock_backend:
-            load_mlflow_optimiser_artifact(
-                source_type="run",
-                run_id="run_1",
-                tracking_uri="http://explicit:5000",
-            )
-            mock_backend.assert_not_called()
+        load_mlflow_optimiser_artifact(
+            source_type="run",
+            run_id="run_1",
+            tracking_uri="http://explicit:5000",
+        )
+        mlflow_mocks.backend.assert_not_called()
 
 
 # ===========================================================================

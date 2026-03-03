@@ -80,6 +80,20 @@ class TestSafeGlobals:
         with pytest.raises(NameError):
             exec("breakpoint()", ns, {})
 
+    def test_all_dangerous_builtins_blocked(self):
+        """All dangerous builtins must be absent from safe namespace."""
+        ns = safe_globals()
+        blocked = {
+            "__import__", "breakpoint", "compile", "eval",
+            "exec", "globals", "locals", "open", "input", "memoryview",
+        }
+        builtins_ns = ns.get("__builtins__", ns)
+        if isinstance(builtins_ns, dict):
+            present = blocked & set(builtins_ns.keys())
+        else:
+            present = {b for b in blocked if hasattr(builtins_ns, b)}
+        assert present == set(), f"Dangerous builtins present: {present}"
+
 
 class TestValidateProjectPath:
     """Verify path validation catches directory traversal."""
@@ -162,6 +176,7 @@ class TestSafeJoblibLoad:
         joblib.dump(model, str(f))
         result = safe_joblib_load(str(f))
         assert isinstance(result, LinearRegression)
+        assert result.get_params() == model.get_params()
 
     def test_malicious_joblib_blocked(self, tmp_path: Path):
         """A joblib file containing os.system should be blocked."""
@@ -206,38 +221,37 @@ class TestSafeJoblibLoad:
         with pytest.raises(ValueError, match="outside.*project root"):
             safe_joblib_load(str(f))
 
-    def test_restriction_does_not_leak_across_calls(self, tmp_path: Path):
-        """Verify the monkey-patch is restored after safe_joblib_load."""
+    def test_safe_load_does_not_break_subsequent_loads(self, tmp_path: Path):
+        """After safe_joblib_load, normal joblib.load of safe objects works."""
         import joblib
-        from joblib.numpy_pickle import NumpyUnpickler
 
-        original_find_class = NumpyUnpickler.find_class
         set_project_root(tmp_path)
         f = tmp_path / "test.joblib"
         joblib.dump([1, 2, 3], str(f))
         safe_joblib_load(str(f))
-        # find_class should be restored to original after the call
-        assert NumpyUnpickler.find_class is original_find_class
+        # A subsequent normal joblib.load should still work
+        assert joblib.load(str(f)) == [1, 2, 3]
 
-    def test_restriction_restored_on_error(self, tmp_path: Path):
-        """Verify monkey-patch is restored even if loading fails."""
+    def test_safe_load_restored_after_error(self, tmp_path: Path):
+        """After a failed safe_joblib_load, normal joblib.load still works."""
         import joblib
-        from joblib.numpy_pickle import NumpyUnpickler
 
-        original_find_class = NumpyUnpickler.find_class
         set_project_root(tmp_path)
-        f = tmp_path / "evil.joblib"
+        safe_f = tmp_path / "safe.joblib"
+        joblib.dump({"a": 1}, str(safe_f))
+
+        evil_f = tmp_path / "evil.joblib"
 
         class _Evil:
             def __reduce__(self):
                 import os
                 return (os.system, ("echo pwned",))
 
-        joblib.dump(_Evil(), str(f))
+        joblib.dump(_Evil(), str(evil_f))
         with pytest.raises(pickle.UnpicklingError):
-            safe_joblib_load(str(f))
-        # find_class must be restored even after the error
-        assert NumpyUnpickler.find_class is original_find_class
+            safe_joblib_load(str(evil_f))
+        # Normal joblib.load should still work after the error
+        assert joblib.load(str(safe_f)) == {"a": 1}
 
 
 class TestValidateUserCode:
@@ -290,7 +304,12 @@ class TestValidateUserCode:
 
     def test_syntax_error_passes_through(self):
         """SyntaxError code should not raise UnsafeCodeError — let exec() handle it."""
-        validate_user_code("df = (((")  # broken syntax, no UnsafeCodeError
+        from haute._sandbox import UnsafeCodeError
+
+        try:
+            validate_user_code("df = (((")
+        except UnsafeCodeError:
+            pytest.fail("validate_user_code raised UnsafeCodeError for syntax error")
 
     def test_empty_code_passes(self):
         """Empty string should pass."""

@@ -1,0 +1,198 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { renderHook, cleanup, act } from "@testing-library/react"
+import type { Node, Edge } from "@xyflow/react"
+import useEdgeHandlers from "../useEdgeHandlers"
+import { NODE_TYPES } from "../../utils/nodeTypes"
+
+vi.mock("@xyflow/react", async () => {
+  const actual = await vi.importActual("@xyflow/react")
+  return {
+    ...actual,
+    addEdge: (params: Record<string, unknown>, eds: Edge[]) => [...eds, { id: `e_${params.source}_${params.target}`, ...params }],
+  }
+})
+
+function makeParams(overrides: Partial<Parameters<typeof useEdgeHandlers>[0]> = {}) {
+  return {
+    graphRef: { current: { nodes: [] as Node[], edges: [] as Edge[] } },
+    nodeIdCounter: { current: 0 },
+    lastSelectedNodeRef: { current: null as Node | null },
+    setNodes: vi.fn((updater: (nds: Node[]) => Node[]) => updater([])),
+    setEdges: vi.fn((updater: (eds: Edge[]) => Edge[]) => updater([])),
+    setSelectedNode: vi.fn(),
+    setContextMenu: vi.fn(),
+    fetchPreview: vi.fn(),
+    clearTrace: vi.fn(),
+    screenToFlowPosition: vi.fn((pos: { x: number; y: number }) => pos),
+    ...overrides,
+  }
+}
+
+describe("useEdgeHandlers", () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it("onConnect creates a new edge", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "a",
+        target: "b",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).toHaveBeenCalledOnce()
+  })
+
+  it("onConnect prevents self-loop", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "a",
+        target: "a",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).not.toHaveBeenCalled()
+  })
+
+  it("onConnect prevents duplicate edges", () => {
+    const params = makeParams()
+    params.graphRef.current.edges = [
+      { id: "e1", source: "a", target: "b" } as Edge,
+    ]
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "a",
+        target: "b",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).not.toHaveBeenCalled()
+  })
+
+  it("onConnect strips targetHandle for submodel nodes", () => {
+    const params = makeParams()
+    params.graphRef.current.nodes = [
+      { id: "sm1", data: { label: "SM", nodeType: NODE_TYPES.SUBMODEL } } as unknown as Node,
+    ]
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "a",
+        target: "sm1",
+        sourceHandle: null,
+        targetHandle: "in__child1",
+      })
+    })
+    expect(params.setEdges).toHaveBeenCalledOnce()
+    // The updater should produce an edge with targetHandle: null
+    const updater = params.setEdges.mock.calls[0][0] as (eds: Edge[]) => Edge[]
+    const newEdges = updater([])
+    expect(newEdges[0]).toHaveProperty("targetHandle", null)
+  })
+
+  it("onSelectionChange with single node calls fetchPreview and clearTrace", () => {
+    const params = makeParams()
+    const node = { id: "n1", data: { label: "A" } } as Node
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onSelectionChange({ nodes: [node], edges: [] })
+    })
+    expect(params.setSelectedNode).toHaveBeenCalled()
+    // The setSelectedNode callback should trigger fetchPreview/clearTrace when prev differs
+    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node
+    updater(null) // simulate prev !== node.id
+    expect(params.fetchPreview).toHaveBeenCalledWith(node)
+    expect(params.clearTrace).toHaveBeenCalled()
+  })
+
+  it("onSelectionChange with no nodes sets selectedNode to null", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onSelectionChange({ nodes: [], edges: [] })
+    })
+    expect(params.setSelectedNode).toHaveBeenCalledWith(null)
+    expect(params.clearTrace).toHaveBeenCalled()
+  })
+
+  it("handleDeleteEdge removes edge by id", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.handleDeleteEdge("e1")
+    })
+    expect(params.setEdges).toHaveBeenCalledOnce()
+    const updater = params.setEdges.mock.calls[0][0] as (eds: Edge[]) => Edge[]
+    const remaining = updater([{ id: "e1" } as Edge, { id: "e2" } as Edge])
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].id).toBe("e2")
+  })
+
+  it("onNodeContextMenu sets context menu with correct data", () => {
+    const params = makeParams()
+    const node = { id: "n1", data: { label: "Test Node", nodeType: "transform" } } as unknown as Node
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    const event = { preventDefault: vi.fn(), clientX: 100, clientY: 200 } as unknown as React.MouseEvent
+    act(() => {
+      result.current.onNodeContextMenu(event, node)
+    })
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(params.setContextMenu).toHaveBeenCalledWith({
+      x: 100,
+      y: 200,
+      nodeId: "n1",
+      nodeLabel: "Test Node",
+      isSubmodel: false,
+    })
+  })
+
+  it("onDrop creates a new node from drag data", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    const event = {
+      preventDefault: vi.fn(),
+      clientX: 300,
+      clientY: 400,
+      dataTransfer: {
+        getData: vi.fn((key: string) => {
+          if (key === "application/reactflow-type") return NODE_TYPES.TRANSFORM
+          if (key === "application/reactflow-config") return "{}"
+          return ""
+        }),
+      },
+    } as unknown as React.DragEvent
+    act(() => {
+      result.current.onDrop(event)
+    })
+    expect(params.setNodes).toHaveBeenCalledOnce()
+    expect(params.setSelectedNode).toHaveBeenCalledOnce()
+    expect(params.nodeIdCounter.current).toBe(1)
+  })
+
+  it("onDrop with no type does nothing", () => {
+    const params = makeParams()
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    const event = {
+      preventDefault: vi.fn(),
+      clientX: 0,
+      clientY: 0,
+      dataTransfer: {
+        getData: vi.fn(() => ""),
+      },
+    } as unknown as React.DragEvent
+    act(() => {
+      result.current.onDrop(event)
+    })
+    expect(params.setNodes).not.toHaveBeenCalled()
+  })
+})

@@ -98,3 +98,4 @@ class TestLintEdgeCases:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 1
+        assert "main.py" in result.output

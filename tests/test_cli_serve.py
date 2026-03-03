@@ -84,4 +84,9 @@ class TestServe:
             runner.invoke(cli, ["serve", "--no-browser"])
 
         mock_popen.assert_called_once()
-        assert "npm" in mock_popen.call_args[0][0] or mock_popen.call_args[0][0][0] == "npm"
+        cmd = mock_popen.call_args[0][0]
+        # cmd may be a string (shell=True) or list (shell=False)
+        if isinstance(cmd, str):
+            assert "npm" in cmd, f"Expected 'npm' in command string: {cmd}"
+        else:
+            assert cmd[0] == "npm", f"Expected 'npm' as first arg, got: {cmd}"

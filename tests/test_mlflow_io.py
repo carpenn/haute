@@ -5,12 +5,15 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import polars as pl
 import pytest
 
 from haute._mlflow_io import (
     _MODEL_CACHE_MAX_SIZE,
     _find_cbm_artifact,
     _model_cache,
+    _prepare_predict_frame,
     _resolve_version,
     load_mlflow_model,
 )
@@ -311,3 +314,78 @@ class TestTaskValidation:
         """Empty task string raises ValueError."""
         with pytest.raises(ValueError, match="Invalid task"):
             load_mlflow_model(source_type="run", run_id="x", task="")
+
+
+# ---------------------------------------------------------------------------
+# _prepare_predict_frame — real data, no mocks
+# ---------------------------------------------------------------------------
+
+
+def _mock_model(cat_indices: list[int] | None = None) -> MagicMock:
+    """Create a mock CatBoost model with optional categorical feature indices."""
+    m = MagicMock()
+    if cat_indices is not None:
+        m.get_cat_feature_indices.return_value = cat_indices
+    else:
+        del m.get_cat_feature_indices  # no categorical features
+    return m
+
+
+class TestPreparePredictFrame:
+    def test_numeric_only_returns_numpy(self):
+        """All-numeric features should return a numpy array."""
+        model = _mock_model(cat_indices=[])
+        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        result = _prepare_predict_frame(model, df, ["a", "b"])
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (2, 2)
+
+    def test_numeric_nulls_become_nan(self):
+        """Null values in numeric columns should become NaN after Float32 cast."""
+        model = _mock_model(cat_indices=[])
+        df = pl.DataFrame({"x": [1.0, None, 3.0]})
+        result = _prepare_predict_frame(model, df, ["x"])
+        assert isinstance(result, np.ndarray)
+        assert np.isnan(result[1, 0]), "Null should become NaN"
+        assert result[0, 0] == pytest.approx(1.0, abs=0.01)
+
+    def test_categorical_nulls_become_sentinel(self):
+        """Null values in categorical columns should be filled with '_MISSING_'."""
+        model = _mock_model(cat_indices=[0])
+        df = pl.DataFrame({"cat": ["a", None, "b"]})
+        result = _prepare_predict_frame(model, df, ["cat"])
+        # With cat features, returns pandas DataFrame
+        import pandas as pd
+        assert isinstance(result, pd.DataFrame)
+        assert result.iloc[1, 0] == "_MISSING_"
+
+    def test_mixed_numeric_and_categorical(self):
+        """Mixed features: numeric→numpy float, categorical→sentinel+Categorical."""
+        model = _mock_model(cat_indices=[1])  # second feature is categorical
+        df = pl.DataFrame({
+            "num": [1.0, None, 3.0],
+            "cat": ["x", None, "y"],
+        })
+        result = _prepare_predict_frame(model, df, ["num", "cat"])
+        import pandas as pd
+        assert isinstance(result, pd.DataFrame)
+        # numeric column should have NaN for null
+        assert np.isnan(result["num"].iloc[1])
+        # categorical column should have sentinel for null
+        assert result["cat"].iloc[1] == "_MISSING_"
+
+    def test_no_cat_feature_indices_attr(self):
+        """Model without get_cat_feature_indices treats all features as numeric."""
+        model = _mock_model(cat_indices=None)  # deletes the attribute
+        df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+        result = _prepare_predict_frame(model, df, ["a"])
+        assert isinstance(result, np.ndarray)
+
+    def test_feature_order_preserved(self):
+        """Output columns should match the requested feature order."""
+        model = _mock_model(cat_indices=[])
+        df = pl.DataFrame({"b": [10.0, 20.0], "a": [1.0, 2.0]})
+        result = _prepare_predict_frame(model, df, ["a", "b"])
+        # First column should be "a", second "b"
+        assert result[0, 0] == pytest.approx(1.0, abs=0.01)
+        assert result[0, 1] == pytest.approx(10.0, abs=0.01)

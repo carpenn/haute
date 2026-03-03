@@ -218,6 +218,78 @@ class TestHauteModelPredict:
         call_kwargs = mock_score.call_args.kwargs
         assert call_kwargs["artifact_paths"] == {"model.pkl": "/served/model.pkl"}
 
+    @staticmethod
+    def _build_fixture_model(output_fields: list[str] | None = None) -> "HauteModel":
+        """Build a HauteModel wired to the fixture pipeline graph."""
+        from haute.deploy._model_code import HauteModel
+        from haute.deploy._pruner import prune_for_deploy
+        from haute.parser import parse_pipeline_file
+
+        full_graph = parse_pipeline_file(PIPELINE_FILE)
+        pruned, _kept, _removed = prune_for_deploy(full_graph, "output")
+
+        model = HauteModel()
+        model._graph = pruned
+        model._input_node_ids = ["quotes"]
+        model._output_node_id = "output"
+        model._output_fields = output_fields
+        model._artifact_paths = {}
+        return model
+
+    def test_predict_end_to_end_with_real_graph(self):
+        """E2E: predict with a real pruned graph — no mocks on score_graph."""
+        import pandas as pd
+
+        model = self._build_fixture_model()
+
+        # Area "A" → factor 1.1, premium = VehPower * area_factor * Exposure
+        input_pd = pd.DataFrame([{
+            "IDpol": 1, "VehPower": 5, "Area": "A",
+            "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5,
+        }])
+
+        result = model.predict(MagicMock(), input_pd)
+
+        assert isinstance(result, pd.DataFrame)
+        assert "premium" in result.columns, f"Expected 'premium', got {result.columns.tolist()}"
+        assert result["premium"].iloc[0] == pytest.approx(2.75, rel=1e-6)
+
+    def test_predict_end_to_end_multiple_rows(self):
+        """E2E with multiple rows — verifies vectorised execution."""
+        import pandas as pd
+
+        model = self._build_fixture_model()
+
+        input_pd = pd.DataFrame([
+            {"IDpol": 1, "VehPower": 5, "Area": "A", "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5},
+            {"IDpol": 2, "VehPower": 10, "Area": "B", "VehAge": 2, "BonusMalus": 60, "Exposure": 1.0},
+        ])
+
+        result = model.predict(MagicMock(), input_pd)
+
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 2
+        # Row 1: 5 * 1.1 * 0.5 = 2.75  (Area "A" → factor 1.1)
+        # Row 2: 10 * 1.2 * 1.0 = 12.0  (Area "B" → factor 1.2)
+        assert result["premium"].iloc[0] == pytest.approx(2.75, rel=1e-6)
+        assert result["premium"].iloc[1] == pytest.approx(12.0, rel=1e-6)
+
+    def test_predict_with_output_fields_filters(self):
+        """E2E: output_fields limits returned columns."""
+        import pandas as pd
+
+        model = self._build_fixture_model(output_fields=["premium"])
+
+        input_pd = pd.DataFrame([{
+            "IDpol": 1, "VehPower": 5, "Area": "A",
+            "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5,
+        }])
+
+        result = model.predict(MagicMock(), input_pd)
+
+        assert list(result.columns) == ["premium"]
+        assert result["premium"].iloc[0] == pytest.approx(2.75, rel=1e-6)
+
 
 # ===========================================================================
 # 2. _schema.py — infer_input_schema, infer_output_schema
@@ -638,13 +710,125 @@ class TestScoreGraphMissingOutput:
 
         input_df = pl.DataFrame({"x": [1.0]})
 
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(RuntimeError, match="produced no result"):
             score_graph(
                 graph=graph,
                 input_df=input_df,
                 input_node_ids=["src"],
                 output_node_id="nonexistent",
             )
+
+
+class TestScoreGraphBadInput:
+    """Tests for score_graph with wrong input types / missing columns."""
+
+    def _simple_graph(self):
+        """apiInput → transform (cast VehPower to float) → output."""
+        return _g({
+            "nodes": [
+                {"id": "src", "data": {
+                    "label": "src",
+                    "nodeType": "apiInput",
+                    "config": {"path": ""},
+                }},
+                {"id": "calc", "data": {
+                    "label": "calc",
+                    "nodeType": "transform",
+                    "config": {"code": '.with_columns(result=pl.col("VehPower").cast(pl.Float64) * 2)'},
+                }},
+                {"id": "out", "data": {
+                    "label": "out",
+                    "nodeType": "output",
+                    "config": {},
+                }},
+            ],
+            "edges": [
+                {"id": "e1", "source": "src", "target": "calc"},
+                {"id": "e2", "source": "calc", "target": "out"},
+            ],
+        })
+
+    def test_missing_column_raises(self):
+        """Input missing a column referenced by transform raises an error."""
+        from haute.deploy._scorer import score_graph
+
+        graph = self._simple_graph()
+        # VehPower is missing — transform references it
+        input_df = pl.DataFrame({"other_col": [1.0]})
+
+        with pytest.raises(Exception, match="VehPower|not found|ColumnNotFoundError"):
+            score_graph(
+                graph=graph,
+                input_df=input_df,
+                input_node_ids=["src"],
+                output_node_id="out",
+            )
+
+    def test_wrong_dtype_in_column(self):
+        """String where float expected — cast should fail or produce wrong results."""
+        from haute.deploy._scorer import score_graph
+
+        graph = self._simple_graph()
+        # VehPower is a string — .cast(pl.Float64) on "abc" should fail
+        input_df = pl.DataFrame({"VehPower": ["abc", "def"]})
+
+        with pytest.raises((pl.exceptions.InvalidOperationError, pl.exceptions.ComputeError)):
+            score_graph(
+                graph=graph,
+                input_df=input_df,
+                input_node_ids=["src"],
+                output_node_id="out",
+            )
+
+    @staticmethod
+    def _passthrough_graph():
+        """apiInput → output with no transform."""
+        return _g({
+            "nodes": [
+                {"id": "src", "data": {
+                    "label": "src",
+                    "nodeType": "apiInput",
+                    "config": {"path": ""},
+                }},
+                {"id": "out", "data": {
+                    "label": "out",
+                    "nodeType": "output",
+                    "config": {},
+                }},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "out"}],
+        })
+
+    def test_null_input_propagates(self):
+        """Null values flow through the pipeline without crashing."""
+        from haute.deploy._scorer import score_graph
+
+        input_df = pl.DataFrame({"x": [None, 1.0, None]})
+        result = score_graph(
+            graph=self._passthrough_graph(),
+            input_df=input_df,
+            input_node_ids=["src"],
+            output_node_id="out",
+        )
+
+        assert isinstance(result, pl.DataFrame)
+        assert len(result) == 3
+        assert result["x"].null_count() == 2
+
+    def test_empty_dataframe(self):
+        """Empty DataFrame (0 rows) should execute without error."""
+        from haute.deploy._scorer import score_graph
+
+        input_df = pl.DataFrame({"x": pl.Series([], dtype=pl.Float64)})
+        result = score_graph(
+            graph=self._passthrough_graph(),
+            input_df=input_df,
+            input_node_ids=["src"],
+            output_node_id="out",
+        )
+
+        assert isinstance(result, pl.DataFrame)
+        assert len(result) == 0
 
 
 class TestScoreGraphExternalFileRemap:
@@ -1312,8 +1496,15 @@ class TestGetDeployStatus:
 class TestBuildSignature:
     """Tests for _build_signature()."""
 
+    @staticmethod
+    def _input_type_map(sig):
+        """Extract {col_name: DataType} from a ModelSignature's inputs."""
+        return {col.name: col.type for col in sig.inputs.inputs}
+
     def test_basic_types(self):
         from haute.deploy._mlflow import _build_signature
+        from mlflow.models import ModelSignature
+        from mlflow.types import DataType
 
         resolved = _make_resolved(
             input_schema={"age": "Int32", "name": "String", "premium": "Float64"},
@@ -1322,14 +1513,18 @@ class TestBuildSignature:
 
         sig = _build_signature(resolved)
 
-        # Should return a ModelSignature
-        from mlflow.models import ModelSignature
-
         assert isinstance(sig, ModelSignature)
+        type_map = self._input_type_map(sig)
+        assert type_map["age"] == DataType.integer, "Int32 must map to integer"
+        assert type_map["name"] == DataType.string, "String must map to string"
+        assert type_map["premium"] == DataType.double, "Float64 must map to double"
+        out_map = {col.name: col.type for col in sig.outputs.inputs}
+        assert out_map["result"] == DataType.double
 
     def test_parameterized_datetime_type(self):
         """Datetime('us', 'UTC') should map to datetime DataType."""
         from haute.deploy._mlflow import _build_signature
+        from mlflow.types import DataType
 
         resolved = _make_resolved(
             input_schema={"ts": "Datetime('us', 'UTC')"},
@@ -1337,15 +1532,13 @@ class TestBuildSignature:
         )
 
         sig = _build_signature(resolved)
-
-        from mlflow.models import ModelSignature
-
-        assert isinstance(sig, ModelSignature)
+        type_map = self._input_type_map(sig)
+        assert type_map["ts"] == DataType.datetime, "Parameterized Datetime must map to datetime"
 
     def test_unknown_dtype_falls_back_to_string(self):
         """Unknown polars dtype should map to DataType.string."""
-
         from haute.deploy._mlflow import _build_signature
+        from mlflow.types import DataType
 
         resolved = _make_resolved(
             input_schema={"exotic": "CategoricalComplex"},
@@ -1353,15 +1546,13 @@ class TestBuildSignature:
         )
 
         sig = _build_signature(resolved)
-
-        # The exotic column should have been mapped to string
-        input_cols = sig.inputs.to_dict()
-        # Verify it doesn't crash - the schema should be valid
-        assert len(input_cols) > 0
+        type_map = self._input_type_map(sig)
+        assert type_map["exotic"] == DataType.string, "Unknown dtype must fall back to string"
 
     def test_all_numeric_types(self):
-        """All supported numeric types should produce valid signatures."""
+        """All supported numeric types should produce correct MLflow type mappings."""
         from haute.deploy._mlflow import _build_signature
+        from mlflow.types import DataType
 
         all_types = {
             "a_i8": "Int8", "b_i16": "Int16", "c_i32": "Int32", "d_i64": "Int64",
@@ -1376,9 +1567,25 @@ class TestBuildSignature:
         )
 
         sig = _build_signature(resolved)
-        from mlflow.models import ModelSignature
+        type_map = self._input_type_map(sig)
 
-        assert isinstance(sig, ModelSignature)
+        # Integer types (Int8, Int16, Int32, UInt8, UInt16) -> integer
+        for col in ("a_i8", "b_i16", "c_i32", "e_u8", "f_u16"):
+            assert type_map[col] == DataType.integer, f"{col} must map to integer"
+        # Long types (Int64, UInt32, UInt64) -> long
+        for col in ("d_i64", "g_u32", "h_u64"):
+            assert type_map[col] == DataType.long, f"{col} must map to long"
+        # Float32 -> float
+        assert type_map["i_f32"] == DataType.float, "Float32 must map to float"
+        # Float64 -> double
+        assert type_map["j_f64"] == DataType.double, "Float64 must map to double"
+        # String / Utf8 -> string
+        assert type_map["k_str"] == DataType.string
+        assert type_map["l_utf8"] == DataType.string
+        # Boolean -> boolean
+        assert type_map["m_bool"] == DataType.boolean
+        # Date -> datetime
+        assert type_map["n_date"] == DataType.datetime
 
 
 class TestCondaEnvAndPipRequirements:
@@ -2008,3 +2215,107 @@ class TestFormatHelpers:
         from haute.deploy._impact import _fmt_int
 
         assert _fmt_int(1000000) == "1,000,000"
+
+
+# ===========================================================================
+# Additional validator / test-quote edge cases
+# ===========================================================================
+
+
+class TestLoadTestQuoteFileEdgeCases:
+    """Edge cases for load_test_quote_file()."""
+
+    def test_non_array_json_raises_value_error(self, tmp_path):
+        """A JSON file containing an object (not an array) must raise ValueError."""
+        from haute.deploy._validators import load_test_quote_file
+
+        bad_file = tmp_path / "quotes.json"
+        bad_file.write_text('{"key": "value"}')
+
+        with pytest.raises(ValueError, match="JSON array"):
+            load_test_quote_file(bad_file)
+
+
+class TestValidateDeployEdgeCases:
+    """Additional edge cases for validate_deploy()."""
+
+    def test_output_node_missing_from_pruned_graph(self):
+        """Validation must report an error when output_node_id is not in the pruned graph."""
+        from haute.deploy._validators import validate_deploy
+
+        resolved = _make_resolved(
+            output_node_id="missing_output",
+            pruned_graph=_g({
+                "nodes": [
+                    {"id": "src", "data": {"nodeType": "apiInput", "config": {}}},
+                ],
+            }),
+            input_node_ids=["src"],
+        )
+
+        errors = validate_deploy(resolved)
+        assert any("missing_output" in e and "not in pruned graph" in e for e in errors)
+
+    def test_empty_input_schema_reported(self):
+        """Validation must report an error when input_schema is empty."""
+        from haute.deploy._validators import validate_deploy
+
+        resolved = _make_resolved(
+            input_schema={},
+            output_schema={"col": "Int64"},
+            pruned_graph=_g({
+                "nodes": [
+                    {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
+                    {"id": "output", "data": {"nodeType": "output", "config": {}}},
+                ],
+                "edges": [{"id": "e1", "source": "policies", "target": "output"}],
+            }),
+            input_node_ids=["policies"],
+            output_node_id="output",
+        )
+
+        errors = validate_deploy(resolved)
+        assert any("Input schema is empty" in e for e in errors)
+
+    def test_empty_output_schema_reported(self):
+        """Validation must report an error when output_schema is empty."""
+        from haute.deploy._validators import validate_deploy
+
+        resolved = _make_resolved(
+            input_schema={"col": "Int64"},
+            output_schema={},
+            pruned_graph=_g({
+                "nodes": [
+                    {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
+                    {"id": "output", "data": {"nodeType": "output", "config": {}}},
+                ],
+                "edges": [{"id": "e1", "source": "policies", "target": "output"}],
+            }),
+            input_node_ids=["policies"],
+            output_node_id="output",
+        )
+
+        errors = validate_deploy(resolved)
+        assert any("Output schema is empty" in e for e in errors)
+
+
+class TestScoreTestQuotesEdgeCases:
+    """Additional edge cases for score_test_quotes()."""
+
+    def test_empty_dir_returns_empty(self, tmp_path):
+        """An existing but empty test_quotes directory returns an empty list."""
+        from haute.deploy._config import DeployConfig
+        from haute.deploy._validators import score_test_quotes
+
+        tq_dir = tmp_path / "quotes"
+        tq_dir.mkdir()
+
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+            test_quotes_dir=tq_dir,
+        )
+        resolved = _make_resolved(config=config)
+
+        results = score_test_quotes(resolved)
+        assert results == []

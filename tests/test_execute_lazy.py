@@ -260,20 +260,6 @@ class TestExecuteLazy:
 # ===========================================================================
 
 
-class TestEagerResult:
-    def test_named_tuple_fields(self):
-        er = EagerResult(
-            outputs={}, order=[], parents_of={},
-            node_map={}, id_to_name={},
-            errors={}, timings={}, memory_bytes={},
-        )
-        assert er.outputs == {}
-        assert er.order == []
-        assert er.errors == {}
-        assert er.timings == {}
-        assert er.memory_bytes == {}
-
-
 # ===========================================================================
 # _build_funcs
 # ===========================================================================
