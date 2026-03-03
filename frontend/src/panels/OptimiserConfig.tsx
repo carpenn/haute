@@ -3,10 +3,11 @@ import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Targe
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
 import { solveOptimiser, saveOptimiser, logOptimiserToMlflow } from "../api/client"
 import { useDataInputColumns } from "../hooks/useDataInputColumns"
+import { useConstraintHandlers } from "../hooks/useConstraintHandlers"
 import type { SolveResult } from "./OptimiserPreview"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
-import useUIStore from "../stores/useUIStore"
+import useSettingsStore from "../stores/useSettingsStore"
 import { formatElapsed } from "../utils/formatValue"
 import { configField } from "../utils/configField"
 import { extractBandingLevelsForNode } from "../utils/banding"
@@ -82,12 +83,12 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
 
   // Global MLflow status from store (fetched once on app startup)
-  const mlflow = useUIStore((s) => s.mlflow)
+  const mlflow = useSettingsStore((s) => s.mlflow)
   const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
 
   // Collapse state from UI store (persisted)
-  const advancedOpen = useUIStore((s) => s.isSectionOpen("optimiser.advanced"))
-  const toggleAdvanced = useUIStore((s) => s.toggleSection)
+  const advancedOpen = useSettingsStore((s) => s.isSectionOpen("optimiser.advanced"))
+  const toggleAdvanced = useSettingsStore((s) => s.toggleSection)
 
   const mode = configField(config, "mode", "online")
   const factorColumns = configField<string[][]>(config, "factor_columns", [])
@@ -121,33 +122,12 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   )
 
   // --- Constraints helpers ---
-
-  const handleAddConstraint = useCallback(() => {
-    const usedCols = new Set(Object.keys(constraints))
-    const available = dataInputColumns.find(c => !usedCols.has(c.name) && c.name !== objective)
-    const colName = available ? available.name : `constraint_${Object.keys(constraints).length + 1}`
-    const newConstraints = { ...constraints, [colName]: { min: 0.9 } }
-    onUpdate("constraints", newConstraints)
-  }, [constraints, dataInputColumns, objective, onUpdate])
-
-  const handleRemoveConstraint = useCallback((name: string) => {
-    const newConstraints = { ...constraints }
-    delete newConstraints[name]
-    onUpdate("constraints", newConstraints)
-  }, [constraints, onUpdate])
-
-  const handleConstraintColumnChange = useCallback((oldName: string, newName: string) => {
-    if (oldName === newName) return
-    const newConstraints: Record<string, Record<string, number>> = {}
-    for (const [k, v] of Object.entries(constraints)) {
-      newConstraints[k === oldName ? newName : k] = v
-    }
-    onUpdate("constraints", newConstraints)
-  }, [constraints, onUpdate])
-
-  const handleConstraintValueChange = useCallback((name: string, type: string, value: number) => {
-    onUpdate("constraints", { ...constraints, [name]: { [type]: value } })
-  }, [constraints, onUpdate])
+  const {
+    handleAddConstraint,
+    handleRemoveConstraint,
+    handleConstraintColumnChange,
+    handleConstraintValueChange,
+  } = useConstraintHandlers(constraints, objective, dataInputColumns, onUpdate)
 
   // --- Factor toggle helpers (ratebook) ---
 

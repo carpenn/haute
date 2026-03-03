@@ -7,7 +7,6 @@ import os
 import tempfile
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +19,16 @@ if TYPE_CHECKING:
 
 from haute._logging import get_logger
 from haute._sandbox import _get_project_root
+from haute._types import (
+    GraphNode,
+    OnlineSolveResultLike,
+    PipelineGraph,
+    RatebookSolveResultLike,
+    SolveResultLike,
+)
 from haute.graph_utils import NodeType
+from haute.routes._helpers import raise_node_not_found, raise_node_type_error
+from haute.routes._job_store import JobStore
 from haute.schemas import (
     OptimiserApplyRequest,
     OptimiserApplyResponse,
@@ -40,23 +48,21 @@ logger = get_logger(component="server.optimiser")
 router = APIRouter(prefix="/api/optimiser", tags=["optimiser"])
 
 # In-memory job store — same pattern as modelling.
-_jobs: dict[str, dict[str, Any]] = {}
-_JOB_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+_store = JobStore()
 
-
-def _evict_stale_jobs() -> None:
-    """Remove jobs older than TTL to bound memory usage."""
-    cutoff = time.time() - _JOB_TTL_SECONDS
-    stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
-    for jid in stale:
-        del _jobs[jid]
-
-
-_DEFAULT_TIMEOUT = 300  # seconds
+# ── Default constants ─────────────────────────────────────────────
+_DEFAULT_TIMEOUT = 300  # seconds — max wall-clock time for a solve job
+_HISTOGRAM_BINS = 20  # bin count for scenario-value distribution histogram
+_DEFAULT_MAX_ITER = 50  # max solver iterations (online & ratebook)
+_DEFAULT_CHUNK_SIZE = 500_000  # rows per chunk for solver processing
+_DEFAULT_TOLERANCE = 1e-6  # convergence tolerance for solver
+_DEFAULT_MAX_CD_ITERATIONS = 10  # max coordinate-descent iterations (ratebook)
+_DEFAULT_CD_TOLERANCE = 1e-3  # coordinate-descent convergence tolerance (ratebook)
+_APPLY_PREVIEW_ROWS = 100  # max rows returned in the apply preview payload
 
 
 def _compute_scenario_value_stats(
-    solve_result: Any,
+    solve_result: SolveResultLike,
 ) -> tuple[dict[str, float], dict[str, list[float]]]:
     """Compute scenario value distribution statistics and histogram from solve result.
 
@@ -87,7 +93,7 @@ def _compute_scenario_value_stats(
 
     # Histogram via numpy (Polars has no native histogram)
     vals = col.to_numpy()
-    counts, edges = np.histogram(vals, bins=20)
+    counts, edges = np.histogram(vals, bins=_HISTOGRAM_BINS)
     histogram = {
         "counts": [int(c) for c in counts],
         "edges": [float(e) for e in edges],
@@ -96,16 +102,13 @@ def _compute_scenario_value_stats(
 
 
 
-def _find_optimiser_node(graph: Any, node_id: str) -> Any:
+def _find_optimiser_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find and validate an optimiser node in the graph."""
     node = graph.node_map.get(node_id)
     if node is None:
-        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+        raise_node_not_found(node_id)
     if node.data.nodeType != NodeType.OPTIMISER:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Node '{node_id}' is not an optimiser node (got {node.data.nodeType})",
-        )
+        raise_node_type_error(node_id, "optimiser", str(node.data.nodeType))
     return node
 
 
@@ -121,12 +124,12 @@ def _solve_online(
     solver = OnlineOptimiser(
         objective=config["objective"],
         constraints=config["constraints"],
-        max_iter=config.get("max_iter", 50),
-        chunk_size=config.get("chunk_size", 500_000),
-        tolerance=config.get("tolerance", 1e-6),
+        max_iter=config.get("max_iter", _DEFAULT_MAX_ITER),
+        chunk_size=config.get("chunk_size", _DEFAULT_CHUNK_SIZE),
+        tolerance=config.get("tolerance", _DEFAULT_TOLERANCE),
         record_history=config.get("record_history", False),
     )
-    solve_result = solver.solve(quote_grid)
+    solve_result: OnlineSolveResultLike = solver.solve(quote_grid)
     elapsed = time.monotonic() - start_time
     converged = solve_result.converged
     logger.info("solve_completed", mode="online", elapsed=f"{elapsed:.2f}s", converged=converged)
@@ -170,7 +173,7 @@ def _solve_online(
 def _solve_ratebook(
     quote_grid: QuoteGrid,
     config: dict[str, Any],
-    factors_df: pl.DataFrame,
+    factors_df: pl.DataFrame | None,
     job: dict[str, Any],
     start_time: float,
 ) -> None:
@@ -205,11 +208,11 @@ def _solve_ratebook(
         objective=config["objective"],
         constraints=constraints,
         factor_columns=factor_columns_valid,
-        max_iter=config.get("max_iter", 50),
-        max_cd_iterations=config.get("max_cd_iterations", 10),
-        cd_tolerance=config.get("cd_tolerance", 1e-3),
-        tolerance=config.get("tolerance", 1e-6),
-        chunk_size=config.get("chunk_size", 500_000),
+        max_iter=config.get("max_iter", _DEFAULT_MAX_ITER),
+        max_cd_iterations=config.get("max_cd_iterations", _DEFAULT_MAX_CD_ITERATIONS),
+        cd_tolerance=config.get("cd_tolerance", _DEFAULT_CD_TOLERANCE),
+        tolerance=config.get("tolerance", _DEFAULT_TOLERANCE),
+        chunk_size=config.get("chunk_size", _DEFAULT_CHUNK_SIZE),
     )
 
     # Select only the factor columns + quote ID for alignment
@@ -236,7 +239,7 @@ def _solve_ratebook(
     factors_df = quote_order.join(factors_df, on="quote_id", how="left")
     factors_df = factors_df.drop("quote_id")
 
-    solve_result = solver.solve(quote_grid, factors_df)
+    solve_result: RatebookSolveResultLike = solver.solve(quote_grid, factors_df)
     elapsed = time.monotonic() - start_time
     converged = solve_result.converged
     logger.info("solve_completed", mode="ratebook", elapsed=f"{elapsed:.2f}s", converged=converged)
@@ -325,17 +328,14 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
                 detail="Ratebook mode requires factor_columns. Add at least one factor group.",
             )
 
-    _evict_stale_jobs()
-    job_id = uuid.uuid4().hex[:12]
-    logger.info("solve_started", node_id=body.node_id, mode=mode, job_id=job_id)
-    _jobs[job_id] = {
+    job_id = _store.create_job({
         "status": "running",
         "progress": 0.0,
         "message": "Starting",
         "config": dict(config),
         "node_label": node.data.label,
-        "created_at": time.time(),
-    }
+    })
+    logger.info("solve_started", node_id=body.node_id, mode=mode, job_id=job_id)
 
     # --- Execute pipeline lazily (no intermediate DataFrames in memory) ---
     import polars as pl
@@ -351,7 +351,7 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
     except Exception as exc:
         error_msg = f"Pipeline execution failed: {exc}"
         logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
-        _jobs[job_id] = {"status": "error", "message": error_msg}
+        _store.jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=500, detail=error_msg)
 
     # If the user selected a specific data input, use that node's lazy output
@@ -366,7 +366,7 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
             "No data arrived at the optimiser node. "
             "Make sure an upstream data source is connected and producing data."
         )
-        _jobs[job_id] = {"status": "error", "message": error_msg}
+        _store.jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=400, detail=error_msg)
 
     # --- Column validation via schema (no collect) ---
@@ -381,7 +381,7 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
     if missing_cols:
         avail = sorted(available_cols)
         detail = f"Missing columns in scored data: {missing_cols}. Available: {avail}"
-        _jobs[job_id] = {"status": "error", "message": detail}
+        _store.jobs[job_id] = {"status": "error", "message": detail}
         raise HTTPException(status_code=400, detail=detail)
 
     constraint_cols = list(constraints.keys()) if isinstance(constraints, dict) else []
@@ -443,20 +443,22 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
     except Exception as exc:
         detail = f"Grid construction failed: {exc}"
         logger.error("grid_build_failed", error=str(exc), node_id=body.node_id)
-        _jobs[job_id].update({"status": "error", "message": detail})
+        _store.update_job(job_id, status="error", message=detail)
         raise HTTPException(status_code=400, detail=detail) from exc
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
     start_time = time.monotonic()
-    _jobs[job_id]["start_time"] = start_time
-    _jobs[job_id]["timeout"] = config.get("timeout", _DEFAULT_TIMEOUT)
+    _store.update_job(job_id,
+        start_time=start_time,
+        timeout=config.get("timeout", _DEFAULT_TIMEOUT),
+    )
     node_id = body.node_id  # capture for closure
 
     def _solve_background() -> None:
         try:
-            job = _jobs[job_id]
+            job = _store.jobs[job_id]
             job.update({
                 "message": "Solving",
                 "progress": 0.1,
@@ -471,27 +473,27 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
         except ValueError as exc:
             error_msg = f"Data error: {exc}"
             logger.error("solve_failed", error=str(exc), node_id=node_id, category="data")
-            _jobs[job_id].update({
-                "status": "error",
-                "message": error_msg,
-                "elapsed_seconds": time.monotonic() - start_time,
-            })
+            _store.update_job(job_id,
+                status="error",
+                message=error_msg,
+                elapsed_seconds=time.monotonic() - start_time,
+            )
         except RuntimeError as exc:
             error_msg = f"Algorithm error: {exc}"
             logger.error("solve_failed", error=str(exc), node_id=node_id, category="algorithm")
-            _jobs[job_id].update({
-                "status": "error",
-                "message": error_msg,
-                "elapsed_seconds": time.monotonic() - start_time,
-            })
+            _store.update_job(job_id,
+                status="error",
+                message=error_msg,
+                elapsed_seconds=time.monotonic() - start_time,
+            )
         except Exception as exc:
             error_msg = f"Unexpected error: {exc}"
             logger.error("solve_failed", error=str(exc), node_id=node_id, category="unexpected")
-            _jobs[job_id].update({
-                "status": "error",
-                "message": error_msg,
-                "elapsed_seconds": time.monotonic() - start_time,
-            })
+            _store.update_job(job_id,
+                status="error",
+                message=error_msg,
+                elapsed_seconds=time.monotonic() - start_time,
+            )
 
     thread = threading.Thread(target=_solve_background, daemon=True)
     thread.start()
@@ -501,7 +503,7 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
 @router.get("/solve/status/{job_id}", response_model=OptimiserStatusResponse)
 async def solve_status(job_id: str) -> OptimiserStatusResponse:
     """Poll optimisation job progress."""
-    job = _jobs.get(job_id)
+    job = _store.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
@@ -530,7 +532,7 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
 def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
     """Apply solved lambdas to the scored data."""
     logger.info("apply_requested", job_id=body.job_id)
-    job = _jobs.get(body.job_id)
+    job = _store.get_job(body.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
     if job.get("status") != "completed":
@@ -549,7 +551,7 @@ def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
             status="ok",
             total_objective=solve_result.total_objective,
             constraints=solve_result.total_constraints,
-            preview=df.head(100).to_dicts(),
+            preview=df.head(_APPLY_PREVIEW_ROWS).to_dicts(),
             row_count=len(df),
         )
     except Exception as exc:
@@ -560,7 +562,7 @@ def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
 @router.post("/frontier", response_model=OptimiserFrontierResponse)
 def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
     """Compute efficient frontier for a completed optimisation job."""
-    job = _jobs.get(body.job_id)
+    job = _store.get_job(body.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
     if job.get("status") != "completed":
@@ -598,7 +600,7 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
 
 def _build_artifact_payload(
     job: dict[str, Any],
-    solve_result: Any,
+    solve_result: SolveResultLike,
     version_override: str = "",
 ) -> dict[str, Any]:
     """Build the JSON payload for an optimiser artifact.
@@ -627,7 +629,7 @@ def _build_artifact_payload(
         "quote_id": job_config.get("quote_id", "quote_id"),
         "scenario_index": job_config.get("scenario_index", "scenario_index"),
         "scenario_value": job_config.get("scenario_value", "scenario_value"),
-        "chunk_size": job_config.get("chunk_size", 500_000),
+        "chunk_size": job_config.get("chunk_size", _DEFAULT_CHUNK_SIZE),
         "converged": solve_result.converged,
         "iterations": getattr(solve_result, "iterations", None),
         "cd_iterations": getattr(solve_result, "cd_iterations", None),
@@ -641,7 +643,7 @@ def _build_artifact_payload(
 @router.post("/save", response_model=OptimiserSaveResponse)
 def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     """Save the optimisation result to disk."""
-    job = _jobs.get(body.job_id)
+    job = _store.get_job(body.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
     if job.get("status") != "completed":
@@ -672,6 +674,14 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
             path=str(out),
             message=f"Saved optimisation result to {out}",
         )
+    except HTTPException:
+        raise
+    except OSError as exc:
+        logger.error("save_failed", error=str(exc), job_id=body.job_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Filesystem error saving optimiser result: {exc}",
+        )
     except Exception as exc:
         logger.error("save_failed", error=str(exc), job_id=body.job_id)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -680,7 +690,7 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
 @router.post("/mlflow/log", response_model=OptimiserMlflowLogResponse)
 def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
     """Log optimisation results to MLflow."""
-    job = _jobs.get(body.job_id)
+    job = _store.get_job(body.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
     if job.get("status") != "completed":

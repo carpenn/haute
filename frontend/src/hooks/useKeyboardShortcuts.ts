@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import type { Node, Edge } from "@xyflow/react"
+import useToastStore from "../stores/useToastStore"
 import useUIStore from "../stores/useUIStore"
 
 interface KeyboardShortcutsParams {
@@ -22,7 +23,8 @@ export default function useKeyboardShortcuts({
   graphRef, clipboard, nodeIdCounter,
   setSelectedNode, setPreviewData, clearTrace,
 }: KeyboardShortcutsParams) {
-  const { addToast, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid } = useUIStore()
+  const { addToast } = useToastStore()
+  const { setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid } = useUIStore()
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName

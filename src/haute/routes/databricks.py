@@ -27,6 +27,9 @@ logger = get_logger(component="server.databricks")
 
 router = APIRouter(prefix="/api/databricks", tags=["databricks"])
 
+# ── Timeout constant (seconds) ───────────────────────────────────
+_FETCH_TIMEOUT = 600.0  # Databricks table fetch — large tables can be slow
+
 
 def _get_databricks_client() -> Any:
     """Return a Databricks WorkspaceClient using credentials from .env."""
@@ -52,7 +55,7 @@ def _get_databricks_client() -> Any:
 
 
 @router.get("/warehouses", response_model=WarehouseListResponse)
-async def list_databricks_warehouses() -> WarehouseListResponse:
+def list_databricks_warehouses() -> WarehouseListResponse:
     """List available Databricks SQL Warehouses."""
     try:
         w = _get_databricks_client()
@@ -74,7 +77,7 @@ async def list_databricks_warehouses() -> WarehouseListResponse:
 
 
 @router.get("/catalogs", response_model=CatalogListResponse)
-async def list_databricks_catalogs() -> CatalogListResponse:
+def list_databricks_catalogs() -> CatalogListResponse:
     """List Unity Catalog catalogs."""
     try:
         w = _get_databricks_client()
@@ -91,7 +94,7 @@ async def list_databricks_catalogs() -> CatalogListResponse:
 
 
 @router.get("/schemas", response_model=SchemaListResponse)
-async def list_databricks_schemas(catalog: str) -> SchemaListResponse:
+def list_databricks_schemas(catalog: str) -> SchemaListResponse:
     """List schemas within a Unity Catalog catalog."""
     try:
         w = _get_databricks_client()
@@ -108,7 +111,7 @@ async def list_databricks_schemas(catalog: str) -> SchemaListResponse:
 
 
 @router.get("/tables", response_model=TableListResponse)
-async def list_databricks_tables(catalog: str, schema: str) -> TableListResponse:
+def list_databricks_tables(catalog: str, schema: str) -> TableListResponse:
     """List tables within a Unity Catalog schema."""
     try:
         w = _get_databricks_client()
@@ -144,17 +147,22 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
                 http_path=body.http_path,
                 query=body.query,
             ),
-            timeout=600.0,
+            timeout=_FETCH_TIMEOUT,
         )
         return FetchTableResponse.model_validate(result)
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Databricks fetch timed out (600s limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Databricks fetch timed out ({_FETCH_TIMEOUT:.0f}s limit)",
+        )
     except ImportError:
         raise HTTPException(
             status_code=400,
             detail="databricks-sql-connector is not installed. "
             "Install with: pip install haute[databricks]",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

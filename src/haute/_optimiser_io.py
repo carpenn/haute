@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 from typing import Any
 
 from haute._logging import get_logger
+from haute._lru_cache import LRUCache
 
 logger = get_logger(component="optimiser_io")
 
 _ARTIFACT_CACHE_MAX_SIZE = 8
-_artifact_cache: dict[tuple[str, float], dict[str, Any]] = {}
-_artifact_cache_lock = threading.Lock()
+_artifact_cache: LRUCache[tuple[str, float], dict[str, Any]] = LRUCache(
+    max_size=_ARTIFACT_CACHE_MAX_SIZE,
+)
 
 
 def load_optimiser_artifact(path: str) -> dict[str, Any]:
@@ -45,21 +46,15 @@ def load_optimiser_artifact(path: str) -> dict[str, Any]:
 
     key = (path, mtime)
 
-    with _artifact_cache_lock:
-        cached = _artifact_cache.get(key)
-        if cached is not None:
-            logger.debug("optimiser_artifact_cache_hit", path=path)
-            return cached
+    cached = _artifact_cache.get(key)
+    if cached is not None:
+        logger.debug("optimiser_artifact_cache_hit", path=path)
+        return cached
 
     with open(path) as f:
         artifact = json.load(f)
 
-    with _artifact_cache_lock:
-        _artifact_cache[key] = artifact
-        if len(_artifact_cache) > _ARTIFACT_CACHE_MAX_SIZE:
-            oldest = next(iter(_artifact_cache))
-            del _artifact_cache[oldest]
-
+    _artifact_cache.put(key, artifact)
     logger.info("optimiser_artifact_loaded", path=path, mode=artifact.get("mode"))
     return artifact
 
@@ -72,8 +67,9 @@ _MLFLOW_ARTIFACT_NAME = "optimiser_result.json"
 
 # Separate LRU cache for MLflow-sourced artifacts (keyed by run_id or
 # model+version, not file path).
-_mlflow_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
-_mlflow_cache_lock = threading.Lock()
+_mlflow_cache: LRUCache[tuple[str, str, str], dict[str, Any]] = LRUCache(
+    max_size=_ARTIFACT_CACHE_MAX_SIZE,
+)
 
 
 def load_mlflow_optimiser_artifact(
@@ -133,11 +129,10 @@ def load_mlflow_optimiser_artifact(
         )
 
     cache_key = (source_type, resolved_run_id, resolved_version)
-    with _mlflow_cache_lock:
-        cached = _mlflow_cache.get(cache_key)
-        if cached is not None:
-            logger.debug("mlflow_optimiser_cache_hit", key=str(cache_key))
-            return cached
+    cached = _mlflow_cache.get(cache_key)
+    if cached is not None:
+        logger.debug("mlflow_optimiser_cache_hit", key=str(cache_key))
+        return cached
 
     local_path = mlflow.artifacts.download_artifacts(
         f"runs:/{resolved_run_id}/{_MLFLOW_ARTIFACT_NAME}"
@@ -146,12 +141,7 @@ def load_mlflow_optimiser_artifact(
     with open(local_path) as f:
         artifact = json.load(f)
 
-    with _mlflow_cache_lock:
-        _mlflow_cache[cache_key] = artifact
-        if len(_mlflow_cache) > _ARTIFACT_CACHE_MAX_SIZE:
-            oldest = next(iter(_mlflow_cache))
-            del _mlflow_cache[oldest]
-
+    _mlflow_cache.put(cache_key, artifact)
     logger.info(
         "mlflow_optimiser_artifact_loaded",
         source_type=source_type,

@@ -5,12 +5,12 @@ import { makePreviewData } from "../utils/makePreviewData"
 import { loadPipeline, previewNode, runPipeline, savePipeline, ApiError } from "../api/client"
 import { resolveGraphFromRefs } from "../utils/buildGraph"
 import type { NodeResult } from "../api/types"
+import useToastStore from "../stores/useToastStore"
+import useSettingsStore from "../stores/useSettingsStore"
 import useUIStore from "../stores/useUIStore"
 import useNodeResultsStore from "../stores/useNodeResultsStore"
 
 interface PipelineAPIParams {
-  nodes: Node[]
-  edges: Edge[]
   selectedNode: Node | null
   graphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
   parentGraphRef: React.MutableRefObject<{ nodes: Node[]; edges: Edge[]; submodels: Record<string, unknown> } | null>
@@ -59,22 +59,31 @@ function resultToPreview(nodeId: string, label: string, r: NodeResult): PreviewD
 }
 
 export default function usePipelineAPI({
-  nodes, edges, selectedNode,
+  selectedNode,
   graphRef, parentGraphRef, submodelsRef, setNodes,
   setNodesRaw, setEdgesRaw, setPreamble,
   preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
   nodeIdCounter,
 }: PipelineAPIParams): PipelineAPIReturn {
-  const rowLimit = useUIStore((s) => s.rowLimit)
-  const activeScenario = useUIStore((s) => s.activeScenario)
+  const rowLimit = useSettingsStore((s) => s.rowLimit)
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
   const setDirty = useUIStore((s) => s.setDirty)
-  const addToast = useUIStore((s) => s.addToast)
+  const addToast = useToastStore((s) => s.addToast)
   const [loading, setLoading] = useState(true)
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "ok" | "error" | "running">>({})
   const [runStatus, setRunStatus] = useState<string | null>(null)
   const previewAbort = useRef<AbortController | null>(null)
   const previewDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Stable refs for values that change across renders but shouldn't
+  // trigger re-creation of callbacks. Read at call-time instead.
+  const rowLimitRef = useRef(rowLimit)
+  rowLimitRef.current = rowLimit
+  const activeScenarioRef = useRef(activeScenario)
+  activeScenarioRef.current = activeScenario
+  const selectedNodeRef = useRef(selectedNode)
+  selectedNodeRef.current = selectedNode
 
   // Initial pipeline load
   useEffect(() => {
@@ -93,10 +102,10 @@ export default function usePipelineAPI({
         if (data.submodels) submodelsRef.current = data.submodels
         // Populate scenario state from backend sidecar
         if (data.scenarios && Array.isArray(data.scenarios)) {
-          useUIStore.getState().setScenarios(data.scenarios)
+          useSettingsStore.getState().setScenarios(data.scenarios)
         }
         if (data.active_scenario) {
-          useUIStore.getState().setActiveScenario(data.active_scenario)
+          useSettingsStore.getState().setActiveScenario(data.active_scenario)
         }
         nodeIdCounter.current = pipelineNodes.length
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
@@ -130,7 +139,7 @@ export default function usePipelineAPI({
 
     const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
 
-    previewNode(graph, node.id, rowLimit, activeScenario, { signal: controller.signal })
+    previewNode(graph, node.id, rowLimitRef.current, activeScenarioRef.current, { signal: controller.signal })
       .then((result) => {
         const preview = resultToPreview(node.id, label, result)
         setPreviewData(preview)
@@ -145,7 +154,7 @@ export default function usePipelineAPI({
           setPreviewData(makePreviewData(node.id, label, { status: "error", error: err.message }))
         }
       })
-  }, [rowLimit, activeScenario, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
 
   const fetchPreview = useCallback((node: Node) => {
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
@@ -160,16 +169,17 @@ export default function usePipelineAPI({
   }, [fetchPreviewImmediate])
 
   const handleRun = useCallback(() => {
-    if (nodes.length === 0) return
+    const { nodes: currentNodes, edges: currentEdges } = graphRef.current
+    if (currentNodes.length === 0) return
     // Cancel any pending preview since run results will replace it
     previewAbort.current?.abort()
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
     setRunStatus("Running...")
     const running: Record<string, "running"> = {}
-    nodes.forEach((n) => { running[n.id] = "running" })
+    currentNodes.forEach((n) => { running[n.id] = "running" })
     setNodeStatuses(running)
 
-    runPipeline({ nodes, edges, preamble: preambleRef.current }, useUIStore.getState().activeScenario)
+    runPipeline({ nodes: currentNodes, edges: currentEdges, preamble: preambleRef.current }, useSettingsStore.getState().activeScenario)
       .then((data) => {
         const statuses: Record<string, "ok" | "error"> = {}
         const results = data.results ?? {}
@@ -185,19 +195,22 @@ export default function usePipelineAPI({
           return r?.columns ? { ...n, data: { ...n.data, _columns: r.columns } } : n
         }))
 
-        if (selectedNode && results[selectedNode.id]) {
+        const sel = selectedNodeRef.current
+        // Read nodes from ref for label lookup (graph may have changed during async run)
+        const latestNodes = graphRef.current.nodes
+        if (sel && results[sel.id]) {
           // Build timings from all run results so the toolbar can show the full breakdown
           const allTimings = Object.entries(results).map(([nid, r]) => {
-            const matchingNode = nodes.find((n) => n.id === nid)
+            const matchingNode = latestNodes.find((n) => n.id === nid)
             return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, timing_ms: r.timing_ms ?? 0 }
           })
           const allMemory = Object.entries(results).map(([nid, r]) => {
-            const matchingNode = nodes.find((n) => n.id === nid)
+            const matchingNode = latestNodes.find((n) => n.id === nid)
             return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, memory_bytes: r.memory_bytes ?? 0 }
           })
           const totalMs = allTimings.reduce((s, t) => s + t.timing_ms, 0)
           const totalMemory = allMemory.reduce((s, m) => s + m.memory_bytes, 0)
-          const preview = resultToPreview(selectedNode.id, nodeLabel(selectedNode), results[selectedNode.id])
+          const preview = resultToPreview(sel.id, nodeLabel(sel), results[sel.id])
           preview.timings = allTimings
           preview.timing_ms = totalMs
           preview.memory = allMemory
@@ -211,11 +224,11 @@ export default function usePipelineAPI({
         addToast("error", `Run failed: ${err.message}`)
         setTimeout(() => setRunStatus(null), 3000)
       })
-  }, [nodes, edges, selectedNode, setNodes, addToast])
+  }, [graphRef, preambleRef, setNodes, addToast])
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
-    const { scenarios: sc, activeScenario: as_ } = useUIStore.getState()
+    const { scenarios: sc, activeScenario: as_ } = useSettingsStore.getState()
     savePipeline({
       name: pipelineNameRef.current,
       description: "",

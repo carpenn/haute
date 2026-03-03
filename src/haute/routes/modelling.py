@@ -7,14 +7,16 @@ import os
 import tempfile
 import threading
 import time
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
+from haute._types import GraphNode, PipelineGraph
 from haute.graph_utils import NodeType
 from haute.modelling._algorithms import ALGORITHM_REGISTRY
+from haute.routes._helpers import raise_node_not_found, raise_node_type_error
+from haute.routes._job_store import JobStore
 from haute.schemas import (
     ExportScriptRequest,
     ExportScriptResponse,
@@ -33,9 +35,13 @@ logger = get_logger(component="server.modelling")
 router = APIRouter(prefix="/api/modelling", tags=["modelling"])
 
 # In-memory job store — fine for single-server dev tool.
-# Jobs older than _JOB_TTL_SECONDS are evicted on each new write.
-_jobs: dict[str, dict[str, Any]] = {}
-_JOB_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+_store = JobStore()
+
+# ── Default constants ─────────────────────────────────────────────
+_DEFAULT_BORDER_COUNT = 128  # CatBoost border count for VRAM estimation
+_DEFAULT_DEPTH = 6  # CatBoost tree depth for VRAM estimation
+_DEFAULT_TEST_SIZE = 0.2  # train/test split proportion
+_DEFAULT_SPLIT_SEED = 42  # reproducible random split seed
 
 
 def _clamp_row_limit(
@@ -50,24 +56,13 @@ def _clamp_row_limit(
     return current_limit
 
 
-def _evict_stale_jobs() -> None:
-    """Remove jobs older than TTL to bound memory usage."""
-    cutoff = time.time() - _JOB_TTL_SECONDS
-    stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
-    for jid in stale:
-        del _jobs[jid]
-
-
-def _find_modelling_node(graph: Any, node_id: str) -> Any:
+def _find_modelling_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find and validate a modelling node in the graph."""
     node = graph.node_map.get(node_id)
     if node is None:
-        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+        raise_node_not_found(node_id)
     if node.data.nodeType != NodeType.MODELLING:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Node '{node_id}' is not a modelling node (got {node.data.nodeType})",
-        )
+        raise_node_type_error(node_id, "modelling", str(node.data.nodeType))
     return node
 
 
@@ -140,8 +135,8 @@ def _check_gpu_vram(
 
     vram_needed = estimate_gpu_vram_bytes(
         effective_rows, probe_columns,
-        border_count=params.get("border_count", 128),
-        depth=params.get("depth", 6),
+        border_count=params.get("border_count", _DEFAULT_BORDER_COUNT),
+        depth=params.get("depth", _DEFAULT_DEPTH),
     )
     estimated_mb = round(vram_needed / 1024**2, 1)
 
@@ -191,26 +186,23 @@ def train_model(body: TrainRequest) -> TrainResponse:
             ),
         )
 
-    _evict_stale_jobs()
-
     # Reject if a training job is already running — concurrent runs double
     # memory and can easily OOM on 32 GB machines with 10M-row datasets.
-    running = [jid for jid, j in _jobs.items() if j.get("status") == "running"]
+    _store._evict_stale()
+    running = [jid for jid, j in _store.jobs.items() if j.get("status") == "running"]
     if running:
         raise HTTPException(
             status_code=409,
             detail="A training job is already running. Please wait for it to finish.",
         )
 
-    job_id = uuid.uuid4().hex[:12]
-    _jobs[job_id] = {
+    job_id = _store.create_job({
         "status": "running",
         "progress": 0.0,
         "message": "Starting",
         "config": dict(config),
         "node_label": node.data.label,
-        "created_at": time.time(),
-    }
+    })
 
     # --- Estimate RAM and decide on row limit ---
 
@@ -225,7 +217,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
     try:
         from haute._ram_estimate import estimate_safe_training_rows
 
-        _jobs[job_id].update({"message": "Estimating memory requirements"})
+        _store.update_job(job_id, message="Estimating memory requirements")
         ram_est = estimate_safe_training_rows(
             body.graph, body.node_id, _build_node_fn,
             preamble_ns=preamble_ns,
@@ -235,7 +227,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
         total_source_rows = ram_est.total_rows
         probe_columns = ram_est.probe_columns
         if ram_warning:
-            _jobs[job_id]["warning"] = ram_warning
+            _store.update_job(job_id, warning=ram_warning)
     except Exception as exc:
         logger.warning("ram_estimate_failed", error=str(exc))
         row_limit = None
@@ -258,12 +250,12 @@ def train_model(body: TrainRequest) -> TrainResponse:
                     estimated_mb=vram_check.estimated_mb,
                     available_mb=vram_check.available_mb,
                 )
-                _jobs[job_id]["gpu_warning"] = gpu_warning
+                _store.update_job(job_id, gpu_warning=gpu_warning)
                 ram_warning = (
                     f"{ram_warning}\n{gpu_warning}" if ram_warning
                     else gpu_warning
                 )
-                _jobs[job_id]["warning"] = ram_warning
+                _store.update_job(job_id, warning=ram_warning)
         except Exception as exc:
             logger.warning("vram_estimate_failed", error=str(exc))
 
@@ -295,7 +287,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
     os.close(tmp_fd)
 
     try:
-        _jobs[job_id].update({"message": "Executing pipeline"})
+        _store.update_job(job_id, message="Executing pipeline")
         _mem_checkpoint("before _execute_lazy")
         lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
             body.graph, _build_node_fn,
@@ -341,7 +333,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
             os.unlink(tmp_parquet)
         error_msg = f"Pipeline execution failed: {exc}"
         logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
-        _jobs[job_id] = {"status": "error", "message": error_msg}
+        _store.jobs[job_id] = {"status": "error", "message": error_msg}
         raise HTTPException(status_code=500, detail=error_msg)
 
     # --- Build TrainingJob and start in background ---
@@ -349,25 +341,29 @@ def train_model(body: TrainRequest) -> TrainResponse:
     from haute.modelling import TrainingJob
 
     name = config.get("name", node.data.label)
-    split_raw = config.get("split", {"strategy": "random", "test_size": 0.2, "seed": 42})
+    split_raw = config.get("split", {
+        "strategy": "random",
+        "test_size": _DEFAULT_TEST_SIZE,
+        "seed": _DEFAULT_SPLIT_SEED,
+    })
 
     start_time = time.monotonic()
-    _jobs[job_id]["start_time"] = start_time
+    _store.update_job(job_id, start_time=start_time)
 
     def _progress(msg: str, frac: float) -> None:
-        _jobs[job_id].update({
-            "progress": frac,
-            "message": msg,
-            "elapsed_seconds": time.monotonic() - start_time,
-        })
+        _store.update_job(job_id,
+            progress=frac,
+            message=msg,
+            elapsed_seconds=time.monotonic() - start_time,
+        )
 
     def _on_iteration(iteration: int, total: int, metrics: dict[str, float]) -> None:
-        _jobs[job_id].update({
-            "iteration": iteration,
-            "total_iterations": total,
-            "train_loss": metrics,
-            "elapsed_seconds": time.monotonic() - start_time,
-        })
+        _store.update_job(job_id,
+            iteration=iteration,
+            total_iterations=total,
+            train_loss=metrics,
+            elapsed_seconds=time.monotonic() - start_time,
+        )
 
     job = TrainingJob(
         name=name,
@@ -414,33 +410,39 @@ def train_model(body: TrainRequest) -> TrainResponse:
                 warning=ram_warning,
                 total_source_rows=total_source_rows,
             )
-            _jobs[job_id].update({
-                "status": "completed",
-                "result": response,
-                "elapsed_seconds": time.monotonic() - start_time,
-            })
+            _store.update_job(job_id,
+                status="completed",
+                result=response,
+                elapsed_seconds=time.monotonic() - start_time,
+            )
         except ValueError as exc:
             error_msg = str(exc)
             logger.warning("training_validation_error", error=error_msg, node_id=node_id)
-            _jobs[job_id].update({"status": "error", "message": error_msg})
+            _store.update_job(job_id, status="error", message=error_msg)
         except Exception as exc:
             error_msg = _friendly_error(exc)
             logger.error("training_failed", error=str(exc), node_id=node_id)
-            _jobs[job_id].update({"status": "error", "message": error_msg})
+            _store.update_job(job_id, status="error", message=error_msg)
         finally:
             # Clean up route-level temp parquet (optimiser pattern)
             if os.path.exists(tmp_parquet):
                 os.unlink(tmp_parquet)
 
-    thread = threading.Thread(target=_train_background, daemon=True)
-    thread.start()
+    try:
+        thread = threading.Thread(target=_train_background, daemon=True)
+        thread.start()
+    except Exception:
+        # Thread creation failed — clean up temp file to prevent leak
+        if os.path.exists(tmp_parquet):
+            os.unlink(tmp_parquet)
+        raise
     return TrainResponse(status="started", job_id=job_id)
 
 
 @router.get("/train/status/{job_id}", response_model=TrainStatusResponse)
 async def train_status(job_id: str) -> TrainStatusResponse:
     """Poll training job progress."""
-    job = _jobs.get(job_id)
+    job = _store.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
@@ -540,7 +542,7 @@ async def mlflow_check() -> MlflowCheckResponse:
 @router.post("/mlflow/log", response_model=LogExperimentResponse)
 async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
     """Log a completed training job's results to MLflow."""
-    job = _jobs.get(body.job_id)
+    job = _store.get_job(body.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
 

@@ -27,6 +27,24 @@ from haute._types import (
 from haute.executor import _build_node_fn, _exec_user_code
 
 
+def _remap_artifact(
+    node_id: str,
+    config: dict,
+    remap: dict[str, str],
+    key_field: str,
+) -> str | None:
+    """Look up a remapped artifact path for a node.
+
+    Builds the artifact key from *node_id* and the basename of the config
+    value at *key_field*, then checks the *remap* dict.
+
+    Returns the remapped local path if found, otherwise ``None``.
+    """
+    raw_path = config.get(key_field, "")
+    artifact_key = f"{node_id}__{PurePosixPath(raw_path).name}"
+    return remap.get(artifact_key)
+
+
 def score_graph(
     graph: PipelineGraph,
     input_df: pl.DataFrame,
@@ -73,9 +91,8 @@ def score_graph(
 
         # Intercept: externalFile with remapped artifact path
         if node_type == NodeType.EXTERNAL_FILE and remap:
-            artifact_key = f"{nid}__{PurePosixPath(config.get('path', '')).name}"
-            if artifact_key in remap:
-                remapped_path = remap[artifact_key]
+            remapped_path = _remap_artifact(nid, config, remap, "path")
+            if remapped_path is not None:
                 code = config.get("code", "").strip()
                 file_type = config.get("fileType", "pickle")
                 model_class = config.get("modelClass", "classifier")
@@ -109,10 +126,8 @@ def score_graph(
 
             # File-based with remap
             if remap:
-                raw_path = config.get("artifact_path", "")
-                artifact_key = f"{nid}__{PurePosixPath(raw_path).name}"
-                if artifact_key in remap:
-                    remapped_path = remap[artifact_key]
+                remapped_path = _remap_artifact(nid, config, remap, "artifact_path")
+                if remapped_path is not None:
 
                     def optimiser_apply_fn(
                         *dfs: _Frame,
@@ -159,10 +174,8 @@ def score_graph(
         # Intercept: modelScore with remapped artifact path — load from
         # bundled .cbm instead of downloading from MLflow at runtime.
         if node_type == NodeType.MODEL_SCORE and remap:
-            artifact_name_part = config.get("artifact_path", "")
-            artifact_key = f"{nid}__{PurePosixPath(artifact_name_part).name}"
-            if artifact_key in remap:
-                remapped_path = remap[artifact_key]
+            remapped_path = _remap_artifact(nid, config, remap, "artifact_path")
+            if remapped_path is not None:
                 _task = config.get("task", "regression")
                 _output_col = config.get("output_column", "prediction")
                 _code = config.get("code", "").strip()
@@ -197,10 +210,8 @@ def score_graph(
 
         # Intercept: static dataSource with remapped artifact path
         if node_type == NodeType.DATA_SOURCE and nid not in input_set and remap:
-            raw_path = config.get("path", "")
-            artifact_key = f"{nid}__{PurePosixPath(raw_path).name}"
-            if artifact_key in remap:
-                remapped_path = remap[artifact_key]
+            remapped_path = _remap_artifact(nid, config, remap, "path")
+            if remapped_path is not None:
 
                 def static_source(_p: str = remapped_path) -> _Frame:
                     return read_source(_p)

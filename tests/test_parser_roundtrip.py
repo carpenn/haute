@@ -1,0 +1,1209 @@
+"""Property-based round-trip tests: graph -> codegen -> parse -> structural equivalence.
+
+Uses Hypothesis to generate random valid PipelineGraph instances, run them
+through ``graph_to_code`` then ``parse_pipeline_source``, and assert the
+parsed graph is structurally equivalent to the original.
+
+The round-trip pipeline:
+    1. Generate a PipelineGraph with 2-5 nodes and linear edges
+    2. Emit code via ``graph_to_code``
+    3. Write config JSON sidecar files (via ``collect_node_configs``) to a temp dir
+    4. Parse code back via ``parse_pipeline_source(_base_dir=tmp_dir)``
+    5. Assert structural equivalence (node count, types, edges, config values)
+
+Focused on types that cleanly round-trip:
+    dataSource, transform, output, constant, dataSink, banding, ratingStep, apiInput
+
+Skipped types (complex edge cases):
+    modelScore, externalFile, liveSwitch, modelling, optimiser, optimiserApply,
+    scenarioExpander, submodel, submodelPort
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import hypothesis.strategies as st
+from hypothesis import HealthCheck, assume, given, settings
+
+from haute._config_io import collect_node_configs
+from haute._types import (
+    GraphEdge,
+    GraphNode,
+    NodeData,
+    NodeType,
+    PipelineGraph,
+    _sanitize_func_name,
+)
+from haute.codegen import graph_to_code
+from haute.parser import parse_pipeline_source
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Types that round-trip cleanly via codegen -> parse
+ROUNDTRIP_TYPES: list[NodeType] = [
+    NodeType.DATA_SOURCE,
+    NodeType.TRANSFORM,
+    NodeType.OUTPUT,
+    NodeType.CONSTANT,
+    NodeType.DATA_SINK,
+    NodeType.BANDING,
+    NodeType.RATING_STEP,
+    NodeType.API_INPUT,
+]
+
+# Types that require upstream inputs (params > 0)
+_NEEDS_UPSTREAM = {
+    NodeType.TRANSFORM,
+    NodeType.OUTPUT,
+    NodeType.DATA_SINK,
+    NodeType.BANDING,
+    NodeType.RATING_STEP,
+}
+
+# Types with zero params (sources)
+_SOURCE_TYPES = {
+    NodeType.DATA_SOURCE,
+    NodeType.API_INPUT,
+    NodeType.CONSTANT,
+}
+
+
+def _write_configs(graph: PipelineGraph, base_dir: Path) -> None:
+    """Write node config JSON sidecar files to *base_dir*."""
+    configs = collect_node_configs(graph)
+    for rel_path, content in configs.items():
+        abs_path = base_dir / rel_path
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        abs_path.write_text(content)
+
+
+def _parse_roundtrip(graph: PipelineGraph, base_dir: Path) -> PipelineGraph:
+    """Run the full round-trip: graph -> code -> write configs -> parse."""
+    code = graph_to_code(graph, pipeline_name="roundtrip_test")
+    _write_configs(graph, base_dir)
+    return parse_pipeline_source(code, source_file="roundtrip.py", _base_dir=base_dir)
+
+
+def _edge_pairs(edges: list[GraphEdge]) -> set[tuple[str, str]]:
+    """Extract (source, target) pairs from edge list."""
+    return {(e.source, e.target) for e in edges}
+
+
+def _strip_upstream_prefix(code: str, all_node_ids: set[str]) -> str:
+    """Strip a leading upstream node name from parsed transform code.
+
+    When codegen wraps chain-style code (starting with '.') as::
+
+        df = (
+            <upstream_name>
+            .filter(...)
+        )
+
+    the parser extracts ``<upstream_name>\\n.filter(...)`` back out.
+    This function strips the leading ``<upstream_name>\\n`` if it matches
+    a known node ID, so we can compare just the user's code portion.
+
+    For non-chain code (e.g. bare expressions, assignments), the parser
+    may extract ``<upstream_name>`` as the entire code body (empty code
+    generates ``return <upstream>``).  In that case, stripping it yields
+    an empty string, which matches the original empty code.
+    """
+    lines = code.strip().splitlines()
+    if len(lines) >= 1 and lines[0].strip() in all_node_ids:
+        rest = "\n".join(lines[1:]).strip()
+        return rest
+    return code.strip()
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis strategies
+# ---------------------------------------------------------------------------
+
+
+def _valid_label() -> st.SearchStrategy[str]:
+    """Generate labels that sanitize to unique, valid Python identifiers.
+
+    Labels are simple lowercase alpha strings (3-12 chars) that don't
+    collide with Python keywords or common identifiers like 'df', 'pl'.
+    """
+    import keyword
+
+    _reserved = {"df", "pl", "pipeline", "haute"}
+    return (
+        st.text(
+            alphabet=st.sampled_from("abcdefghijklmnopqrstuvwxyz"),
+            min_size=3,
+            max_size=12,
+        )
+        .filter(lambda s: s not in _reserved)
+        .filter(lambda s: not keyword.iskeyword(s))
+        .filter(lambda s: not s.startswith("node_"))  # avoid collision with sanitizer prefix
+    )
+
+
+@st.composite
+def _unique_labels(draw: st.DrawFn, n: int) -> list[str]:
+    """Draw *n* labels that sanitize to distinct function names."""
+    labels: list[str] = []
+    seen_names: set[str] = set()
+    attempts = 0
+    while len(labels) < n and attempts < n * 20:
+        attempts += 1
+        label = draw(_valid_label())
+        name = _sanitize_func_name(label)
+        if name not in seen_names:
+            seen_names.add(name)
+            labels.append(label)
+    assume(len(labels) == n)
+    return labels
+
+
+# -- Config strategies per type --------------------------------------------
+
+
+def _data_source_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for dataSource config dicts."""
+    return st.fixed_dictionaries({
+        "path": st.sampled_from([
+            "data/input.parquet",
+            "data/source.parquet",
+            "files/quotes.parquet",
+        ]),
+        "sourceType": st.just("flat_file"),
+    })
+
+
+def _api_input_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for apiInput config dicts."""
+    return st.fixed_dictionaries({
+        "path": st.sampled_from([
+            "data/api.parquet",
+            "data/request.parquet",
+            "inputs/quotes.parquet",
+        ]),
+    })
+
+
+def _transform_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for transform config dicts.
+
+    Uses simple chain-style code that round-trips cleanly.
+    The code starts with '.' so codegen wraps it as a chain expression.
+    """
+    return st.fixed_dictionaries({
+        "code": st.sampled_from([
+            '.filter(pl.col("a") > 0)',
+            '.select(pl.all())',
+            '.with_columns(pl.col("x").alias("y"))',
+        ]),
+    })
+
+
+def _output_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for output config dicts."""
+    return st.fixed_dictionaries({
+        "fields": st.lists(
+            st.sampled_from(["col_a", "col_b", "col_c", "col_d"]),
+            min_size=1,
+            max_size=3,
+            unique=True,
+        ),
+    })
+
+
+def _constant_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for constant config dicts."""
+    return st.fixed_dictionaries({
+        "values": st.lists(
+            st.fixed_dictionaries({
+                "name": st.sampled_from(["rate", "factor", "threshold", "limit"]),
+                "value": st.sampled_from(["1.0", "0.5", "100", "0.95"]),
+            }),
+            min_size=1,
+            max_size=3,
+        ),
+    })
+
+
+def _data_sink_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for dataSink config dicts."""
+    return st.fixed_dictionaries({
+        "path": st.sampled_from([
+            "output/result.parquet",
+            "output/scored.parquet",
+        ]),
+        "format": st.sampled_from(["parquet", "csv"]),
+    })
+
+
+def _banding_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for banding config dicts (single factor)."""
+    return st.fixed_dictionaries({
+        "factors": st.just([{
+            "banding": "continuous",
+            "column": "age",
+            "outputColumn": "age_band",
+            "rules": [
+                {"op1": ">", "val1": "25", "op2": "<=", "val2": "35", "assignment": "young"},
+            ],
+            "default": None,
+        }]),
+    })
+
+
+def _rating_step_config() -> st.SearchStrategy[dict[str, Any]]:
+    """Strategy for ratingStep config dicts."""
+    return st.fixed_dictionaries({
+        "tables": st.just([{
+            "name": "T1",
+            "factors": ["age_band"],
+            "outputColumn": "age_factor",
+            "defaultValue": "1.0",
+            "entries": [{"age_band": "young", "value": 1.1}],
+        }]),
+    })
+
+
+_CONFIG_STRATEGY: dict[NodeType, st.SearchStrategy[dict[str, Any]]] = {
+    NodeType.DATA_SOURCE: _data_source_config(),
+    NodeType.API_INPUT: _api_input_config(),
+    NodeType.TRANSFORM: _transform_config(),
+    NodeType.OUTPUT: _output_config(),
+    NodeType.CONSTANT: _constant_config(),
+    NodeType.DATA_SINK: _data_sink_config(),
+    NodeType.BANDING: _banding_config(),
+    NodeType.RATING_STEP: _rating_step_config(),
+}
+
+
+# -- Graph strategy --------------------------------------------------------
+
+
+@st.composite
+def _pipeline_graph(draw: st.DrawFn) -> PipelineGraph:
+    """Generate a valid PipelineGraph with 2-5 nodes and linear edges.
+
+    Rules:
+    - First node is always a source type (dataSource or apiInput)
+    - Remaining nodes are non-source types that need upstream inputs
+    - All labels sanitize to unique function names
+    - Edges form a linear chain: node[0] -> node[1] -> ... -> node[n-1]
+    """
+    n_nodes = draw(st.integers(min_value=2, max_value=5))
+    labels = draw(_unique_labels(n_nodes))
+
+    # First node: must be a source type
+    first_type = draw(st.sampled_from([NodeType.DATA_SOURCE, NodeType.API_INPUT]))
+    first_config = draw(_CONFIG_STRATEGY[first_type])
+    first_name = _sanitize_func_name(labels[0])
+
+    nodes: list[GraphNode] = [
+        GraphNode(
+            id=first_name,
+            position={"x": 0.0, "y": 0.0},
+            data=NodeData(
+                label=labels[0],
+                description=f"{labels[0]} node",
+                nodeType=first_type,
+                config=first_config,
+            ),
+        )
+    ]
+
+    # Remaining nodes: types that need upstream
+    downstream_types = [t for t in ROUNDTRIP_TYPES if t in _NEEDS_UPSTREAM]
+    for i in range(1, n_nodes):
+        ntype = draw(st.sampled_from(downstream_types))
+        config = draw(_CONFIG_STRATEGY[ntype])
+        func_name = _sanitize_func_name(labels[i])
+        nodes.append(
+            GraphNode(
+                id=func_name,
+                position={"x": float(i * 300), "y": 0.0},
+                data=NodeData(
+                    label=labels[i],
+                    description=f"{labels[i]} node",
+                    nodeType=ntype,
+                    config=config,
+                ),
+            )
+        )
+
+    # Linear edge chain
+    edges: list[GraphEdge] = []
+    for i in range(len(nodes) - 1):
+        src_id = nodes[i].id
+        tgt_id = nodes[i + 1].id
+        edges.append(GraphEdge(id=f"e_{src_id}_{tgt_id}", source=src_id, target=tgt_id))
+
+    return PipelineGraph(
+        nodes=nodes,
+        edges=edges,
+        pipeline_name="roundtrip_test",
+        pipeline_description="Property-based round-trip test",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round-trip assertions
+# ---------------------------------------------------------------------------
+
+
+def _assert_structural_equivalence(
+    original: PipelineGraph,
+    parsed: PipelineGraph,
+) -> None:
+    """Assert the parsed graph matches the original on structural properties."""
+    # Same number of nodes
+    assert len(parsed.nodes) == len(original.nodes), (
+        f"Node count mismatch: original={len(original.nodes)}, parsed={len(parsed.nodes)}"
+    )
+
+    # Build lookup maps by sanitized label (which becomes the node ID after parse)
+    orig_by_id: dict[str, GraphNode] = {n.id: n for n in original.nodes}
+    parsed_by_id: dict[str, GraphNode] = {n.id: n for n in parsed.nodes}
+
+    # Same set of node IDs
+    assert set(orig_by_id.keys()) == set(parsed_by_id.keys()), (
+        f"Node ID mismatch: original={set(orig_by_id.keys())}, parsed={set(parsed_by_id.keys())}"
+    )
+
+    # Same node types
+    for nid in orig_by_id:
+        orig_type = orig_by_id[nid].data.nodeType
+        parsed_type = parsed_by_id[nid].data.nodeType
+        assert parsed_type == orig_type, (
+            f"Node type mismatch for '{nid}': original={orig_type}, parsed={parsed_type}"
+        )
+
+    # Edge connections: all original edges must be present in parsed
+    # (parsed may have additional edges from param-name inference)
+    orig_edges = _edge_pairs(original.edges)
+    parsed_edges = _edge_pairs(parsed.edges)
+    assert orig_edges.issubset(parsed_edges), (
+        f"Missing edges:\n  original={orig_edges}\n  parsed={parsed_edges}\n"
+        f"  missing={orig_edges - parsed_edges}"
+    )
+
+    # Collect all node IDs for stripping upstream prefixes from transform code
+    all_node_ids = set(orig_by_id.keys())
+
+    # Config equivalence (type-specific)
+    for nid in orig_by_id:
+        orig_cfg = orig_by_id[nid].data.config
+        parsed_cfg = parsed_by_id[nid].data.config
+        node_type = orig_by_id[nid].data.nodeType
+
+        _assert_config_equivalence(nid, node_type, orig_cfg, parsed_cfg, all_node_ids)
+
+
+def _assert_config_equivalence(
+    node_id: str,
+    node_type: NodeType,
+    orig: dict[str, Any],
+    parsed: dict[str, Any],
+    all_node_ids: set[str],
+) -> None:
+    """Assert config values survived the round-trip for the given node type.
+
+    *all_node_ids* is used to strip upstream param name prefixes from
+    parsed transform code (see ``_strip_upstream_prefix``).
+    """
+    if node_type == NodeType.DATA_SOURCE:
+        assert parsed.get("path") == orig.get("path"), (
+            f"[{node_id}] path mismatch: {parsed.get('path')!r} != {orig.get('path')!r}"
+        )
+        assert parsed.get("sourceType") == orig.get("sourceType"), (
+            f"[{node_id}] sourceType mismatch"
+        )
+
+    elif node_type == NodeType.API_INPUT:
+        assert parsed.get("path") == orig.get("path"), (
+            f"[{node_id}] path mismatch: {parsed.get('path')!r} != {orig.get('path')!r}"
+        )
+
+    elif node_type == NodeType.TRANSFORM:
+        # Code round-trip: codegen wraps chain-style code with the upstream
+        # param name, and the parser extracts it back including that name.
+        # We strip the upstream prefix before comparing.
+        orig_code = (orig.get("code") or "").strip()
+        parsed_code = (parsed.get("code") or "").strip()
+        parsed_code = _strip_upstream_prefix(parsed_code, all_node_ids)
+        assert parsed_code == orig_code, (
+            f"[{node_id}] code mismatch:\n  original={orig_code!r}\n  parsed={parsed_code!r}"
+        )
+
+    elif node_type == NodeType.OUTPUT:
+        assert parsed.get("fields") == orig.get("fields"), (
+            f"[{node_id}] fields mismatch: {parsed.get('fields')!r} != {orig.get('fields')!r}"
+        )
+
+    elif node_type == NodeType.CONSTANT:
+        # Values round-trip: name and value should match
+        orig_vals = orig.get("values", [])
+        parsed_vals = parsed.get("values", [])
+        assert len(parsed_vals) == len(orig_vals), (
+            f"[{node_id}] values count mismatch: {len(parsed_vals)} != {len(orig_vals)}"
+        )
+        for ov, pv in zip(orig_vals, parsed_vals):
+            assert pv.get("name") == ov.get("name"), (
+                f"[{node_id}] constant name mismatch: {pv.get('name')!r} != {ov.get('name')!r}"
+            )
+            assert pv.get("value") == ov.get("value"), (
+                f"[{node_id}] constant value mismatch: {pv.get('value')!r} != {ov.get('value')!r}"
+            )
+
+    elif node_type == NodeType.DATA_SINK:
+        assert parsed.get("path") == orig.get("path"), (
+            f"[{node_id}] sink path mismatch"
+        )
+        assert parsed.get("format") == orig.get("format"), (
+            f"[{node_id}] sink format mismatch"
+        )
+
+    elif node_type == NodeType.BANDING:
+        orig_factors = orig.get("factors", [])
+        parsed_factors = parsed.get("factors", [])
+        assert len(parsed_factors) == len(orig_factors), (
+            f"[{node_id}] banding factors count mismatch"
+        )
+        for of, pf in zip(orig_factors, parsed_factors):
+            assert pf.get("banding") == of.get("banding"), (
+                f"[{node_id}] banding type mismatch"
+            )
+            assert pf.get("column") == of.get("column"), (
+                f"[{node_id}] banding column mismatch"
+            )
+            assert pf.get("outputColumn") == of.get("outputColumn"), (
+                f"[{node_id}] banding outputColumn mismatch"
+            )
+            assert pf.get("rules") == of.get("rules"), (
+                f"[{node_id}] banding rules mismatch"
+            )
+
+    elif node_type == NodeType.RATING_STEP:
+        orig_tables = orig.get("tables", [])
+        parsed_tables = parsed.get("tables", [])
+        assert len(parsed_tables) == len(orig_tables), (
+            f"[{node_id}] ratingStep tables count mismatch"
+        )
+        for ot, pt in zip(orig_tables, parsed_tables):
+            assert pt.get("name") == ot.get("name"), (
+                f"[{node_id}] table name mismatch"
+            )
+            assert pt.get("factors") == ot.get("factors"), (
+                f"[{node_id}] table factors mismatch"
+            )
+            assert pt.get("outputColumn") == ot.get("outputColumn"), (
+                f"[{node_id}] table outputColumn mismatch"
+            )
+            assert pt.get("entries") == ot.get("entries"), (
+                f"[{node_id}] table entries mismatch"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Property-based round-trip tests
+# ---------------------------------------------------------------------------
+
+
+class TestRoundTrip:
+    """Main property-based round-trip tests.
+
+    Uses ``tempfile.mkdtemp()`` instead of pytest's ``tmp_path`` fixture
+    because Hypothesis does not reset function-scoped fixtures between
+    generated inputs.
+    """
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_structural_equivalence(self, graph: PipelineGraph) -> None:
+        """Graph -> codegen -> parse preserves structure."""
+        base_dir = Path(tempfile.mkdtemp())
+        parsed = _parse_roundtrip(graph, base_dir)
+        _assert_structural_equivalence(graph, parsed)
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_code_compiles(self, graph: PipelineGraph) -> None:
+        """Generated code is syntactically valid Python."""
+        code = graph_to_code(graph, pipeline_name="roundtrip_test")
+        compile(code, "<roundtrip>", "exec")
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_pipeline_name_preserved(self, graph: PipelineGraph) -> None:
+        """Pipeline name survives the round-trip."""
+        base_dir = Path(tempfile.mkdtemp())
+        parsed = _parse_roundtrip(graph, base_dir)
+        assert parsed.pipeline_name == "roundtrip_test"
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_node_descriptions_preserved(self, graph: PipelineGraph) -> None:
+        """Node descriptions survive the round-trip."""
+        base_dir = Path(tempfile.mkdtemp())
+        parsed = _parse_roundtrip(graph, base_dir)
+        orig_descs = {n.id: n.data.description for n in graph.nodes}
+        parsed_descs = {n.id: n.data.description for n in parsed.nodes}
+        for nid, orig_desc in orig_descs.items():
+            assert nid in parsed_descs, f"Node {nid} missing from parsed graph"
+            assert parsed_descs[nid] == orig_desc, (
+                f"Description mismatch for {nid}: {parsed_descs[nid]!r} != {orig_desc!r}"
+            )
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_edge_count_non_decreasing(self, graph: PipelineGraph) -> None:
+        """Parsed graph has at least as many edges as the original.
+
+        The parser can infer additional edges from parameter-name matching
+        (when a function parameter matches another node's function name),
+        so the parsed edge count may be >= the original.
+        """
+        base_dir = Path(tempfile.mkdtemp())
+        parsed = _parse_roundtrip(graph, base_dir)
+        assert len(parsed.edges) >= len(graph.edges), (
+            f"Edge count decreased: original={len(graph.edges)}, parsed={len(parsed.edges)}"
+        )
+
+    @given(graph=_pipeline_graph())
+    @settings(
+        max_examples=50,
+        deadline=10_000,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    def test_roundtrip_node_types_stable(self, graph: PipelineGraph) -> None:
+        """Node type distribution is identical after round-trip."""
+        base_dir = Path(tempfile.mkdtemp())
+        parsed = _parse_roundtrip(graph, base_dir)
+        orig_types = sorted(n.data.nodeType.value for n in graph.nodes)
+        parsed_types = sorted(n.data.nodeType.value for n in parsed.nodes)
+        assert parsed_types == orig_types
+
+
+# ---------------------------------------------------------------------------
+# Focused deterministic tests for specific edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCases:
+    """Deterministic tests for specific round-trip edge cases."""
+
+    def test_two_node_source_to_transform(self, tmp_path: Path) -> None:
+        """Minimal pipeline: dataSource -> transform."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="load_data",
+                    data=NodeData(
+                        label="load_data",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="clean",
+                    data=NodeData(
+                        label="clean",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": '.filter(pl.col("x") > 0)'},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="load_data", target="clean")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_source_to_output_with_fields(self, tmp_path: Path) -> None:
+        """dataSource -> output with field selection."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="result",
+                    data=NodeData(
+                        label="result",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["premium", "discount"]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="result")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_constant_node_roundtrip(self, tmp_path: Path) -> None:
+        """constant -> transform preserves constant values."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="params",
+                    data=NodeData(
+                        label="params",
+                        nodeType=NodeType.CONSTANT,
+                        config={"values": [
+                            {"name": "rate", "value": "0.05"},
+                            {"name": "cap", "value": "1000"},
+                        ]},
+                    ),
+                ),
+                GraphNode(
+                    id="calc",
+                    data=NodeData(
+                        label="calc",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": '.select(pl.all())'},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="params", target="calc")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_data_sink_parquet(self, tmp_path: Path) -> None:
+        """source -> sink (parquet) round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "in.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="writer",
+                    data=NodeData(
+                        label="writer",
+                        nodeType=NodeType.DATA_SINK,
+                        config={"path": "output/result.parquet", "format": "parquet"},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="writer")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_data_sink_csv(self, tmp_path: Path) -> None:
+        """source -> sink (csv) round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "in.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="csv_out",
+                    data=NodeData(
+                        label="csv_out",
+                        nodeType=NodeType.DATA_SINK,
+                        config={"path": "output/result.csv", "format": "csv"},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="csv_out")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_banding_single_factor(self, tmp_path: Path) -> None:
+        """source -> banding (single factor) round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="band_age",
+                    data=NodeData(
+                        label="band_age",
+                        nodeType=NodeType.BANDING,
+                        config={"factors": [{
+                            "banding": "continuous",
+                            "column": "age",
+                            "outputColumn": "age_band",
+                            "rules": [
+                                {
+                                    "op1": ">", "val1": "18", "op2": "<=",
+                                    "val2": "30", "assignment": "young",
+                                },
+                                {
+                                    "op1": ">", "val1": "30", "op2": "<=",
+                                    "val2": "60", "assignment": "middle",
+                                },
+                            ],
+                            "default": None,
+                        }]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="band_age")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_banding_with_default(self, tmp_path: Path) -> None:
+        """source -> banding with a non-null default round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="band_score",
+                    data=NodeData(
+                        label="band_score",
+                        nodeType=NodeType.BANDING,
+                        config={"factors": [{
+                            "banding": "continuous",
+                            "column": "score",
+                            "outputColumn": "score_band",
+                            "rules": [
+                                {
+                                    "op1": ">=", "val1": "0", "op2": "<",
+                                    "val2": "50", "assignment": "low",
+                                },
+                            ],
+                            "default": "high",
+                        }]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="band_score")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_rating_step_roundtrip(self, tmp_path: Path) -> None:
+        """source -> ratingStep round-trips table config."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="rating",
+                    data=NodeData(
+                        label="rating",
+                        nodeType=NodeType.RATING_STEP,
+                        config={"tables": [{
+                            "name": "age_table",
+                            "factors": ["age_band"],
+                            "outputColumn": "age_factor",
+                            "defaultValue": "1.0",
+                            "entries": [
+                                {"age_band": "young", "value": 0.9},
+                                {"age_band": "middle", "value": 1.0},
+                                {"age_band": "old", "value": 1.2},
+                            ],
+                        }]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="rating")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_api_input_parquet(self, tmp_path: Path) -> None:
+        """apiInput (parquet) -> transform round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="api",
+                    data=NodeData(
+                        label="api",
+                        nodeType=NodeType.API_INPUT,
+                        config={"path": "data/request.parquet"},
+                    ),
+                ),
+                GraphNode(
+                    id="process",
+                    data=NodeData(
+                        label="process",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": '.select(pl.all())'},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="api", target="process")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_five_node_linear_chain(self, tmp_path: Path) -> None:
+        """Long linear chain: source -> transform -> banding -> ratingStep -> output."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="load",
+                    data=NodeData(
+                        label="load",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="clean",
+                    data=NodeData(
+                        label="clean",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": '.filter(pl.col("valid") == 1)'},
+                    ),
+                ),
+                GraphNode(
+                    id="band",
+                    data=NodeData(
+                        label="band",
+                        nodeType=NodeType.BANDING,
+                        config={"factors": [{
+                            "banding": "continuous",
+                            "column": "age",
+                            "outputColumn": "age_band",
+                            "rules": [{
+                                "op1": ">", "val1": "0", "op2": "<=",
+                                "val2": "99", "assignment": "all",
+                            }],
+                            "default": None,
+                        }]},
+                    ),
+                ),
+                GraphNode(
+                    id="rate",
+                    data=NodeData(
+                        label="rate",
+                        nodeType=NodeType.RATING_STEP,
+                        config={"tables": [{
+                            "name": "T1",
+                            "factors": ["age_band"],
+                            "outputColumn": "factor",
+                            "defaultValue": "1.0",
+                            "entries": [{"age_band": "all", "value": 1.05}],
+                        }]},
+                    ),
+                ),
+                GraphNode(
+                    id="result",
+                    data=NodeData(
+                        label="result",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["premium"]},
+                    ),
+                ),
+            ],
+            edges=[
+                GraphEdge(id="e1", source="load", target="clean"),
+                GraphEdge(id="e2", source="clean", target="band"),
+                GraphEdge(id="e3", source="band", target="rate"),
+                GraphEdge(id="e4", source="rate", target="result"),
+            ],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_empty_transform_code(self, tmp_path: Path) -> None:
+        """Transform with empty code round-trips.
+
+        Codegen produces ``return <upstream>`` for empty code.  The parser
+        extracts the upstream name as the code body.  This is expected:
+        the user's "code" was empty, and after round-trip the parsed code
+        is the upstream name (which the executor treats as a passthrough).
+        """
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="passthrough",
+                    data=NodeData(
+                        label="passthrough",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": ""},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="passthrough")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        # Structural: both nodes present, types preserved
+        assert len(parsed.nodes) == 2
+        parsed_types = {n.data.nodeType for n in parsed.nodes}
+        assert NodeType.DATA_SOURCE in parsed_types
+        assert NodeType.TRANSFORM in parsed_types
+        # Edge: at least the original edge is present
+        orig_edges = _edge_pairs(graph.edges)
+        parsed_edges = _edge_pairs(parsed.edges)
+        assert orig_edges.issubset(parsed_edges)
+        # Empty code becomes the upstream name after round-trip
+        transform_node = next(n for n in parsed.nodes if n.data.nodeType == NodeType.TRANSFORM)
+        parsed_code = (transform_node.data.config.get("code") or "").strip()
+        assert parsed_code == "source"  # upstream name extracted from "return source"
+
+    def test_output_no_fields(self, tmp_path: Path) -> None:
+        """Output with empty fields list round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="out",
+                    data=NodeData(
+                        label="out",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": []},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="out")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_label_with_spaces_sanitizes(self, tmp_path: Path) -> None:
+        """Labels with spaces sanitize to underscored function names."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="load_data",
+                    data=NodeData(
+                        label="load data",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="clean_up",
+                    data=NodeData(
+                        label="clean up",
+                        nodeType=NodeType.TRANSFORM,
+                        config={"code": '.select(pl.all())'},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="load_data", target="clean_up")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        # After round-trip, IDs and labels become the sanitized function names
+        parsed_ids = {n.id for n in parsed.nodes}
+        assert "load_data" in parsed_ids
+        assert "clean_up" in parsed_ids
+
+    def test_csv_data_source_roundtrip(self, tmp_path: Path) -> None:
+        """CSV data source uses scan_csv template and round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="csv_src",
+                    data=NodeData(
+                        label="csv_src",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data/input.csv", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="out",
+                    data=NodeData(
+                        label="out",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["col_a"]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="csv_src", target="out")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_multiple_constants_roundtrip(self, tmp_path: Path) -> None:
+        """Multiple constant values with numeric and string coercion."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="consts",
+                    data=NodeData(
+                        label="consts",
+                        nodeType=NodeType.CONSTANT,
+                        config={"values": [
+                            {"name": "pi", "value": "3.14159"},
+                            {"name": "greeting", "value": "hello"},
+                            {"name": "count", "value": "42"},
+                        ]},
+                    ),
+                ),
+                GraphNode(
+                    id="use_consts",
+                    data=NodeData(
+                        label="use_consts",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["pi", "greeting", "count"]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="consts", target="use_consts")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+    def test_rating_step_with_default_value(self, tmp_path: Path) -> None:
+        """ratingStep with defaultValue round-trips through config file."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="source",
+                    data=NodeData(
+                        label="source",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={"path": "data.parquet", "sourceType": "flat_file"},
+                    ),
+                ),
+                GraphNode(
+                    id="rating",
+                    data=NodeData(
+                        label="rating",
+                        nodeType=NodeType.RATING_STEP,
+                        config={"tables": [{
+                            "name": "T1",
+                            "factors": ["region"],
+                            "outputColumn": "region_factor",
+                            "defaultValue": "1.0",
+                            "entries": [
+                                {"region": "north", "value": 1.1},
+                                {"region": "south", "value": 0.9},
+                            ],
+                        }]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="rating")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+
+
+# ---------------------------------------------------------------------------
+# Sanitize function name tests
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeFuncName:
+    """Test _sanitize_func_name edge cases relevant to round-trip."""
+
+    @given(label=st.text(
+        alphabet=st.sampled_from("abcdefghijklmnopqrstuvwxyz _-0123456789"),
+        min_size=1,
+        max_size=20,
+    ))
+    @settings(max_examples=100, deadline=5_000)
+    def test_sanitize_is_valid_identifier(self, label: str) -> None:
+        """Sanitized name is always a valid Python identifier."""
+        name = _sanitize_func_name(label)
+        assert name.isidentifier(), f"{name!r} is not a valid identifier (from {label!r})"
+
+    @given(label=st.text(
+        alphabet=st.sampled_from("abcdefghijklmnopqrstuvwxyz _-0123456789"),
+        min_size=1,
+        max_size=20,
+    ))
+    @settings(max_examples=100, deadline=5_000)
+    def test_sanitize_is_idempotent(self, label: str) -> None:
+        """Sanitizing twice gives the same result as once."""
+        once = _sanitize_func_name(label)
+        twice = _sanitize_func_name(once)
+        assert twice == once, f"Not idempotent: {label!r} -> {once!r} -> {twice!r}"
+
+    def test_sanitize_digit_prefix(self) -> None:
+        assert _sanitize_func_name("1abc") == "node_1abc"
+
+    def test_sanitize_empty(self) -> None:
+        assert _sanitize_func_name("") == "unnamed_node"
+
+    def test_sanitize_all_special(self) -> None:
+        assert _sanitize_func_name("!!!") == "unnamed_node"
+
+    def test_sanitize_spaces_and_hyphens(self) -> None:
+        assert _sanitize_func_name("my node-test") == "my_node_test"

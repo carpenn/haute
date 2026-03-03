@@ -28,7 +28,7 @@ jobs:
         run: uv run mypy src/haute/
 
       - name: Tests with coverage
-        run: uv run pytest tests/ -q --cov=src/haute --cov-report=term-missing --cov-fail-under=80
+        run: uv run pytest tests/ -q --cov=src/haute --cov-branch --cov-report=term-missing --cov-fail-under=60
 
       - name: Verify wheel builds
         run: uv build

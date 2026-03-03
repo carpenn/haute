@@ -6,13 +6,12 @@ analogous to ``_io.py``'s ``load_external_object()``.
 
 from __future__ import annotations
 
-import threading
-from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
 from haute._logging import get_logger
+from haute._lru_cache import LRUCache
 
 if TYPE_CHECKING:
     from catboost import CatBoostClassifier, CatBoostRegressor
@@ -21,8 +20,9 @@ if TYPE_CHECKING:
 logger = get_logger(component="mlflow_io")
 
 _MODEL_CACHE_MAX_SIZE = 16
-_model_cache: OrderedDict[tuple[str, str, str, str], object] = OrderedDict()
-_model_cache_lock = threading.Lock()
+_model_cache: LRUCache[tuple[str, str, str, str], object] = LRUCache(
+    max_size=_MODEL_CACHE_MAX_SIZE,
+)
 
 
 def load_mlflow_model(
@@ -102,12 +102,10 @@ def load_mlflow_model(
 
     cache_key = (source_type, resolved_run_id, resolved_version or resolved_artifact, task)
 
-    with _model_cache_lock:
-        cached = _model_cache.get(cache_key)
-        if cached is not None:
-            _model_cache.move_to_end(cache_key)
-            logger.info("mlflow_model_cache_hit", key=str(cache_key))
-            return cached
+    cached = _model_cache.get(cache_key)
+    if cached is not None:
+        logger.info("mlflow_model_cache_hit", key=str(cache_key))
+        return cached
 
     # Persistent local artifact cache — avoids re-downloading from remote
     # tracking servers (e.g. Databricks) on every server restart.
@@ -116,11 +114,7 @@ def load_mlflow_model(
     )
 
     model = _load_catboost_model(local_path, task)
-
-    with _model_cache_lock:
-        _model_cache[cache_key] = model
-        if len(_model_cache) > _MODEL_CACHE_MAX_SIZE:
-            _model_cache.popitem(last=False)
+    _model_cache.put(cache_key, model)
 
     logger.info(
         "mlflow_model_loaded",

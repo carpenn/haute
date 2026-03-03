@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import threading
-from collections import OrderedDict
-
 import polars as pl
 
 from haute._logging import get_logger
+from haute._lru_cache import LRUCache
 
 logger = get_logger(component="io")
 
@@ -20,12 +18,21 @@ def read_source(path: str) -> pl.LazyFrame:
     Centralises the csv/json/parquet dispatch that was previously duplicated
     across the executor, scorer, schema inference, and server modules.
 
+    All formats except ``.json`` use Polars lazy scans, so a downstream
+    ``.head(row_limit)`` pushes the limit into the I/O layer and avoids
+    reading the full file.  Plain ``.json`` has no ``scan_json`` equivalent
+    in Polars, so the entire file is read eagerly then wrapped as lazy.
+    This is acceptable because API-input JSON files use the separate
+    ``read_json_flat`` path which caches to parquet.
+
     Raises:
         ValueError: If the file extension is not supported.
     """
     if path.endswith(".csv"):
         return pl.scan_csv(path)
     if path.endswith(".json"):
+        # No scan_json in Polars — read eagerly.  Callers should prefer
+        # the JSON flatten/cache path (read_json_flat) for large files.
         return pl.read_json(path).lazy()
     if path.endswith(".jsonl"):
         return pl.scan_ndjson(path)
@@ -36,8 +43,9 @@ def read_source(path: str) -> pl.LazyFrame:
     raise ValueError(f"Unsupported file type: .{suffix}")
 
 
-_object_cache: OrderedDict[tuple[str, float, str, str], object] = OrderedDict()
-_object_cache_lock = threading.Lock()
+_object_cache: LRUCache[tuple[str, float, str, str], object] = LRUCache(
+    max_size=_OBJECT_CACHE_MAX_SIZE,
+)
 
 
 def load_external_object(path: str, file_type: str, model_class: str = "classifier") -> object:
@@ -66,19 +74,12 @@ def load_external_object(path: str, file_type: str, model_class: str = "classifi
         mtime = 0.0
     key = (path, mtime, file_type, model_class)
 
-    with _object_cache_lock:
-        cached = _object_cache.get(key)
-        if cached is not None:
-            _object_cache.move_to_end(key)
-            return cached
+    cached = _object_cache.get(key)
+    if cached is not None:
+        return cached
 
     obj = _load_external_object_uncached(path, file_type, model_class)
-
-    with _object_cache_lock:
-        _object_cache[key] = obj
-        if len(_object_cache) > _OBJECT_CACHE_MAX_SIZE:
-            _object_cache.popitem(last=False)
-
+    _object_cache.put(key, obj)
     return obj
 
 

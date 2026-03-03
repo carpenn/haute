@@ -3,7 +3,7 @@ import { Settings, Undo2, Redo2, Grid3X3, Keyboard, Timer, HardDrive } from "luc
 import type { WsStatus } from "../hooks/useWebSocketSync"
 import type { NodeTiming, NodeMemory } from "../api/types"
 import BreakdownDropdown, { type BreakdownItem } from "./BreakdownDropdown"
-import useUIStore from "../stores/useUIStore"
+import useSettingsStore from "../stores/useSettingsStore"
 
 function formatTiming(ms: number): string {
   return ms < 1000 ? `${ms.toFixed(1)}ms` : `${(ms / 1000).toFixed(2)}s`
@@ -53,13 +53,13 @@ export default function Toolbar({
   onRun, runStatus, onSave,
   wsStatus, lastRunMs, timings, memory,
 }: ToolbarProps) {
-  const rowLimit = useUIStore((s) => s.rowLimit)
-  const setRowLimit = useUIStore((s) => s.setRowLimit)
-  const scenarios = useUIStore((s) => s.scenarios)
-  const activeScenario = useUIStore((s) => s.activeScenario)
-  const setActiveScenario = useUIStore((s) => s.setActiveScenario)
-  const addScenario = useUIStore((s) => s.addScenario)
-  const removeScenario = useUIStore((s) => s.removeScenario)
+  const rowLimit = useSettingsStore((s) => s.rowLimit)
+  const setRowLimit = useSettingsStore((s) => s.setRowLimit)
+  const scenarios = useSettingsStore((s) => s.scenarios)
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  const setActiveScenario = useSettingsStore((s) => s.setActiveScenario)
+  const addScenario = useSettingsStore((s) => s.addScenario)
+  const removeScenario = useSettingsStore((s) => s.removeScenario)
   const [addingScenario, setAddingScenario] = useState(false)
   const [newScenarioName, setNewScenarioName] = useState("")
   const wsConfig = WS_STATUS_CONFIG[wsStatus]

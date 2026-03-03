@@ -11,7 +11,6 @@ from haute._mlflow_io import (
     _MODEL_CACHE_MAX_SIZE,
     _find_cbm_artifact,
     _model_cache,
-    _model_cache_lock,
     _resolve_version,
     load_mlflow_model,
 )
@@ -20,11 +19,9 @@ from haute._mlflow_io import (
 @pytest.fixture(autouse=True)
 def _clear_cache():
     """Clear the model cache before/after each test."""
-    with _model_cache_lock:
-        _model_cache.clear()
+    _model_cache.clear()
     yield
-    with _model_cache_lock:
-        _model_cache.clear()
+    _model_cache.clear()
 
 
 @pytest.fixture()
@@ -146,8 +143,7 @@ class TestModelCache:
         fake_model = MagicMock()
         # Pre-populate cache with the key that load_mlflow_model will produce
         cache_key = ("run", "abc123", "model.cbm", "regression")
-        with _model_cache_lock:
-            _model_cache[cache_key] = fake_model
+        _model_cache.put(cache_key, fake_model)
 
         mock_mlflow, _, modules_patch, resolve_patch = mock_mlflow_env
 
@@ -167,9 +163,8 @@ class TestModelCache:
     def test_cache_lru_eviction(self, mock_mlflow_env):
         """Exceeding max cache size evicts oldest entry."""
         # Fill cache beyond max
-        with _model_cache_lock:
-            for i in range(_MODEL_CACHE_MAX_SIZE + 2):
-                _model_cache[("run", f"run_{i}", f"art_{i}", "regression")] = MagicMock()
+        for i in range(_MODEL_CACHE_MAX_SIZE + 2):
+            _model_cache.put(("run", f"run_{i}", f"art_{i}", "regression"), MagicMock())
 
         fake_model = MagicMock()
         _, _, modules_patch, resolve_patch = mock_mlflow_env
@@ -184,9 +179,8 @@ class TestModelCache:
                 task="regression",
             )
 
-        with _model_cache_lock:
-            # The new entry should be in the cache
-            assert ("run", "new_run", "model.cbm", "regression") in _model_cache
+        # The new entry should be in the cache
+        assert ("run", "new_run", "model.cbm", "regression") in _model_cache
 
 
 # ---------------------------------------------------------------------------

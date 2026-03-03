@@ -1,0 +1,106 @@
+"""Shared CLI utilities."""
+
+import subprocess
+import sys
+import webbrowser
+from pathlib import Path
+
+import click
+
+from haute._logging import get_logger
+
+logger = get_logger(component="cli")
+
+
+def _open_browser(url: str) -> None:
+    """Open *url* in the default browser, suppressing noisy stderr from gio."""
+    try:
+        if sys.platform == "linux":
+            rc = subprocess.call(
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if rc != 0:
+                webbrowser.open(url)
+        elif sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            webbrowser.open(url)
+    except Exception:
+        webbrowser.open(url)
+
+
+def _find_frontend_dir() -> Path | None:
+    """Walk up from cwd looking for a frontend/ directory with package.json."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / "frontend"
+        if (candidate / "package.json").exists():
+            return candidate
+    return None
+
+
+def _load_deploy_config(
+    *,
+    pipeline_file: str | None = None,
+    model_name: str | None = None,
+    require_toml: bool = False,
+) -> "DeployConfig":  # noqa: F821 — lazy import below
+    """Load a :class:`DeployConfig` from ``haute.toml`` or CLI arguments.
+
+    Centralises the repeated pattern of:
+
+    1. Check if ``haute.toml`` exists in the current working directory.
+    2. If it does, load a :class:`DeployConfig` from it.
+    3. Otherwise, fall back to constructing one from CLI arguments
+       (only when *require_toml* is ``False`` and *pipeline_file* is given).
+
+    Parameters
+    ----------
+    pipeline_file:
+        Path to the pipeline file (CLI argument fallback).
+    model_name:
+        Model name (CLI argument fallback).
+    require_toml:
+        If ``True``, exit with an error when ``haute.toml`` is missing
+        instead of falling back to CLI arguments.
+
+    Returns
+    -------
+    DeployConfig
+        Loaded (or constructed) deploy configuration.
+
+    Raises
+    ------
+    SystemExit
+        When no config source is available.
+    """
+    from haute.deploy._config import DeployConfig
+
+    toml_path = Path.cwd() / "haute.toml"
+
+    if toml_path.exists():
+        config = DeployConfig.from_toml(toml_path)
+        click.echo("  \u2713 Loaded config from haute.toml")
+        return config
+
+    if require_toml:
+        click.echo("Error: No haute.toml found.", err=True)
+        raise SystemExit(1)
+
+    if pipeline_file:
+        return DeployConfig(
+            pipeline_file=Path(pipeline_file),
+            model_name=model_name or Path(pipeline_file).stem,
+        )
+
+    click.echo(
+        "Error: No haute.toml found and no pipeline file specified.",
+        err=True,
+    )
+    raise SystemExit(1)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import gc
+import os
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +43,50 @@ class TrainResult:
     feature_importance_loss: list[dict[str, Any]] = field(default_factory=list)
     cv_results: dict[str, Any] | None = None
     ave_per_feature: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class _PreparedData:
+    """Intermediate result from the data-preparation phase."""
+
+    data_path: str
+    owns_tmp: bool
+    features: list[str]
+    cat_features: list[str]
+    total_rows: int
+
+
+@dataclass
+class _SplitResult:
+    """Intermediate result from the train/test split phase."""
+
+    split_path: str
+    owns_tmp: bool
+    n_train: int
+    n_test: int
+
+
+@dataclass
+class _TrainModelResult:
+    """Intermediate result from the model-fitting phase."""
+
+    model: Any
+    algo: Any
+    fit_result: Any
+    fit_params: dict[str, Any]
+
+
+@dataclass
+class _MetricsResult:
+    """Intermediate result from the metrics/evaluation phase."""
+
+    metrics: dict[str, float]
+    importance: list[dict[str, Any]]
+    double_lift: list[dict[str, Any]]
+    shap_summary: list[dict[str, float]]
+    feature_importance_loss: list[dict[str, Any]]
+    cv_results: dict[str, Any] | None
+    ave_per_feature: list[dict[str, Any]]
 
 
 class TrainingJob:
@@ -152,21 +198,86 @@ class TrainingJob:
             if progress:
                 progress(msg, frac)
 
-        # 1. Load data — either a parquet path on disk (from route sink)
-        #    or a DataFrame (from tests / direct usage).
-        _report("Loading data", 0.0)
-        import os
-        import tempfile
-
-        from haute.modelling._algorithms import _build_pool, _mem_checkpoint
+        from haute.modelling._algorithms import _mem_checkpoint
 
         _mem_checkpoint("training run START")
 
-        _owns_tmp = False  # whether we created the temp parquet ourselves
+        _report("Loading data", 0.0)
+        prepared = self._prepare_data(_report)
+
+        _report("Splitting data", 0.15)
+        split_result = self._split_data(prepared, _report)
+
+        _report("Training model", 0.2)
+        train_result = self._train_model(
+            split_result, prepared.features, prepared.cat_features,
+            on_iteration, _report,
+        )
+
+        _report("Evaluating on test set", 0.7)
+        metrics_result = self._compute_metrics(
+            split_result, prepared.features, prepared.cat_features,
+            train_result, _report,
+        )
+
+        _report("Saving model", 0.9)
+        model_path = self._save_artifacts(train_result)
+
+        if self.mlflow_experiment:
+            self._log_to_mlflow(
+                metrics_result.metrics, metrics_result.importance, str(model_path),
+                shap_summary=metrics_result.shap_summary,
+                feature_importance_loss=metrics_result.feature_importance_loss,
+                cv_results=metrics_result.cv_results,
+                double_lift=metrics_result.double_lift,
+                loss_history=train_result.fit_result.loss_history,
+                ave_per_feature=metrics_result.ave_per_feature,
+                algorithm=self.algorithm,
+                task=self.task,
+                train_rows=split_result.n_train,
+                test_rows=split_result.n_test,
+                best_iteration=train_result.fit_result.best_iteration,
+                features=prepared.features,
+                split_config=self.split_config.__dict__,
+            )
+
+        _report("Done", 1.0)
+
+        return TrainResult(
+            metrics=metrics_result.metrics,
+            feature_importance=metrics_result.importance,
+            model_path=str(model_path),
+            train_rows=split_result.n_train,
+            test_rows=split_result.n_test,
+            features=prepared.features,
+            cat_features=prepared.cat_features,
+            best_iteration=train_result.fit_result.best_iteration,
+            loss_history=train_result.fit_result.loss_history,
+            double_lift=metrics_result.double_lift,
+            shap_summary=metrics_result.shap_summary,
+            feature_importance_loss=metrics_result.feature_importance_loss,
+            cv_results=metrics_result.cv_results,
+            ave_per_feature=metrics_result.ave_per_feature,
+        )
+
+    # ------------------------------------------------------------------
+    # Pipeline sub-methods
+    # ------------------------------------------------------------------
+
+    def _prepare_data(
+        self,
+        _report: Callable[[str, float], None],
+    ) -> _PreparedData:
+        """Load data, validate columns, clean null targets, and derive features."""
+        import pyarrow.parquet as pq
+
+        from haute.modelling._algorithms import _mem_checkpoint
+
+        owns_tmp = False
         data_path: str | None = None
 
         if isinstance(self._data, str) and self._data.endswith(".parquet"):
-            # Route already sunk the LazyFrame to disk — no collect needed
+            # Route already sunk the LazyFrame to disk -- no collect needed
             data_path = self._data
             self._data = None
             _mem_checkpoint(f"using on-disk parquet: {data_path}")
@@ -189,24 +300,23 @@ class TrainingJob:
 
             tmp_fd, data_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_split_")
             os.close(tmp_fd)
-            _owns_tmp = True
+            owns_tmp = True
             df.write_parquet(data_path)
             del df
             gc.collect()
             _malloc_trim()
             _mem_checkpoint("wrote temp parquet, freed df")
 
-        # 2. Validate schema from parquet metadata (cheap, no data loaded)
+        # Validate schema from parquet metadata (cheap, no data loaded)
         _report("Validating columns", 0.05)
-        import pyarrow.parquet as pq
-        _pq_meta = pq.read_metadata(data_path)
-        if _pq_meta.num_rows == 0:
+        pq_meta = pq.read_metadata(data_path)
+        if pq_meta.num_rows == 0:
             raise ValueError("DataFrame is empty — cannot train on zero rows")
         schema_lf = pl.scan_parquet(data_path)
         schema_df = schema_lf.head(0).collect()
         self._validate_columns(schema_df)
 
-        # 2b. Drop null targets — re-write parquet without nulls if needed
+        # Drop null targets -- re-write parquet without nulls if needed
         null_count = (
             pl.scan_parquet(data_path)
             .select(pl.col(self.target).is_null().sum())
@@ -223,25 +333,38 @@ class TrainingJob:
                 logger.info("sink_streaming_fallback", step="null_clean", reason=str(sink_exc))
                 clean_lf.collect(engine="streaming").write_parquet(clean_path)
             # Swap: delete old temp, use new one
-            if _owns_tmp:
+            if owns_tmp:
                 os.unlink(data_path)
             data_path = clean_path
-            _owns_tmp = True
+            owns_tmp = True
             _mem_checkpoint(f"dropped {null_count:,} null-target rows")
 
-        # 3. Derive features from schema
+        # Derive features from schema
         features, cat_features = self._derive_features(schema_df)
         del schema_df, schema_lf
         _report(f"Using {len(features)} features ({len(cat_features)} categorical)", 0.1)
 
-        # 4. Compute split mask and write split parquet
-        _report("Splitting data", 0.15)
-        _need_cv = bool(self.cv_folds and self.cv_folds > 1)
+        return _PreparedData(
+            data_path=data_path,
+            owns_tmp=owns_tmp,
+            features=features,
+            cat_features=cat_features,
+            total_rows=pq_meta.num_rows,
+        )
 
-        # Read row count from parquet metadata (no data loaded)
-        total_rows = _pq_meta.num_rows
+    def _split_data(
+        self,
+        prepared: _PreparedData,
+        _report: Callable[[str, float], None],
+    ) -> _SplitResult:
+        """Compute train/test split mask and write split parquet."""
+        from haute.modelling._algorithms import _mem_checkpoint
 
-        # Compute mask — for temporal/group we need a small scan
+        data_path = prepared.data_path
+        owns_tmp = prepared.owns_tmp
+        total_rows = prepared.total_rows
+
+        # Compute mask -- for temporal/group we need a small scan
         mask_df = None
         if self.split_config.strategy in ("temporal", "group"):
             col = self.split_config.date_column or self.split_config.group_column
@@ -271,13 +394,31 @@ class TrainingJob:
         _malloc_trim()
 
         # Free the original temp parquet if we own it
-        if _owns_tmp and data_path != split_path:
+        if owns_tmp and data_path != split_path:
             os.unlink(data_path)
-        data_path = split_path
-        _owns_tmp = True
         _mem_checkpoint("wrote split parquet")
 
-        # 5. Look up algorithm
+        return _SplitResult(
+            split_path=split_path,
+            owns_tmp=True,
+            n_train=n_train,
+            n_test=n_test,
+        )
+
+    def _train_model(
+        self,
+        split_result: _SplitResult,
+        features: list[str],
+        cat_features: list[str],
+        on_iteration: IterationCallback | None,
+        _report: Callable[[str, float], None],
+    ) -> _TrainModelResult:
+        """Build train/eval pools, fit the model, and free pool memory."""
+        from haute.modelling._algorithms import _build_pool, _mem_checkpoint
+
+        data_path = split_result.split_path
+
+        # Look up algorithm
         algo_cls = ALGORITHM_REGISTRY.get(self.algorithm)
         if algo_cls is None:
             raise ValueError(
@@ -286,15 +427,15 @@ class TrainingJob:
             )
         algo = algo_cls()
 
-        # 5b. Resolve loss function and inject into params
+        # Resolve loss function and inject into params
         fit_params = {**self.params}
         resolved_loss = resolve_loss_function(self.loss_function, self.task, self.variance_power)
         if resolved_loss:
             fit_params["loss_function"] = resolved_loss
 
-        # 6. Read train partition, extract labels, free DataFrame, then build pool.
-        #    Extracting y/w/baseline first and freeing the full DataFrame
-        #    before _build_pool prevents triple-copy (Polars + Pandas + Pool).
+        # Read train partition, extract labels, free DataFrame, then build pool.
+        # Extracting y/w/baseline first and freeing the full DataFrame
+        # before _build_pool prevents triple-copy (Polars + Pandas + Pool).
         _report("Building training pool", 0.2)
         train_df = (
             pl.scan_parquet(data_path)
@@ -324,7 +465,7 @@ class TrainingJob:
         _malloc_trim()
         _mem_checkpoint("train pool built")
 
-        # 7. Read test partition, same extract-then-free pattern
+        # Read test partition, same extract-then-free pattern
         _report("Building eval pool", 0.25)
         test_df = (
             pl.scan_parquet(data_path)
@@ -352,7 +493,7 @@ class TrainingJob:
         _malloc_trim()
         _mem_checkpoint("eval pool built")
 
-        # 8. Fit with pre-built pools (no DataFrame needed — pools hold data)
+        # Fit with pre-built pools (no DataFrame needed -- pools hold data)
         _report("Training model", 0.3)
         fit_result = algo.fit(
             None, features, cat_features,
@@ -364,15 +505,37 @@ class TrainingJob:
             pool=train_pool,
             eval_pool=eval_pool,
         )
-        model = fit_result.model
         _mem_checkpoint("algo.fit() returned")
         del train_pool, eval_pool
         gc.collect()
         _malloc_trim()
         _mem_checkpoint("del pools")
 
-        # 9. Re-read test partition from disk for evaluation
-        _report("Evaluating on test set", 0.7)
+        return _TrainModelResult(
+            model=fit_result.model,
+            algo=algo,
+            fit_result=fit_result,
+            fit_params=fit_params,
+        )
+
+    def _compute_metrics(
+        self,
+        split_result: _SplitResult,
+        features: list[str],
+        cat_features: list[str],
+        train_result: _TrainModelResult,
+        _report: Callable[[str, float], None],
+    ) -> _MetricsResult:
+        """Evaluate on the test set: metrics, importance, SHAP, and optional CV."""
+        from haute.modelling._algorithms import _build_pool, _mem_checkpoint
+        from haute.modelling._metrics import compute_ave_per_feature, compute_double_lift
+
+        data_path = split_result.split_path
+        algo = train_result.algo
+        model = train_result.model
+        need_cv = bool(self.cv_folds and self.cv_folds > 1)
+
+        # Re-read test partition from disk for evaluation
         test_df = (
             pl.scan_parquet(data_path)
             .filter(~pl.col("_is_train"))
@@ -384,19 +547,17 @@ class TrainingJob:
         y_pred = algo.predict(model, test_df, features)
         w = test_df[self.weight].to_numpy() if self.weight else None
 
-        # 8. Compute metrics
+        # Compute metrics
         _report("Computing metrics", 0.8)
         metrics = compute_metrics(y_true, y_pred, w, self.metrics)
 
-        # 8b. Compute double-lift (actual vs predicted by decile)
-        from haute.modelling._metrics import compute_double_lift
+        # Double-lift (actual vs predicted by decile)
         double_lift = compute_double_lift(y_true, y_pred, w)
 
-        # 9. Feature importance (PredictionValuesChange)
+        # Feature importance (PredictionValuesChange)
         importance = algo.feature_importance(model)
 
-        # 9a. Actual vs Expected per feature (top 15 by importance)
-        from haute.modelling._metrics import compute_ave_per_feature
+        # Actual vs Expected per feature (top 15 by importance)
         sorted_features = [fi["feature"] for fi in importance if fi["feature"] in features]
         # Add any features not in importance list (shouldn't happen, but defensive)
         sorted_features += [f for f in features if f not in sorted_features]
@@ -404,7 +565,7 @@ class TrainingJob:
             test_df, sorted_features, cat_features, y_true, y_pred, w,
         )
 
-        # 9b. SHAP values + LossFunctionChange importance on test set
+        # SHAP values + LossFunctionChange importance on test set
         _report("Computing SHAP values", 0.85)
         shap_summary: list[dict[str, float]] = []
         feature_importance_loss: list[dict[str, Any]] = []
@@ -425,13 +586,13 @@ class TrainingJob:
             except Exception:
                 pass
 
-        # Free test DataFrame — no longer needed after this point
+        # Free test DataFrame -- no longer needed after this point
         del test_df
         gc.collect()
 
-        # 9c. Cross-validation (in addition to the normal train)
+        # Cross-validation (in addition to the normal train)
         cv_results: dict[str, Any] | None = None
-        if _need_cv and hasattr(algo, "cross_validate"):
+        if need_cv and hasattr(algo, "cross_validate"):
             _report("Running cross-validation", 0.88)
             try:
                 _cv_df = (
@@ -441,60 +602,38 @@ class TrainingJob:
                 )
                 cv_results = algo.cross_validate(
                     _cv_df, features, cat_features,
-                    self.target, self.weight, fit_params, self.task,
+                    self.target, self.weight, train_result.fit_params, self.task,
                     n_folds=self.cv_folds,
                 )
                 del _cv_df
                 gc.collect()
             except Exception:
                 pass  # CV is best-effort
+
         # Clean up split parquet (kept alive for test re-read + CV)
-        if _owns_tmp and os.path.exists(data_path):
+        if split_result.owns_tmp and os.path.exists(data_path):
             os.unlink(data_path)
 
-        # 10. Save model
-        _report("Saving model", 0.9)
-        ext = ".cbm" if self.algorithm == "catboost" else ".model"
-        model_path = Path(self.output_dir) / f"{self.name}{ext}"
-        algo.save(model, model_path)
-
-        # 11. Optionally log to MLflow
-        if self.mlflow_experiment:
-            self._log_to_mlflow(
-                metrics, importance, str(model_path),
-                shap_summary=shap_summary,
-                feature_importance_loss=feature_importance_loss,
-                cv_results=cv_results,
-                double_lift=double_lift,
-                loss_history=fit_result.loss_history,
-                ave_per_feature=ave_per_feature,
-                algorithm=self.algorithm,
-                task=self.task,
-                train_rows=n_train,
-                test_rows=n_test,
-                best_iteration=fit_result.best_iteration,
-                features=features,
-                split_config=self.split_config.__dict__,
-            )
-
-        _report("Done", 1.0)
-
-        return TrainResult(
+        return _MetricsResult(
             metrics=metrics,
-            feature_importance=importance,
-            model_path=str(model_path),
-            train_rows=n_train,
-            test_rows=n_test,
-            features=features,
-            cat_features=cat_features,
-            best_iteration=fit_result.best_iteration,
-            loss_history=fit_result.loss_history,
+            importance=importance,
             double_lift=double_lift,
             shap_summary=shap_summary,
             feature_importance_loss=feature_importance_loss,
             cv_results=cv_results,
             ave_per_feature=ave_per_feature,
         )
+
+    def _save_artifacts(self, train_result: _TrainModelResult) -> Path:
+        """Save the trained model to disk and return the model path."""
+        ext = ".cbm" if self.algorithm == "catboost" else ".model"
+        model_path = Path(self.output_dir) / f"{self.name}{ext}"
+        train_result.algo.save(train_result.model, model_path)
+        return model_path
+
+    # ------------------------------------------------------------------
+    # Utility methods (unchanged)
+    # ------------------------------------------------------------------
 
     def _load_data(self) -> pl.DataFrame:
         """Load data from path or use directly if already a DataFrame."""

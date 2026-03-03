@@ -305,7 +305,7 @@ class TestGraphToCode:
     def test_description_included(self):
         graph = _g({"nodes": [], "edges": []})
         code = graph_to_code(graph, pipeline_name="p", description="Motor pricing")
-        assert 'description="Motor pricing"' in code
+        assert "description='Motor pricing'" in code
 
     def test_multi_node_pipeline_compiles(self):
         """Full 3-node graph with edges generates compilable code."""
@@ -439,3 +439,208 @@ class TestLiveSwitchSafety:
             f"{sidecar.relative_to(PROJECT_ROOT)}: active_scenario is "
             f"'{active}' — must be 'live' before committing."
         )
+
+
+# ---------------------------------------------------------------------------
+# Codegen error-path and edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class TestCodegenEdgeCases:
+    """Edge cases and error paths for code generation."""
+
+    def test_empty_graph_produces_valid_code(self):
+        """An empty graph (no nodes, no edges) should still produce valid Python."""
+        code = graph_to_code(_g({"nodes": [], "edges": []}))
+        assert "import polars as pl" in code
+        assert "import haute" in code
+        assert "@pipeline.node" not in code
+        assert "pipeline.connect" not in code
+        compile(code, "<test>", "exec")
+
+    def test_node_with_special_characters_in_label(self):
+        """Labels with special chars should be sanitized to valid Python identifiers."""
+        node = _n({
+            "id": "special",
+            "data": {
+                "label": "My Node (v2) - Final!",
+                "nodeType": "transform",
+                "config": {"code": ".with_columns(y=pl.lit(1))"},
+            },
+        })
+        code = _node_to_code(node)
+        # Function name should be a valid Python identifier
+        assert "def " in code
+        # Should compile without errors
+        _compile_node_code(code)
+
+    def test_node_with_unicode_in_label(self):
+        """Unicode characters in labels should be sanitized."""
+        node = _n({
+            "id": "unicode",
+            "data": {
+                "label": "price_update_cafe",
+                "nodeType": "transform",
+                "config": {"code": ".with_columns(y=pl.lit(1))"},
+            },
+        })
+        code = _node_to_code(node)
+        _compile_node_code(code)
+
+    def test_node_with_empty_config_values(self):
+        """Nodes with empty/None config values should still produce valid code."""
+        node = _n({
+            "id": "empty",
+            "data": {
+                "label": "EmptyConfig",
+                "nodeType": "transform",
+                "config": {"code": None},
+            },
+        })
+        code = _node_to_code(node)
+        assert "def EmptyConfig(" in code
+        _compile_node_code(code)
+
+    def test_node_with_empty_string_config(self):
+        """Transform with empty string code should generate passthrough."""
+        node = _n({
+            "id": "empty",
+            "data": {
+                "label": "EmptyCode",
+                "nodeType": "transform",
+                "config": {"code": ""},
+            },
+        })
+        code = _node_to_code(node, source_names=["upstream"])
+        assert "return upstream" in code
+        _compile_node_code(code)
+
+    def test_graph_with_edge_referencing_nonexistent_node(self):
+        """Edges to non-existent nodes should not crash graph_to_code."""
+        graph = _g({
+            "nodes": [
+                {"id": "a", "data": {"label": "A", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "a", "target": "ghost_node"},
+            ],
+        })
+        # Should not raise — ghost edges are tolerated
+        code = graph_to_code(graph)
+        assert "import polars as pl" in code
+        compile(code, "<test>", "exec")
+
+    def test_node_with_very_long_label(self):
+        """A node with a very long label (>200 chars) should still produce valid code."""
+        long_label = "A" * 250
+        node = _n({
+            "id": "long",
+            "data": {
+                "label": long_label,
+                "nodeType": "transform",
+                "config": {"code": ".with_columns(y=pl.lit(1))"},
+            },
+        })
+        code = _node_to_code(node)
+        # Should produce a valid Python function name (even if very long)
+        assert f"def {long_label}(" in code
+        _compile_node_code(code)
+
+    def test_output_with_none_fields(self):
+        """Output node with None fields list should generate passthrough."""
+        node = _n({
+            "id": "out",
+            "data": {
+                "label": "Out",
+                "nodeType": "output",
+                "config": {"fields": None},
+            },
+        })
+        code = _node_to_code(node, source_names=["src"])
+        assert "return src" in code
+        assert ".select" not in code
+        _compile_node_code(code)
+
+    def test_sink_with_empty_path(self):
+        """Sink node with empty path should still generate compilable code."""
+        node = _n({
+            "id": "s",
+            "data": {
+                "label": "Sink",
+                "nodeType": "dataSink",
+                "config": {"path": "", "format": "parquet"},
+            },
+        })
+        code = _node_to_code(node)
+        assert "def Sink(" in code
+        _compile_node_code(code)
+
+    def test_data_source_with_no_config_keys(self):
+        """Data source with completely empty config should still compile."""
+        node = _n({
+            "id": "src",
+            "data": {
+                "label": "Source",
+                "nodeType": "dataSource",
+                "config": {},
+            },
+        })
+        code = _node_to_code(node)
+        assert "def Source()" in code
+        _compile_node_code(code)
+
+    def test_external_file_with_empty_code_generates_passthrough(self):
+        """External file node with no user code should produce a passthrough."""
+        node = _n({
+            "id": "ext",
+            "data": {
+                "label": "Model",
+                "nodeType": "externalFile",
+                "config": {"path": "model.pkl", "fileType": "pickle", "code": ""},
+            },
+        })
+        code = _node_to_code(node, source_names=["features"])
+        assert "return df" in code
+        _compile_node_code(code)
+
+    def test_constant_with_empty_values(self):
+        """Constant node with empty values list should use default."""
+        node = _n({
+            "id": "c",
+            "data": {
+                "label": "MyConst",
+                "nodeType": "constant",
+                "config": {"values": []},
+            },
+        })
+        code = _node_to_code(node)
+        assert "def MyConst()" in code
+        assert '"constant": [0]' in code
+        _compile_node_code(code)
+
+    def test_constant_with_none_values(self):
+        """Constant node with None values list should use default."""
+        node = _n({
+            "id": "c",
+            "data": {
+                "label": "MyConst",
+                "nodeType": "constant",
+                "config": {"values": None},
+            },
+        })
+        code = _node_to_code(node)
+        assert '"constant": [0]' in code
+        _compile_node_code(code)
+
+    def test_description_with_quotes_escaped(self):
+        """Node description containing double quotes should not break code generation."""
+        graph = _g({
+            "nodes": [{
+                "id": "a",
+                "data": {"label": "A", "nodeType": "dataSource", "config": {"path": "d.parquet"}},
+            }],
+            "edges": [],
+        })
+        code = graph_to_code(graph, description='Motor "premium" model')
+        # Should compile without error
+        compile(code, "<test>", "exec")

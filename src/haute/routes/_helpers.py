@@ -7,12 +7,64 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import HTTPException, WebSocket
 
 from haute._logging import get_logger
 from haute.graph_utils import PipelineGraph, _sanitize_func_name
 
 logger = get_logger(component="server")
+
+# ---------------------------------------------------------------------------
+# Path safety
+# ---------------------------------------------------------------------------
+
+
+def validate_safe_path(base: Path, user_provided: str | Path) -> Path:
+    """Resolve *user_provided* relative to *base* and verify it stays within *base*.
+
+    Returns the resolved ``Path``.  Raises ``HTTPException(403)`` if the
+    resolved path escapes the project root.
+    """
+    target = (base / user_provided).resolve()
+    if not target.is_relative_to(base):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot access paths outside the project root",
+        )
+    return target
+
+
+# ---------------------------------------------------------------------------
+# HTTP error helpers (DRY structured-logging + HTTPException raising)
+# ---------------------------------------------------------------------------
+
+
+def raise_node_not_found(node_id: str) -> None:
+    """Raise 404 for a missing node, with structured logging."""
+    logger.warning("node_not_found", node_id=node_id)
+    raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+
+
+def raise_node_type_error(node_id: str, expected: str, got: str) -> None:
+    """Raise 400 for a node type mismatch, with structured logging."""
+    logger.warning("node_type_mismatch", node_id=node_id, expected=expected, got=got)
+    raise HTTPException(
+        status_code=400,
+        detail=f"Node '{node_id}' is not a {expected} node (got {got})",
+    )
+
+
+def raise_pipeline_not_found(name: str) -> None:
+    """Raise 404 for a missing pipeline, with structured logging."""
+    logger.warning("pipeline_not_found", name=name)
+    raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
+
+
+def raise_validation_error(detail: str) -> None:
+    """Raise 400 for a validation failure, with structured logging."""
+    logger.warning("validation_error", detail=detail)
+    raise HTTPException(status_code=400, detail=detail)
+
 
 # ---------------------------------------------------------------------------
 # Self-write tracking (avoid file-watcher feedback loops)
@@ -40,15 +92,22 @@ ws_clients: set[WebSocket] = set()
 
 async def broadcast(data: dict[str, Any]) -> None:
     """Push a message to all connected WebSocket clients."""
-    payload = _json.dumps(data)
+    try:
+        payload = _json.dumps(data)
+    except (TypeError, ValueError) as exc:
+        logger.error("broadcast_serialization_failed", error=str(exc))
+        return
+
     dead: list[WebSocket] = []
     for ws in ws_clients:
         try:
             await ws.send_text(payload)
         except Exception:
             dead.append(ws)
-    for ws in dead:
-        ws_clients.discard(ws)
+    if dead:
+        logger.debug("broadcast_cleaned_dead_clients", count=len(dead))
+        for ws in dead:
+            ws_clients.discard(ws)
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +177,8 @@ def _ensure_module_deps() -> dict[str, set[Path]]:
         try:
             source = f.read_text()
             tree = ast.parse(source)
-        except Exception:
+        except Exception as exc:
+            logger.debug("module_deps_parse_failed", file=f.name, error=str(exc))
             continue
 
         from haute._parser_submodels import extract_submodel_calls
@@ -153,7 +213,7 @@ def load_sidecar(py_path: Path) -> dict[str, Any]:
     if sidecar.exists():
         try:
             return _json.loads(sidecar.read_text())
-        except Exception as e:
+        except (_json.JSONDecodeError, OSError) as e:
             logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}
 

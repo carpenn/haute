@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import cached_property
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict, runtime_checkable
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,6 +59,7 @@ class ApiInputConfig(TypedDict, total=False):
 
     path: str
     row_id_column: str
+    flattenSchema: dict[str, Any]
 
 
 class DataSourceConfig(TypedDict, total=False):
@@ -188,6 +189,7 @@ class ModellingConfig(TypedDict, total=False):
     mlflow_experiment: str
     model_name: str
     output_dir: str
+    row_limit: int
 
 
 class OptimiserConfig(TypedDict, total=False):
@@ -258,6 +260,94 @@ class ScenarioExpanderConfig(TypedDict, total=False):
     steps: int          # number of steps
     step_column: str    # name of the 0-based step index column (e.g. "scenario_index")
 
+
+# ---------------------------------------------------------------------------
+# Solve result Protocols — structural typing for price_contour results
+# ---------------------------------------------------------------------------
+# ``price_contour.SolveResult`` is a Rust/pyo3 class and
+# ``price_contour.RatebookResult`` is a Python dataclass.  Both expose a
+# similar interface but differ in some attributes.  These Protocols let
+# route-layer code type-check without importing the external library.
+
+
+@runtime_checkable
+class SolveResultLike(Protocol):
+    """Structural interface for the common attributes of any solve result.
+
+    Covers the intersection of ``price_contour.SolveResult`` (online) and
+    ``price_contour.RatebookResult`` (ratebook).  Used in code that handles
+    both result types (e.g. ``_build_artifact_payload``, ``apply_lambdas``).
+    """
+
+    @property
+    def lambdas(self) -> dict[str, float]: ...
+    @property
+    def total_objective(self) -> float: ...
+    @property
+    def total_constraints(self) -> dict[str, float]: ...
+    @property
+    def converged(self) -> bool: ...
+
+
+@runtime_checkable
+class OnlineSolveResultLike(SolveResultLike, Protocol):
+    """Structural interface for ``price_contour.SolveResult`` (online mode).
+
+    Extends the common interface with attributes specific to the online
+    solver: per-quote DataFrame, iteration count, quote/step counts,
+    convergence history, and the underlying QuoteGrid.
+    """
+
+    @property
+    def dataframe(self) -> pl.DataFrame: ...
+    @property
+    def baseline_objective(self) -> float: ...
+    @property
+    def baseline_constraints(self) -> dict[str, float]: ...
+    @property
+    def iterations(self) -> int: ...
+    @property
+    def n_quotes(self) -> int: ...
+    @property
+    def n_steps(self) -> int: ...
+    @property
+    def history(self) -> list[dict[str, float]] | None: ...
+    @property
+    def grid(self) -> Any: ...  # QuoteGrid — Rust opaque type
+
+
+@runtime_checkable
+class RatebookSolveResultLike(SolveResultLike, Protocol):
+    """Structural interface for ``price_contour.RatebookResult`` (ratebook mode).
+
+    Extends the common interface with attributes specific to the ratebook
+    solver: factor tables, coordinate-descent iteration count, clamp rate,
+    and baseline values.
+    """
+
+    @property
+    def baseline_objective(self) -> float: ...
+    @property
+    def baseline_constraints(self) -> dict[str, float]: ...
+    @property
+    def factor_tables(self) -> dict[str, dict[str, float]]: ...
+    @property
+    def cd_iterations(self) -> int: ...
+    @property
+    def clamp_rate(self) -> float: ...
+
+
+MODEL_SCORE_CONFIG_KEYS: tuple[str, ...] = (
+    "source_type", "run_id", "artifact_path", "run_name",
+    "registered_model", "version", "task", "output_column",
+    "experiment_name", "experiment_id",
+)
+
+MODELLING_CONFIG_KEYS: tuple[str, ...] = (
+    "name", "target", "weight", "exclude", "algorithm", "task",
+    "params", "split", "metrics", "mlflow_experiment", "model_name",
+    "output_dir",
+)
 
 OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
     "mode", "quote_id", "scenario_index", "scenario_value", "objective",
@@ -370,10 +460,14 @@ def _sanitize_func_name(label: str) -> str:
     Uses ASCII-only matching to stay in sync with the frontend implementation
     in frontend/src/utils/sanitizeName.ts.
     """
+    import keyword
+
     name = label.strip()
     name = name.replace(" ", "_").replace("-", "_")
     name = "".join(c for c in name if c.isascii() and (c.isalnum() or c == "_"))
     if name and name[0].isdigit():
+        name = f"node_{name}"
+    if keyword.iskeyword(name):
         name = f"node_{name}"
     return name or "unnamed_node"
 

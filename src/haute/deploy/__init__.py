@@ -50,6 +50,21 @@ _PLANNED_TARGETS = {"sagemaker", "azure-ml"}
 
 def deploy(config: DeployConfig) -> DeployResult:
     """Resolve config and deploy to the configured target."""
+    # Validate target *before* resolve_config() so bad targets don't trigger
+    # unrelated errors (e.g. "No output node found") from config resolution.
+    all_known = _SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS | _PLANNED_TARGETS
+    if config.target not in all_known:
+        raise ValueError(
+            f"Unknown deploy target '{config.target}'. "
+            f"Known targets: {', '.join(sorted(all_known))}."
+        )
+    if config.target in _PLANNED_TARGETS:
+        raise NotImplementedError(
+            f"Target '{config.target}' is planned but not yet implemented. "
+            f"Supported targets: "
+            f"{', '.join(sorted(_SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS))}."
+        )
+
     resolved = resolve_config(config)
 
     if config.target == "databricks":
@@ -64,16 +79,3 @@ def deploy(config: DeployConfig) -> DeployResult:
         from haute.deploy._container import deploy_to_platform_container
 
         return deploy_to_platform_container(resolved)
-
-    if config.target in _PLANNED_TARGETS:
-        raise NotImplementedError(
-            f"Target '{config.target}' is planned but not yet implemented. "
-            f"Supported targets: "
-            f"{', '.join(sorted(_SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS))}."
-        )
-
-    all_known = _SUPPORTED_TARGETS | _CONTAINER_PLATFORM_TARGETS | _PLANNED_TARGETS
-    raise ValueError(
-        f"Unknown deploy target '{config.target}'. "
-        f"Known targets: {', '.join(sorted(all_known))}."
-    )

@@ -1,7 +1,7 @@
 import { ToggleLeft } from "lucide-react"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
-import useUIStore from "../../stores/useUIStore"
+import useSettingsStore from "../../stores/useSettingsStore"
 
 export default function LiveSwitchEditor({
   config,
@@ -12,8 +12,8 @@ export default function LiveSwitchEditor({
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
 }) {
-  const scenarios = useUIStore((s) => s.scenarios)
-  const activeScenario = useUIStore((s) => s.activeScenario)
+  const scenarios = useSettingsStore((s) => s.scenarios)
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
   const inputScenarioMap = configField<Record<string, string>>(config, "input_scenario_map", {})
 
   /** Update the mapping for a single input. */

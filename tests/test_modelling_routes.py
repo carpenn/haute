@@ -167,9 +167,9 @@ class TestTrainEndpoint:
 
     def test_train_rejects_concurrent(self, client, training_data):
         """A second training request while one is running returns 409."""
-        from haute.routes.modelling import _jobs
+        from haute.routes.modelling import _store
 
-        _jobs["fake_running"] = {
+        _store.jobs["fake_running"] = {
             "status": "running",
             "progress": 0.5,
             "message": "Training...",
@@ -184,7 +184,7 @@ class TestTrainEndpoint:
             assert resp.status_code == 409
             assert "already running" in resp.json()["detail"]
         finally:
-            _jobs.pop("fake_running", None)
+            _store.jobs.pop("fake_running", None)
 
 
     def test_train_gpu_falls_back_to_cpu_on_vram_limit(self, client, training_data):
@@ -266,10 +266,10 @@ class TestMlflowLogEndpoint:
 
     def test_mlflow_log_job_not_completed(self, client, training_data):
         """Start a job, then immediately try to log — should fail with 400."""
-        from haute.routes.modelling import _jobs
+        from haute.routes.modelling import _store
 
         # Inject a fake running job
-        _jobs["fake_running"] = {"status": "running", "progress": 0.5, "message": "Training..."}
+        _store.jobs["fake_running"] = {"status": "running", "progress": 0.5, "message": "Training...", "created_at": time.time()}
         try:
             resp = client.post("/api/modelling/mlflow/log", json={
                 "job_id": "fake_running",
@@ -277,4 +277,4 @@ class TestMlflowLogEndpoint:
             assert resp.status_code == 400
             assert "not completed" in resp.json()["detail"]
         finally:
-            _jobs.pop("fake_running", None)
+            _store.jobs.pop("fake_running", None)

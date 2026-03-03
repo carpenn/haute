@@ -3,6 +3,7 @@ import { renderHook, cleanup } from "@testing-library/react"
 import type { Node, Edge } from "@xyflow/react"
 import useKeyboardShortcuts from "../useKeyboardShortcuts"
 import useUIStore from "../../stores/useUIStore"
+import useToastStore from "../../stores/useToastStore"
 
 function makeParams(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0]> = {}) {
   return {
@@ -32,8 +33,10 @@ describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     // Reset store state between tests
     useUIStore.setState({
-      toasts: [], _toastCounter: 0,
       shortcutsOpen: false, submodelDialog: null, snapToGrid: false,
+    })
+    useToastStore.setState({
+      toasts: [], _toastCounter: 0,
     })
     params = makeParams()
     renderHook(() => useKeyboardShortcuts(params))
@@ -91,7 +94,7 @@ describe("useKeyboardShortcuts", () => {
     params.graphRef.current.nodes = selected
     fireKey("c", { ctrlKey: true })
     expect(params.clipboard.current.nodes).toHaveLength(1)
-    const toasts = useUIStore.getState().toasts
+    const toasts = useToastStore.getState().toasts
     expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Copied 1 node" })
   })
 
@@ -103,7 +106,7 @@ describe("useKeyboardShortcuts", () => {
     fireKey("v", { ctrlKey: true })
     expect(params.setNodes).toHaveBeenCalledOnce()
     expect(params.setEdges).toHaveBeenCalledOnce()
-    const toasts = useUIStore.getState().toasts
+    const toasts = useToastStore.getState().toasts
     expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Pasted 1 node" })
   })
 
@@ -140,7 +143,7 @@ describe("useKeyboardShortcuts", () => {
   it("G (no mod) toggles snap-to-grid and toasts", () => {
     fireKey("g")
     expect(useUIStore.getState().snapToGrid).toBe(true)
-    const toasts = useUIStore.getState().toasts
+    const toasts = useToastStore.getState().toasts
     expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Snap to grid ON" })
   })
 
@@ -158,7 +161,7 @@ describe("useKeyboardShortcuts", () => {
       { id: "n1", position: { x: 0, y: 0 }, data: {}, selected: true } as Node,
     ]
     fireKey("g", { ctrlKey: true })
-    const toasts = useUIStore.getState().toasts
+    const toasts = useToastStore.getState().toasts
     expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: expect.stringContaining("2 nodes") })
   })
 

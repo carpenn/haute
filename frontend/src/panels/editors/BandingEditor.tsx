@@ -1,125 +1,13 @@
 import { useState } from "react"
-import { X, Plus, Trash, SlidersHorizontal } from "lucide-react"
+import { X, Plus, SlidersHorizontal } from "lucide-react"
 import { InputSourcesBar, INPUT_STYLE } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import type { ContinuousRule, CategoricalRule, BandingFactor } from "../../types/banding"
-
-function normaliseBandingFactors(config: Record<string, unknown>): BandingFactor[] {
-  const raw = config.factors as BandingFactor[] | undefined
-  if (Array.isArray(raw) && raw.length > 0) return raw
-  return [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }]
-}
+import { normaliseBandingFactors, inferBandingType } from "./banding/bandingUtils"
+import { BandingRulesGrid } from "./banding/BandingRulesGrid"
 
 const EMPTY_CONTINUOUS: ContinuousRule = { op1: ">", val1: "", op2: "", val2: "", assignment: "" }
 const EMPTY_CATEGORICAL: CategoricalRule = { value: "", assignment: "" }
-const OPS = ["<", "<=", ">", ">=", "="]
-
-function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFactor; onUpdateFactor: (patch: Partial<BandingFactor>) => void }) {
-  const rules = factor.rules || []
-  const bt = factor.banding || "continuous"
-
-  const setRules = (r: (ContinuousRule | CategoricalRule)[]) => onUpdateFactor({ rules: r })
-  const updateRule = (idx: number, field: string, value: string) => {
-    const next = [...rules]; next[idx] = { ...next[idx], [field]: value }; setRules(next)
-  }
-  const removeRule = (idx: number) => setRules(rules.filter((_, i) => i !== idx))
-
-  return (
-    <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>
-      {bt === "continuous" ? (
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)', width: 52 }}>Op</th>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)', width: 60 }}>Value</th>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)', width: 52, opacity: 0.55 }}>Op</th>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)', width: 60, opacity: 0.55 }}>Value</th>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)' }}>Band</th>
-              <th style={{ width: 28 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 ? (
-              <tr><td colSpan={6} className="px-2 py-3 text-center" style={{ color: 'var(--text-muted)' }}>No rules yet</td></tr>
-            ) : (rules as ContinuousRule[]).map((rule, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td className="px-1 py-1">
-                  <select value={rule.op1 || ""} onChange={(e) => updateRule(i, "op1", e.target.value)}
-                    className="w-full px-1 py-1 rounded text-[11px] font-mono appearance-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                    <option value="">—</option>
-                    {OPS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </td>
-                <td className="px-1 py-1">
-                  <input type="text" value={rule.val1 ?? ""} onChange={(e) => updateRule(i, "val1", e.target.value)}
-                    className="w-full px-1.5 py-1 rounded text-[11px] font-mono focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} placeholder="0" />
-                </td>
-                <td className="px-1 py-1">
-                  <select value={rule.op2 || ""} onChange={(e) => updateRule(i, "op2", e.target.value)}
-                    className="w-full px-1 py-1 rounded text-[11px] font-mono appearance-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                    <option value="">—</option>
-                    {OPS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </td>
-                <td className="px-1 py-1">
-                  <input type="text" value={rule.val2 ?? ""} onChange={(e) => updateRule(i, "val2", e.target.value)}
-                    className="w-full px-1.5 py-1 rounded text-[11px] font-mono focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} placeholder="" />
-                </td>
-                <td className="px-1 py-1">
-                  <input type="text" value={rule.assignment ?? ""} onChange={(e) => updateRule(i, "assignment", e.target.value)}
-                    className="w-full px-1.5 py-1 rounded text-[11px] font-mono font-semibold focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#14b8a6' }} placeholder="band" />
-                </td>
-                <td className="px-1 py-1 text-center">
-                  <button onClick={() => removeRule(i)} className="p-0.5 rounded transition-colors" style={{ color: 'var(--text-muted)' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}><Trash size={11} /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)' }}>Value</th>
-              <th className="text-left px-2 py-1.5 font-semibold" style={{ color: 'var(--text-muted)' }}>Group</th>
-              <th style={{ width: 28 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 ? (
-              <tr><td colSpan={3} className="px-2 py-3 text-center" style={{ color: 'var(--text-muted)' }}>No rules yet</td></tr>
-            ) : (rules as CategoricalRule[]).map((rule, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td className="px-1 py-1">
-                  <input type="text" value={rule.value ?? ""} onChange={(e) => updateRule(i, "value", e.target.value)}
-                    className="w-full px-1.5 py-1 rounded text-[11px] font-mono focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} placeholder="Semi-detached House" />
-                </td>
-                <td className="px-1 py-1">
-                  <input type="text" value={rule.assignment ?? ""} onChange={(e) => updateRule(i, "assignment", e.target.value)}
-                    className="w-full px-1.5 py-1 rounded text-[11px] font-mono font-semibold focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#14b8a6' }} placeholder="House" />
-                </td>
-                <td className="px-1 py-1 text-center">
-                  <button onClick={() => removeRule(i)} className="p-0.5 rounded transition-colors" style={{ color: 'var(--text-muted)' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}><Trash size={11} /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
 
 export default function BandingEditor({
   config,
@@ -141,17 +29,6 @@ export default function BandingEditor({
 
   const colMap = Object.fromEntries(upstreamColumns.map(c => [c.name, c.dtype]))
 
-  const isNumericDtype = (dtype: string) => {
-    const d = dtype.toLowerCase()
-    return d.startsWith("int") || d.startsWith("uint") || d.startsWith("float") || d === "f32" || d === "f64" || d === "i8" || d === "i16" || d === "i32" || d === "i64" || d === "u8" || d === "u16" || d === "u32" || d === "u64"
-  }
-
-  const inferBandingType = (colName: string): string | null => {
-    const dtype = colMap[colName]
-    if (!dtype) return null
-    return isNumericDtype(dtype) ? "continuous" : "categorical"
-  }
-
   const commitFactors = (next: BandingFactor[]) => {
     onUpdate("factors", next)
   }
@@ -163,7 +40,7 @@ export default function BandingEditor({
 
   const setColumnWithAutoDetect = (idx: number, colName: string) => {
     const patch: Partial<BandingFactor> = { column: colName }
-    const detected = inferBandingType(colName)
+    const detected = inferBandingType(colName, colMap)
     if (detected && detected !== factors[idx].banding) {
       patch.banding = detected
       patch.rules = []

@@ -1,13 +1,16 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react"
-import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, FlaskConical, RefreshCw } from "lucide-react"
+import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
-import { trainModel, exportTraining, logToMlflow, estimateTrainingRam } from "../api/client"
+import { trainModel, exportTraining, estimateTrainingRam } from "../api/client"
 import type { TrainEstimate } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
-import useUIStore from "../stores/useUIStore"
-import { formatElapsed } from "../utils/formatValue"
+import useSettingsStore from "../stores/useSettingsStore"
 import { configField } from "../utils/configField"
 import { buildGraph } from "../utils/buildGraph"
+import { LossChart } from "./modelling/LossChart"
+import { FeatureImportance } from "./modelling/FeatureImportance"
+import { MlflowExportSection } from "./modelling/MlflowExportSection"
+import { TrainingProgress as TrainingProgressPanel } from "./modelling/TrainingProgress"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -25,60 +28,6 @@ const REGRESSION_METRICS = ["gini", "rmse", "mae", "mse", "r2", "poisson_devianc
 const CLASSIFICATION_METRICS = ["auc", "logloss"]
 const REGRESSION_LOSSES = ["RMSE", "MAE", "Poisson", "Tweedie"]
 const CLASSIFICATION_LOSSES = ["Logloss", "CrossEntropy"]
-
-
-
-function LossChart({ lossHistory, bestIteration }: { lossHistory: { iteration: number; [key: string]: number }[]; bestIteration?: number | null }) {
-  if (!lossHistory || lossHistory.length < 2) return null
-
-  // Find train and eval loss keys
-  const keys = Object.keys(lossHistory[0]).filter(k => k !== "iteration")
-  const trainKey = keys.find(k => k.startsWith("train_"))
-  const evalKey = keys.find(k => k.startsWith("eval_"))
-  if (!trainKey) return null
-
-  const w = 280, h = 80, px = 4, py = 4
-  const chartW = w - px * 2, chartH = h - py * 2
-
-  // Gather all loss values to find y range
-  const allVals: number[] = []
-  for (const entry of lossHistory) {
-    if (trainKey && entry[trainKey] != null) allVals.push(entry[trainKey])
-    if (evalKey && entry[evalKey] != null) allVals.push(entry[evalKey])
-  }
-  const yMin = Math.min(...allVals)
-  const yMax = Math.max(...allVals)
-  const yRange = yMax - yMin || 1
-
-  const xScale = (i: number) => px + (i / (lossHistory.length - 1)) * chartW
-  const yScale = (v: number) => py + chartH - ((v - yMin) / yRange) * chartH
-
-  const makePath = (key: string) => {
-    const points = lossHistory
-      .map((e, i) => e[key] != null ? `${i === 0 ? "M" : "L"}${xScale(i).toFixed(1)},${yScale(e[key]).toFixed(1)}` : null)
-      .filter(Boolean)
-    return points.join(" ")
-  }
-
-  // Best iteration vertical line position
-  const bestX = bestIteration != null ? xScale(Math.min(bestIteration, lossHistory.length - 1)) : null
-
-  return (
-    <div>
-      <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Loss Curve</label>
-      <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-        <path d={makePath(trainKey)} fill="none" stroke="#a855f7" strokeWidth={1.5} />
-        {evalKey && <path d={makePath(evalKey)} fill="none" stroke="#22c55e" strokeWidth={1.5} />}
-        {bestX != null && <line x1={bestX} y1={py} x2={bestX} y2={py + chartH} stroke="#f59e0b" strokeWidth={1} strokeDasharray="3,2" />}
-      </svg>
-      <div className="flex gap-3 mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
-        <span><span style={{ color: "#a855f7" }}>--</span> Train</span>
-        {evalKey && <span><span style={{ color: "#22c55e" }}>--</span> Eval</span>}
-        {bestX != null && <span><span style={{ color: "#f59e0b" }}>|</span> Best iter</span>}
-      </div>
-    </div>
-  )
-}
 
 export default function ModellingConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels, preamble }: ModellingConfigProps) {
   // ── Store-backed state (survives panel unmount) ──
@@ -99,9 +48,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   // ── Local UI state (cheap, ok to recreate) ──
   const [exporting, setExporting] = useState(false)
   const [exportedScript, setExportedScript] = useState<string | null>(null)
-  const [importanceType, setImportanceType] = useState<"prediction" | "loss" | "shap">("prediction")
-  const [loggingToMlflow, setLoggingToMlflow] = useState(false)
-  const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
+  const [mlflowResult, setMlflowResult] = useState<{ status: string; error?: string } | null>(null)
 
   // ── RAM estimate (fetched once when modelling node selected) ──
   const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)
@@ -140,14 +87,14 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   }, [nodeId])
 
   // Global MLflow status from store (fetched once on app startup)
-  const mlflow = useUIStore((s) => s.mlflow)
+  const mlflow = useSettingsStore((s) => s.mlflow)
   const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
 
   // Collapse state from UI store (persisted)
-  const advancedOpen = useUIStore((s) => s.isSectionOpen("modelling.advanced"))
-  const mlflowOpen = useUIStore((s) => s.isSectionOpen("modelling.mlflow"))
-  const monotonicOpen = useUIStore((s) => s.isSectionOpen("modelling.monotonic"))
-  const toggleSection = useUIStore((s) => s.toggleSection)
+  const advancedOpen = useSettingsStore((s) => s.isSectionOpen("modelling.advanced"))
+  const mlflowOpen = useSettingsStore((s) => s.isSectionOpen("modelling.mlflow"))
+  const monotonicOpen = useSettingsStore((s) => s.isSectionOpen("modelling.monotonic"))
+  const toggleSection = useSettingsStore((s) => s.toggleSection)
 
   const target = configField(config, "target", "")
   const weight = configField(config, "weight", "")
@@ -178,7 +125,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     setMlflowResult(null)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     try {
-      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useUIStore.getState().activeScenario })
+      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario })
 
       if (result.status === "started" && result.job_id) {
         // Register job in store — background hook picks up polling
@@ -209,24 +156,6 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       setExporting(false)
     }
   }, [config._nodeId, buildGraphCb])
-
-  const handleLogExperiment = useCallback(async () => {
-    if (!trainJobId) return
-    setLoggingToMlflow(true)
-    setMlflowResult(null)
-    try {
-      const result = await logToMlflow({
-        job_id: trainJobId,
-        experiment_name: configField(config, "mlflow_experiment", "") || null,
-        model_name: configField(config, "model_name", "") || null,
-      })
-      setMlflowResult(result)
-    } catch (e) {
-      setMlflowResult({ status: "error", error: String(e) })
-    } finally {
-      setLoggingToMlflow(false)
-    }
-  }, [trainJobId, config.mlflow_experiment, config.model_name])
 
   const availableMetrics = task === "classification" ? CLASSIFICATION_METRICS : REGRESSION_METRICS
 
@@ -843,38 +772,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       </div>
 
       {/* Live Training Progress */}
-      {trainProgress && (
-        <div className="px-3 py-2.5 rounded-lg text-xs space-y-2" style={{ background: "rgba(168,85,247,.06)", border: "1px solid rgba(168,85,247,.2)" }}>
-          {/* Progress bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px]">
-              <span style={{ color: "#a855f7" }}>{trainProgress.message || "Training..."}</span>
-              <span style={{ color: "var(--text-muted)" }}>{formatElapsed(trainProgress.elapsed_seconds)}</span>
-            </div>
-            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(168,85,247,.15)" }}>
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(trainProgress.progress * 100, 2)}%`, background: "#a855f7" }}
-              />
-            </div>
-          </div>
-
-          {/* Iteration + loss stats */}
-          {trainProgress.total_iterations > 0 && (
-            <div className="flex gap-4 text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
-              <span>
-                Round <span style={{ color: "var(--text-primary)" }}>{trainProgress.iteration}</span>
-                /{trainProgress.total_iterations}
-              </span>
-              {Object.entries(trainProgress.train_loss).map(([name, value]) => (
-                <span key={name}>
-                  {name}: <span style={{ color: "var(--text-primary)" }}>{value.toFixed(4)}</span>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {trainProgress && <TrainingProgressPanel trainProgress={trainProgress} />}
 
       {/* Train Results */}
       {trainResult && (
@@ -907,39 +805,12 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
               )}
               {/* Log to MLflow button */}
               {mlflowBackend?.installed && trainJobId && (
-                <div className="space-y-1.5">
-                  <button
-                    onClick={handleLogExperiment}
-                    disabled={loggingToMlflow}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-                    style={{
-                      background: loggingToMlflow ? "var(--chrome-hover)" : "rgba(59,130,246,.15)",
-                      color: loggingToMlflow ? "var(--text-muted)" : "#3b82f6",
-                      border: "1px solid rgba(59,130,246,.3)",
-                    }}
-                  >
-                    {loggingToMlflow ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
-                    {loggingToMlflow ? "Logging..." : `Log to MLflow (${mlflowBackend.backend})`}
-                  </button>
-                  {mlflowResult && mlflowResult.status === "ok" && (
-                    <div className="px-3 py-2 rounded-lg text-xs space-y-0.5" style={{ background: "rgba(59,130,246,.08)", border: "1px solid rgba(59,130,246,.2)" }}>
-                      <div style={{ color: "#3b82f6" }}>Logged to {mlflowResult.experiment_name}</div>
-                      {mlflowResult.run_url && (
-                        <a href={mlflowResult.run_url} target="_blank" rel="noreferrer" className="underline" style={{ color: "#60a5fa" }}>
-                          Open in Databricks
-                        </a>
-                      )}
-                      {!mlflowResult.run_url && mlflowResult.tracking_uri && (
-                        <div style={{ color: "var(--text-muted)" }}>Run ID: {mlflowResult.run_id}</div>
-                      )}
-                    </div>
-                  )}
-                  {mlflowResult && mlflowResult.status === "error" && (
-                    <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", color: "#fca5a5" }}>
-                      {mlflowResult.error}
-                    </div>
-                  )}
-                </div>
+                <MlflowExportSection
+                  trainJobId={trainJobId}
+                  mlflowBackend={mlflowBackend}
+                  config={config}
+                  onMlflowResult={setMlflowResult}
+                />
               )}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Metrics</label>
@@ -996,60 +867,9 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
                   </div>
                 </div>
               )}
-              {trainResult.feature_importance.length > 0 && (() => {
-                const types: { key: "prediction" | "loss" | "shap"; label: string }[] = [
-                  { key: "prediction", label: "Prediction" },
-                  ...(trainResult.feature_importance_loss?.length ? [{ key: "loss" as const, label: "Loss" }] : []),
-                  ...(trainResult.shap_summary?.length ? [{ key: "shap" as const, label: "SHAP" }] : []),
-                ]
-                const items = importanceType === "shap"
-                  ? (trainResult.shap_summary || []).slice(0, 10).map(s => ({ feature: s.feature, importance: s.mean_abs_shap }))
-                  : importanceType === "loss"
-                    ? (trainResult.feature_importance_loss || []).slice(0, 10)
-                    : trainResult.feature_importance.slice(0, 10)
-                const maxVal = items[0]?.importance || 1
-                return (
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Top Features</label>
-                      {types.length > 1 && (
-                        <div className="flex gap-1">
-                          {types.map(t => (
-                            <button
-                              key={t.key}
-                              onClick={() => setImportanceType(t.key)}
-                              className="px-1.5 py-0.5 rounded text-[10px]"
-                              style={{
-                                background: importanceType === t.key ? "var(--accent-soft)" : "var(--chrome-hover)",
-                                color: importanceType === t.key ? "var(--accent)" : "var(--text-muted)",
-                              }}
-                            >
-                              {t.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-0.5">
-                      {items.map((fi, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs font-mono">
-                          <span className="truncate flex-1" style={{ color: "var(--text-secondary)" }}>{fi.feature}</span>
-                          <div className="w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--chrome-hover)" }}>
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${(Math.abs(fi.importance) / Math.abs(maxVal)) * 100}%`,
-                                background: "#a855f7",
-                              }}
-                            />
-                          </div>
-                          <span className="w-12 text-right" style={{ color: "var(--text-muted)" }}>{fi.importance.toFixed(1)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })()}
+              {trainResult.feature_importance.length > 0 && (
+                <FeatureImportance trainResult={trainResult} />
+              )}
             </>
           )}
         </div>

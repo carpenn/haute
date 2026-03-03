@@ -72,6 +72,46 @@ class ImpactReport:
 _DEFAULT_BATCH_SIZE = 500
 
 
+def _run_batched(
+    records: list[dict],
+    score_fn: Callable[[list[dict]], object],
+    batch_size: int,
+    progress: Callable[[str], None] | None,
+) -> list:
+    """Iterate *records* in batches, call *score_fn* per batch, collect results.
+
+    Parameters
+    ----------
+    records:
+        Full list of input records.
+    score_fn:
+        Called once per batch with ``score_fn(batch) -> preds``.
+        *preds* may be a list (extended onto results) or a scalar (appended).
+    batch_size:
+        Maximum number of records per batch.
+    progress:
+        Optional callback receiving a status string per batch.
+
+    Returns
+    -------
+    list
+        Concatenated predictions from all batches.
+    """
+    all_preds: list = []
+    n_batches = math.ceil(len(records) / batch_size)
+    for i in range(0, len(records), batch_size):
+        batch = records[i : i + batch_size]
+        num = i // batch_size + 1
+        if progress:
+            progress(f"    batch {num}/{n_batches}")
+        preds = score_fn(batch)
+        if isinstance(preds, list):
+            all_preds.extend(preds)
+        else:
+            all_preds.append(preds)
+    return all_preds
+
+
 def score_endpoint_batched(
     ws: WorkspaceClient,
     endpoint_name: str,
@@ -80,20 +120,12 @@ def score_endpoint_batched(
     progress: Callable[[str], None] | None = None,
 ) -> list:
     """Score records against a serving endpoint in batches."""
-    all_preds: list = []
-    n_batches = math.ceil(len(records) / batch_size)
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        num = i // batch_size + 1
-        if progress:
-            progress(f"    batch {num}/{n_batches}")
+
+    def _score(batch: list[dict]) -> object:
         resp = ws.serving_endpoints.query(name=endpoint_name, dataframe_records=batch)
-        preds = resp.predictions
-        if isinstance(preds, list):
-            all_preds.extend(preds)
-        else:
-            all_preds.append(preds)
-    return all_preds
+        return resp.predictions
+
+    return _run_batched(records, _score, batch_size, progress)
 
 
 def score_http_endpoint_batched(
@@ -110,16 +142,9 @@ def score_http_endpoint_batched(
     import urllib.error
     import urllib.request
 
-    all_preds: list = []
-    n_batches = math.ceil(len(records) / batch_size)
     quote_url = endpoint_url.rstrip("/") + "/quote"
 
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        num = i // batch_size + 1
-        if progress:
-            progress(f"    batch {num}/{n_batches}")
-
+    def _score(batch: list[dict]) -> object:
         body = _json.dumps(batch).encode("utf-8")
         req = urllib.request.Request(
             quote_url,
@@ -135,13 +160,9 @@ def score_http_endpoint_batched(
             raise RuntimeError(
                 f"HTTP {exc.code} from {quote_url}: {error_body}"
             ) from exc
+        return result
 
-        if isinstance(result, list):
-            all_preds.extend(result)
-        else:
-            all_preds.append(result)
-
-    return all_preds
+    return _run_batched(records, _score, batch_size, progress)
 
 
 def _preds_to_df(preds: list) -> pl.DataFrame:

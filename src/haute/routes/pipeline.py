@@ -8,13 +8,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
-from haute.graph_utils import NodeType, PipelineGraph
+from haute.graph_utils import PipelineGraph
 from haute.routes._helpers import (
     discover_pipelines,
     lookup_pipeline_by_name,
-    mark_self_write,
     parse_pipeline_to_graph,
-    save_sidecar,
+    raise_pipeline_not_found,
 )
 from haute.schemas import (
     PipelineSummary,
@@ -33,6 +32,12 @@ from haute.schemas import (
 logger = get_logger(component="server.pipeline")
 
 router = APIRouter(prefix="/api", tags=["pipeline"])
+
+# ── Timeout constants (seconds) ──────────────────────────────────
+_RUN_TIMEOUT = 300.0  # full pipeline execution
+_TRACE_TIMEOUT = 120.0  # single-row trace
+_PREVIEW_TIMEOUT = 120.0  # node preview execution
+_SINK_TIMEOUT = 300.0  # sink (write-to-disk) execution
 
 
 @router.get("/pipelines", response_model=list[PipelineSummary])
@@ -88,7 +93,7 @@ async def get_pipeline(name: str) -> PipelineGraph:
 
     graph = await asyncio.to_thread(_find)
     if graph is None:
-        raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
+        raise_pipeline_not_found(name)
     return graph
 
 
@@ -122,126 +127,10 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     When the graph contains submodels, multiple files are written via
     ``graph_to_code_multi``.
     """
-    from haute._config_io import collect_node_configs
-    from haute.codegen import graph_to_code, graph_to_code_multi
+    from haute.routes._save_pipeline import SavePipelineService
 
-    graph = body.graph
-
-    # Validate singleton node types (max 1 each)
-    singletons = [
-        (NodeType.API_INPUT, "API Input"),
-        (NodeType.OUTPUT, "Output"),
-        (NodeType.LIVE_SWITCH, "Live Switch"),
-    ]
-    for singleton_type, label in singletons:
-        count = sum(1 for n in graph.nodes if n.data.nodeType == singleton_type)
-        if count > 1:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Only one {label} node is allowed per pipeline (found {count}).",
-            )
-
-    cwd = Path.cwd()
-
-    # Determine main pipeline .py path
-    if not body.source_file:
-        raise HTTPException(
-            status_code=400,
-            detail="source_file is required — the frontend must track"
-            " and send the original pipeline file path",
-        )
-    py_path = (cwd / body.source_file).resolve()
-    if not py_path.is_relative_to(cwd):
-        raise HTTPException(
-            status_code=400,
-            detail="source_file must be within the project directory",
-        )
-
-    mark_self_write()
-
-    if graph.submodels:
-        # Multi-file write: main .py + submodel .py files
-        files = graph_to_code_multi(
-            graph,
-            pipeline_name=body.name,
-            description=body.description,
-            preamble=body.preamble,
-            source_file=body.source_file,
-            preserved_blocks=body.preserved_blocks or None,
-        )
-        for rel_path, code in files.items():
-            out_path = (cwd / rel_path).resolve()
-            if not out_path.is_relative_to(cwd):
-                continue
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(code)
-    else:
-        code = graph_to_code(
-            graph,
-            pipeline_name=body.name,
-            description=body.description,
-            preamble=body.preamble,
-            preserved_blocks=body.preserved_blocks or None,
-        )
-        py_path.write_text(code)
-
-    # Auto-infer flattenSchema for api_input nodes with JSON data paths
-    from haute._json_flatten import infer_schema, load_samples
-
-    for node in graph.nodes:
-        if node.data.nodeType != NodeType.API_INPUT:
-            continue
-        cfg = node.data.config
-        path = cfg.get("path", "")
-        if not path.endswith((".json", ".jsonl")):
-            continue
-        if cfg.get("flattenSchema"):
-            continue
-        data_path = (cwd / path).resolve()
-        if data_path.is_file() and data_path.is_relative_to(cwd):
-            samples = load_samples(data_path)
-            if samples:
-                cfg["flattenSchema"] = infer_schema(samples)
-
-    # Write node config JSON sidecar files and clean up stale ones
-    from haute._config_io import NODE_TYPE_TO_FOLDER
-
-    config_files = collect_node_configs(graph)
-    for rel_path, json_content in config_files.items():
-        out_path = (cwd / rel_path).resolve()
-        if not out_path.is_relative_to(cwd):
-            continue
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json_content)
-
-    # Remove config files that no longer have a corresponding node
-    config_dir = cwd / "config"
-    if config_dir.is_dir():
-        for folder in NODE_TYPE_TO_FOLDER.values():
-            folder_path = config_dir / folder
-            if not folder_path.is_dir():
-                continue
-            for json_file in folder_path.glob("*.json"):
-                rel = str(json_file.relative_to(cwd))
-                if rel not in config_files:
-                    json_file.unlink()
-                    logger.info("stale_config_removed", path=rel)
-            # Remove empty folder
-            if not any(folder_path.iterdir()):
-                folder_path.rmdir()
-        # Remove empty config dir
-        if config_dir.is_dir() and not any(config_dir.iterdir()):
-            config_dir.rmdir()
-
-    # Write sidecar .haute.json (node positions + scenarios for the GUI)
-    graph.scenarios = body.scenarios
-    graph.active_scenario = body.active_scenario
-    save_sidecar(py_path, graph)
-
-    return SavePipelineResponse(
-        file=str(py_path.relative_to(cwd)),
-        pipeline_name=body.name,
-    )
+    svc = SavePipelineService(project_root=Path.cwd())
+    return svc.save(body)
 
 
 @router.post("/pipeline/run", response_model=RunPipelineResponse)
@@ -256,11 +145,15 @@ async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
 
     try:
         results = await asyncio.wait_for(
-            asyncio.to_thread(execute_graph, graph, scenario=body.scenario), timeout=300.0,
+            asyncio.to_thread(execute_graph, graph, scenario=body.scenario),
+            timeout=_RUN_TIMEOUT,
         )
         return RunPipelineResponse(status="ok", results=results)
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Pipeline execution timed out (300s limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Pipeline execution timed out ({_RUN_TIMEOUT:.0f}s limit)",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -288,14 +181,17 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
                 row_limit=body.row_limit,
                 scenario=body.scenario,
             ),
-            timeout=120.0,
+            timeout=_TRACE_TIMEOUT,
         )
         return TraceResponse(
             status="ok",
             trace=trace_result_to_dict(result),  # type: ignore[arg-type]
         )
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Trace execution timed out (120s limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Trace execution timed out ({_TRACE_TIMEOUT:.0f}s limit)",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -329,7 +225,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 row_limit=body.row_limit,
                 scenario=body.scenario,
             ),
-            timeout=120.0,
+            timeout=_PREVIEW_TIMEOUT,
         )
         node_result = results.get(body.node_id)
         if not node_result:
@@ -388,7 +284,10 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             schema_warnings=node_result.schema_warnings,
         )
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Preview execution timed out (120s limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Preview execution timed out ({_PREVIEW_TIMEOUT:.0f}s limit)",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -413,10 +312,15 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
             asyncio.to_thread(
                 execute_sink, graph, sink_node_id=body.node_id, scenario=body.scenario,
             ),
-            timeout=300.0,
+            timeout=_SINK_TIMEOUT,
         )
         return result
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Sink execution timed out (300s limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Sink execution timed out ({_SINK_TIMEOUT:.0f}s limit)",
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

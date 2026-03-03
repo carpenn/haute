@@ -59,8 +59,9 @@ class TestSanitizeFuncNameProperties:
     @given(label=st.text(alphabet=string.ascii_letters + "_", min_size=1, max_size=20))
     @settings(max_examples=100)
     def test_preserves_valid_identifiers(self, label: str):
-        """Input that is already a valid identifier is preserved (mostly)."""
-        assume(label.isidentifier())
+        """Input that is already a valid non-keyword identifier is preserved."""
+        import keyword
+        assume(label.isidentifier() and not keyword.iskeyword(label))
         result = _sanitize_func_name(label)
         assert result == label
 

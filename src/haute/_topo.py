@@ -15,10 +15,11 @@ def topo_sort_ids(node_ids: list[str], edges: list[GraphEdge]) -> list[str]:
 
     for e in edges:
         src, tgt = e.source, e.target
-        if tgt in in_degree:
-            in_degree[tgt] += 1
-        if src in children:
-            children[src].append(tgt)
+        # Skip edges where either endpoint is not a known node
+        if src not in children or tgt not in in_degree:
+            continue
+        in_degree[tgt] += 1
+        children[src].append(tgt)
 
     heap = sorted(nid for nid, deg in in_degree.items() if deg == 0)
     heapq.heapify(heap)

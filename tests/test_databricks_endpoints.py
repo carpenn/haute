@@ -1,4 +1,17 @@
-"""Tests for Databricks browsing API endpoints (mocked — no real Databricks connection)."""
+"""Tests for Databricks browsing API endpoints (mocked — no real Databricks connection).
+
+Covers:
+  - GET /api/databricks/warehouses: success, empty list, exception, missing creds
+  - GET /api/databricks/catalogs: success
+  - GET /api/databricks/schemas: success, missing catalog param
+  - GET /api/databricks/tables: success, full_name fallback construction,
+    missing params, tables with None name skipped
+  - POST /api/databricks/fetch: success, timeout (504), ImportError (400),
+    generic exception (500)
+  - GET /api/databricks/fetch/progress: active, not active
+  - GET /api/databricks/cache: cached, not cached
+  - DELETE /api/databricks/cache: success, already missing
+"""
 
 from __future__ import annotations
 
@@ -49,6 +62,49 @@ class TestListWarehouses:
         assert wh["http_path"] == "/sql/1.0/warehouses/abc123"
         assert wh["state"] == "RUNNING"
         assert wh["size"] == "Small"
+
+    def test_empty_warehouse_list(self, client: TestClient) -> None:
+        """Returns empty warehouses list when none exist."""
+        mock_ws = MagicMock()
+        mock_ws.warehouses.list.return_value = []
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get("/api/databricks/warehouses")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["warehouses"] == []
+
+    def test_exception_returns_500(self, client: TestClient) -> None:
+        """Unexpected exception from Databricks SDK returns 500."""
+        mock_ws = MagicMock()
+        mock_ws.warehouses.list.side_effect = RuntimeError("network issue")
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get("/api/databricks/warehouses")
+
+        assert resp.status_code == 500
+        assert "network issue" in resp.json()["detail"]
+
+    def test_warehouse_without_state(self, client: TestClient) -> None:
+        """Warehouse with state=None returns UNKNOWN."""
+        from databricks.sdk.service.sql import EndpointInfo
+
+        wh = EndpointInfo(
+            id="xyz", name="No State WH",
+            state=None, cluster_size=None,
+        )
+
+        mock_ws = MagicMock()
+        mock_ws.warehouses.list.return_value = [wh]
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get("/api/databricks/warehouses")
+
+        assert resp.status_code == 200
+        wh_data = resp.json()["warehouses"][0]
+        assert wh_data["state"] == "UNKNOWN"
+        assert wh_data["size"] == ""
 
     def test_missing_credentials_returns_400(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -152,6 +208,67 @@ class TestListTables:
     def test_missing_params_returns_422(self, client: TestClient) -> None:
         resp = client.get("/api/databricks/tables", params={"catalog": "main"})
         assert resp.status_code == 422
+
+    def test_full_name_fallback_construction(self, client: TestClient) -> None:
+        """When full_name is None, it is constructed from catalog.schema.name."""
+        from databricks.sdk.service.catalog import TableInfo, TableType
+
+        tbl = TableInfo(
+            name="claims",
+            full_name=None,
+            table_type=TableType.EXTERNAL,
+            comment="",
+        )
+
+        mock_ws = MagicMock()
+        mock_ws.tables.list.return_value = [tbl]
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get(
+                "/api/databricks/tables",
+                params={"catalog": "prod", "schema": "insurance"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["tables"][0]["full_name"] == "prod.insurance.claims"
+
+    def test_tables_with_none_name_skipped(self, client: TestClient) -> None:
+        """Tables where name is None are filtered out."""
+        from databricks.sdk.service.catalog import TableInfo, TableType
+
+        valid = TableInfo(name="valid_tbl", full_name="cat.sch.valid_tbl",
+                          table_type=TableType.MANAGED, comment="")
+        invalid = TableInfo(name=None, full_name=None,
+                            table_type=None, comment="")
+
+        mock_ws = MagicMock()
+        mock_ws.tables.list.return_value = [valid, invalid]
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get(
+                "/api/databricks/tables",
+                params={"catalog": "cat", "schema": "sch"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["tables"]) == 1
+        assert data["tables"][0]["name"] == "valid_tbl"
+
+    def test_exception_returns_500(self, client: TestClient) -> None:
+        """Unexpected error from tables.list returns 500."""
+        mock_ws = MagicMock()
+        mock_ws.tables.list.side_effect = RuntimeError("quota exceeded")
+
+        with patch("haute.routes.databricks._get_databricks_client", return_value=mock_ws):
+            resp = client.get(
+                "/api/databricks/tables",
+                params={"catalog": "cat", "schema": "sch"},
+            )
+
+        assert resp.status_code == 500
+        assert "quota exceeded" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +393,62 @@ class TestFetchTable:
         with patch("haute._databricks_io.fetch_and_cache", side_effect=ImportError("no module")):
             resp = client.post("/api/databricks/fetch", json={"table": "cat.sch.tbl"})
         assert resp.status_code == 400
+        assert "databricks-sql-connector" in resp.json()["detail"]
+
+    def test_fetch_timeout_returns_504(self, client: TestClient) -> None:
+        """Fetch exceeding timeout returns 504."""
+        with patch("asyncio.wait_for", side_effect=TimeoutError("timed out")):
+            resp = client.post("/api/databricks/fetch", json={
+                "table": "cat.sch.big_table",
+                "http_path": "/sql/wh",
+            })
+
+        assert resp.status_code == 504
+        assert "timed out" in resp.json()["detail"]
+
+    def test_fetch_generic_exception_returns_500(self, client: TestClient) -> None:
+        """Unexpected error during fetch returns 500."""
+        with patch("haute._databricks_io.fetch_and_cache", side_effect=RuntimeError("disk full")):
+            resp = client.post("/api/databricks/fetch", json={
+                "table": "cat.sch.tbl",
+            })
+
+        assert resp.status_code == 500
+        assert "disk full" in resp.json()["detail"]
+
+    def test_fetch_with_custom_query(self, client: TestClient) -> None:
+        """Custom SQL query is forwarded to fetch_and_cache."""
+        from haute._databricks_io import _cache_path_for
+
+        fake_result = {
+            "path": str(_cache_path_for("cat.sch.tbl")),
+            "table": "cat.sch.tbl",
+            "row_count": 10,
+            "column_count": 2,
+            "columns": {"a": "Int64", "b": "Utf8"},
+            "size_bytes": 512,
+            "fetched_at": 1700000000.0,
+            "fetch_seconds": 0.5,
+        }
+
+        with patch("haute._databricks_io.fetch_and_cache", return_value=fake_result) as mock_fetch:
+            resp = client.post("/api/databricks/fetch", json={
+                "table": "cat.sch.tbl",
+                "http_path": "/sql/wh",
+                "query": "SELECT a, b FROM cat.sch.tbl WHERE a > 10",
+            })
+
+        assert resp.status_code == 200
+        mock_fetch.assert_called_once_with(
+            table="cat.sch.tbl",
+            http_path="/sql/wh",
+            query="SELECT a, b FROM cat.sch.tbl WHERE a > 10",
+        )
+
+    def test_fetch_missing_table_returns_422(self, client: TestClient) -> None:
+        """Missing required 'table' field returns 422."""
+        resp = client.post("/api/databricks/fetch", json={})
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

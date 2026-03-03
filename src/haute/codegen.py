@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from haute._config_io import config_path_for_node, has_config_folder
 from haute._logging import get_logger
-from haute.graph_utils import (
+from haute._types import (
+    MODELLING_CONFIG_KEYS,
     OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
+)
+from haute.graph_utils import (
     GraphEdge,
     GraphNode,
     NodeType,
@@ -25,6 +30,19 @@ __all__ = [
 ]
 
 
+def _build_extra_kwargs(config: dict, keys: tuple[str, ...]) -> list[str]:
+    """Build ``"key={value!r}"`` decorator kwarg strings for present config keys.
+
+    Skips keys whose value is ``None``, ``""``, or ``[]``.
+    """
+    parts: list[str] = []
+    for key in keys:
+        val = config.get(key)
+        if val is not None and val != "" and val != []:
+            parts.append(f"{key}={val!r}")
+    return parts
+
+
 def _build_params(source_names: list[str]) -> str:
     """Build the function parameter string from upstream node names."""
     if source_names:
@@ -33,35 +51,30 @@ def _build_params(source_names: list[str]) -> str:
 
 
 # Template fragments for each node type
-_API_INPUT_JSON = '''\
-@pipeline.node(api_input=True, path="{path}"{row_id_kw})
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    from haute._json_flatten import read_json_flat
-    return read_json_flat("{path}", config_path="{config_path}")
-'''
 
-_API_INPUT_JSONL = '''\
-@pipeline.node(api_input=True, path="{path}"{row_id_kw})
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    from haute._json_flatten import read_json_flat
-    return read_json_flat("{path}", config_path="{config_path}")
-'''
 
-_API_INPUT_FLAT = '''\
-@pipeline.node(api_input=True, path="{path}"{row_id_kw})
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.scan_parquet("{path}")
-'''
+def _api_input_template(path: str) -> str:
+    """Return the API input template string for the given file path.
 
-_API_INPUT_CSV = '''\
-@pipeline.node(api_input=True, path="{path}"{row_id_kw})
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.scan_csv("{path}")
-'''
+    JSON/JSONL files use ``read_json_flat``, CSV uses ``scan_csv``,
+    everything else (parquet / flat) uses ``scan_parquet``.
+    """
+    if path.endswith((".json", ".jsonl")):
+        body = (
+            '    from haute._json_flatten import read_json_flat\n'
+            '    return read_json_flat("{path}", config_path="{config_path}")'
+        )
+    elif path.endswith(".csv"):
+        body = '    return pl.scan_csv("{path}")'
+    else:
+        body = '    return pl.scan_parquet("{path}")'
+
+    return (
+        '@pipeline.node(api_input=True, path="{path}"{row_id_kw})\n'
+        'def {func_name}() -> pl.LazyFrame:\n'
+        '    """{description}"""\n'
+        + body + '\n'
+    )
 
 _LIVE_SWITCH = '''\
 @pipeline.node(live_switch=True, input_scenario_map={input_scenario_map_repr})
@@ -343,399 +356,485 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
     return code
 
 
-def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) -> str:
-    """Generate code for a single node (with legacy inline decorator).
+# ---------------------------------------------------------------------------
+# Codegen dispatch table — mirrors _NODE_BUILDERS in executor.py
+# ---------------------------------------------------------------------------
 
-    source_names: sanitized function names of upstream nodes (used as param names).
-    """
+#: Builder signature: (node, source_names) -> generated Python code string.
+CodegenBuilder = Callable[[GraphNode, list[str]], str]
+
+_CODEGEN_BUILDERS: dict[NodeType, CodegenBuilder] = {}
+
+
+def _register_codegen(node_type: NodeType) -> Callable[[CodegenBuilder], CodegenBuilder]:
+    """Decorator to register a codegen builder for a given NodeType."""
+    def decorator(fn: CodegenBuilder) -> CodegenBuilder:
+        _CODEGEN_BUILDERS[node_type] = fn
+        return fn
+    return decorator
+
+
+# ---------------------------------------------------------------------------
+# Per-type builders
+# ---------------------------------------------------------------------------
+
+
+@_register_codegen(NodeType.API_INPUT)
+def _gen_api_input(node: GraphNode, source_names: list[str]) -> str:
     data = node.data
-    node_type = data.nodeType
     config = data.config
-    label = data.label
-    description = data.description or f"{label} node"
-    func_name = _sanitize_func_name(label)
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
 
-    if source_names is None:
-        source_names = []
+    path = config.get("path", "")
+    row_id_kw = ""
+    if config.get("row_id_column"):
+        row_id_kw = f', row_id_column="{config["row_id_column"]}"'
+    cfg_path = str(config_path_for_node(data.nodeType, func_name))
+    template = _api_input_template(path)
+    return template.format(
+        func_name=func_name,
+        description=description,
+        path=path,
+        row_id_kw=row_id_kw,
+        config_path=cfg_path,
+    )
 
-    if node_type == NodeType.API_INPUT:
-        path = config.get("path", "")
-        row_id_kw = ""
-        if config.get("row_id_column"):
-            row_id_kw = f', row_id_column="{config["row_id_column"]}"'
-        cfg_path = str(config_path_for_node(node_type, func_name))
-        if path.endswith((".json", ".jsonl")):
-            template = _API_INPUT_JSON
-        elif path.endswith(".csv"):
-            template = _API_INPUT_CSV
-        else:
-            template = _API_INPUT_FLAT
-        return template.format(
+
+@_register_codegen(NodeType.LIVE_SWITCH)
+def _gen_live_switch(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
+    input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
+    first_param = source_names[0] if source_names else "df"
+    # Generated code always routes to the "live" input
+    active_param = first_param
+    for inp, scn in input_scenario_map.items():
+        if scn == "live" and inp in source_names:
+            active_param = inp
+            break
+    return _LIVE_SWITCH.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        input_scenario_map_repr=repr(input_scenario_map),
+        active_param=active_param,
+    )
+
+
+@_register_codegen(NodeType.DATA_SOURCE)
+def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    path = config.get("path", "")
+    source_type = config.get("sourceType", "flat_file")
+    if source_type == "databricks":
+        table = config.get("table", "catalog.schema.table")
+        http_path = config.get("http_path", "")
+        http_path_kw = f', http_path="{http_path}"' if http_path else ""
+        query = config.get("query", "")
+        query_kw = f', query="{query}"' if query else ""
+        return _SOURCE_DATABRICKS.format(
+            func_name=func_name,
+            description=description,
+            table=table,
+            http_path_kw=http_path_kw,
+            query_kw=query_kw,
+        )
+    elif path.endswith(".csv"):
+        return _SOURCE_CSV.format(
             func_name=func_name,
             description=description,
             path=path,
-            row_id_kw=row_id_kw,
-            config_path=cfg_path,
         )
-
-    elif node_type == NodeType.LIVE_SWITCH:
-        params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
-        input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
-        first_param = source_names[0] if source_names else "df"
-        # Generated code always routes to the "live" input
-        active_param = first_param
-        for inp, scn in input_scenario_map.items():
-            if scn == "live" and inp in source_names:
-                active_param = inp
-                break
-        return _LIVE_SWITCH.format(
+    else:
+        return _SOURCE_FLAT_FILE.format(
             func_name=func_name,
             description=description,
-            params=params,
-            input_scenario_map_repr=repr(input_scenario_map),
-            active_param=active_param,
+            path=path,
         )
 
-    elif node_type == NodeType.DATA_SOURCE:
-        path = config.get("path", "")
-        source_type = config.get("sourceType", "flat_file")
-        if source_type == "databricks":
-            table = config.get("table", "catalog.schema.table")
-            http_path = config.get("http_path", "")
-            http_path_kw = f', http_path="{http_path}"' if http_path else ""
-            query = config.get("query", "")
-            query_kw = f', query="{query}"' if query else ""
-            return _SOURCE_DATABRICKS.format(
-                func_name=func_name,
-                description=description,
-                table=table,
-                http_path_kw=http_path_kw,
-                query_kw=query_kw,
-            )
-        elif path.endswith(".csv"):
-            return _SOURCE_CSV.format(
-                func_name=func_name,
-                description=description,
-                path=path,
-            )
-        else:
-            return _SOURCE_FLAT_FILE.format(
-                func_name=func_name,
-                description=description,
-                path=path,
-            )
 
-    elif node_type == NodeType.CONSTANT:
-        raw_values = config.get("values", []) or []
-        # Build the repr for the decorator kwarg
-        values_repr = repr([
-            {"name": v.get("name", ""), "value": v.get("value", "")}
-            for v in raw_values
-        ])
-        # Build a dict literal for the LazyFrame constructor
-        data_pairs: list[str] = []
-        for v in raw_values:
-            name = v.get("name", "col")
-            val = v.get("value", "")
-            # Try numeric coercion for the code literal
-            try:
-                num = float(val)
-                data_pairs.append(f'"{name}": [{num!r}]')
-            except (ValueError, TypeError):
-                data_pairs.append(f'"{name}": ["{val}"]')
-        data_dict = "{" + ", ".join(data_pairs) + "}" if data_pairs else '{"constant": [0]}'
-        return _CONSTANT.format(
-            func_name=func_name,
-            description=description,
-            values_repr=values_repr,
-            data_dict=data_dict,
+@_register_codegen(NodeType.CONSTANT)
+def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    raw_values = config.get("values", []) or []
+    # Build the repr for the decorator kwarg
+    values_repr = repr([
+        {"name": v.get("name", ""), "value": v.get("value", "")}
+        for v in raw_values
+    ])
+    # Build a dict literal for the LazyFrame constructor
+    data_pairs: list[str] = []
+    for v in raw_values:
+        name = v.get("name", "col")
+        val = v.get("value", "")
+        # Try numeric coercion for the code literal
+        try:
+            num = float(val)
+            data_pairs.append(f'"{name}": [{num!r}]')
+        except (ValueError, TypeError):
+            data_pairs.append(f'"{name}": ["{val}"]')
+    data_dict = "{" + ", ".join(data_pairs) + "}" if data_pairs else '{"constant": [0]}'
+    return _CONSTANT.format(
+        func_name=func_name,
+        description=description,
+        values_repr=values_repr,
+        data_dict=data_dict,
+    )
+
+
+@_register_codegen(NodeType.MODEL_SCORE)
+def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    source_type = config.get("sourceType", "run")
+    task_val = config.get("task", "regression")
+    output_column = config.get("output_column", "prediction")
+    user_code = (config.get("code") or "").strip()
+    params = _build_params(source_names)
+    first_param = source_names[0] if source_names else "df"
+
+    proba_block_batched = ""
+    if task_val == "classification":
+        proba_block_batched = (
+            f'            if hasattr(model, "predict_proba"):\n'
+            f"                probas = model.predict_proba(X)\n"
+            f"                if probas.ndim == 2:\n"
+            f"                    probas = probas[:, 1]\n"
+            f"                chunk = chunk.with_columns(\n"
+            f'                    pl.Series("{output_column}_proba",'
+            f" probas))\n"
         )
 
-    elif node_type == NodeType.MODEL_SCORE:
-        source_type = config.get("sourceType", "run")
-        task_val = config.get("task", "regression")
-        output_column = config.get("output_column", "prediction")
-        user_code = config.get("code", "").strip()
-        params = _build_params(source_names)
-        first_param = source_names[0] if source_names else "df"
+    user_code_block = ""
+    if user_code:
+        wrapped = _wrap_external_code(user_code).rstrip("\n") + "\n"
+        # Replace the trailing "    return df" that _wrap_external_code appends
+        if wrapped.rstrip().endswith("return df"):
+            wrapped = wrapped.rstrip()
+            wrapped = wrapped[: wrapped.rfind("return df")].rstrip() + "\n"
+        user_code_block = f"    {_MODEL_SCORE_USER_CODE_SENTINEL}\n{wrapped}"
 
-        proba_block_batched = ""
-        if task_val == "classification":
-            proba_block_batched = (
-                f'            if hasattr(model, "predict_proba"):\n'
-                f"                probas = model.predict_proba(X)\n"
-                f"                if probas.ndim == 2:\n"
-                f"                    probas = probas[:, 1]\n"
-                f"                chunk = chunk.with_columns(\n"
-                f'                    pl.Series("{output_column}_proba",'
-                f" probas))\n"
-            )
+    if source_type == "registered":
+        reg_model = config.get("registered_model", "")
+        ver = config.get("version", "latest")
+        decorator_kwargs = (
+            f'model_score=True, source_type="registered", '
+            f'registered_model="{reg_model}", version="{ver}", '
+            f'task="{task_val}", output_column="{output_column}"'
+        )
+        load_kwargs = (
+            f'source_type="registered", registered_model="{reg_model}", '
+            f'version="{ver}", task="{task_val}"'
+        )
+    else:
+        rid = config.get("run_id", "")
+        apath = config.get("artifact_path", "")
+        rname = config.get("run_name", "")
+        exp_name = config.get("experiment_name", "")
+        exp_id = config.get("experiment_id", "")
+        decorator_kwargs = (
+            f'model_score=True, source_type="run", '
+            f'run_id="{rid}", artifact_path="{apath}", '
+            f'task="{task_val}", output_column="{output_column}"'
+        )
+        if rname:
+            decorator_kwargs += f', run_name="{rname}"'
+        if exp_name:
+            decorator_kwargs += f', experiment_name="{exp_name}"'
+        if exp_id:
+            decorator_kwargs += f', experiment_id="{exp_id}"'
+        load_kwargs = (
+            f'source_type="run", run_id="{rid}", '
+            f'artifact_path="{apath}", task="{task_val}"'
+        )
 
-        user_code_block = ""
-        if user_code:
-            wrapped = _wrap_external_code(user_code).rstrip("\n") + "\n"
-            # Replace the trailing "    return df" that _wrap_external_code appends
-            if wrapped.rstrip().endswith("return df"):
-                wrapped = wrapped.rstrip()
-                wrapped = wrapped[: wrapped.rfind("return df")].rstrip() + "\n"
-            user_code_block = f"    {_MODEL_SCORE_USER_CODE_SENTINEL}\n{wrapped}"
+    return _MODEL_SCORE.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        first_param=first_param,
+        decorator_kwargs=decorator_kwargs,
+        load_kwargs=load_kwargs,
+        output_column=output_column,
+        proba_block_batched=proba_block_batched,
+        user_code_block=user_code_block,
+    )
 
-        if source_type == "registered":
-            reg_model = config.get("registered_model", "")
-            ver = config.get("version", "latest")
-            decorator_kwargs = (
-                f'model_score=True, source_type="registered", '
-                f'registered_model="{reg_model}", version="{ver}", '
-                f'task="{task_val}", output_column="{output_column}"'
-            )
-            load_kwargs = (
-                f'source_type="registered", registered_model="{reg_model}", '
-                f'version="{ver}", task="{task_val}"'
-            )
-        else:
-            rid = config.get("run_id", "")
-            apath = config.get("artifact_path", "")
-            rname = config.get("run_name", "")
-            exp_name = config.get("experiment_name", "")
-            exp_id = config.get("experiment_id", "")
-            decorator_kwargs = (
-                f'model_score=True, source_type="run", '
-                f'run_id="{rid}", artifact_path="{apath}", '
-                f'task="{task_val}", output_column="{output_column}"'
-            )
-            if rname:
-                decorator_kwargs += f', run_name="{rname}"'
-            if exp_name:
-                decorator_kwargs += f', experiment_name="{exp_name}"'
-            if exp_id:
-                decorator_kwargs += f', experiment_id="{exp_id}"'
-            load_kwargs = (
-                f'source_type="run", run_id="{rid}", '
-                f'artifact_path="{apath}", task="{task_val}"'
-            )
 
-        return _MODEL_SCORE.format(
+@_register_codegen(NodeType.BANDING)
+def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    factors = config.get("factors", []) or []
+    params = _build_params(source_names)
+    if len(factors) == 1:
+        f = factors[0]
+        banding = f.get("banding", "continuous")
+        column = f.get("column", "")
+        output_column = f.get("outputColumn", "")
+        rules = f.get("rules", []) or []
+        default = f.get("default")
+        rules_kw = f", rules={rules!r}" if rules else ""
+        default_kw = f', default="{default}"' if default else ""
+        return _BANDING_SINGLE.format(
             func_name=func_name,
             description=description,
-            params=params,
-            first_param=first_param,
-            decorator_kwargs=decorator_kwargs,
-            load_kwargs=load_kwargs,
+            banding=banding,
+            column=column,
             output_column=output_column,
-            proba_block_batched=proba_block_batched,
-            user_code_block=user_code_block,
+            rules_kw=rules_kw,
+            default_kw=default_kw,
+            params=params,
         )
-
-    elif node_type == NodeType.BANDING:
-        factors = config.get("factors", []) or []
-        params = _build_params(source_names)
-        if len(factors) == 1:
-            f = factors[0]
-            banding = f.get("banding", "continuous")
-            column = f.get("column", "")
-            output_column = f.get("outputColumn", "")
-            rules = f.get("rules", []) or []
-            default = f.get("default")
-            rules_kw = f", rules={rules!r}" if rules else ""
-            default_kw = f', default="{default}"' if default else ""
-            return _BANDING_SINGLE.format(
-                func_name=func_name,
-                description=description,
-                banding=banding,
-                column=column,
-                output_column=output_column,
-                rules_kw=rules_kw,
-                default_kw=default_kw,
-                params=params,
-            )
-        else:
-            # Multi-factor: emit factors list with output_column key for decorator
-            emit_factors = []
-            for f in factors:
-                ef: dict = {
-                    "banding": f.get("banding", "continuous"),
-                    "column": f.get("column", ""),
-                    "output_column": f.get("outputColumn", ""),
-                    "rules": f.get("rules", []),
-                }
-                if f.get("default"):
-                    ef["default"] = f["default"]
-                emit_factors.append(ef)
-            return _BANDING_MULTI.format(
-                func_name=func_name,
-                description=description,
-                factors_repr=repr(emit_factors),
-                params=params,
-            )
-
-    elif node_type == NodeType.RATING_STEP:
-        tables = config.get("tables", []) or []
-        params = _build_params(source_names)
-        emit_tables = []
-        for t in tables:
-            et: dict = {
-                "name": t.get("name", ""),
-                "factors": t.get("factors", []),
-                "output_column": t.get("outputColumn", ""),
-                "entries": t.get("entries", []),
+    else:
+        # Multi-factor: emit factors list with output_column key for decorator
+        emit_factors = []
+        for f in factors:
+            ef: dict = {
+                "banding": f.get("banding", "continuous"),
+                "column": f.get("column", ""),
+                "output_column": f.get("outputColumn", ""),
+                "rules": f.get("rules", []),
             }
-            if t.get("defaultValue") is not None:
-                et["default_value"] = t["defaultValue"]
-            emit_tables.append(et)
-        extra_parts: list[str] = []
-        op = config.get("operation")
-        if op and op != "multiply":
-            extra_parts.append(f"operation={op!r}")
-        combined = config.get("combinedColumn")
-        if combined:
-            extra_parts.append(f"combined_column={combined!r}")
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-        return _RATING_STEP.format(
+            if f.get("default"):
+                ef["default"] = f["default"]
+            emit_factors.append(ef)
+        return _BANDING_MULTI.format(
             func_name=func_name,
             description=description,
-            tables_repr=repr(emit_tables),
+            factors_repr=repr(emit_factors),
             params=params,
-            extra_kwargs=extra_kwargs,
         )
 
-    elif node_type == NodeType.SCENARIO_EXPANDER:
-        params = _build_params(source_names)
-        first = source_names[0] if source_names else "df"
-        extra_parts = []
-        for key in SCENARIO_EXPANDER_CONFIG_KEYS:
-            val = config.get(key)
-            if val is not None and val != "":
-                extra_parts.append(f"{key}={val!r}")
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-        return _SCENARIO_EXPANDER.format(
-            func_name=func_name,
-            description=description,
-            params=params,
-            first=first,
-            extra_kwargs=extra_kwargs,
-        )
 
-    elif node_type == NodeType.OPTIMISER:
-        params = _build_params(source_names)
-        first = source_names[0] if source_names else "df"
-        extra_parts = []
-        for key in OPTIMISER_CONFIG_KEYS:
-            val = config.get(key)
-            if val is not None and val != "" and val != []:
-                extra_parts.append(f"{key}={val!r}")
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-        return _OPTIMISER.format(
-            func_name=func_name,
-            description=description,
-            params=params,
-            first=first,
-            extra_kwargs=extra_kwargs,
-        )
+@_register_codegen(NodeType.RATING_STEP)
+def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
 
-    elif node_type == NodeType.OPTIMISER_APPLY:
-        params = _build_params(source_names)
-        first = source_names[0] if source_names else "df"
-        extra_parts = []
-        for key in OPTIMISER_APPLY_CONFIG_KEYS:
-            val = config.get(key)
-            if val is not None and val != "":
-                extra_parts.append(f"{key}={val!r}")
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-        return _OPTIMISER_APPLY.format(
-            func_name=func_name,
-            description=description,
-            params=params,
-            first=first,
-            extra_kwargs=extra_kwargs,
-        )
-
-    elif node_type == NodeType.MODELLING:
-        params = _build_params(source_names)
-        modelling_keys = (
-            "name", "target", "weight", "exclude", "algorithm", "task",
-            "params", "split", "metrics", "mlflow_experiment", "model_name",
-            "output_dir",
-        )
-        extra_parts = []
-        for key in modelling_keys:
-            val = config.get(key)
-            if val is not None and val != "" and val != []:
-                extra_parts.append(f"{key}={val!r}")
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-        return _MODELLING.format(
-            func_name=func_name,
-            description=description,
-            params=params,
-            extra_kwargs=extra_kwargs,
-        )
-
-    elif node_type == NodeType.EXTERNAL_FILE:
-        path = config.get("path", "model.pkl")
-        file_type = config.get("fileType", "pickle")
-        code = config.get("code", "").strip()
-        params = _build_params(source_names)
-        body = _wrap_external_code(code)
-        if file_type == "catboost":
-            model_class = config.get("modelClass", "classifier")
-            cb_class = "CatBoostRegressor" if model_class == "regressor" else "CatBoostClassifier"
-            return _EXTERNAL_CATBOOST.format(
-                func_name=func_name,
-                description=description,
-                path=path,
-                params=params,
-                body=body,
-                model_class=model_class,
-                cb_class=cb_class,
-            )
-        templates = {
-            "pickle": _EXTERNAL_PICKLE,
-            "json": _EXTERNAL_JSON,
-            "joblib": _EXTERNAL_JOBLIB,
+    tables = config.get("tables", []) or []
+    params = _build_params(source_names)
+    emit_tables = []
+    for t in tables:
+        et: dict = {
+            "name": t.get("name", ""),
+            "factors": t.get("factors", []),
+            "output_column": t.get("outputColumn", ""),
+            "entries": t.get("entries", []),
         }
-        template = templates.get(file_type, _EXTERNAL_PICKLE)
-        return template.format(
+        if t.get("defaultValue") is not None:
+            et["default_value"] = t["defaultValue"]
+        emit_tables.append(et)
+    extra_parts: list[str] = []
+    op = config.get("operation")
+    if op and op != "multiply":
+        extra_parts.append(f"operation={op!r}")
+    combined = config.get("combinedColumn")
+    if combined:
+        extra_parts.append(f"combined_column={combined!r}")
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    return _RATING_STEP.format(
+        func_name=func_name,
+        description=description,
+        tables_repr=repr(emit_tables),
+        params=params,
+        extra_kwargs=extra_kwargs,
+    )
+
+
+@_register_codegen(NodeType.SCENARIO_EXPANDER)
+def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    params = _build_params(source_names)
+    first = source_names[0] if source_names else "df"
+    extra_parts = _build_extra_kwargs(config, SCENARIO_EXPANDER_CONFIG_KEYS)
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    return _SCENARIO_EXPANDER.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        first=first,
+        extra_kwargs=extra_kwargs,
+    )
+
+
+@_register_codegen(NodeType.OPTIMISER)
+def _gen_optimiser(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    params = _build_params(source_names)
+    first = source_names[0] if source_names else "df"
+    extra_parts = _build_extra_kwargs(config, OPTIMISER_CONFIG_KEYS)
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    return _OPTIMISER.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        first=first,
+        extra_kwargs=extra_kwargs,
+    )
+
+
+@_register_codegen(NodeType.OPTIMISER_APPLY)
+def _gen_optimiser_apply(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    params = _build_params(source_names)
+    first = source_names[0] if source_names else "df"
+    extra_parts = _build_extra_kwargs(config, OPTIMISER_APPLY_CONFIG_KEYS)
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    return _OPTIMISER_APPLY.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        first=first,
+        extra_kwargs=extra_kwargs,
+    )
+
+
+@_register_codegen(NodeType.MODELLING)
+def _gen_modelling(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    params = _build_params(source_names)
+    extra_parts = _build_extra_kwargs(config, MODELLING_CONFIG_KEYS)
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    return _MODELLING.format(
+        func_name=func_name,
+        description=description,
+        params=params,
+        extra_kwargs=extra_kwargs,
+    )
+
+
+@_register_codegen(NodeType.EXTERNAL_FILE)
+def _gen_external_file(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    path = config.get("path", "model.pkl")
+    file_type = config.get("fileType", "pickle")
+    code = (config.get("code") or "").strip()
+    params = _build_params(source_names)
+    body = _wrap_external_code(code)
+    if file_type == "catboost":
+        model_class = config.get("modelClass", "classifier")
+        cb_class = "CatBoostRegressor" if model_class == "regressor" else "CatBoostClassifier"
+        return _EXTERNAL_CATBOOST.format(
             func_name=func_name,
             description=description,
             path=path,
             params=params,
             body=body,
+            model_class=model_class,
+            cb_class=cb_class,
         )
+    templates = {
+        "pickle": _EXTERNAL_PICKLE,
+        "json": _EXTERNAL_JSON,
+        "joblib": _EXTERNAL_JOBLIB,
+    }
+    template = templates.get(file_type, _EXTERNAL_PICKLE)
+    return template.format(
+        func_name=func_name,
+        description=description,
+        path=path,
+        params=params,
+        body=body,
+    )
 
-    elif node_type == NodeType.DATA_SINK:
-        path = config.get("path", "output.parquet")
-        fmt = config.get("format", "parquet")
-        params = _build_params(source_names)
-        first = source_names[0] if source_names else "df"
-        template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
-        return template.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-            params=params,
-            first=first,
-        )
 
-    elif node_type == NodeType.OUTPUT:
-        fields = config.get("fields", []) or []
-        params = _build_params(source_names)
-        first = source_names[0] if source_names else "df"
-        dec_parts = ["output=True"]
-        if fields:
-            dec_parts.append(f"fields={fields!r}")
-            select_args = ", ".join(f'"{f}"' for f in fields)
-            body = f"    return {first}.select({select_args})"
-        else:
-            body = f"    return {first}"
-        dec = ", ".join(dec_parts)
-        return (
-            f"@pipeline.node({dec})\n"
-            f"def {func_name}({params}) -> pl.LazyFrame:\n"
-            f'    """{description}"""\n'
-            f"{body}\n"
-        )
+@_register_codegen(NodeType.DATA_SINK)
+def _gen_data_sink(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
 
-    # transform - use source node names as params
-    code = config.get("code", "").strip()
+    path = config.get("path", "output.parquet")
+    fmt = config.get("format", "parquet")
+    params = _build_params(source_names)
+    first = source_names[0] if source_names else "df"
+    template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
+    return template.format(
+        func_name=func_name,
+        description=description,
+        path=path,
+        params=params,
+        first=first,
+    )
+
+
+@_register_codegen(NodeType.OUTPUT)
+def _gen_output(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    fields = config.get("fields", []) or []
+    params = _build_params(source_names)
+    first = source_names[0] if source_names else "df"
+    dec_parts = ["output=True"]
+    if fields:
+        dec_parts.append(f"fields={fields!r}")
+        select_args = ", ".join(f'"{f}"' for f in fields)
+        body = f"    return {first}.select({select_args})"
+    else:
+        body = f"    return {first}"
+    dec = ", ".join(dec_parts)
+    return (
+        f"@pipeline.node({dec})\n"
+        f"def {func_name}({params}) -> pl.LazyFrame:\n"
+        f'    """{description}"""\n'
+        f"{body}\n"
+    )
+
+
+@_register_codegen(NodeType.TRANSFORM)
+def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
+    data = node.data
+    config = data.config
+    func_name = _sanitize_func_name(data.label)
+    description = data.description or f"{data.label} node"
+
+    code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     body = _wrap_user_code(code, source_names)
 
@@ -745,6 +844,27 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
         f'    """{description}"""\n'
         f"{body}\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher
+# ---------------------------------------------------------------------------
+
+
+def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) -> str:
+    """Generate code for a single node (with legacy inline decorator).
+
+    source_names: sanitized function names of upstream nodes (used as param names).
+    """
+    if source_names is None:
+        source_names = []
+
+    builder = _CODEGEN_BUILDERS.get(node.data.nodeType)
+    if builder is not None:
+        return builder(node, source_names)
+
+    # Fallback: treat unknown types as transforms
+    return _gen_transform(node, source_names)
 
 
 def _instance_to_code(
@@ -837,7 +957,7 @@ def graph_to_code(
 
     lines += [
         "",
-        f'pipeline = haute.Pipeline("{pipeline_name}", description="{description}")',
+        f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
         "",
         "",
     ]
@@ -1048,7 +1168,7 @@ def graph_to_code_multi(
 
     main_lines += [
         "",
-        f'pipeline = haute.Pipeline("{pipeline_name}", description="{description}")',
+        f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
         "",
         "",
     ]

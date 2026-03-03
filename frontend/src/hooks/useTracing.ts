@@ -6,7 +6,8 @@ import { NODE_TYPES } from "../utils/nodeTypes"
 import { nodeData } from "../types/node"
 import { traceCell } from "../api/client"
 import { resolveGraphFromRefs } from "../utils/buildGraph"
-import useUIStore from "../stores/useUIStore"
+import useToastStore from "../stores/useToastStore"
+import useSettingsStore from "../stores/useSettingsStore"
 
 interface TracingParams {
   nodes: Node[]
@@ -34,7 +35,9 @@ export default function useTracing({
   preambleRef,
   nodeStatuses,
 }: TracingParams): TracingReturn {
-  const { rowLimit, activeScenario, addToast } = useUIStore()
+  const addToast = useToastStore((s) => s.addToast)
+  const rowLimit = useSettingsStore((s) => s.rowLimit)
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
   const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
 

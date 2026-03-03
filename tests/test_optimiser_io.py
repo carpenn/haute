@@ -1,0 +1,282 @@
+"""Comprehensive tests for haute._optimiser_io.
+
+Covers:
+  - load_optimiser_artifact  — caching, mtime invalidation, file errors
+  - load_mlflow_optimiser_artifact — run/registered paths, validation, caching
+  - _resolve_version — "latest", explicit version, empty versions list
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time as _time
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from haute._optimiser_io import (
+    _artifact_cache,
+    _mlflow_cache,
+    _resolve_version,
+    load_mlflow_optimiser_artifact,
+    load_optimiser_artifact,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_caches():
+    """Clear caches before and after every test."""
+    _artifact_cache.clear()
+    _mlflow_cache.clear()
+    yield
+    _artifact_cache.clear()
+    _mlflow_cache.clear()
+
+
+# ===========================================================================
+# load_optimiser_artifact
+# ===========================================================================
+
+
+class TestLoadOptimiserArtifact:
+    def test_loads_valid_json(self, tmp_path):
+        f = tmp_path / "artifact.json"
+        data = {"mode": "online", "lambdas": {"x": 1.5}}
+        f.write_text(json.dumps(data))
+
+        result = load_optimiser_artifact(str(f))
+        assert result["mode"] == "online"
+        assert result["lambdas"]["x"] == 1.5
+
+    def test_caches_on_second_call(self, tmp_path):
+        f = tmp_path / "artifact.json"
+        f.write_text(json.dumps({"mode": "ratebook"}))
+
+        result1 = load_optimiser_artifact(str(f))
+        result2 = load_optimiser_artifact(str(f))
+        assert result1 is result2
+
+    def test_mtime_change_invalidates_cache(self, tmp_path):
+        f = tmp_path / "artifact.json"
+        f.write_text(json.dumps({"version": 1}))
+
+        result1 = load_optimiser_artifact(str(f))
+        assert result1["version"] == 1
+
+        # Write new content with a different mtime
+        f.write_text(json.dumps({"version": 2}))
+        future = _time.time() + 10
+        os.utime(str(f), (future, future))
+
+        result2 = load_optimiser_artifact(str(f))
+        assert result2["version"] == 2
+        assert result1 is not result2
+
+    def test_file_not_found_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_optimiser_artifact(str(tmp_path / "nonexistent.json"))
+
+    def test_invalid_json_raises(self, tmp_path):
+        f = tmp_path / "bad.json"
+        f.write_text("{bad json")
+        with pytest.raises(json.JSONDecodeError):
+            load_optimiser_artifact(str(f))
+
+    def test_missing_file_mtime_is_zero(self, tmp_path):
+        """When the file doesn't exist at mtime check, mtime defaults to 0.0,
+        but the actual open() still raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_optimiser_artifact(str(tmp_path / "ghost.json"))
+
+
+# ===========================================================================
+# load_mlflow_optimiser_artifact — run source
+# ===========================================================================
+
+
+class TestLoadMlflowOptimiserArtifactRun:
+    @patch("mlflow.artifacts.download_artifacts")
+    @patch("mlflow.set_tracking_uri")
+    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
+    def test_run_source_loads_artifact(
+        self, mock_backend, mock_set_uri, mock_download, tmp_path,
+    ):
+        # Set up temp artifact file
+        artifact_file = tmp_path / "optimiser_result.json"
+        artifact_file.write_text(json.dumps({"mode": "online", "version": "v1"}))
+        mock_download.return_value = str(artifact_file)
+        mock_backend.return_value = ("http://localhost:5000", "local")
+
+        result = load_mlflow_optimiser_artifact(
+            source_type="run",
+            run_id="run_abc123",
+        )
+        assert result["mode"] == "online"
+        mock_download.assert_called_once()
+
+    @patch("mlflow.artifacts.download_artifacts")
+    @patch("mlflow.set_tracking_uri")
+    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
+    def test_run_source_caches(
+        self, mock_backend, mock_set_uri, mock_download, tmp_path,
+    ):
+        artifact_file = tmp_path / "optimiser_result.json"
+        artifact_file.write_text(json.dumps({"mode": "online"}))
+        mock_download.return_value = str(artifact_file)
+        mock_backend.return_value = ("http://localhost:5000", "local")
+
+        result1 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
+        result2 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
+        assert result1 is result2
+        # download_artifacts called only once due to caching
+        mock_download.assert_called_once()
+
+    def test_run_without_run_id_raises(self):
+        with pytest.raises(ValueError, match="run_id is required"):
+            load_mlflow_optimiser_artifact(
+                source_type="run",
+                run_id="",
+                tracking_uri="http://x",
+            )
+
+    def test_invalid_source_type_raises(self):
+        with pytest.raises(ValueError, match="Invalid sourceType"):
+            load_mlflow_optimiser_artifact(
+                source_type="invalid",
+                tracking_uri="http://x",
+            )
+
+
+# ===========================================================================
+# load_mlflow_optimiser_artifact — registered model source
+# ===========================================================================
+
+
+class TestLoadMlflowOptimiserArtifactRegistered:
+    @patch("mlflow.artifacts.download_artifacts")
+    @patch("mlflow.set_tracking_uri")
+    @patch("mlflow.tracking.MlflowClient")
+    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
+    def test_registered_source(
+        self, mock_backend, mock_client, mock_set_uri, mock_download, tmp_path,
+    ):
+        artifact_file = tmp_path / "optimiser_result.json"
+        artifact_file.write_text(json.dumps({"mode": "ratebook"}))
+        mock_download.return_value = str(artifact_file)
+        mock_backend.return_value = ("http://localhost:5000", "local")
+
+        client_instance = mock_client.return_value
+        # Mock _resolve_version
+        with patch("haute._optimiser_io._resolve_version", return_value="2"):
+            mv = MagicMock()
+            mv.run_id = "resolved_run_id"
+            client_instance.get_model_version.return_value = mv
+
+            result = load_mlflow_optimiser_artifact(
+                source_type="registered",
+                registered_model="my_model",
+                version="2",
+            )
+        assert result["mode"] == "ratebook"
+
+    def test_registered_without_model_name_raises(self):
+        with pytest.raises(ValueError, match="registered_model is required"):
+            load_mlflow_optimiser_artifact(
+                source_type="registered",
+                registered_model="",
+                tracking_uri="http://x",
+            )
+
+    @patch("mlflow.artifacts.download_artifacts")
+    @patch("mlflow.set_tracking_uri")
+    @patch("haute.modelling._mlflow_log.resolve_tracking_backend")
+    def test_tracking_uri_auto_detected(
+        self, mock_backend, mock_set_uri, mock_download, tmp_path,
+    ):
+        """When tracking_uri is empty, resolve_tracking_backend is called."""
+        artifact_file = tmp_path / "optimiser_result.json"
+        artifact_file.write_text(json.dumps({"mode": "online"}))
+        mock_download.return_value = str(artifact_file)
+        mock_backend.return_value = ("http://auto-detected:5000", "local")
+
+        load_mlflow_optimiser_artifact(
+            source_type="run",
+            run_id="run_1",
+            tracking_uri="",  # empty => auto-detect
+        )
+        mock_backend.assert_called_once()
+
+    @patch("mlflow.artifacts.download_artifacts")
+    @patch("mlflow.set_tracking_uri")
+    def test_explicit_tracking_uri_skips_auto_detect(
+        self, mock_set_uri, mock_download, tmp_path,
+    ):
+        """When tracking_uri is provided, resolve_tracking_backend is not called."""
+        artifact_file = tmp_path / "optimiser_result.json"
+        artifact_file.write_text(json.dumps({"mode": "online"}))
+        mock_download.return_value = str(artifact_file)
+
+        with patch("haute.modelling._mlflow_log.resolve_tracking_backend") as mock_backend:
+            load_mlflow_optimiser_artifact(
+                source_type="run",
+                run_id="run_1",
+                tracking_uri="http://explicit:5000",
+            )
+            mock_backend.assert_not_called()
+
+
+# ===========================================================================
+# _resolve_version
+# ===========================================================================
+
+
+class TestResolveVersion:
+    def test_explicit_version_returned(self):
+        client = MagicMock()
+        assert _resolve_version(client, "model", "3") == "3"
+
+    def test_latest_resolves_to_newest(self):
+        client = MagicMock()
+        v1 = MagicMock()
+        v1.version = "1"
+        v2 = MagicMock()
+        v2.version = "2"
+        v3 = MagicMock()
+        v3.version = "3"
+        client.search_model_versions.return_value = [v1, v3, v2]
+
+        result = _resolve_version(client, "model", "latest")
+        assert result == "3"
+
+    def test_empty_version_resolves_to_latest(self):
+        client = MagicMock()
+        v = MagicMock()
+        v.version = "5"
+        client.search_model_versions.return_value = [v]
+
+        result = _resolve_version(client, "model", "")
+        assert result == "5"
+
+    def test_no_versions_raises(self):
+        client = MagicMock()
+        client.search_model_versions.return_value = []
+
+        with pytest.raises(ValueError, match="No versions found"):
+            _resolve_version(client, "model", "latest")
+
+    def test_sql_injection_in_model_name_escaped(self):
+        """Model names with quotes should be safely escaped."""
+        client = MagicMock()
+        v = MagicMock()
+        v.version = "1"
+        client.search_model_versions.return_value = [v]
+
+        _resolve_version(client, "model's_name", "latest")
+        call_arg = client.search_model_versions.call_args[0][0]
+        # The single quote should be escaped
+        assert "\\'" in call_arg

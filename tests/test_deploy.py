@@ -568,10 +568,13 @@ class TestConfig:
         assert config.model_name == "motor-pricing"  # original unchanged
 
     def test_resolve_config(self) -> None:
-        """Integration test — resolves via haute.toml which references main.py."""
+        """Integration test — resolves using fixture pipeline (has output node)."""
         from haute.deploy._config import DeployConfig, resolve_config
 
-        config = DeployConfig.from_toml(Path("haute.toml"))
+        config = DeployConfig(
+            pipeline_file=PIPELINE_FILE,
+            model_name="test-model",
+        )
         resolved = resolve_config(config)
 
         assert resolved.output_node_id == "output"

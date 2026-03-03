@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import { getLayoutedElements } from "../utils/layout"
+import useToastStore from "../stores/useToastStore"
 import useUIStore from "../stores/useUIStore"
 
 export type WsStatus = "connected" | "reconnecting" | "disconnected"
@@ -22,7 +23,8 @@ export default function useWebSocketSync({
   setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
   nodeIdCounter, fitView,
 }: WebSocketSyncParams): WsStatus {
-  const { setSyncBanner, addToast } = useUIStore()
+  const { setSyncBanner } = useUIStore()
+  const { addToast } = useToastStore()
   const [status, setStatus] = useState<WsStatus>("reconnecting")
   const retriesRef = useRef(0)
 

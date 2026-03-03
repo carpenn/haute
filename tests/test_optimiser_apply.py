@@ -13,7 +13,6 @@ import pytest
 
 from haute._optimiser_io import (
     _artifact_cache,
-    _artifact_cache_lock,
     load_optimiser_artifact,
 )
 from haute._parser_helpers import _build_node_config, _infer_node_type
@@ -435,8 +434,7 @@ class TestExecutorRatebook:
 
 class TestArtifactLoader:
     def setup_method(self):
-        with _artifact_cache_lock:
-            _artifact_cache.clear()
+        _artifact_cache.clear()
 
     def test_load_artifact(self):
         path = _write_artifact(_make_online_artifact())

@@ -16,8 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from haute._config_io import infer_node_type_from_config_path, load_node_config
+from haute._config_validation import warn_unrecognized_config_keys
 from haute._logging import get_logger
 from haute.graph_utils import (
+    MODEL_SCORE_CONFIG_KEYS,
+    MODELLING_CONFIG_KEYS,
     OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
@@ -416,12 +419,7 @@ def _build_node_config(
         config["input_scenario_map"] = decorator_kwargs.get("input_scenario_map", {})
         config["inputs"] = param_names
     elif node_type == NodeType.MODEL_SCORE:
-        model_score_keys = (
-            "source_type", "run_id", "artifact_path", "run_name",
-            "registered_model", "version", "task", "output_column",
-            "experiment_name", "experiment_id",
-        )
-        for key in model_score_keys:
+        for key in MODEL_SCORE_CONFIG_KEYS:
             if key in decorator_kwargs:
                 # Map snake_case decorator key to camelCase config key where needed
                 config_key = "sourceType" if key == "source_type" else key
@@ -493,12 +491,7 @@ def _build_node_config(
             if key in decorator_kwargs:
                 config[key] = decorator_kwargs[key]
     elif node_type == NodeType.MODELLING:
-        modelling_keys = (
-            "name", "target", "weight", "exclude", "algorithm", "task",
-            "params", "split", "metrics", "mlflow_experiment", "model_name",
-            "output_dir",
-        )
-        for key in modelling_keys:
+        for key in MODELLING_CONFIG_KEYS:
             if key in decorator_kwargs:
                 config[key] = decorator_kwargs[key]
     elif node_type == NodeType.CONSTANT:
@@ -764,4 +757,6 @@ def _resolve_node_config(
     else:
         node_type = _infer_node_type(decorator_kwargs, n_params)
         config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+
+    warn_unrecognized_config_keys(node_type, config)
     return node_type, config

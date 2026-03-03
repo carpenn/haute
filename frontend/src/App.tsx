@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, type DragEvent } from "react"
+import { useEffect, useCallback, useState, useRef } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -7,9 +7,6 @@ import {
   SelectionMode,
   type Node,
   type Edge,
-  type OnConnect,
-  type OnSelectionChangeFunc,
-  addEdge,
   BackgroundVariant,
   MarkerType,
 } from "@xyflow/react"
@@ -24,6 +21,7 @@ import DataPreview from "./panels/DataPreview"
 import OptimiserPreview from "./panels/OptimiserPreview"
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
+import { ErrorBoundary } from "./components/ErrorBoundary"
 import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import BreadcrumbBar from "./components/BreadcrumbBar"
@@ -38,11 +36,14 @@ import useTracing from "./hooks/useTracing"
 import useSubmodelNavigation from "./hooks/useSubmodelNavigation"
 import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts"
 import useBackgroundJobs from "./hooks/useBackgroundJobs"
+import useNodeHandlers from "./hooks/useNodeHandlers"
+import useEdgeHandlers from "./hooks/useEdgeHandlers"
+import useToastStore from "./stores/useToastStore"
+import useSettingsStore from "./stores/useSettingsStore"
 import useUIStore from "./stores/useUIStore"
 import useNodeResultsStore from "./stores/useNodeResultsStore"
 
 import { NODE_TYPES } from "./utils/nodeTypes"
-import { getLayoutedElements } from "./utils/layout"
 import { nodeData } from "./types/node"
 import { PanelLeftOpen } from "lucide-react"
 
@@ -70,26 +71,6 @@ const nodeTypes = {
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
 
-const labelMap: Record<string, string> = {
-  [NODE_TYPES.API_INPUT]: "API Input",
-  [NODE_TYPES.DATA_SOURCE]: "Data Source",
-  [NODE_TYPES.TRANSFORM]: "Polars",
-  [NODE_TYPES.MODEL_SCORE]: "Model Scoring",
-  [NODE_TYPES.RATING_STEP]: "Rating Step",
-  [NODE_TYPES.BANDING]: "Banding",
-  [NODE_TYPES.OUTPUT]: "API Output",
-  [NODE_TYPES.DATA_SINK]: "Data Sink",
-  [NODE_TYPES.EXTERNAL_FILE]: "Load File",
-  [NODE_TYPES.LIVE_SWITCH]: "Live Switch",
-  [NODE_TYPES.MODELLING]: "Model Training",
-  [NODE_TYPES.OPTIMISER]: "Optimisation",
-  [NODE_TYPES.OPTIMISER_APPLY]: "Apply Optimisation",
-  [NODE_TYPES.SCENARIO_EXPANDER]: "Expander",
-  [NODE_TYPES.CONSTANT]: "Constant",
-  [NODE_TYPES.SUBMODEL]: "Submodel",
-  [NODE_TYPES.SUBMODEL_PORT]: "Port",
-}
-
 // ---------------------------------------------------------------------------
 // FlowEditor — main orchestrator
 // ---------------------------------------------------------------------------
@@ -106,7 +87,11 @@ function FlowEditor() {
   const { screenToFlowPosition, fitView } = useReactFlow()
 
   // UI state from Zustand store (leaf-subscribed values live in their own components)
-  const addToast = useUIStore((s) => s.addToast)
+  // Toast store
+  const addToast = useToastStore((s) => s.addToast)
+  // Settings store
+  const fetchMlflow = useSettingsStore((s) => s.fetchMlflow)
+  // UI store (chrome / layout)
   const paletteOpen = useUIStore((s) => s.paletteOpen)
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen)
   const settingsOpen = useUIStore((s) => s.settingsOpen)
@@ -121,7 +106,6 @@ function FlowEditor() {
   const setSyncBanner = useUIStore((s) => s.setSyncBanner)
   const dirty = useUIStore((s) => s.dirty)
   const setDirty = useUIStore((s) => s.setDirty)
-  const fetchMlflow = useUIStore((s) => s.fetchMlflow)
 
   // Fetch MLflow status once on startup (shared by all panels)
   useEffect(() => { fetchMlflow() }, [fetchMlflow])
@@ -180,7 +164,7 @@ function FlowEditor() {
     nodeStatuses, runStatus,
     fetchPreview, handleRun, handleSave,
   } = usePipelineAPI({
-    nodes, edges, selectedNode,
+    selectedNode,
     graphRef, parentGraphRef, submodelsRef, setNodes,
     setNodesRaw, setEdgesRaw, setPreamble,
     preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
@@ -221,47 +205,8 @@ function FlowEditor() {
   useBackgroundJobs()
 
   // ---------------------------------------------------------------------------
-  // Node interaction handlers
+  // Node + edge interaction handlers (extracted to custom hooks)
   // ---------------------------------------------------------------------------
-
-  const onConnect: OnConnect = useCallback(
-    (params) => {
-      if (params.source === params.target) return
-      const { edges: currentEdges, nodes: currentNodes } = graphRef.current
-      const exists = currentEdges.some(
-        (e) => e.source === params.source && e.target === params.target
-      )
-      if (exists) return
-
-      const targetNode = currentNodes.find((n) => n.id === params.target)
-      if (targetNode && nodeData(targetNode).nodeType === NODE_TYPES.SUBMODEL && params.targetHandle) {
-        setEdges((eds) => addEdge({ ...params, targetHandle: null }, eds))
-        return
-      }
-
-      setEdges((eds) => addEdge(params, eds))
-    },
-    [setEdges],
-  )
-
-  const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
-    if (selectedNodes.length === 1) {
-      const node = selectedNodes[0]
-      setSelectedNode((prev) => {
-        if (prev?.id !== node.id) {
-          fetchPreview(node)
-          clearTrace()
-        }
-        return node
-      })
-      lastSelectedNodeRef.current = node
-    } else {
-      // Canvas click: deselect but keep panel showing last node
-      setSelectedNode(null)
-      clearTrace()
-      // Don't clear previewData or lastSelectedNodeRef — panel stays visible
-    }
-  }, [fetchPreview, clearTrace])
 
   const onUpdateNode = useCallback(
     (id: string, data: Record<string, unknown>) => {
@@ -271,126 +216,23 @@ function FlowEditor() {
     [setNodes],
   )
 
-  const handleDeleteEdge = useCallback((edgeId: string) => {
-    setEdges((eds) => eds.filter((e) => e.id !== edgeId))
-  }, [setEdges])
+  const {
+    handleDeleteNode, handleDuplicateNode,
+    handleCreateInstance, handleRenameNode, handleAutoLayout,
+  } = useNodeHandlers({
+    graphRef, nodeIdCounter, lastSelectedNodeRef,
+    setNodes, setEdges, setSelectedNode,
+    setPreviewData, onUpdateNode, fitView,
+  })
 
-  const handleDeleteNode = useCallback((id: string) => {
-    const { nodes: n, edges: e } = graphRef.current
-    setNodes(n.filter((node) => node.id !== id))
-    setEdges(e.filter((edge) => edge.source !== id && edge.target !== id))
-    setSelectedNode((prev) => (prev?.id === id ? null : prev))
-    setPreviewData((prev) => (prev?.nodeId === id ? null : prev))
-    clearNode(id)
-    if (lastSelectedNodeRef.current?.id === id) lastSelectedNodeRef.current = null
-  }, [setNodes, setEdges, setPreviewData, clearNode])
-
-  const handleDuplicateNode = useCallback((id: string) => {
-    const { nodes: n } = graphRef.current
-    const original = n.find((node) => node.id === id)
-    if (!original) return
-    nodeIdCounter.current += 1
-    const newId = `${original.type}_${nodeIdCounter.current}`
-    const newNode: Node = {
-      ...original,
-      id: newId,
-      position: { x: original.position.x + 40, y: original.position.y + 40 },
-      selected: true,
-      data: { ...original.data, label: `${original.data.label} copy` },
-    }
-    setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
-    setSelectedNode(newNode)
-  }, [setNodes])
-
-  const handleCreateInstance = useCallback((id: string) => {
-    const { nodes: n } = graphRef.current
-    const original = n.find((node) => node.id === id)
-    if (!original) return
-    nodeIdCounter.current += 1
-    const origData = nodeData(original)
-    const origNodeType = origData.nodeType || NODE_TYPES.TRANSFORM
-    const newId = `${origNodeType}_${nodeIdCounter.current}`
-    const newNode: Node = {
-      id: newId,
-      type: original.type,
-      position: { x: original.position.x + 60, y: original.position.y + 80 },
-      selected: true,
-      data: {
-        label: `${origData.label} instance`,
-        description: `Instance of ${origData.label}`,
-        nodeType: origNodeType,
-        config: { instanceOf: id },
-      },
-    }
-    setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
-    setSelectedNode(newNode)
-    addToast("info", `Created instance of "${origData.label}"`)
-  }, [setNodes, addToast])
-
-  const handleRenameNode = useCallback((id: string) => {
-    const { nodes: n } = graphRef.current
-    const node = n.find((nd) => nd.id === id)
-    if (!node) return
-    const newLabel = prompt("Rename node:", String(node.data.label))
-    if (newLabel !== null && newLabel.trim()) {
-      onUpdateNode(id, { ...node.data, label: newLabel.trim() })
-    }
-  }, [onUpdateNode])
-
-  const handleAutoLayout = useCallback(async () => {
-    const { nodes: n, edges: e } = graphRef.current
-    if (n.length === 0) return
-    const layouted = await getLayoutedElements(n, e)
-    setNodes(layouted)
-    setTimeout(() => fitView({ padding: 0.8 }), 50)
-    addToast("info", "Auto-layout applied")
-  }, [setNodes, fitView, addToast])
-
-  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
-    event.preventDefault()
-    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id, nodeLabel: String(node.data.label), isSubmodel: nodeData(node).nodeType === NODE_TYPES.SUBMODEL })
-  }, [])
-
-  const onDragOver = useCallback((event: DragEvent) => {
-    event.preventDefault()
-    event.dataTransfer.dropEffect = "move"
-  }, [])
-
-  const onDrop = useCallback(
-    (event: DragEvent) => {
-      event.preventDefault()
-      const type = event.dataTransfer.getData("application/reactflow-type")
-      if (!type) return
-
-      let config = {}
-      try {
-        config = JSON.parse(event.dataTransfer.getData("application/reactflow-config") || "{}")
-      } catch { /* ignore */ }
-
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      nodeIdCounter.current += 1
-      const id = `${type}_${nodeIdCounter.current}`
-
-      const newNode: Node = {
-        id,
-        type,
-        position,
-        data: {
-          label: `${labelMap[type] || "Node"} ${nodeIdCounter.current}`,
-          description: "",
-          nodeType: type,
-          config,
-        },
-      }
-
-      setNodes((nds) => [
-        ...nds.map((n) => ({ ...n, selected: false })),
-        { ...newNode, selected: true },
-      ])
-      setSelectedNode(newNode)
-    },
-    [screenToFlowPosition, setNodes],
-  )
+  const {
+    onConnect, onSelectionChange, handleDeleteEdge,
+    onNodeContextMenu, onDragOver, onDrop,
+  } = useEdgeHandlers({
+    graphRef, nodeIdCounter, lastSelectedNodeRef,
+    setNodes, setEdges, setSelectedNode, setContextMenu,
+    fetchPreview, clearTrace, screenToFlowPosition,
+  })
 
   // ---------------------------------------------------------------------------
   // Render
@@ -435,23 +277,27 @@ function FlowEditor() {
       />
 
       <div className="flex-1 flex min-h-0">
-        {paletteOpen ? (
-          <NodePalette onCollapse={() => setPaletteOpen(false)} nodes={nodes} />
-        ) : (
-          <button
-            onClick={() => setPaletteOpen(true)}
-            aria-label="Show node palette"
-            className="shrink-0 flex items-center justify-center w-10 transition-colors"
-            style={{ background: 'var(--chrome)', borderRight: '1px solid var(--chrome-border)' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--chrome-hover)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'var(--chrome)'}
-            title="Show node palette"
-          >
-            <PanelLeftOpen size={16} style={{ color: 'var(--text-muted)' }} />
-          </button>
-        )}
+        <nav aria-label="Node palette">
+          {paletteOpen ? (
+            <ErrorBoundary name="NodePalette">
+              <NodePalette onCollapse={() => setPaletteOpen(false)} nodes={nodes} />
+            </ErrorBoundary>
+          ) : (
+            <button
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Show node palette"
+              className="shrink-0 flex items-center justify-center w-10 h-full transition-colors"
+              style={{ background: 'var(--chrome)', borderRight: '1px solid var(--chrome-border)' }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--chrome-hover)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--chrome)'}
+              title="Show node palette"
+            >
+              <PanelLeftOpen size={16} style={{ color: 'var(--text-muted)' }} />
+            </button>
+          )}
+        </nav>
 
-        <div className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0">
           {syncBanner && (
             <div className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium"
               style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', borderBottom: '1px solid rgba(239, 68, 68, 0.3)' }}>
@@ -459,85 +305,93 @@ function FlowEditor() {
               <button onClick={() => setSyncBanner(null)} className="opacity-60 hover:opacity-100">✕</button>
             </div>
           )}
-          <div className="flex-1 min-h-0 relative">
-            <BreadcrumbBar viewStack={viewStack} onNavigate={handleBreadcrumbNavigate} />
-            <ReactFlow
-              nodes={nodesWithStatus}
-              edges={edgesWithTrace}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onSelectionChange={onSelectionChange}
-              onNodeContextMenu={onNodeContextMenu}
-              onNodeDoubleClick={(_event, node) => {
-                if (nodeData(node).nodeType === NODE_TYPES.SUBMODEL) {
-                  handleDrillIntoSubmodel(node.id)
-                }
-              }}
-              onPaneClick={() => { setContextMenu(null); clearTrace() }}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              nodeTypes={nodeTypes}
-              selectNodesOnDrag={false}
-              selectionMode={SelectionMode.Partial}
-              selectionKeyCode={"Shift"}
-              snapToGrid={snapToGrid}
-              snapGrid={[20, 20]}
-              fitView
-              fitViewOptions={{ padding: 0.8 }}
-              proOptions={{ hideAttribution: true }}
-              defaultEdgeOptions={{
-                type: "default",
-                animated: false,
-                style: { stroke: 'rgba(255,255,255,.12)', strokeWidth: 1.5 },
-                markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.15)' },
-              }}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={snapToGrid ? 20 : 24} size={1} color={snapToGrid ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.06)"} />
-            </ReactFlow>
-          </div>
+          <ErrorBoundary name="Canvas">
+            <div className="flex-1 min-h-0 relative">
+              <BreadcrumbBar viewStack={viewStack} onNavigate={handleBreadcrumbNavigate} />
+              <ReactFlow
+                nodes={nodesWithStatus}
+                edges={edgesWithTrace}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onSelectionChange={onSelectionChange}
+                onNodeContextMenu={onNodeContextMenu}
+                onNodeDoubleClick={(_event, node) => {
+                  if (nodeData(node).nodeType === NODE_TYPES.SUBMODEL) {
+                    handleDrillIntoSubmodel(node.id)
+                  }
+                }}
+                onPaneClick={() => { setContextMenu(null); clearTrace() }}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                nodeTypes={nodeTypes}
+                selectNodesOnDrag={false}
+                selectionMode={SelectionMode.Partial}
+                selectionKeyCode={"Shift"}
+                snapToGrid={snapToGrid}
+                snapGrid={[20, 20]}
+                fitView
+                fitViewOptions={{ padding: 0.8 }}
+                proOptions={{ hideAttribution: true }}
+                defaultEdgeOptions={{
+                  type: "default",
+                  animated: false,
+                  style: { stroke: 'rgba(255,255,255,.12)', strokeWidth: 1.5 },
+                  markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.15)' },
+                }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={snapToGrid ? 20 : 24} size={1} color={snapToGrid ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.06)"} />
+              </ReactFlow>
+            </div>
+          </ErrorBoundary>
 
-          {(() => {
-            const activeNodeId = selectedNode?.id ?? lastSelectedNodeRef.current?.id
-            const optPreview = activeNodeId ? getOptimiserPreview(activeNodeId) : null
-            if (optPreview) {
+          <ErrorBoundary name="DataPreview">
+            {(() => {
+              const activeNodeId = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+              const optPreview = activeNodeId ? getOptimiserPreview(activeNodeId) : null
+              if (optPreview) {
+                return (
+                  <OptimiserPreview
+                    data={optPreview}
+                    onClose={() => {
+                      // Clear from store so the preview dismisses
+                      if (activeNodeId) clearNode(activeNodeId)
+                    }}
+                  />
+                )
+              }
               return (
-                <OptimiserPreview
-                  data={optPreview}
-                  onClose={() => {
-                    // Clear from store so the preview dismisses
-                    if (activeNodeId) clearNode(activeNodeId)
-                  }}
+                <DataPreview
+                  data={previewData}
+                  onClose={() => { setPreviewData(null); clearTrace() }}
+                  onCellClick={handleCellClick}
+                  tracedCell={tracedCell}
                 />
               )
-            }
-            return (
-              <DataPreview
-                data={previewData}
-                onClose={() => { setPreviewData(null); clearTrace() }}
-                onCellClick={handleCellClick}
-                tracedCell={tracedCell}
-              />
-            )
-          })()}
-        </div>
+            })()}
+          </ErrorBoundary>
+        </main>
 
-        {traceResult ? (
-          <TracePanel trace={traceResult} onClose={clearTrace} />
-        ) : (
-          <NodePanel
-            node={(selectedNode ?? lastSelectedNodeRef.current) as unknown as SimpleNode | null}
-            edges={edges as unknown as SimpleEdge[]}
-            allNodes={nodes as unknown as SimpleNode[]}
-            submodels={submodelsSnapshot}
-            preamble={preamble}
-            onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
-            onUpdateNode={onUpdateNode}
-            onDeleteEdge={handleDeleteEdge}
-            onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
-            dimmed={!selectedNode && !!lastSelectedNodeRef.current}
-          />
-        )}
+        <aside aria-label="Node properties">
+          <ErrorBoundary name="NodePanel">
+            {traceResult ? (
+              <TracePanel trace={traceResult} onClose={clearTrace} />
+            ) : (
+              <NodePanel
+                node={(selectedNode ?? lastSelectedNodeRef.current) as unknown as SimpleNode | null}
+                edges={edges as unknown as SimpleEdge[]}
+                allNodes={nodes as unknown as SimpleNode[]}
+                submodels={submodelsSnapshot}
+                preamble={preamble}
+                onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
+                onUpdateNode={onUpdateNode}
+                onDeleteEdge={handleDeleteEdge}
+                onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
+                dimmed={!selectedNode && !!lastSelectedNodeRef.current}
+              />
+            )}
+          </ErrorBoundary>
+        </aside>
       </div>
 
       {contextMenu && (
@@ -581,7 +435,9 @@ function FlowEditor() {
         />
       )}
 
-      <ToastContainer />
+      <ErrorBoundary name="Toast">
+        <ToastContainer />
+      </ErrorBoundary>
     </div>
   )
 }

@@ -930,3 +930,260 @@ class TestApiInputLargeFileGating:
         result = fn()
         df = result.collect()
         assert df["x"].to_list() == [10, 20]
+
+
+# ---------------------------------------------------------------------------
+# Error path tests
+# ---------------------------------------------------------------------------
+
+
+class TestExecUserCodeErrors:
+    """Error paths in _exec_user_code — syntax errors, runtime errors,
+    missing sources, and sandboxing."""
+
+    def test_syntax_error_in_chain_code(self):
+        """Syntax error in chain-style code should raise SyntaxError."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(SyntaxError):
+            _exec_user_code(".filter(pl.col('x') > )", ["df"], (lf,))
+
+    def test_syntax_error_in_assignment_code(self):
+        """Syntax error in assignment-style code should raise SyntaxError."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(SyntaxError):
+            _exec_user_code("df = df.with_columns(", ["df"], (lf,))
+
+    def test_division_by_zero_in_user_code(self):
+        """Runtime ZeroDivisionError should propagate from user code."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(ZeroDivisionError):
+            _exec_user_code("df = 1 / 0", ["df"], (lf,))
+
+    def test_name_error_referencing_undefined_variable(self):
+        """Referencing an undefined variable should raise NameError."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(NameError, match="nonexistent_var"):
+            _exec_user_code("df = nonexistent_var", ["df"], (lf,))
+
+    def test_attribute_error_on_wrong_method(self):
+        """Calling a non-existent method on the DataFrame raises at exec/collect."""
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(AttributeError):
+            _exec_user_code("df = df.totally_fake_method()", ["df"], (lf,))
+
+    def test_empty_code_returns_input_unchanged(self):
+        """Empty string code should pass through the input DataFrame."""
+        lf = pl.DataFrame({"x": [1, 2, 3]}).lazy()
+        # Empty code hits the chain branch since it doesn't start with "."
+        # and doesn't contain "df =", so wraps as df = (\n\n)
+        # Actually, empty code won't start with "." and won't contain "df =",
+        # so it wraps as df = (\n    \n). That's a syntax error.
+        # The hook is that _build_node_fn with empty code returns passthrough.
+        # Let's verify the passthrough path instead:
+        node = _transform_node("t", code="")
+        _, fn, _ = _build_node_fn(node)
+        result = fn(lf).collect()
+        assert result["x"].to_list() == [1, 2, 3]
+
+
+class TestBuildNodeFnErrorPaths:
+    """Error paths in _build_node_fn — missing config, bad source refs, etc."""
+
+    def test_data_source_missing_path(self):
+        """Data source with empty path should fail when the function is called."""
+        node = _source_node("src", "")
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True
+        with pytest.raises(Exception):
+            fn()
+
+    def test_data_source_nonexistent_file(self):
+        """Data source pointing to a file that doesn't exist should raise at collect."""
+        node = _source_node("src", "/nonexistent/path/data.parquet")
+        _, fn, _ = _build_node_fn(node)
+        # scan_parquet is lazy — the error occurs at collect() time
+        with pytest.raises(Exception):
+            fn().collect()
+
+    def test_transform_with_syntax_error_in_code(self):
+        """Transform node whose code has a syntax error should raise when invoked."""
+        node = _transform_node("bad", code=".filter(pl.col('x') >")
+        _, fn, _ = _build_node_fn(node, source_names=["df"])
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(SyntaxError):
+            fn(lf)
+
+    def test_transform_with_runtime_error(self):
+        """Transform node whose code divides by zero should raise at execution."""
+        node = _transform_node("bad", code="df = 1 / 0")
+        _, fn, _ = _build_node_fn(node, source_names=["df"])
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(ZeroDivisionError):
+            fn(lf)
+
+    def test_external_file_missing_path(self, tmp_path):
+        """External file node with non-existent path should fail when invoked."""
+        node = _n({
+            "id": "ext",
+            "data": {
+                "label": "ext",
+                "nodeType": "externalFile",
+                "config": {
+                    "path": str(tmp_path / "does_not_exist.pkl"),
+                    "fileType": "pickle",
+                    "code": "df = obj",
+                },
+            },
+        })
+        _, fn, _ = _build_node_fn(node, source_names=["df"])
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(Exception):
+            fn(lf)
+
+
+class TestExecuteGraphErrorPaths:
+    """Error paths in execute_graph — cascading failures, bad node references,
+    missing sources, and circular dependencies."""
+
+    def test_node_referencing_nonexistent_column(self, tmp_path):
+        """A transform that selects a non-existent column should produce an error result."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1, 2]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("bad", code=".select('no_such_column')"),
+            ],
+            "edges": [_edge("src", "bad")],
+        })
+        results = execute_graph(graph)
+        assert results["bad"].status == "error"
+        assert results["bad"].row_count == 0
+
+    def test_chain_of_errors_propagates(self, tmp_path):
+        """A chain of 3 transforms where the first errors should fail all downstream."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t1", code="df = 1 / 0"),
+                _transform_node("t2"),
+                _transform_node("t3"),
+            ],
+            "edges": [
+                _edge("src", "t1"),
+                _edge("t1", "t2"),
+                _edge("t2", "t3"),
+            ],
+        })
+        results = execute_graph(graph)
+        assert results["src"].status == "ok"
+        assert results["t1"].status == "error"
+        assert results["t2"].status == "error"
+        assert results["t3"].status == "error"
+
+    def test_runtime_error_captured_in_user_code(self, tmp_path):
+        """Runtime error (division by zero) should be captured as error result."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("bad", code="df = 1 / 0"),
+            ],
+            "edges": [_edge("src", "bad")],
+        })
+        results = execute_graph(graph)
+        assert results["bad"].status == "error"
+        assert "division" in results["bad"].error.lower() or "zero" in results["bad"].error.lower()
+
+    def test_syntax_error_captured_in_user_code(self, tmp_path):
+        """Syntax error in user code should be captured as error result."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("bad", code=".filter(pl.col('x') >"),
+            ],
+            "edges": [_edge("src", "bad")],
+        })
+        results = execute_graph(graph)
+        assert results["bad"].status == "error"
+
+    def test_circular_dependency_handled_gracefully(self, tmp_path):
+        """Circular edges should not hang the executor — topo sort drops them.
+
+        Kahn's algorithm naturally ignores nodes involved in cycles (they never
+        reach in-degree 0), so they are simply absent from results.
+        """
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("a"),
+                _transform_node("b"),
+            ],
+            "edges": [
+                _edge("src", "a"),
+                _edge("a", "b"),
+                _edge("b", "a"),  # circular
+            ],
+        })
+        # Should not hang — execute within a timeout
+        results = execute_graph(graph)
+        # Source should succeed; a and b are in a cycle so topo_sort
+        # drops them — they won't appear in results.
+        assert results["src"].status == "ok"
+        # The cycle nodes may or may not be in results depending on
+        # whether the topo sort includes them. If they are present,
+        # they should have error status.
+        if "a" in results:
+            assert results["a"].status == "error"
+        if "b" in results:
+            assert results["b"].status == "error"
+
+    def test_disconnected_nodes_still_execute(self, tmp_path):
+        """Nodes with no edges (disconnected) should still be executed."""
+        p1 = tmp_path / "d1.parquet"
+        p2 = tmp_path / "d2.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p1)
+        pl.DataFrame({"y": [2]}).write_parquet(p2)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src1", str(p1)),
+                _source_node("src2", str(p2)),
+            ],
+            "edges": [],
+        })
+        results = execute_graph(graph)
+        assert results["src1"].status == "ok"
+        assert results["src2"].status == "ok"
+
+    def test_edge_referencing_nonexistent_source_node(self, tmp_path):
+        """Edge with a source that doesn't exist in nodes should not crash."""
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t"),
+            ],
+            "edges": [
+                _edge("src", "t"),
+                _edge("ghost", "t"),  # ghost doesn't exist
+            ],
+        })
+        # Should not crash — the ghost edge is simply ignored by topo sort
+        results = execute_graph(graph)
+        assert results["src"].status == "ok"
+        assert results["t"].status == "ok"

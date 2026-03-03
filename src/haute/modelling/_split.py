@@ -119,20 +119,14 @@ def _temporal_split(
     return train, test
 
 
-def _group_split(
-    df: pl.DataFrame,
-    group_column: str,
-    test_size: float,
-    seed: int,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Split by hashing group values — all rows in a group go to the same set."""
-    if group_column not in df.columns:
-        raise ValueError(f"Group column '{group_column}' not found in DataFrame")
+def _assign_group_split(
+    unique_groups: list, test_size: float, seed: int,
+) -> set[str]:
+    """Deterministically assign groups to the test set via MD5 hashing.
 
-    # Get unique group values and deterministically assign to train/test
-    unique_groups = df[group_column].unique().to_list()
-
-    test_groups: set = set()
+    Returns the set of group values (as strings) assigned to test.
+    """
+    test_groups: set[str] = set()
     for g in sorted(str(v) for v in unique_groups):
         h = hashlib.md5(f"{seed}:{g}".encode()).hexdigest()
         # Use first 8 hex chars as a fraction
@@ -143,6 +137,22 @@ def _group_split(
     # If no groups assigned to test (small dataset), force at least one
     if not test_groups and len(unique_groups) > 1:
         test_groups.add(str(sorted(str(v) for v in unique_groups)[0]))
+
+    return test_groups
+
+
+def _group_split(
+    df: pl.DataFrame,
+    group_column: str,
+    test_size: float,
+    seed: int,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Split by hashing group values — all rows in a group go to the same set."""
+    if group_column not in df.columns:
+        raise ValueError(f"Group column '{group_column}' not found in DataFrame")
+
+    unique_groups = df[group_column].unique().to_list()
+    test_groups = _assign_group_split(unique_groups, test_size, seed)
 
     is_test = pl.col(group_column).cast(pl.Utf8).is_in(list(test_groups))
     train = df.filter(~is_test)
@@ -187,13 +197,6 @@ def _group_mask(
     if group_column not in df.columns:
         raise ValueError(f"Group column '{group_column}' not found in DataFrame")
     unique_groups = df[group_column].unique().to_list()
-    test_groups: set = set()
-    for g in sorted(str(v) for v in unique_groups):
-        h = hashlib.md5(f"{seed}:{g}".encode()).hexdigest()
-        frac = int(h[:8], 16) / 0xFFFFFFFF
-        if frac < test_size:
-            test_groups.add(g)
-    if not test_groups and len(unique_groups) > 1:
-        test_groups.add(str(sorted(str(v) for v in unique_groups)[0]))
+    test_groups = _assign_group_split(unique_groups, test_size, seed)
     is_test = pl.col(group_column).cast(pl.Utf8).is_in(list(test_groups))
     return df.select((~is_test).alias("_is_train"))["_is_train"]

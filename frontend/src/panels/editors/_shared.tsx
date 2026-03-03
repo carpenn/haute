@@ -3,7 +3,7 @@ import { X, Folder, FileText, ChevronLeft, Check, Table2, Loader2, AlertTriangle
 import { getDtypeColor } from "../../utils/dtypeColors"
 import type { ColumnInfo } from "../../types/node"
 import { listFiles } from "../../api/client"
-import useUIStore, { useMlflowStatus } from "../../stores/useUIStore"
+import useSettingsStore, { useMlflowStatus } from "../../stores/useSettingsStore"
 
 // ─── Shared Styles ───────────────────────────────────────────────
 export const INPUT_STYLE = {
@@ -85,8 +85,8 @@ export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | undefined>(currentPath)
-  const getFileListCache = useUIStore((s) => s.getFileListCache)
-  const setFileListCache = useUIStore((s) => s.setFileListCache)
+  const getFileListCache = useSettingsStore((s) => s.getFileListCache)
+  const setFileListCache = useSettingsStore((s) => s.setFileListCache)
 
   useEffect(() => {
     const cacheKey = `${dir}|${extensions || ""}`

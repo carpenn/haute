@@ -22,7 +22,7 @@ vi.mock("../../api/client.ts", () => ({
 
 import { getOptimiserStatus, getTrainStatus } from "../../api/client.ts"
 import useNodeResultsStore from "../../stores/useNodeResultsStore.ts"
-import useUIStore from "../../stores/useUIStore.ts"
+import useToastStore from "../../stores/useToastStore.ts"
 import useBackgroundJobs from "../../hooks/useBackgroundJobs.ts"
 import type { SolveProgress, TrainProgress } from "../../stores/useNodeResultsStore.ts"
 
@@ -38,7 +38,7 @@ function resetStores() {
     trainJobs: {},
     graphVersion: 0,
   })
-  useUIStore.setState({
+  useToastStore.setState({
     toasts: [],
     _toastCounter: 0,
   })
@@ -374,7 +374,7 @@ describe("useBackgroundJobs", () => {
       expect(job?.error).toBe("Infeasible")
 
       // A toast should have been created
-      const toasts = useUIStore.getState().toasts
+      const toasts = useToastStore.getState().toasts
       expect(toasts.length).toBeGreaterThanOrEqual(1)
       expect(toasts.some((t) => t.type === "error")).toBe(true)
     })

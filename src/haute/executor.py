@@ -44,6 +44,13 @@ from haute.schemas import ColumnInfo, NodeResult, SchemaWarning, SinkResponse
 
 logger = get_logger(component="executor")
 
+# ── Default constants ─────────────────────────────────────────────
+_DEFAULT_SCENARIO_MIN = 0.8  # scenario expander lower bound
+_DEFAULT_SCENARIO_MAX = 1.2  # scenario expander upper bound
+_DEFAULT_SCENARIO_STEPS = 21  # number of steps in scenario grid
+_DEFAULT_CHUNK_SIZE = 500_000  # rows per chunk for optimiser apply
+_MAX_PREVIEW_ROWS = 100  # max rows in execute_graph JSON payload
+
 
 def _compile_preamble(preamble: str) -> dict[str, Any]:
     """Compile user-defined preamble code into a namespace dict.
@@ -169,6 +176,565 @@ def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> Gr
     return node.model_copy(update={"data": merged_data})
 
 
+# ---------------------------------------------------------------------------
+# Node builder registry
+# ---------------------------------------------------------------------------
+
+# Type alias for builder functions.
+# Each builder receives the same parameters as _build_node_fn and returns
+# (func_name, callable, is_source).
+NodeBuilder = Callable[
+    [GraphNode, list[str], int | None, dict[str, GraphNode] | None,
+     list[str] | None, dict[str, Any] | None, str | None],
+    tuple[str, Callable, bool],
+]
+
+_NODE_BUILDERS: dict[NodeType, NodeBuilder] = {}
+
+
+def _register(node_type: NodeType) -> Callable[[NodeBuilder], NodeBuilder]:
+    """Decorator to register a node builder for a given NodeType."""
+    def decorator(fn: NodeBuilder) -> NodeBuilder:
+        _NODE_BUILDERS[node_type] = fn
+        return fn
+    return decorator
+
+
+def _passthrough_fn(*dfs: _Frame) -> _Frame:
+    """Shared passthrough: return the first input or an empty LazyFrame."""
+    return dfs[0] if dfs else pl.LazyFrame()
+
+
+@_register(NodeType.API_INPUT)
+def _build_api_input(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    path = config.get("path", "")
+    flat_schema = config.get("flattenSchema")
+
+    if path.endswith((".json", ".jsonl")):
+        def api_source_fn(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
+            from haute._json_flatten import (
+                _json_cache_path,
+                is_large_json,
+                read_json_flat,
+            )
+
+            cache_path = _json_cache_path(_path)
+            if is_large_json(_path) and not cache_path.exists():
+                from pathlib import Path
+
+                size_mb = round(Path(_path).stat().st_size / (1024 * 1024), 1)
+                raise RuntimeError(
+                    f"Data file ({size_mb} MB) has not been cached yet. "
+                    "Click 'Cache as Parquet' on the API Input node to process it."
+                )
+            if cache_path.exists():
+                return pl.scan_parquet(cache_path)
+            return read_json_flat(_path, schema=_schema)
+    else:
+        def api_source_fn() -> _Frame:
+            return read_source(path)
+
+    return func_name, api_source_fn, True
+
+
+@_register(NodeType.DATA_SOURCE)
+def _build_data_source(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    path = config.get("path", "")
+    source_type = config.get("sourceType", "flat_file")
+
+    if source_type == "databricks":
+        table = config.get("table", "")
+
+        def _databricks_source(_table: str = table) -> _Frame:
+            from haute._databricks_io import read_cached_table
+
+            return read_cached_table(_table)
+
+        return func_name, _databricks_source, True
+
+    def source_fn() -> _Frame:
+        return read_source(path)
+
+    return func_name, source_fn, True
+
+
+@_register(NodeType.CONSTANT)
+def _build_constant(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    raw_values = config.get("values", []) or []
+
+    def constant_fn() -> _Frame:
+        data: dict[str, list] = {}
+        for v in raw_values:
+            name = v.get("name", "")
+            if not name:
+                continue
+            val = v.get("value", "")
+            try:
+                data[name] = [float(val)]
+            except (ValueError, TypeError):
+                data[name] = [val]
+        if not data:
+            data = {"constant": [0]}
+        return pl.LazyFrame(data)
+
+    return func_name, constant_fn, True
+
+
+@_register(NodeType.LIVE_SWITCH)
+def _build_live_switch(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
+    input_names = list(source_names)
+    _scenario = scenario or "live"
+
+    def switch_fn(*dfs: _Frame) -> _Frame:
+        # Find the input mapped to the active scenario
+        for inp, scn in input_scenario_map.items():
+            if scn == _scenario:
+                for i, name in enumerate(input_names):
+                    if name == inp:
+                        return dfs[i]
+        # Fallback: first input + log warning
+        if input_scenario_map:
+            logger.warning(
+                "live_switch_unmapped_scenario",
+                scenario=_scenario,
+                mapped_scenarios=list(input_scenario_map.values()),
+                falling_back_to=input_names[0] if input_names else "<none>",
+            )
+        return dfs[0]
+
+    return func_name, switch_fn, False
+
+
+@_register(NodeType.DATA_SINK)
+def _build_data_sink(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(node.data.label)
+    # During normal run/preview, dataSink is a pass-through.
+    # Actual writing happens via execute_sink() on explicit user action.
+    return func_name, _passthrough_fn, False
+
+
+@_register(NodeType.EXTERNAL_FILE)
+def _build_external_file(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    code = config.get("code", "").strip()
+    path = config.get("path", "")
+    file_type = config.get("fileType", "pickle")
+    model_class = config.get("modelClass", "classifier")
+    _src_names = list(source_names)
+
+    _orig_src = list(orig_source_names) if orig_source_names else None
+    _in_map = dict(config.get("inputMapping", {})) or None
+    _preamble_ext = dict(preamble_ns) if preamble_ns else {}
+    if code:
+
+        def external_fn(*dfs: _Frame) -> _Frame:
+            ens = {"obj": load_external_object(path, file_type, model_class)}
+            ens.update(_preamble_ext)
+            return _exec_user_code(
+                code, _src_names, dfs,
+                extra_ns=ens,
+                orig_source_names=_orig_src,
+                input_mapping=_in_map,
+            )
+
+        return func_name, external_fn, False
+    else:
+        return func_name, _passthrough_fn, False
+
+
+@_register(NodeType.OUTPUT)
+def _build_output(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    fields = config.get("fields", []) or []
+
+    def output_fn(*dfs: _Frame) -> _Frame:
+        lf = dfs[0] if dfs else pl.LazyFrame()
+        if fields:
+            lf = lf.select(fields)
+        return lf
+
+    return func_name, output_fn, False
+
+
+@_register(NodeType.BANDING)
+def _build_banding(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    factors = _normalise_banding_factors(config)
+
+    def banding_fn(*dfs: _Frame, _factors: list = list(factors)) -> _Frame:
+        lf = dfs[0] if dfs else pl.LazyFrame()
+        for f in _factors:
+            col = f.get("column", "")
+            out = f.get("outputColumn", "")
+            rules = f.get("rules", []) or []
+            if not col or not out or not rules:
+                continue
+            lf = _apply_banding(
+                lf, col, out, f.get("banding", "continuous"),
+                rules, f.get("default"),
+            )
+        return lf
+
+    return func_name, banding_fn, False
+
+
+@_register(NodeType.RATING_STEP)
+def _build_rating_step(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    tables: list[dict[str, Any]] = config.get("tables", []) or []
+    # GUI config may send None for these fields, so `or` ensures a usable default
+    _rs_operation: str = config.get("operation", "multiply") or "multiply"
+    _rs_combined: str = config.get("combinedColumn", "") or ""
+
+    def rating_fn(
+        *dfs: _Frame,
+        _tables: list = list(tables),
+        _op: str = _rs_operation,
+        _combined: str = _rs_combined,
+    ) -> _Frame:
+        lf = dfs[0] if dfs else pl.LazyFrame()
+        out_cols: list[str] = []
+        for t in _tables:
+            lf = _apply_rating_table(lf, t)
+            oc = t.get("outputColumn", "")
+            if oc:
+                out_cols.append(oc)
+        if _combined and len(out_cols) >= 2:
+            logger.info(
+                "combining_rating_columns",
+                columns=out_cols,
+                operation=_op,
+                output=_combined,
+            )
+            lf = _combine_rating_columns(lf, out_cols, _op, _combined)
+        return lf
+
+    return func_name, rating_fn, False
+
+
+@_register(NodeType.SCENARIO_EXPANDER)
+def _build_scenario_expander(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    _col_name = config.get("column_name", "scenario_value")
+    _min_val = float(config.get("min_value", _DEFAULT_SCENARIO_MIN))
+    _max_val = float(config.get("max_value", _DEFAULT_SCENARIO_MAX))
+    _steps = int(config.get("steps", _DEFAULT_SCENARIO_STEPS))
+    _step_col = config.get("step_column", "scenario_index")
+
+    def scenario_expand_fn(
+        *dfs: _Frame,
+        _cn: str = _col_name,
+        _mn: float = _min_val,
+        _mx: float = _max_val,
+        _st: int = _steps,
+        _sc: str = _step_col,
+    ) -> _Frame:
+        import numpy as np
+
+        lf = dfs[0] if dfs else pl.LazyFrame()
+        vals = np.linspace(_mn, _mx, _st)
+        scenarios = pl.DataFrame({
+            _sc: pl.Series(range(_st), dtype=pl.Int32),
+            # Float32 to match Rust QuoteGrid schema (price-contour ingests f32)
+            _cn: pl.Series(vals.tolist(), dtype=pl.Float32),
+        }).lazy()
+        return lf.join(scenarios, how="cross")
+
+    return func_name, scenario_expand_fn, False
+
+
+@_register(NodeType.OPTIMISER)
+def _build_optimiser(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(node.data.label)
+    # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
+    return func_name, _passthrough_fn, False
+
+
+@_register(NodeType.OPTIMISER_APPLY)
+def _build_optimiser_apply(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    _artifact_path = config.get("artifact_path", "")
+    _version_col = config.get("version_column", "__optimiser_version__")
+    _source_type = config.get("sourceType", "")
+    _run_id = config.get("run_id", "")
+    _registered_model = config.get("registered_model", "")
+    _opt_version = config.get("version", "latest")
+
+    # Determine if we have a valid source configured
+    _has_file = bool(_artifact_path) and _source_type in ("", "file")
+    _has_mlflow = _source_type in ("run", "registered") and (
+        (_source_type == "run" and _run_id)
+        or (_source_type == "registered" and _registered_model)
+    )
+
+    if not _has_file and not _has_mlflow:
+        return func_name, _passthrough_fn, False
+
+    def optimiser_apply_fn(
+        *dfs: _Frame,
+        _path: str = _artifact_path,
+        _vcol: str = _version_col,
+        _st: str = _source_type,
+        _rid: str = _run_id,
+        _rm: str = _registered_model,
+        _ver: str = _opt_version,
+    ) -> _Frame:
+        if _st in ("run", "registered"):
+            from haute._optimiser_io import load_mlflow_optimiser_artifact
+
+            artifact = load_mlflow_optimiser_artifact(
+                source_type=_st,
+                run_id=_rid,
+                registered_model=_rm,
+                version=_ver,
+            )
+        else:
+            from haute._optimiser_io import load_optimiser_artifact
+
+            artifact = load_optimiser_artifact(_path)
+
+        return _dispatch_apply(dfs[0] if dfs else pl.LazyFrame(), artifact, _vcol)
+
+    return func_name, optimiser_apply_fn, False
+
+
+@_register(NodeType.MODELLING)
+def _build_modelling(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(node.data.label)
+    # Pass-through in preview mode. Training happens via /api/modelling/train.
+    return func_name, _passthrough_fn, False
+
+
+@_register(NodeType.MODEL_SCORE)
+def _build_model_score(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    source_type = config.get("sourceType", "")
+    _run_id = config.get("run_id", "")
+    _artifact_path = config.get("artifact_path", "")
+    _registered_model = config.get("registered_model", "")
+    _task = config.get("task", "regression")
+
+    # If no model source configured, passthrough
+    if not source_type or (source_type == "run" and not _run_id) or (
+        source_type == "registered" and not _registered_model
+    ):
+        return func_name, _passthrough_fn, False
+
+    from haute._model_scorer import ModelScorer
+
+    scorer = ModelScorer(
+        source_type=source_type,
+        run_id=_run_id,
+        artifact_path=_artifact_path,
+        registered_model=config.get("registered_model", ""),
+        version=config.get("version", "latest"),
+        task=_task,
+        output_col=config.get("output_column", "prediction"),
+        code=config.get("code", "").strip(),
+        source_names=list(source_names),
+        scenario=scenario or "live",
+        row_limit=row_limit,
+    )
+
+    return func_name, scorer.score, False
+
+
+@_register(NodeType.TRANSFORM)
+def _build_transform(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    config = node.data.config
+    func_name = _sanitize_func_name(node.data.label)
+    code = config.get("code", "").strip()
+    _src_names = list(source_names)
+    _orig_src = list(orig_source_names) if orig_source_names else None
+    _in_map = dict(config.get("inputMapping", {})) or None
+    _preamble = dict(preamble_ns) if preamble_ns else None
+
+    if code:
+
+        def transform_fn(*dfs: _Frame) -> _Frame:
+            return _exec_user_code(
+                code, _src_names, dfs,
+                extra_ns=_preamble,
+                orig_source_names=_orig_src,
+                input_mapping=_in_map,
+            )
+
+        return func_name, transform_fn, False
+    else:
+        return func_name, _passthrough_fn, False
+
+
+# SUBMODEL and SUBMODEL_PORT are pass-through types with no special logic.
+# Register them explicitly so _build_node_fn doesn't raise on unknown types.
+@_register(NodeType.SUBMODEL)
+def _build_submodel(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(node.data.label)
+    return func_name, _passthrough_fn, False
+
+
+@_register(NodeType.SUBMODEL_PORT)
+def _build_submodel_port(
+    node: GraphNode,
+    source_names: list[str],
+    row_limit: int | None,
+    node_map: dict[str, GraphNode] | None,
+    orig_source_names: list[str] | None,
+    preamble_ns: dict[str, Any] | None,
+    scenario: str | None,
+) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(node.data.label)
+    return func_name, _passthrough_fn, False
+
+
+# ---------------------------------------------------------------------------
+# Main dispatcher
+# ---------------------------------------------------------------------------
+
+
 def _build_node_fn(
     node: GraphNode,
     source_names: list[str] | None = None,
@@ -192,491 +758,19 @@ def _build_node_fn(
     if node_map:
         node = resolve_instance_node(node, node_map)
 
-    data = node.data
-    node_type = data.nodeType
-    config = data.config
-    label = data.label
-    func_name = _sanitize_func_name(label)
-
     if source_names is None:
         source_names = []
 
-    if node_type == NodeType.API_INPUT:
-        path = config.get("path", "")
-        flat_schema = config.get("flattenSchema")
-
-        if path.endswith((".json", ".jsonl")):
-            def api_source_fn(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
-                from haute._json_flatten import (
-                    _json_cache_path,
-                    is_large_json,
-                    read_json_flat,
-                )
-
-                cache_path = _json_cache_path(_path)
-                if is_large_json(_path) and not cache_path.exists():
-                    from pathlib import Path
-
-                    size_mb = round(Path(_path).stat().st_size / (1024 * 1024), 1)
-                    raise RuntimeError(
-                        f"Data file ({size_mb} MB) has not been cached yet. "
-                        "Click 'Cache as Parquet' on the API Input node to process it."
-                    )
-                if cache_path.exists():
-                    return pl.scan_parquet(cache_path)
-                return read_json_flat(_path, schema=_schema)
-        else:
-            def api_source_fn() -> _Frame:
-                return read_source(path)
-
-        return func_name, api_source_fn, True
-
-    if node_type == NodeType.DATA_SOURCE:
-        path = config.get("path", "")
-        source_type = config.get("sourceType", "flat_file")
-
-        if source_type == "databricks":
-            table = config.get("table", "")
-
-            def _databricks_source(_table: str = table) -> _Frame:
-                from haute._databricks_io import read_cached_table
-
-                return read_cached_table(_table)
-
-            return func_name, _databricks_source, True
-
-        def source_fn() -> _Frame:
-            return read_source(path)
-
-        return func_name, source_fn, True
-
-    if node_type == NodeType.CONSTANT:
-        raw_values = config.get("values", []) or []
-
-        def constant_fn() -> _Frame:
-            data: dict[str, list] = {}
-            for v in raw_values:
-                name = v.get("name", "")
-                if not name:
-                    continue
-                val = v.get("value", "")
-                try:
-                    data[name] = [float(val)]
-                except (ValueError, TypeError):
-                    data[name] = [val]
-            if not data:
-                data = {"constant": [0]}
-            return pl.LazyFrame(data)
-
-        return func_name, constant_fn, True
-
-    elif node_type == NodeType.LIVE_SWITCH:
-        input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
-        input_names = list(source_names)
-        _scenario = scenario or "live"
-
-        def switch_fn(*dfs: _Frame) -> _Frame:
-            # Find the input mapped to the active scenario
-            for inp, scn in input_scenario_map.items():
-                if scn == _scenario:
-                    for i, name in enumerate(input_names):
-                        if name == inp:
-                            return dfs[i]
-            # Fallback: first input + log warning
-            if input_scenario_map:
-                logger.warning(
-                    "live_switch_unmapped_scenario",
-                    scenario=_scenario,
-                    mapped_scenarios=list(input_scenario_map.values()),
-                    falling_back_to=input_names[0] if input_names else "<none>",
-                )
-            return dfs[0]
-
-        return func_name, switch_fn, False
-
-    elif node_type == NodeType.DATA_SINK:
-        # During normal run/preview, dataSink is a pass-through.
-        # Actual writing happens via execute_sink() on explicit user action.
-        def sink_passthrough(*dfs: _Frame) -> _Frame:
-            return dfs[0] if dfs else pl.LazyFrame()
-
-        return func_name, sink_passthrough, False
-
-    elif node_type == NodeType.EXTERNAL_FILE:
-        code = config.get("code", "").strip()
-        path = config.get("path", "")
-        file_type = config.get("fileType", "pickle")
-        model_class = config.get("modelClass", "classifier")
-        _src_names = list(source_names)
-
-        _orig_src = list(orig_source_names) if orig_source_names else None
-        _in_map = dict(config.get("inputMapping", {})) or None
-        _preamble_ext = dict(preamble_ns) if preamble_ns else {}
-        if code:
-
-            def external_fn(*dfs: _Frame) -> _Frame:
-                ens = {"obj": load_external_object(path, file_type, model_class)}
-                ens.update(_preamble_ext)
-                return _exec_user_code(
-                    code, _src_names, dfs,
-                    extra_ns=ens,
-                    orig_source_names=_orig_src,
-                    input_mapping=_in_map,
-                )
-
-            return func_name, external_fn, False
-        else:
-
-            def external_passthrough(*dfs: _Frame) -> _Frame:
-                return dfs[0] if dfs else pl.LazyFrame()
-
-            return func_name, external_passthrough, False
-
-    elif node_type == NodeType.OUTPUT:
-        fields = config.get("fields", []) or []
-
-        def output_fn(*dfs: _Frame) -> _Frame:
-            lf = dfs[0] if dfs else pl.LazyFrame()
-            if fields:
-                lf = lf.select(fields)
-            return lf
-
-        return func_name, output_fn, False
-
-    elif node_type == NodeType.BANDING:
-        factors = _normalise_banding_factors(config)
-
-        def banding_fn(*dfs: _Frame, _factors: list = list(factors)) -> _Frame:
-            lf = dfs[0] if dfs else pl.LazyFrame()
-            for f in _factors:
-                col = f.get("column", "")
-                out = f.get("outputColumn", "")
-                rules = f.get("rules", []) or []
-                if not col or not out or not rules:
-                    continue
-                lf = _apply_banding(
-                    lf, col, out, f.get("banding", "continuous"),
-                    rules, f.get("default"),
-                )
-            return lf
-
-        return func_name, banding_fn, False
-
-    elif node_type == NodeType.RATING_STEP:
-        tables: list[dict[str, Any]] = config.get("tables", []) or []
-        # GUI config may send None for these fields, so `or` ensures a usable default
-        _rs_operation: str = config.get("operation", "multiply") or "multiply"
-        _rs_combined: str = config.get("combinedColumn", "") or ""
-
-        def rating_fn(
-            *dfs: _Frame,
-            _tables: list = list(tables),
-            _op: str = _rs_operation,
-            _combined: str = _rs_combined,
-        ) -> _Frame:
-            lf = dfs[0] if dfs else pl.LazyFrame()
-            out_cols: list[str] = []
-            for t in _tables:
-                lf = _apply_rating_table(lf, t)
-                oc = t.get("outputColumn", "")
-                if oc:
-                    out_cols.append(oc)
-            if _combined and len(out_cols) >= 2:
-                logger.info(
-                    "combining_rating_columns",
-                    columns=out_cols,
-                    operation=_op,
-                    output=_combined,
-                )
-                lf = _combine_rating_columns(lf, out_cols, _op, _combined)
-            return lf
-
-        return func_name, rating_fn, False
-
-    elif node_type == NodeType.SCENARIO_EXPANDER:
-        _col_name = config.get("column_name", "scenario_value")
-        _min_val = float(config.get("min_value", 0.8))
-        _max_val = float(config.get("max_value", 1.2))
-        _steps = int(config.get("steps", 21))
-        _step_col = config.get("step_column", "scenario_index")
-        def scenario_expand_fn(
-            *dfs: _Frame,
-            _cn: str = _col_name,
-            _mn: float = _min_val,
-            _mx: float = _max_val,
-            _st: int = _steps,
-            _sc: str = _step_col,
-        ) -> _Frame:
-            import numpy as np
-
-            lf = dfs[0] if dfs else pl.LazyFrame()
-            vals = np.linspace(_mn, _mx, _st)
-            scenarios = pl.DataFrame({
-                _sc: pl.Series(range(_st), dtype=pl.Int32),
-                # Float32 to match Rust QuoteGrid schema (price-contour ingests f32)
-                _cn: pl.Series(vals.tolist(), dtype=pl.Float32),
-            }).lazy()
-            return lf.join(scenarios, how="cross")
-
-        return func_name, scenario_expand_fn, False
-
-    elif node_type == NodeType.OPTIMISER:
-        # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
-        def optimiser_passthrough(*dfs: _Frame) -> _Frame:
-            return dfs[0] if dfs else pl.LazyFrame()
-
-        return func_name, optimiser_passthrough, False
-
-    elif node_type == NodeType.OPTIMISER_APPLY:
-        _artifact_path = config.get("artifact_path", "")
-        _version_col = config.get("version_column", "__optimiser_version__")
-        _source_type = config.get("sourceType", "")
-        _run_id = config.get("run_id", "")
-        _registered_model = config.get("registered_model", "")
-        _opt_version = config.get("version", "latest")
-
-        # Determine if we have a valid source configured
-        _has_file = bool(_artifact_path) and _source_type in ("", "file")
-        _has_mlflow = _source_type in ("run", "registered") and (
-            (_source_type == "run" and _run_id)
-            or (_source_type == "registered" and _registered_model)
+    builder = _NODE_BUILDERS.get(node.data.nodeType)
+    if builder is not None:
+        return builder(
+            node, source_names, row_limit, node_map,
+            orig_source_names, preamble_ns, scenario,
         )
 
-        if not _has_file and not _has_mlflow:
-
-            def optimiser_apply_passthrough(*dfs: _Frame) -> _Frame:
-                return dfs[0] if dfs else pl.LazyFrame()
-
-            return func_name, optimiser_apply_passthrough, False
-
-        def optimiser_apply_fn(
-            *dfs: _Frame,
-            _path: str = _artifact_path,
-            _vcol: str = _version_col,
-            _st: str = _source_type,
-            _rid: str = _run_id,
-            _rm: str = _registered_model,
-            _ver: str = _opt_version,
-        ) -> _Frame:
-            if _st in ("run", "registered"):
-                from haute._optimiser_io import load_mlflow_optimiser_artifact
-
-                artifact = load_mlflow_optimiser_artifact(
-                    source_type=_st,
-                    run_id=_rid,
-                    registered_model=_rm,
-                    version=_ver,
-                )
-            else:
-                from haute._optimiser_io import load_optimiser_artifact
-
-                artifact = load_optimiser_artifact(_path)
-
-            return _dispatch_apply(dfs[0] if dfs else pl.LazyFrame(), artifact, _vcol)
-
-        return func_name, optimiser_apply_fn, False
-
-    elif node_type == NodeType.MODELLING:
-        # Pass-through in preview mode. Training happens via /api/modelling/train.
-        def modelling_passthrough(*dfs: _Frame) -> _Frame:
-            return dfs[0] if dfs else pl.LazyFrame()
-
-        return func_name, modelling_passthrough, False
-
-    elif node_type == NodeType.MODEL_SCORE:
-        source_type = config.get("sourceType", "")
-        _run_id = config.get("run_id", "")
-        _artifact_path = config.get("artifact_path", "")
-        _registered_model = config.get("registered_model", "")
-        _version = config.get("version", "latest")
-        _task = config.get("task", "regression")
-        _output_col = config.get("output_column", "prediction")
-        code = config.get("code", "").strip()
-        _src_names = list(source_names)
-
-        # If no model source configured, passthrough
-        if not source_type or (source_type == "run" and not _run_id) or (
-            source_type == "registered" and not _registered_model
-        ):
-
-            def model_score_passthrough(*dfs: _Frame) -> _Frame:
-                return dfs[0] if dfs else pl.LazyFrame()
-
-            return func_name, model_score_passthrough, False
-
-        # Import shared scoring helper (avoids duplication with deploy scorer)
-        from haute._mlflow_io import _prepare_predict_frame
-
-        def _sink_to_temp(lf: pl.LazyFrame) -> str:
-            """Sink a LazyFrame to a temp parquet file via streaming."""
-            import os
-            import tempfile
-
-            fd, path = tempfile.mkstemp(
-                suffix=".parquet", prefix="haute_score_in_",
-            )
-            os.close(fd)
-            try:
-                lf.sink_parquet(path)
-            except Exception:
-                lf.collect(engine="streaming").write_parquet(path)
-            return path
-
-        _score_batch = 500_000
-
-        def _batch_score_to_parquet(
-            model: Any,
-            input_path: str,
-            features: list[str],
-            output_col: str,
-            task: str,
-        ) -> str:
-            """Score a parquet file in batches, return path to scored output."""
-            import os
-            import tempfile
-
-            import pyarrow.parquet as pq
-
-            fd, out_path = tempfile.mkstemp(
-                suffix=".parquet", prefix="haute_score_out_",
-            )
-            os.close(fd)
-
-            pf = pq.ParquetFile(input_path)
-            writer = None
-            want_proba = (
-                task == "classification"
-                and hasattr(model, "predict_proba")
-            )
-
-            try:
-                for batch in pf.iter_batches(
-                    batch_size=_score_batch,
-                ):
-                    chunk = pl.from_arrow(batch)
-                    x_data = _prepare_predict_frame(
-                        model, chunk, features,
-                    )
-                    preds = model.predict(x_data).flatten()
-                    chunk = chunk.with_columns(
-                        pl.Series(output_col, preds),
-                    )
-                    if want_proba:
-                        probas = model.predict_proba(x_data)
-                        if probas.ndim == 2:
-                            probas = probas[:, 1]
-                        chunk = chunk.with_columns(
-                            pl.Series(
-                                f"{output_col}_proba", probas,
-                            ),
-                        )
-                    table = chunk.to_arrow()
-                    if writer is None:
-                        writer = pq.ParquetWriter(
-                            out_path, table.schema,
-                        )
-                    writer.write_table(table)
-                    del chunk, x_data, table
-            finally:
-                if writer is not None:
-                    writer.close()
-            return out_path
-
-        def _score_eager(
-            model: Any, lf: pl.LazyFrame, features: list[str],
-        ) -> pl.LazyFrame:
-            """Collect and score in-memory — delegates to shared helper."""
-            from haute._mlflow_io import _score_eager as score_eager_
-            return score_eager_(model, lf, features, _output_col, _task)
-
-        def _score_batched(
-            model: Any, lf: pl.LazyFrame, features: list[str],
-        ) -> pl.LazyFrame:
-            """Sink → batch score → lazy scan — low-memory path."""
-            import atexit
-            import os
-
-            input_path = _sink_to_temp(lf)
-            scored_path = _batch_score_to_parquet(
-                model, input_path, features,
-                _output_col, _task,
-            )
-            atexit.register(
-                lambda p=scored_path: os.unlink(p)
-                if os.path.exists(p) else None,
-            )
-            os.unlink(input_path)
-            return pl.scan_parquet(scored_path)
-
-        _scenario = scenario or "live"
-        _row_limit = row_limit
-
-        def model_score_fn(*dfs: _Frame) -> _Frame:
-            from haute._mlflow_io import load_mlflow_model
-
-            model = load_mlflow_model(
-                source_type=source_type,
-                run_id=_run_id,
-                artifact_path=_artifact_path,
-                registered_model=_registered_model,
-                version=_version,
-                task=_task,
-            )
-            lf = dfs[0] if dfs else pl.LazyFrame()
-            available_cols = set(lf.collect_schema().names())
-            features = [
-                f for f in model.feature_names_
-                if f in available_cols
-            ]
-
-            # Eager path: "live" scenario or row-limited preview/trace
-            # (data is small, no need for disk round-trip).
-            # Batched path: non-live production scoring (large data, low memory).
-            if _scenario == "live" or _row_limit:
-                result_lf = _score_eager(model, lf, features)
-            else:
-                result_lf = _score_batched(model, lf, features)
-
-            if code:
-                result_lf = _exec_user_code(
-                    code, _src_names, (result_lf,),
-                    extra_ns={"model": model},
-                )
-            return result_lf
-
-        return func_name, model_score_fn, False
-
-    elif node_type == NodeType.TRANSFORM:
-        code = config.get("code", "").strip()
-        _src_names = list(source_names)
-        _orig_src = list(orig_source_names) if orig_source_names else None
-        _in_map = dict(config.get("inputMapping", {})) or None
-        _preamble = dict(preamble_ns) if preamble_ns else None
-
-        if code:
-
-            def transform_fn(*dfs: _Frame) -> _Frame:
-                return _exec_user_code(
-                    code, _src_names, dfs,
-                    extra_ns=_preamble,
-                    orig_source_names=_orig_src,
-                    input_mapping=_in_map,
-                )
-
-            return func_name, transform_fn, False
-        else:
-
-            def passthrough(*dfs: _Frame) -> _Frame:
-                return dfs[0] if dfs else pl.LazyFrame()
-
-            return func_name, passthrough, False
-
-    else:
-
-        def default_passthrough(*dfs: _Frame) -> _Frame:
-            return dfs[0] if dfs else pl.LazyFrame()
-
-        return func_name, default_passthrough, False
+    # Fallback for any unrecognised node type: pass-through
+    func_name = _sanitize_func_name(node.data.label)
+    return func_name, _passthrough_fn, False
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +825,7 @@ def _apply_online(
         quote_id=qid_col,
         scenario_index=step_col,
         scenario_value=mult_col,
-        chunk_size=artifact.get("chunk_size", 500_000),
+        chunk_size=artifact.get("chunk_size", _DEFAULT_CHUNK_SIZE),
     )
     result = applier.apply(df_eager)
     result_df = result.dataframe
@@ -825,11 +919,14 @@ class _PreviewCache:
 
     def invalidate(self) -> None:
         with self._lock:
+            had_data = bool(self.eager_outputs)
             self.fingerprint = None
             self.eager_outputs.clear()
             self.errors.clear()
             self.timings.clear()
             self.memory_bytes.clear()
+            if had_data:
+                logger.debug("preview_cache_invalidated")
 
 
 _preview_cache = _PreviewCache()
@@ -839,7 +936,7 @@ def execute_graph(
     graph: PipelineGraph,
     target_node_id: str | None = None,
     row_limit: int | None = None,
-    max_preview_rows: int = 100,
+    max_preview_rows: int = _MAX_PREVIEW_ROWS,
     scenario: str = "live",
 ) -> dict[str, NodeResult]:
     """Execute a graph and return per-node results.
@@ -875,12 +972,24 @@ def execute_graph(
         if fp == _preview_cache.fingerprint and _preview_cache.eager_outputs:
             cached = _preview_cache.eager_outputs
             if target_node_id is None or target_node_id in cached:
+                logger.debug(
+                    "preview_cache_hit",
+                    fingerprint=fp[:8],
+                    target=target_node_id,
+                    cached_nodes=len(cached),
+                )
                 eager_outputs = cached
                 order = _preview_cache.order
                 errors = _preview_cache.errors
                 timings = _preview_cache.timings
                 memory_bytes = _preview_cache.memory_bytes
             else:
+                logger.debug(
+                    "preview_cache_extend",
+                    fingerprint=fp[:8],
+                    target=target_node_id,
+                    cached_nodes=len(cached),
+                )
                 raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
                     graph, target_node_id, row_limit, scenario=scenario,
                 )
@@ -899,6 +1008,12 @@ def execute_graph(
                 memory_bytes = _preview_cache.memory_bytes
                 order = _preview_cache.order
         else:
+            logger.debug(
+                "preview_cache_miss",
+                fingerprint=fp[:8],
+                target=target_node_id,
+                prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
+            )
             raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
                 graph, target_node_id, row_limit, scenario=scenario,
             )
@@ -1057,7 +1172,7 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
             lf.sink_csv(out)
         else:
             lf.sink_parquet(out)
-    except Exception:
+    except (pl.exceptions.ComputeError, pl.exceptions.InvalidOperationError):
         # Fallback: collect with streaming hint, then write eagerly.
         logger.info("sink_streaming_fallback", path=path, format=fmt)
         df = lf.collect(engine="streaming")

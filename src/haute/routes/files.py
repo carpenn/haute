@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
+from haute.routes._helpers import validate_safe_path
 from haute.schemas import (
     BrowseFilesResponse,
     FileItem,
@@ -25,10 +26,7 @@ async def browse_files(
 ) -> BrowseFilesResponse:
     """Browse files on disk for the file picker UI."""
     base = Path.cwd()
-    target = (base / dir).resolve()
-
-    if not str(target).startswith(str(base)):
-        raise HTTPException(status_code=403, detail="Cannot browse outside project root")
+    target = validate_safe_path(base, dir)
     if not target.is_dir():
         raise HTTPException(status_code=404, detail=f"Directory not found: {dir}")
 
@@ -63,10 +61,7 @@ async def get_schema(path: str) -> SchemaResponse:
     import polars as pl
 
     base = Path.cwd()
-    target = (base / path).resolve()
-
-    if not str(target).startswith(str(base)):
-        raise HTTPException(status_code=403, detail="Cannot read outside project root")
+    target = validate_safe_path(base, path)
     if not target.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
 

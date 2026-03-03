@@ -16,6 +16,9 @@ logger = get_logger(component="server.json_cache")
 
 router = APIRouter(prefix="/api/json-cache", tags=["json-cache"])
 
+# ── Timeout constant (seconds) ───────────────────────────────────
+_BUILD_TIMEOUT = 1800.0  # 30 minutes — JSON flatten + parquet write for large files
+
 
 @router.post("/build", response_model=JsonCacheBuildResponse)
 async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildResponse:
@@ -31,11 +34,16 @@ async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildRespons
                 data_path=body.path,
                 config_path=body.config_path,
             ),
-            timeout=1800.0,
+            timeout=_BUILD_TIMEOUT,
         )
         return JsonCacheBuildResponse.model_validate(result)
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="JSON cache build timed out (30 min limit)")
+        raise HTTPException(
+            status_code=504,
+            detail=f"JSON cache build timed out ({_BUILD_TIMEOUT / 60:.0f} min limit)",
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

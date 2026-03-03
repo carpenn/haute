@@ -6,6 +6,199 @@ project name, deploy target, and CI provider.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+# ── Per-target configuration ─────────────────────────────────────────
+#
+# Central registry of every deploy target.  Each entry carries:
+#   label        – human-readable name for .env.example header
+#   env_body     – literal body appended after the .env.example header
+#   secrets      – ordered list of CI secret / env-var names
+#   toml_section – callable(name) -> TOML string for [deploy.*] block
+
+_TargetConfig = dict[str, str | list[str] | Callable[[str], str]]
+
+TARGETS: dict[str, _TargetConfig] = {
+    "databricks": {
+        "label": "Databricks",
+        "env_body": """
+# General credentials — data warehouse + MLflow tracking
+DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
+DATABRICKS_TOKEN=your_databricks_token_here
+
+# Production serving endpoint credentials
+DATABRICKS_RATING_HOST=https://adb-1234567890123456.12.azuredatabricks.net
+DATABRICKS_RATING_TOKEN=your_databricks_token_here
+""",
+        "secrets": [
+            "DATABRICKS_RATING_HOST",
+            "DATABRICKS_RATING_TOKEN",
+        ],
+        "toml_section": lambda name: f"""\
+[deploy.databricks]
+experiment_name = "/Shared/haute/{name}"
+catalog = "main"
+schema = "pricing"
+serving_workload_size = "Small"
+serving_scale_to_zero = true
+""",
+    },
+    "container": {
+        "label": "Container registry",
+        "env_body": """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+""",
+        "secrets": [
+            "DOCKER_USERNAME",
+            "DOCKER_PASSWORD",
+        ],
+        "toml_section": lambda name: """\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+""",
+    },
+    "azure-container-apps": {
+        "label": "Azure Container Apps",
+        "env_body": """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+AZURE_SUBSCRIPTION_ID=
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+""",
+        "secrets": [
+            "DOCKER_USERNAME",
+            "DOCKER_PASSWORD",
+            "AZURE_SUBSCRIPTION_ID",
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+        ],
+        "toml_section": lambda name: f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.azure-container-apps]
+resource_group = ""
+container_app_name = "{name}"
+environment_name = ""
+""",
+    },
+    "aws-ecs": {
+        "label": "AWS ECS",
+        "env_body": """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=eu-west-1
+""",
+        "secrets": [
+            "DOCKER_USERNAME",
+            "DOCKER_PASSWORD",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_DEFAULT_REGION",
+        ],
+        "toml_section": lambda name: f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.aws-ecs]
+region = "eu-west-1"
+cluster = ""
+service = "{name}"
+""",
+    },
+    "gcp-run": {
+        "label": "GCP Cloud Run",
+        "env_body": """
+DOCKER_USERNAME=
+DOCKER_PASSWORD=
+GCP_PROJECT_ID=
+GCP_SERVICE_ACCOUNT_KEY=
+""",
+        "secrets": [
+            "DOCKER_USERNAME",
+            "DOCKER_PASSWORD",
+            "GCP_PROJECT_ID",
+            "GCP_SERVICE_ACCOUNT_KEY",
+        ],
+        "toml_section": lambda name: f"""\
+[deploy.container]
+registry = ""
+port = 8080
+base_image = "python:3.11-slim"
+
+[deploy.gcp-run]
+project = ""
+region = "europe-west1"
+service = "{name}"
+""",
+    },
+    "sagemaker": {
+        "label": "AWS SageMaker",
+        "env_body": """
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=eu-west-1
+SAGEMAKER_ROLE_ARN=arn:aws:iam::123456789012:role/SageMakerRole
+""",
+        "secrets": [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_DEFAULT_REGION",
+            "SAGEMAKER_ROLE_ARN",
+        ],
+        "toml_section": lambda name: """\
+[deploy.sagemaker]
+region = "eu-west-1"
+instance_type = "ml.m5.large"
+initial_instance_count = 1
+""",
+    },
+    "azure-ml": {
+        "label": "Azure ML",
+        "env_body": """
+AZURE_SUBSCRIPTION_ID=
+AZURE_TENANT_ID=
+AZURE_CLIENT_ID=
+AZURE_CLIENT_SECRET=
+""",
+        "secrets": [
+            "AZURE_SUBSCRIPTION_ID",
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+        ],
+        "toml_section": lambda name: """\
+[deploy.azure-ml]
+resource_group = ""
+workspace_name = ""
+instance_type = "Standard_DS3_v2"
+instance_count = 1
+""",
+    },
+}
+
+
+def _get_target(target: str) -> _TargetConfig:
+    """Look up *target* in :data:`TARGETS`, raising on unknown names."""
+    try:
+        return TARGETS[target]
+    except KeyError:
+        msg = f"Unknown target: {target}"
+        raise ValueError(msg) from None
+
+
 # ── haute.toml ────────────────────────────────────────────────────────
 
 
@@ -46,165 +239,74 @@ endpoint_suffix = "-staging"
 
 
 def _target_section(name: str, target: str) -> str:
-    if target == "databricks":
-        return f"""\
-[deploy.databricks]
-experiment_name = "/Shared/haute/{name}"
-catalog = "main"
-schema = "pricing"
-serving_workload_size = "Small"
-serving_scale_to_zero = true
-"""
-    if target == "container":
-        return """\
-[deploy.container]
-registry = ""
-port = 8080
-base_image = "python:3.11-slim"
-"""
-    if target == "azure-container-apps":
-        return f"""\
-[deploy.container]
-registry = ""
-port = 8080
-base_image = "python:3.11-slim"
-
-[deploy.azure-container-apps]
-resource_group = ""
-container_app_name = "{name}"
-environment_name = ""
-"""
-    if target == "aws-ecs":
-        return f"""\
-[deploy.container]
-registry = ""
-port = 8080
-base_image = "python:3.11-slim"
-
-[deploy.aws-ecs]
-region = "eu-west-1"
-cluster = ""
-service = "{name}"
-"""
-    if target == "gcp-run":
-        return f"""\
-[deploy.container]
-registry = ""
-port = 8080
-base_image = "python:3.11-slim"
-
-[deploy.gcp-run]
-project = ""
-region = "europe-west1"
-service = "{name}"
-"""
-    if target == "sagemaker":
-        return """\
-[deploy.sagemaker]
-region = "eu-west-1"
-instance_type = "ml.m5.large"
-initial_instance_count = 1
-"""
-    if target == "azure-ml":
-        return """\
-[deploy.azure-ml]
-resource_group = ""
-workspace_name = ""
-instance_type = "Standard_DS3_v2"
-instance_count = 1
-"""
-    msg = f"Unknown target: {target}"
-    raise ValueError(msg)
+    cfg = _get_target(target)
+    fn = cfg["toml_section"]
+    assert callable(fn)
+    return fn(name)
 
 
 # ── .env.example ──────────────────────────────────────────────────────
 
-
-def env_example(target: str) -> str:
-    """Generate ``.env.example`` with only the credentials for the chosen target."""
-    header = """\
+_ENV_EXAMPLE_HEADER = """\
 # Haute - {label} credentials
 # Copy this file to .env and fill in your values.
 # .env is gitignored and will never be committed.
 #
 #   cp .env.example .env
 """
-    if target == "databricks":
-        return (
-            header.format(label="Databricks")
-            + """
-# General credentials — data warehouse + MLflow tracking
-DATABRICKS_HOST=https://adb-1234567890123456.12.azuredatabricks.net
-DATABRICKS_TOKEN=your_databricks_token_here
 
-# Production serving endpoint credentials
-DATABRICKS_RATING_HOST=https://adb-1234567890123456.12.azuredatabricks.net
-DATABRICKS_RATING_TOKEN=your_databricks_token_here
-"""
-        )
-    if target == "sagemaker":
-        return (
-            header.format(label="AWS SageMaker")
-            + """
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_DEFAULT_REGION=eu-west-1
-SAGEMAKER_ROLE_ARN=arn:aws:iam::123456789012:role/SageMakerRole
-"""
-        )
-    if target == "azure-ml":
-        return (
-            header.format(label="Azure ML")
-            + """
-AZURE_SUBSCRIPTION_ID=
-AZURE_TENANT_ID=
-AZURE_CLIENT_ID=
-AZURE_CLIENT_SECRET=
-"""
-        )
-    if target == "container":
-        return (
-            header.format(label="Container registry")
-            + """
-DOCKER_USERNAME=
-DOCKER_PASSWORD=
-"""
-        )
-    if target == "azure-container-apps":
-        return (
-            header.format(label="Azure Container Apps")
-            + """
-DOCKER_USERNAME=
-DOCKER_PASSWORD=
-AZURE_SUBSCRIPTION_ID=
-AZURE_TENANT_ID=
-AZURE_CLIENT_ID=
-AZURE_CLIENT_SECRET=
-"""
-        )
-    if target == "aws-ecs":
-        return (
-            header.format(label="AWS ECS")
-            + """
-DOCKER_USERNAME=
-DOCKER_PASSWORD=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_DEFAULT_REGION=eu-west-1
-"""
-        )
-    if target == "gcp-run":
-        return (
-            header.format(label="GCP Cloud Run")
-            + """
-DOCKER_USERNAME=
-DOCKER_PASSWORD=
-GCP_PROJECT_ID=
-GCP_SERVICE_ACCOUNT_KEY=
-"""
-        )
-    msg = f"Unknown target: {target}"
-    raise ValueError(msg)
+
+def env_example(target: str) -> str:
+    """Generate ``.env.example`` with only the credentials for the chosen target."""
+    cfg = _get_target(target)
+    label = cfg["label"]
+    assert isinstance(label, str)
+    env_body = cfg["env_body"]
+    assert isinstance(env_body, str)
+    return _ENV_EXAMPLE_HEADER.format(label=label) + env_body
+
+
+# ── CI secrets helpers ────────────────────────────────────────────────
+
+
+def _format_secrets(target: str, indent: str, fmt: str) -> str:
+    """Build an indented env-var block for any CI provider.
+
+    *fmt* is a format string with ``{key}`` placeholder, e.g.
+    ``"{key}: ${{{{ secrets.{key} }}}}"`` for GitHub Actions.
+    """
+    cfg = _get_target(target)
+    secrets = cfg["secrets"]
+    assert isinstance(secrets, list)
+    lines = [f"{indent}{fmt.format(key=s)}" for s in secrets]
+    return "\n".join(lines)
+
+
+def _github_secrets_env(target: str) -> str:
+    """Return the env: block for GitHub Actions secrets, indented for YAML."""
+    return _format_secrets(
+        target,
+        indent="          ",
+        fmt="{key}: ${{{{ secrets.{key} }}}}",
+    )
+
+
+def _gitlab_secrets_env(target: str) -> str:
+    """Return the variables: block for GitLab CI, indented for YAML."""
+    return _format_secrets(
+        target,
+        indent="    ",
+        fmt="{key}: ${key}",
+    )
+
+
+def _azure_devops_secrets_env(target: str) -> str:
+    """Return the env: block for Azure DevOps pipeline secrets, indented for YAML."""
+    return _format_secrets(
+        target,
+        indent="              ",
+        fmt="{key}: $({key})",
+    )
 
 
 # ── GitHub Actions: ci.yml ────────────────────────────────────────────
@@ -463,61 +565,6 @@ jobs:
 """
 
 
-def _github_secrets_env(target: str) -> str:
-    """Return the env: block for GitHub Actions secrets, indented for YAML."""
-    indent = "          "
-    if target == "databricks":
-        return (
-            f"{indent}DATABRICKS_RATING_HOST: ${{{{ secrets.DATABRICKS_RATING_HOST }}}}\n"
-            f"{indent}DATABRICKS_RATING_TOKEN: ${{{{ secrets.DATABRICKS_RATING_TOKEN }}}}"
-        )
-    if target == "sagemaker":
-        return (
-            f"{indent}AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}\n"
-            f"{indent}AWS_DEFAULT_REGION: ${{{{ secrets.AWS_DEFAULT_REGION }}}}\n"
-            f"{indent}SAGEMAKER_ROLE_ARN: ${{{{ secrets.SAGEMAKER_ROLE_ARN }}}}"
-        )
-    if target == "azure-ml":
-        return (
-            f"{indent}AZURE_SUBSCRIPTION_ID: ${{{{ secrets.AZURE_SUBSCRIPTION_ID }}}}\n"
-            f"{indent}AZURE_TENANT_ID: ${{{{ secrets.AZURE_TENANT_ID }}}}\n"
-            f"{indent}AZURE_CLIENT_ID: ${{{{ secrets.AZURE_CLIENT_ID }}}}\n"
-            f"{indent}AZURE_CLIENT_SECRET: ${{{{ secrets.AZURE_CLIENT_SECRET }}}}"
-        )
-    if target == "container":
-        return (
-            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
-            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}"
-        )
-    if target == "azure-container-apps":
-        return (
-            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
-            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
-            f"{indent}AZURE_SUBSCRIPTION_ID: ${{{{ secrets.AZURE_SUBSCRIPTION_ID }}}}\n"
-            f"{indent}AZURE_TENANT_ID: ${{{{ secrets.AZURE_TENANT_ID }}}}\n"
-            f"{indent}AZURE_CLIENT_ID: ${{{{ secrets.AZURE_CLIENT_ID }}}}\n"
-            f"{indent}AZURE_CLIENT_SECRET: ${{{{ secrets.AZURE_CLIENT_SECRET }}}}"
-        )
-    if target == "aws-ecs":
-        return (
-            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
-            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
-            f"{indent}AWS_ACCESS_KEY_ID: ${{{{ secrets.AWS_ACCESS_KEY_ID }}}}\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: ${{{{ secrets.AWS_SECRET_ACCESS_KEY }}}}\n"
-            f"{indent}AWS_DEFAULT_REGION: ${{{{ secrets.AWS_DEFAULT_REGION }}}}"
-        )
-    if target == "gcp-run":
-        return (
-            f"{indent}DOCKER_USERNAME: ${{{{ secrets.DOCKER_USERNAME }}}}\n"
-            f"{indent}DOCKER_PASSWORD: ${{{{ secrets.DOCKER_PASSWORD }}}}\n"
-            f"{indent}GCP_PROJECT_ID: ${{{{ secrets.GCP_PROJECT_ID }}}}\n"
-            f"{indent}GCP_SERVICE_ACCOUNT_KEY: ${{{{ secrets.GCP_SERVICE_ACCOUNT_KEY }}}}"
-        )
-    msg = f"Unknown target: {target}"
-    raise ValueError(msg)
-
-
 # ── GitLab CI ────────────────────────────────────────────────────────
 
 
@@ -620,61 +667,6 @@ deploy-production:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 """
-
-
-def _gitlab_secrets_env(target: str) -> str:
-    """Return the variables: block for GitLab CI, indented for YAML."""
-    indent = "    "
-    if target == "databricks":
-        return (
-            f"{indent}DATABRICKS_RATING_HOST: $DATABRICKS_RATING_HOST\n"
-            f"{indent}DATABRICKS_RATING_TOKEN: $DATABRICKS_RATING_TOKEN"
-        )
-    if target == "sagemaker":
-        return (
-            f"{indent}AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY\n"
-            f"{indent}AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION\n"
-            f"{indent}SAGEMAKER_ROLE_ARN: $SAGEMAKER_ROLE_ARN"
-        )
-    if target == "azure-ml":
-        return (
-            f"{indent}AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID\n"
-            f"{indent}AZURE_TENANT_ID: $AZURE_TENANT_ID\n"
-            f"{indent}AZURE_CLIENT_ID: $AZURE_CLIENT_ID\n"
-            f"{indent}AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET"
-        )
-    if target == "container":
-        return (
-            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
-            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD"
-        )
-    if target == "azure-container-apps":
-        return (
-            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
-            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
-            f"{indent}AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID\n"
-            f"{indent}AZURE_TENANT_ID: $AZURE_TENANT_ID\n"
-            f"{indent}AZURE_CLIENT_ID: $AZURE_CLIENT_ID\n"
-            f"{indent}AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET"
-        )
-    if target == "aws-ecs":
-        return (
-            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
-            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
-            f"{indent}AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY\n"
-            f"{indent}AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
-        )
-    if target == "gcp-run":
-        return (
-            f"{indent}DOCKER_USERNAME: $DOCKER_USERNAME\n"
-            f"{indent}DOCKER_PASSWORD: $DOCKER_PASSWORD\n"
-            f"{indent}GCP_PROJECT_ID: $GCP_PROJECT_ID\n"
-            f"{indent}GCP_SERVICE_ACCOUNT_KEY: $GCP_SERVICE_ACCOUNT_KEY"
-        )
-    msg = f"Unknown target: {target}"
-    raise ValueError(msg)
 
 
 # ── Azure DevOps ─────────────────────────────────────────────────────
@@ -890,61 +882,6 @@ stages:
                     git push origin "deploy/v$VERSION"
                   displayName: Tag release
 """
-
-
-def _azure_devops_secrets_env(target: str) -> str:
-    """Return the env: block for Azure DevOps pipeline secrets, indented for YAML."""
-    indent = "              "
-    if target == "databricks":
-        return (
-            f"{indent}DATABRICKS_RATING_HOST: $(DATABRICKS_RATING_HOST)\n"
-            f"{indent}DATABRICKS_RATING_TOKEN: $(DATABRICKS_RATING_TOKEN)"
-        )
-    if target == "sagemaker":
-        return (
-            f"{indent}AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)\n"
-            f"{indent}AWS_DEFAULT_REGION: $(AWS_DEFAULT_REGION)\n"
-            f"{indent}SAGEMAKER_ROLE_ARN: $(SAGEMAKER_ROLE_ARN)"
-        )
-    if target == "azure-ml":
-        return (
-            f"{indent}AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)\n"
-            f"{indent}AZURE_TENANT_ID: $(AZURE_TENANT_ID)\n"
-            f"{indent}AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)\n"
-            f"{indent}AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)"
-        )
-    if target == "container":
-        return (
-            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
-            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)"
-        )
-    if target == "azure-container-apps":
-        return (
-            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
-            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
-            f"{indent}AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)\n"
-            f"{indent}AZURE_TENANT_ID: $(AZURE_TENANT_ID)\n"
-            f"{indent}AZURE_CLIENT_ID: $(AZURE_CLIENT_ID)\n"
-            f"{indent}AZURE_CLIENT_SECRET: $(AZURE_CLIENT_SECRET)"
-        )
-    if target == "aws-ecs":
-        return (
-            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
-            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
-            f"{indent}AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)\n"
-            f"{indent}AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)\n"
-            f"{indent}AWS_DEFAULT_REGION: $(AWS_DEFAULT_REGION)"
-        )
-    if target == "gcp-run":
-        return (
-            f"{indent}DOCKER_USERNAME: $(DOCKER_USERNAME)\n"
-            f"{indent}DOCKER_PASSWORD: $(DOCKER_PASSWORD)\n"
-            f"{indent}GCP_PROJECT_ID: $(GCP_PROJECT_ID)\n"
-            f"{indent}GCP_SERVICE_ACCOUNT_KEY: $(GCP_SERVICE_ACCOUNT_KEY)"
-        )
-    msg = f"Unknown target: {target}"
-    raise ValueError(msg)
 
 
 # ── Pre-commit hook ───────────────────────────────────────────────────

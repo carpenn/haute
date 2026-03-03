@@ -281,7 +281,6 @@ def _validate_user_code_cached(
     v = _preamble_validator if allow_imports else _validator
     v.visit(tree)
     _cache[cache_key] = True
-    _cache[code] = True
 
 
 # ---------------------------------------------------------------------------

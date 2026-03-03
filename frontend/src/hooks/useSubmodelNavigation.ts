@@ -5,6 +5,7 @@ import { NODE_TYPES } from "../utils/nodeTypes"
 import { getLayoutedElements } from "../utils/layout"
 import { nodeData } from "../types/node"
 import { createSubmodel, loadSubmodel, dissolveSubmodel } from "../api/client"
+import useToastStore from "../stores/useToastStore"
 import useUIStore from "../stores/useUIStore"
 
 interface SubmodelNavParams {
@@ -40,7 +41,8 @@ export default function useSubmodelNavigation({
   preambleRef, sourceFileRef, pipelineNameRef,
   fitView,
 }: SubmodelNavParams): SubmodelNavReturn {
-  const { addToast, setDirty } = useUIStore()
+  const { addToast } = useToastStore()
+  const { setDirty } = useUIStore()
   const [viewStack, setViewStack] = useState<ViewLevel[]>([{ type: "pipeline", name: "main", file: "" }])
 
   const handleCreateSubmodel = useCallback(async (name: string, nodeIds: string[]) => {

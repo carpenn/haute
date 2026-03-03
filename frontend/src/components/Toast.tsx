@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from "lucide-react"
-import useUIStore from "../stores/useUIStore"
+import useToastStore from "../stores/useToastStore"
 
 export interface ToastMessage {
   id: string
@@ -33,6 +33,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
 
   return (
     <div
+      role="alert"
       className="px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2.5 text-[12px] font-medium animate-slide-in min-w-[240px] max-w-[380px]"
       style={{
         background: "var(--bg-panel)",
@@ -44,6 +45,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
       <span className="flex-1" style={{ color: "var(--text-primary)" }}>{toast.text}</span>
       <button
         onClick={() => onDismiss(toast.id)}
+        aria-label="Dismiss notification"
         className="p-0.5 rounded shrink-0 transition-colors"
         style={{ color: "var(--text-muted)" }}
         onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)" }}
@@ -56,12 +58,12 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
 }
 
 export default function ToastContainer() {
-  const toasts = useUIStore((s) => s.toasts)
-  const onDismiss = useUIStore((s) => s.dismissToast)
+  const toasts = useToastStore((s) => s.toasts)
+  const onDismiss = useToastStore((s) => s.dismissToast)
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end">
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end" aria-live="polite">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
       ))}

@@ -246,6 +246,12 @@ def execute_trace(
     with _cache._lock:
         if fp == _cache.fingerprint and _cache.eager_outputs:
             cache_hit = True
+            logger.debug(
+                "trace_cache_hit",
+                fingerprint=fp[:8],
+                target=target_node_id,
+                cached_nodes=len(_cache.eager_outputs),
+            )
             node_map = _cache.node_map
             order = _cache.order
             parents_of = _cache.parents_of
@@ -253,6 +259,12 @@ def execute_trace(
             eager_outputs = _cache.eager_outputs
 
     if not cache_hit:
+        logger.debug(
+            "trace_cache_miss",
+            fingerprint=fp[:8],
+            target=target_node_id,
+            prev_fingerprint=(_cache.fingerprint or "")[:8],
+        )
         # Cache miss — execute eagerly via shared core (raises on error)
         preamble_ns = _compile_preamble(graph.preamble or "")
         result = _execute_eager_core(
