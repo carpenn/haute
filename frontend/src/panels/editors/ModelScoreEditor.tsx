@@ -10,11 +10,13 @@ export default function ModelScoreEditor({
   onUpdate,
   inputSources,
   onDeleteInput,
+  errorLine,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
+  errorLine?: number | null
 }) {
   const sourceType = configField(config, "sourceType", "registered")
   const task = configField(config, "task", "regression")
@@ -238,6 +240,7 @@ export default function ModelScoreEditor({
         <CodeEditor
           defaultValue={defaultCode}
           onChange={(val) => onUpdate("code", val)}
+          errorLine={errorLine}
           placeholder={`# df has the prediction column already\n# model is the loaded CatBoost model\ndf = df.with_columns(\n    risk_band=pl.when(pl.col("${outputColumn}") > 0.5).then(pl.lit("high")).otherwise(pl.lit("low"))\n)`}
         />
       )}

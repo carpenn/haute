@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 import { CodeEditor, FileBrowser, SchemaPreview } from "../_shared"
 import type { SchemaInfo } from "../_shared"
 
@@ -38,218 +38,140 @@ vi.mock("../../../stores/useSettingsStore", () => {
 import { listFiles } from "../../../api/client"
 const mockListFiles = listFiles as ReturnType<typeof vi.fn>
 
-// jsdom does not implement document.execCommand; stub it so CodeEditor's
-// insertText / replaceRange helpers work.
-beforeEach(() => {
-  document.execCommand = vi.fn((command: string, _showUI?: boolean, value?: string) => {
-    // Simulate "insertText": replace current selection with `value`
-    const ta = document.activeElement as HTMLTextAreaElement | null
-    if (command === "insertText" && ta && "selectionStart" in ta) {
-      const start = ta.selectionStart
-      const end = ta.selectionEnd
-      const before = ta.value.slice(0, start)
-      const after = ta.value.slice(end)
-      ta.value = before + (value ?? "") + after
-      const newCursor = start + (value?.length ?? 0)
-      ta.selectionStart = newCursor
-      ta.selectionEnd = newCursor
-      // Fire a synthetic input event so React sees the change
-      ta.dispatchEvent(new Event("input", { bubbles: true }))
-    }
-    return true
-  })
-})
-
 // ═══════════════════════════════════════════════════════════════════════════
-// CodeEditor
+// CodeEditor (CodeMirror 6)
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("CodeEditor", () => {
   afterEach(cleanup)
 
-  function renderEditor(defaultValue = "", onChange = vi.fn()) {
-    const result = render(
-      <CodeEditor defaultValue={defaultValue} onChange={onChange} />,
+  /** Helper: get the CM6 content element */
+  function getEditorContent(container: HTMLElement) {
+    return container.querySelector(".cm-content") as HTMLElement | null
+  }
+
+  /** Helper: get the full document text from the CM6 editor */
+  function getEditorText(container: HTMLElement) {
+    const content = getEditorContent(container)
+    if (!content) return ""
+    // CM6 renders lines as individual elements inside .cm-content
+    // The textContent of .cm-content gives us the full document
+    return content.textContent ?? ""
+  }
+
+  it("renders with default value", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="hello world" onChange={vi.fn()} />,
     )
-    const textarea = result.container.querySelector("textarea") as HTMLTextAreaElement
-    return { ...result, textarea, onChange }
-  }
-
-  // Helper to set cursor position in the textarea
-  function setCursor(ta: HTMLTextAreaElement, pos: number) {
-    ta.setSelectionRange(pos, pos)
-  }
-
-  function setSelection(ta: HTMLTextAreaElement, start: number, end: number) {
-    ta.setSelectionRange(start, end)
-  }
-
-  // ── Tab ──────────────────────────────────────────────────────────────
-
-  it("Tab inserts 4 spaces at cursor", () => {
-    const { textarea } = renderEditor("hello")
-    textarea.focus()
-    setCursor(textarea, 5)
-    fireEvent.keyDown(textarea, { key: "Tab" })
-    expect(textarea.value).toBe("hello    ")
+    expect(getEditorText(container)).toContain("hello world")
   })
 
-  it("Tab indents selected lines", () => {
-    const code = "line1\nline2\nline3"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    // Select "line1\nline2"
-    setSelection(textarea, 0, 11)
-    fireEvent.keyDown(textarea, { key: "Tab" })
-    expect(textarea.value).toBe("    line1\n    line2\nline3")
+  it("renders the wrapper div with test id", () => {
+    render(<CodeEditor defaultValue="" onChange={vi.fn()} />)
+    expect(screen.getByTestId("code-editor-wrapper")).toBeInTheDocument()
   })
 
-  it("Shift+Tab dedents selected lines", () => {
-    const code = "    line1\n    line2\nline3"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setSelection(textarea, 0, 19)
-    fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true })
-    expect(textarea.value).toBe("line1\nline2\nline3")
+  it("renders line numbers", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="line1\nline2\nline3" onChange={vi.fn()} />,
+    )
+    const gutters = container.querySelector(".cm-lineNumbers")
+    expect(gutters).toBeTruthy()
   })
 
-  it("Shift+Tab on single line removes 4 leading spaces when cursor is after indent", () => {
-    const code = "    hello"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    // Cursor must be right after the 4 spaces (pos 4) so lineText ends with "    "
-    setCursor(textarea, 4)
-    fireEvent.keyDown(textarea, { key: "Tab", shiftKey: true })
-    expect(textarea.value).toBe("hello")
+  it("renders with placeholder when empty", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="" onChange={vi.fn()} placeholder="Type code here..." />,
+    )
+    const ph = container.querySelector(".cm-placeholder")
+    expect(ph).toBeTruthy()
+    expect(ph?.textContent).toBe("Type code here...")
   })
 
-  // ── Bracket pair insertion ──────────────────────────────────────────
-
-  it("typing ( inserts () and places cursor between", () => {
-    const { textarea } = renderEditor("")
-    textarea.focus()
-    setCursor(textarea, 0)
-    fireEvent.keyDown(textarea, { key: "(" })
-    expect(textarea.value).toBe("()")
-    expect(textarea.selectionStart).toBe(1)
+  it("does not show placeholder when there is content", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={vi.fn()} placeholder="Type code here..." />,
+    )
+    const ph = container.querySelector(".cm-placeholder")
+    expect(ph).toBeNull()
   })
 
-  it("typing [ inserts [] and places cursor between", () => {
-    const { textarea } = renderEditor("")
-    textarea.focus()
-    setCursor(textarea, 0)
-    fireEvent.keyDown(textarea, { key: "[" })
-    expect(textarea.value).toBe("[]")
-    expect(textarea.selectionStart).toBe(1)
+  it("applies Python syntax highlighting", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="def foo():\n    return 42" onChange={vi.fn()} />,
+    )
+    // CM6 with Python should produce syntax spans
+    const content = getEditorContent(container)
+    expect(content).toBeTruthy()
+    // "def" should be in a highlighted span (not just raw text)
+    const spans = content!.querySelectorAll("span")
+    expect(spans.length).toBeGreaterThan(0)
   })
 
-  it("typing { inserts {} and places cursor between", () => {
-    const { textarea } = renderEditor("")
-    textarea.focus()
-    setCursor(textarea, 0)
-    fireEvent.keyDown(textarea, { key: "{" })
-    expect(textarea.value).toBe("{}")
-    expect(textarea.selectionStart).toBe(1)
+  it("mounts without error when onChange is provided", () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={onChange} />,
+    )
+    // Editor mounts and renders content — onChange wiring is internal to CM6's
+    // updateListener and cannot be exercised via jsdom (no real contenteditable
+    // input support). Integration coverage for the debounced callback requires
+    // a browser-based test (e.g. Playwright).
+    expect(getEditorContent(container)).toBeTruthy()
   })
 
-  // ── Bracket skip ───────────────────────────────────────────────────
-
-  it("typing ) when cursor is before ) skips instead of inserting", () => {
-    const { textarea } = renderEditor("()")
-    textarea.focus()
-    setCursor(textarea, 1) // between ( and )
-    fireEvent.keyDown(textarea, { key: ")" })
-    expect(textarea.value).toBe("()") // no extra character
-    expect(textarea.selectionStart).toBe(2)
+  it("mounts the CodeMirror editor DOM structure", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={vi.fn()} />,
+    )
+    expect(container.querySelector(".cm-editor")).toBeTruthy()
+    expect(container.querySelector(".cm-scroller")).toBeTruthy()
+    expect(container.querySelector(".cm-content")).toBeTruthy()
+    expect(container.querySelector(".cm-gutters")).toBeTruthy()
   })
 
-  it("typing ] when cursor is before ] skips", () => {
-    const { textarea } = renderEditor("[]")
-    textarea.focus()
-    setCursor(textarea, 1)
-    fireEvent.keyDown(textarea, { key: "]" })
-    expect(textarea.value).toBe("[]")
-    expect(textarea.selectionStart).toBe(2)
+  it("cleans up editor on unmount", () => {
+    const { container, unmount } = render(
+      <CodeEditor defaultValue="test" onChange={vi.fn()} />,
+    )
+    expect(container.querySelector(".cm-editor")).toBeTruthy()
+    unmount()
+    expect(container.querySelector(".cm-editor")).toBeNull()
   })
 
-  // ── Bracket delete ─────────────────────────────────────────────────
-
-  it("Backspace removes matching pair when cursor is between empty brackets", () => {
-    const { textarea } = renderEditor("()")
-    textarea.focus()
-    setCursor(textarea, 1) // between ( and )
-    fireEvent.keyDown(textarea, { key: "Backspace" })
-    expect(textarea.value).toBe("")
+  it("renders multiline content with line numbers in gutter", () => {
+    const code = "line1\nline2\nline3\nline4\nline5"
+    const { container } = render(
+      <CodeEditor defaultValue={code} onChange={vi.fn()} />,
+    )
+    const gutterElements = container.querySelectorAll(".cm-lineNumbers .cm-gutterElement")
+    expect(gutterElements.length).toBeGreaterThan(0)
+    // The gutter should contain the text "5" (line number for the 5th line)
+    const allText = Array.from(gutterElements).map((el) => el.textContent?.trim())
+    expect(allText).toContain("1")
+    expect(allText).toContain("5")
   })
 
-  it("Backspace removes matching pair for {}", () => {
-    const { textarea } = renderEditor("{}")
-    textarea.focus()
-    setCursor(textarea, 1)
-    fireEvent.keyDown(textarea, { key: "Backspace" })
-    expect(textarea.value).toBe("")
+  it("renders lint gutter", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={vi.fn()} />,
+    )
+    expect(container.querySelector(".cm-gutter-lint")).toBeTruthy()
   })
 
-  // ── Enter / auto-indent ────────────────────────────────────────────
-
-  it("Enter auto-indents matching previous line indent", () => {
-    const code = "    hello"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 9) // end of "    hello"
-    fireEvent.keyDown(textarea, { key: "Enter" })
-    expect(textarea.value).toBe("    hello\n    ")
+  it("does not crash when errorLine exceeds document lines", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={vi.fn()} errorLine={999} />,
+    )
+    // Should render without throwing — error is clamped to last line
+    expect(container.querySelector(".cm-editor")).toBeTruthy()
   })
 
-  it("Enter adds extra indent after colon", () => {
-    const code = "def foo():"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 10) // end of "def foo():"
-    fireEvent.keyDown(textarea, { key: "Enter" })
-    expect(textarea.value).toBe("def foo():\n    ")
-  })
-
-  // ── Home key ────────────────────────────────────────────────────────
-
-  it("Home goes to first non-whitespace character", () => {
-    const code = "    hello"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 9) // end of "    hello"
-    fireEvent.keyDown(textarea, { key: "Home" })
-    expect(textarea.selectionStart).toBe(4)
-  })
-
-  // ── Ctrl+D (duplicate) ─────────────────────────────────────────────
-
-  it("Ctrl+D duplicates current line", () => {
-    const code = "line1\nline2"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 2) // somewhere in "line1"
-    fireEvent.keyDown(textarea, { key: "d", ctrlKey: true })
-    expect(textarea.value).toBe("line1\nline1\nline2")
-  })
-
-  // ── Ctrl+/ (toggle comment) ────────────────────────────────────────
-
-  it("Ctrl+/ comments out a line", () => {
-    const code = "hello"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 2)
-    fireEvent.keyDown(textarea, { key: "/", ctrlKey: true })
-    expect(textarea.value).toBe("# hello")
-  })
-
-  it("Ctrl+/ uncomments a commented line", () => {
-    const code = "# hello"
-    const { textarea } = renderEditor(code)
-    textarea.focus()
-    setCursor(textarea, 3)
-    fireEvent.keyDown(textarea, { key: "/", ctrlKey: true })
-    expect(textarea.value).toBe("hello")
+  it("does not show lint markers when errorLine is null", () => {
+    const { container } = render(
+      <CodeEditor defaultValue="x = 1" onChange={vi.fn()} errorLine={null} />,
+    )
+    expect(container.querySelector(".cm-lint-marker-error")).toBeNull()
   })
 })
 

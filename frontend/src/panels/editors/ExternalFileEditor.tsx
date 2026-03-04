@@ -8,11 +8,13 @@ export default function ExternalFileEditor({
   onUpdate,
   inputSources,
   onDeleteInput,
+  errorLine,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
+  errorLine?: number | null
 }) {
   const [fileType, setFileType] = useState<string>(configField(config, "fileType", "pickle"))
   const [modelClass, setModelClass] = useState<string>(configField(config, "modelClass", "classifier"))
@@ -109,6 +111,7 @@ export default function ExternalFileEditor({
       <CodeEditor
         defaultValue={defaultCode}
         onChange={(val) => onUpdate("code", val)}
+        errorLine={errorLine}
         placeholder={placeholders[fileType] || placeholders.pickle}
       />
     </div>

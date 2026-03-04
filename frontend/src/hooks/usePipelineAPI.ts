@@ -50,6 +50,7 @@ function resultToPreview(nodeId: string, label: string, r: NodeResult): PreviewD
     columns: r.columns ?? [],
     preview: r.preview ?? [],
     error: r.error ?? null,
+    error_line: r.error_line ?? null,
     timing_ms: r.timing_ms ?? 0,
     memory_bytes: r.memory_bytes ?? 0,
     timings: r.timings ?? [],

@@ -277,6 +277,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             columns=node_result.columns,
             preview=node_result.preview,
             error=node_result.error,
+            error_line=node_result.error_line,
             timing_ms=node_result.timing_ms,
             memory_bytes=node_result.memory_bytes,
             timings=timings,

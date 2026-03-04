@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any, NamedTuple
@@ -224,6 +225,28 @@ def _build_funcs(
     return funcs
 
 
+def _extract_error_line(exc: Exception) -> int | None:
+    """Extract user-code line number from an exception, if available.
+
+    - SyntaxError: use .lineno (already adjusted by _exec_user_code).
+    - _user_code_line attr: set by _exec_user_code from the traceback
+      for runtime errors like NameError that don't embed line info
+      in their message string.
+    - Fallback: parse 'line N' from the error message
+      (already adjusted by _exec_user_code's regex substitution).
+    - Returns None when no line info is available.
+    """
+    if isinstance(exc, SyntaxError) and exc.lineno is not None:
+        return exc.lineno
+    user_line = getattr(exc, "_user_code_line", None)
+    if user_line is not None:
+        return user_line
+    match = re.search(r"\bline (\d+)\b", str(exc))
+    if match:
+        return int(match.group(1))
+    return None
+
+
 class EagerResult(NamedTuple):
     """Result of eager graph execution."""
 
@@ -235,6 +258,7 @@ class EagerResult(NamedTuple):
     errors: dict[str, str]
     timings: dict[str, float]
     memory_bytes: dict[str, int]
+    error_lines: dict[str, int]
 
 
 def _execute_eager_core(
@@ -279,6 +303,7 @@ def _execute_eager_core(
 
     eager_outputs: dict[str, pl.DataFrame | None] = {}
     errors: dict[str, str] = {}
+    error_lines: dict[str, int] = {}
     timings: dict[str, float] = {}
     memory_bytes: dict[str, int] = {}
 
@@ -312,9 +337,12 @@ def _execute_eager_core(
             logger.warning("node_failed", node_id=nid, error=str(exc))
             eager_outputs[nid] = None
             errors[nid] = str(exc)
+            error_line = _extract_error_line(exc)
+            if error_line is not None:
+                error_lines[nid] = error_line
         timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
 
     return EagerResult(
         eager_outputs, order, parents_of, node_map,
-        id_to_name, errors, timings, memory_bytes,
+        id_to_name, errors, timings, memory_bytes, error_lines,
     )

@@ -145,6 +145,14 @@ def _exec_user_code(
                 msg,
             )
             raise type(exc)(msg) from None
+        # For errors without "line N" in the message (e.g. NameError),
+        # extract the line from the traceback and adjust for preamble offset.
+        if exc.__traceback__:
+            import traceback as _tb
+            for frame in reversed(_tb.extract_tb(exc.__traceback__)):
+                if frame.filename == "<string>":
+                    exc._user_code_line = max(1, frame.lineno - line_offset)
+                    break
         raise
 
     result = local_ns.get("df", dfs[0] if dfs else pl.LazyFrame())
@@ -781,7 +789,7 @@ def _apply_ratebook(
 
 
 _preview_cache = FingerprintCache(
-    slots=("eager_outputs", "errors", "order", "timings", "memory_bytes"),
+    slots=("eager_outputs", "errors", "order", "timings", "memory_bytes", "error_lines"),
 )
 
 
@@ -819,6 +827,7 @@ def execute_graph(
     fp = graph_fingerprint(graph, f"{row_limit}:{scenario}")
 
     errors: dict[str, str] = {}
+    error_lines: dict[str, int] = {}
 
     # Check if we can extend the cache (same graph, new target is a superset)
     cached = _preview_cache.try_get(fp)
@@ -837,6 +846,7 @@ def execute_graph(
             errors = cached["errors"]
             timings = cached["timings"]
             memory_bytes = cached["memory_bytes"]
+            error_lines = cached["error_lines"]
         else:
             # Partial hit — extend with newly-needed nodes
             logger.debug(
@@ -845,7 +855,7 @@ def execute_graph(
                 target=target_node_id,
                 cached_nodes=len(prev_outputs),
             )
-            raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
+            raw_outputs, order, errors, timings, memory_bytes, error_lines = _eager_execute(
                 graph, target_node_id, row_limit, scenario=scenario,
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -853,6 +863,7 @@ def execute_graph(
             merged_errors = {**cached["errors"], **errors}
             merged_timings = {**cached["timings"], **timings}
             merged_memory = {**cached["memory_bytes"], **memory_bytes}
+            merged_error_lines = {**cached["error_lines"], **error_lines}
             merged_order = list(dict.fromkeys(cached["order"] + order))
             _preview_cache.store(
                 fp,
@@ -861,11 +872,13 @@ def execute_graph(
                 order=merged_order,
                 timings=merged_timings,
                 memory_bytes=merged_memory,
+                error_lines=merged_error_lines,
             )
             eager_outputs = merged
             errors = merged_errors
             timings = merged_timings
             memory_bytes = merged_memory
+            error_lines = merged_error_lines
             order = merged_order
     else:
         # Complete cache miss — execute from scratch
@@ -875,7 +888,7 @@ def execute_graph(
             target=target_node_id,
             prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
         )
-        raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
+        raw_outputs, order, errors, timings, memory_bytes, error_lines = _eager_execute(
             graph, target_node_id, row_limit, scenario=scenario,
         )
         eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -886,6 +899,7 @@ def execute_graph(
             order=order,
             timings=timings,
             memory_bytes=memory_bytes,
+            error_lines=error_lines,
         )
 
     # Pre-compute schema warnings for instance nodes by comparing the
@@ -922,6 +936,7 @@ def execute_graph(
             results[nid] = NodeResult(
                 status="error",
                 error=errors[nid],
+                error_line=error_lines.get(nid),
                 timing_ms=timings.get(nid, 0),
                 memory_bytes=memory_bytes.get(nid, 0),
                 schema_warnings=schema_warnings.get(nid, []),
@@ -968,13 +983,15 @@ def _eager_execute(
 ) -> tuple[
     dict[str, pl.DataFrame | None], list[str],
     dict[str, str], dict[str, float], dict[str, int],
+    dict[str, int],
 ]:
     """Execute the graph eagerly in topo order.
 
-    Returns (outputs, order, errors, timings, memory_bytes) where errors maps
-    node_id → message for nodes that failed, timings maps
-    node_id → execution milliseconds, and memory_bytes maps
-    node_id → output DataFrame size in bytes.
+    Returns (outputs, order, errors, timings, memory_bytes, error_lines)
+    where errors maps node_id → message for nodes that failed, timings maps
+    node_id → execution milliseconds, memory_bytes maps
+    node_id → output DataFrame size in bytes, and error_lines maps
+    node_id → 1-based line number in user code for the error.
     """
     preamble_ns = _compile_preamble(graph.preamble or "")
     result = _execute_eager_core(
@@ -986,7 +1003,10 @@ def _eager_execute(
         preamble_ns=preamble_ns or None,
         scenario=scenario,
     )
-    return result.outputs, result.order, result.errors, result.timings, result.memory_bytes
+    return (
+        result.outputs, result.order, result.errors,
+        result.timings, result.memory_bytes, result.error_lines,
+    )
 
 
 def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live") -> SinkResponse:

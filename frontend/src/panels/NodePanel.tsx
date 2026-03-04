@@ -38,6 +38,8 @@ type NodePanelProps = {
   onRefreshPreview?: () => void
   /** True when showing last-selected node while nothing is actively selected */
   dimmed?: boolean
+  /** 1-based line number of the error in user code, if any */
+  errorLine?: number | null
 }
 
 // ─── Panel sizing ─────────────────────────────────────────────────
@@ -214,7 +216,7 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 
 // ─── NodePanel ────────────────────────────────────────────────────
 
-export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed }: NodePanelProps) {
+export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed, errorLine }: NodePanelProps) {
   const panelWidth = useUIStore((s) => s.nodePanelWidth)
   const setNodePanelWidth = useUIStore((s) => s.setNodePanelWidth)
   const isDragging = useRef(false)
@@ -318,7 +320,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} preamble={preamble} />
 
       case NODE_TYPES.EXTERNAL_FILE:
-        return <ExternalFileEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
+        return <ExternalFileEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
 
       case NODE_TYPES.OUTPUT:
         return <OutputEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
@@ -349,7 +351,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         return <RatingStepEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} allNodes={allNodes} />
 
       case NODE_TYPES.MODEL_SCORE:
-        return <ModelScoreEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
+        return <ModelScoreEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
 
       case NODE_TYPES.MODELLING: {
         const upstreamCols = collectUpstreamColumns(node.id, edges, nodeMap)
@@ -401,7 +403,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         return <ConstantEditor config={config} onUpdate={handleConfigUpdate} />
 
       case NODE_TYPES.TRANSFORM:
-        return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} />
+        return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
 
       case NODE_TYPES.SUBMODEL:
         return <SubmodelEditor config={config} />

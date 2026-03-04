@@ -390,6 +390,11 @@ function FlowEditor() {
                 onDeleteEdge={handleDeleteEdge}
                 onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
                 dimmed={!selectedNode && !!lastSelectedNodeRef.current}
+                errorLine={
+                  previewData?.nodeId === (selectedNode ?? lastSelectedNodeRef.current)?.id
+                    ? previewData?.error_line ?? null
+                    : null
+                }
               />
             )}
           </ErrorBoundary>

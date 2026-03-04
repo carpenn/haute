@@ -29,6 +29,7 @@ export interface NodeResult {
   columns?: { name: string; dtype: string }[]
   preview?: Record<string, unknown>[]
   error?: string | null
+  error_line?: number | null
   timing_ms?: number
   memory_bytes?: number
   timings?: NodeTiming[]

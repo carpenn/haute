@@ -7,11 +7,13 @@ export default function TransformEditor({
   onUpdate,
   inputSources,
   onDeleteInput,
+  errorLine,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
+  errorLine?: number | null
 }) {
   const defaultCode = configField(config, "code", "")
   const isMultiInput = inputSources.length > 1
@@ -31,6 +33,7 @@ export default function TransformEditor({
       <CodeEditor
         defaultValue={defaultCode}
         onChange={(val) => onUpdate("code", val)}
+        errorLine={errorLine}
         placeholder={
           isMultiInput
             ? `${inputSources[0].varName}.join(${inputSources[1]?.varName || "other"}, on="key", how="left")`

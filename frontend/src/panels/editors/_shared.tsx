@@ -1,9 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Table2, Loader2, AlertTriangle } from "lucide-react"
 import { getDtypeColor } from "../../utils/dtypeColors"
 import type { ColumnInfo } from "../../types/node"
 import { listFiles } from "../../api/client"
 import useSettingsStore, { useMlflowStatus } from "../../stores/useSettingsStore"
+import { EditorView, placeholder as cmPlaceholder, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection } from "@codemirror/view"
+import { EditorState, Compartment } from "@codemirror/state"
+import { python } from "@codemirror/lang-python"
+import { syntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap, HighlightStyle, indentUnit } from "@codemirror/language"
+import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands"
+import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete"
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search"
+import { lintGutter, setDiagnostics } from "@codemirror/lint"
+import { tags } from "@lezer/highlight"
 
 // ─── Shared Styles ───────────────────────────────────────────────
 export const INPUT_STYLE = {
@@ -285,285 +294,320 @@ export function SchemaPreview({ schema }: { schema: SchemaInfo }) {
   )
 }
 
-// ─── CodeEditor ───────────────────────────────────────────────────
+// ─── CodeEditor (CodeMirror 6) ────────────────────────────────────
 
-const PAIRS: Record<string, string> = { "(": ")", "[": "]", "{": "}", "'": "'", '"': '"' }
-const CLOSE_CHARS = new Set([")", "]", "}"])
+// Dark theme matching Haute's CSS variables
+const hauteTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "var(--bg-input)",
+    color: "var(--text-primary)",
+    fontSize: "12px",
+    fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace",
+    flex: "1",
+    minHeight: "120px",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-scroller": {
+    fontFamily: "inherit",
+    lineHeight: "1.625",
+    overflow: "auto",
+  },
+  ".cm-content": {
+    caretColor: "var(--accent)",
+    padding: "10px 0",
+  },
+  ".cm-line": {
+    padding: "0 12px 0 4px",
+  },
+  ".cm-gutters": {
+    backgroundColor: "var(--bg-elevated)",
+    color: "var(--text-muted)",
+    border: "none",
+    borderRight: "1px solid var(--border)",
+  },
+  ".cm-gutter.cm-lineNumbers .cm-gutterElement": {
+    padding: "0 8px 0 4px",
+    minWidth: "28px",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "transparent",
+    color: "var(--text-secondary)",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "rgba(255,255,255,.03)",
+  },
+  ".cm-selectionBackground": {
+    backgroundColor: "rgba(59,130,246,.25) !important",
+  },
+  "&.cm-focused .cm-selectionBackground": {
+    backgroundColor: "rgba(59,130,246,.3) !important",
+  },
+  ".cm-cursor": {
+    borderLeftColor: "var(--accent)",
+  },
+  ".cm-matchingBracket": {
+    backgroundColor: "rgba(59,130,246,.25)",
+    outline: "1px solid rgba(59,130,246,.4)",
+  },
+  ".cm-selectionMatch": {
+    backgroundColor: "rgba(59,130,246,.15)",
+  },
+  ".cm-searchMatch": {
+    backgroundColor: "rgba(234,179,8,.3)",
+    outline: "1px solid rgba(234,179,8,.5)",
+  },
+  ".cm-searchMatch.cm-searchMatch-selected": {
+    backgroundColor: "rgba(234,179,8,.5)",
+  },
+  ".cm-foldGutter .cm-gutterElement": {
+    color: "var(--text-muted)",
+    padding: "0 4px",
+  },
+  ".cm-tooltip": {
+    backgroundColor: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    color: "var(--text-primary)",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
+    padding: "4px 8px",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "var(--accent-soft)",
+    color: "var(--text-primary)",
+  },
+  ".cm-panels": {
+    backgroundColor: "var(--bg-elevated)",
+    color: "var(--text-primary)",
+    borderTop: "1px solid var(--border)",
+  },
+  ".cm-panels.cm-panels-bottom": {
+    borderTop: "1px solid var(--border)",
+  },
+  ".cm-panel input": {
+    backgroundColor: "var(--bg-input)",
+    color: "var(--text-primary)",
+    border: "1px solid var(--border)",
+    borderRadius: "4px",
+    padding: "2px 6px",
+    fontSize: "12px",
+  },
+  ".cm-panel button": {
+    backgroundColor: "var(--bg-hover)",
+    color: "var(--text-secondary)",
+    border: "1px solid var(--border)",
+    borderRadius: "4px",
+    padding: "2px 8px",
+    fontSize: "12px",
+  },
+  ".cm-placeholder": {
+    color: "var(--text-muted)",
+    fontStyle: "italic",
+  },
+  // Lint diagnostics
+  ".cm-lintRange-error": {
+    backgroundImage: "none",
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
+    borderBottom: "2px solid #ef4444",
+  },
+  ".cm-gutter-lint": {
+    width: "14px",
+  },
+  ".cm-gutter-lint .cm-gutterElement": {
+    padding: "0 2px",
+  },
+  ".cm-lint-marker-error": {
+    width: "8px !important",
+    height: "8px !important",
+    borderRadius: "50%",
+    backgroundColor: "#ef4444",
+    display: "inline-block",
+    marginTop: "6px",
+  },
+  ".cm-tooltip-lint": {
+    backgroundColor: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    color: "var(--text-primary)",
+  },
+}, { dark: true })
+
+// Syntax highlighting colours for Python
+const hauteHighlighting = HighlightStyle.define([
+  { tag: tags.keyword, color: "#c084fc" },             // purple — def, return, if, for, import
+  { tag: tags.controlKeyword, color: "#c084fc" },
+  { tag: tags.definitionKeyword, color: "#c084fc" },
+  { tag: tags.operatorKeyword, color: "#c084fc" },      // and, or, not, in, is
+  { tag: tags.modifier, color: "#c084fc" },
+  { tag: tags.self, color: "#f472b6" },                  // self
+  { tag: tags.bool, color: "#fb923c" },                  // True, False
+  { tag: tags.null, color: "#fb923c" },                  // None
+  { tag: tags.number, color: "#fb923c" },                // numeric literals
+  { tag: tags.string, color: "#86efac" },                // strings
+  { tag: tags.special(tags.string), color: "#86efac" },  // f-strings
+  { tag: tags.regexp, color: "#fbbf24" },
+  { tag: tags.comment, color: "var(--text-muted)", fontStyle: "italic" },
+  { tag: tags.function(tags.definition(tags.variableName)), color: "var(--text-accent)" },  // function defs
+  { tag: tags.function(tags.variableName), color: "#93c5fd" },  // function calls
+  { tag: tags.className, color: "#fbbf24" },
+  { tag: tags.definition(tags.className), color: "#fbbf24" },
+  { tag: tags.propertyName, color: "#67e8f9" },          // .method / .attr
+  { tag: tags.operator, color: "#94a3b8" },
+  { tag: tags.punctuation, color: "#94a3b8" },
+  { tag: tags.bracket, color: "#cbd5e1" },
+  { tag: tags.meta, color: "#a78bfa" },                  // decorators
+  { tag: tags.variableName, color: "var(--text-primary)" },
+  { tag: tags.typeName, color: "#fbbf24" },
+])
+
+// Focus ring: border change on focus/blur
+const focusRingTheme = EditorView.theme({
+  "&": {
+    borderRadius: "8px",
+    border: "1px solid var(--border)",
+    overflow: "hidden",
+    transition: "border-color 0.15s, box-shadow 0.15s",
+  },
+  "&.cm-focused": {
+    borderColor: "rgba(59,130,246,.3)",
+    boxShadow: "0 0 0 2px var(--accent-soft)",
+  },
+})
 
 export function CodeEditor({
   defaultValue,
   onChange,
   placeholder,
+  errorLine,
 }: {
   defaultValue: string
   onChange: (value: string) => void
   placeholder?: string
+  errorLine?: number | null
 }) {
-  const [code, setCode] = useState(defaultValue)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const gutterRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [focused, setFocused] = useState(false)
-
-  const lineCount = Math.max((code || "").split("\n").length, 1)
-
-  // Debounce parent onChange — local state updates instantly, parent
-  // update is deferred by 150ms to avoid re-render storms on fast typing.
-  // Use a ref for onChange to avoid re-triggering the effect when the parent
-  // re-renders (e.g. label rename) — only actual code changes should fire.
+  const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
-  useEffect(() => { onChangeRef.current = onChange }, [onChange])
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const placeholderCompartment = useRef(new Compartment())
+
+  // Keep onChange ref fresh without recreating the editor
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  // Create the editor once on mount
   useEffect(() => {
-    debounceRef.current = setTimeout(() => onChangeRef.current(code), 150)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [code])
+    if (!containerRef.current) return
 
-  const insertText = useCallback((ta: HTMLTextAreaElement, text: string) => {
-    ta.focus()
-    document.execCommand("insertText", false, text)
-    setCode(ta.value)
-  }, [])
+    const updateListener = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const value = update.state.doc.toString()
+        if (debounceRef.current) clearTimeout(debounceRef.current)
+        debounceRef.current = setTimeout(() => onChangeRef.current(value), 150)
+        // Clear diagnostics when the user edits — they're fixing the code
+        if (update.view) {
+          update.view.dispatch(setDiagnostics(update.state, []))
+        }
+      }
+    })
 
-  const replaceRange = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, cursorPos?: number) => {
-    ta.focus()
-    ta.setSelectionRange(start, end)
-    document.execCommand("insertText", false, text)
-    if (cursorPos !== undefined) {
-      ta.setSelectionRange(cursorPos, cursorPos)
+    const state = EditorState.create({
+      doc: defaultValue,
+      extensions: [
+        // Core editing
+        history(),
+        drawSelection(),
+        rectangularSelection(),
+        indentOnInput(),
+        bracketMatching(),
+        closeBrackets(),
+        autocompletion(),
+        highlightActiveLine(),
+        highlightActiveLineGutter(),
+        highlightSelectionMatches(),
+        indentUnit.of("    "),
+
+        // Gutters
+        lineNumbers(),
+        foldGutter(),
+        lintGutter(),
+
+        // Python language
+        python(),
+        syntaxHighlighting(hauteHighlighting),
+
+        // Theme
+        hauteTheme,
+        focusRingTheme,
+
+        // Placeholder
+        placeholderCompartment.current.of(
+          placeholder ? cmPlaceholder(placeholder) : [],
+        ),
+
+        // Keymaps — order matters: specific before general
+        keymap.of([
+          ...closeBracketsKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          ...completionKeymap,
+          indentWithTab,
+          ...defaultKeymap,
+        ]),
+
+        // Change listener
+        updateListener,
+
+        // Prevent the editor from growing wider than the panel
+        EditorView.lineWrapping,
+      ],
+    })
+
+    const view = new EditorView({
+      state,
+      parent: containerRef.current,
+    })
+
+    viewRef.current = view
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      view.destroy()
     }
-    setCode(ta.value)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once: defaultValue is initial content only, onChange is tracked via ref
   }, [])
 
-  const replaceRangeSelect = useCallback((ta: HTMLTextAreaElement, start: number, end: number, text: string, selStart: number, selEnd: number) => {
-    ta.focus()
-    ta.setSelectionRange(start, end)
-    document.execCommand("insertText", false, text)
-    ta.setSelectionRange(selStart, selEnd)
-    setCode(ta.value)
-  }, [])
+  // Push error diagnostics when errorLine changes
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setCode(e.target.value)
-    },
-    [],
-  )
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      const ta = e.currentTarget
-      const { selectionStart: start, selectionEnd: end, value: val } = ta
-      const hasSelection = start !== end
-
-      if (e.key === "Tab") {
-        e.preventDefault()
-        if (hasSelection) {
-          const lineStart = val.lastIndexOf("\n", start - 1) + 1
-          const lineEnd = val.indexOf("\n", end - 1)
-          const blockEnd = lineEnd === -1 ? val.length : lineEnd
-          const block = val.substring(lineStart, blockEnd)
-          const lines = block.split("\n")
-
-          let newBlock: string
-          if (e.shiftKey) {
-            newBlock = lines.map((l) => l.startsWith("    ") ? l.slice(4) : l.replace(/^\t/, "")).join("\n")
-          } else {
-            newBlock = lines.map((l) => "    " + l).join("\n")
-          }
-
-          const delta = newBlock.length - block.length
-          replaceRangeSelect(ta, lineStart, blockEnd, newBlock, lineStart, blockEnd + delta)
-        } else {
-          if (e.shiftKey) {
-            const lineStart = val.lastIndexOf("\n", start - 1) + 1
-            const lineText = val.substring(lineStart, start)
-            if (lineText.endsWith("    ")) {
-              replaceRange(ta, start - 4, start, "", start - 4)
-            } else if (lineText.endsWith("\t")) {
-              replaceRange(ta, start - 1, start, "", start - 1)
-            }
-          } else {
-            insertText(ta, "    ")
-          }
-        }
-        return
-      }
-
-      if (PAIRS[e.key]) {
-        const open = e.key
-        const close = PAIRS[e.key]
-        if (hasSelection) {
-          e.preventDefault()
-          const selected = val.substring(start, end)
-          const wrapped = open + selected + close
-          replaceRangeSelect(ta, start, end, wrapped, start + 1, end + 1)
-          return
-        }
-        if (open === "'" || open === '"') {
-          const charBefore = start > 0 ? val[start - 1] : ""
-          if (/\w/.test(charBefore)) return
-          if (val[start] === open) {
-            e.preventDefault()
-            ta.setSelectionRange(start + 1, start + 1)
-            return
-          }
-        }
-        e.preventDefault()
-        insertText(ta, open + close)
-        ta.setSelectionRange(start + 1, start + 1)
-        return
-      }
-
-      if (CLOSE_CHARS.has(e.key) && val[start] === e.key && !hasSelection) {
-        e.preventDefault()
-        ta.setSelectionRange(start + 1, start + 1)
-        return
-      }
-
-      if (e.key === "Backspace" && !hasSelection && start > 0) {
-        const before = val[start - 1]
-        const after = val[start]
-        if (PAIRS[before] && PAIRS[before] === after) {
-          e.preventDefault()
-          replaceRange(ta, start - 1, start + 1, "", start - 1)
-          return
-        }
-      }
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault()
-        const lineStart = val.lastIndexOf("\n", start - 1) + 1
-        const currentLine = val.substring(lineStart, start)
-        const indentMatch = currentLine.match(/^(\s*)/)
-        let indent = indentMatch ? indentMatch[1] : ""
-        const trimmedLine = currentLine.trimEnd()
-        if (trimmedLine.endsWith(":")) {
-          indent += "    "
-        }
-        insertText(ta, "\n" + indent)
-        return
-      }
-
-      if (e.key === "Home" && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault()
-        const lineStart = val.lastIndexOf("\n", start - 1) + 1
-        const lineText = val.substring(lineStart)
-        const textStart = lineStart + (lineText.match(/^\s*/)?.[0].length ?? 0)
-        const target = start === textStart ? lineStart : textStart
-        if (e.shiftKey) {
-          ta.setSelectionRange(target, end)
-        } else {
-          ta.setSelectionRange(target, target)
-        }
-        return
-      }
-
-      if (e.key === "d" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        if (hasSelection) {
-          const selected = val.substring(start, end)
-          replaceRangeSelect(ta, end, end, selected, end, end + selected.length)
-        } else {
-          const lineStart = val.lastIndexOf("\n", start - 1) + 1
-          let lineEnd = val.indexOf("\n", start)
-          if (lineEnd === -1) lineEnd = val.length
-          const line = val.substring(lineStart, lineEnd)
-          const offset = start - lineStart
-          replaceRange(ta, lineEnd, lineEnd, "\n" + line, lineEnd + 1 + offset)
-        }
-        return
-      }
-
-      if (e.key === "/" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        const lineStart = val.lastIndexOf("\n", start - 1) + 1
-        const lineEnd = hasSelection ? (val.indexOf("\n", end - 1) === -1 ? val.length : val.indexOf("\n", end - 1)) : (val.indexOf("\n", start) === -1 ? val.length : val.indexOf("\n", start))
-        const block = val.substring(lineStart, lineEnd)
-        const lines = block.split("\n")
-        const allCommented = lines.every((l) => l.trimStart().startsWith("# ") || l.trim() === "")
-        let newBlock: string
-        if (allCommented) {
-          newBlock = lines.map((l) => l.trim() === "" ? l : l.replace(/^(\s*)# /, "$1")).join("\n")
-        } else {
-          newBlock = lines.map((l) => l.trim() === "" ? l : l.replace(/^(\s*)/, "$1# ")).join("\n")
-        }
-        const delta = newBlock.length - block.length
-        replaceRangeSelect(ta, lineStart, lineEnd, newBlock, lineStart, lineEnd + delta)
-        return
-      }
-
-      if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        ta.setSelectionRange(0, val.length)
-        return
-      }
-    },
-    [insertText, replaceRange, replaceRangeSelect],
-  )
-
-  const handleScroll = useCallback(() => {
-    if (textareaRef.current && gutterRef.current) {
-      gutterRef.current.scrollTop = textareaRef.current.scrollTop
+    if (errorLine != null && errorLine >= 1) {
+      const doc = view.state.doc
+      const lineNum = Math.min(errorLine, doc.lines)
+      const line = doc.line(lineNum)
+      view.dispatch(setDiagnostics(view.state, [{
+        from: line.from,
+        to: line.to,
+        severity: "error",
+        message: `Error on line ${errorLine}`,
+      }]))
+    } else {
+      view.dispatch(setDiagnostics(view.state, []))
     }
-  }, [])
+  }, [errorLine])
 
-  return (
-    <div
-      ref={containerRef}
-      className="flex-1 min-h-[120px] rounded-lg overflow-hidden"
-      style={{
-        border: focused ? '1px solid rgba(59,130,246,.3)' : '1px solid var(--border)',
-        boxShadow: focused ? '0 0 0 2px var(--accent-soft)' : 'none',
-        background: 'var(--bg-input)',
-      }}
-    >
-      <div className="flex h-full">
-        <div
-          ref={gutterRef}
-          className="shrink-0 overflow-hidden select-none py-2.5"
-          style={{
-            background: 'var(--bg-elevated)',
-            borderRight: '1px solid var(--border)',
-            width: lineCount >= 100 ? 44 : 34,
-          }}
-        >
-          {Array.from({ length: lineCount }, (_, i) => (
-            <div
-              key={i}
-              className="text-right pr-2 font-mono"
-              style={{
-                color: 'var(--text-muted)',
-                fontSize: '12px',
-                lineHeight: '1.625',
-                height: '19.5px',
-              }}
-            >
-              {i + 1}
-            </div>
-          ))}
-        </div>
-        <textarea
-          ref={textareaRef}
-          defaultValue={defaultValue}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onScroll={handleScroll}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          spellCheck={false}
-          placeholder={placeholder}
-          className="flex-1 w-full h-full pl-2.5 pr-3 py-2.5 text-[12px] font-mono focus:outline-none resize-none"
-          style={{
-            background: 'transparent',
-            color: '#a5f3fc',
-            caretColor: 'var(--accent)',
-            lineHeight: '1.625',
-          }}
-        />
-      </div>
-    </div>
-  )
+  // Update placeholder if it changes
+  useEffect(() => {
+    if (!viewRef.current) return
+    viewRef.current.dispatch({
+      effects: placeholderCompartment.current.reconfigure(
+        placeholder ? cmPlaceholder(placeholder) : [],
+      ),
+    })
+  }, [placeholder])
+
+  return <div ref={containerRef} data-testid="code-editor-wrapper" className="flex-1 min-h-[120px]" />
 }
 
 // ─── InputSourcesBar ──────────────────────────────────────────────

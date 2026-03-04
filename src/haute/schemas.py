@@ -62,6 +62,7 @@ class NodeResult(BaseModel):
     columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+    error_line: int | None = None
     timing_ms: float = 0
     memory_bytes: int = 0
     schema_warnings: list[SchemaWarning] = Field(default_factory=list)
@@ -109,6 +110,7 @@ class PreviewNodeResponse(BaseModel):
     columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+    error_line: int | None = None
     timing_ms: float = 0
     memory_bytes: int = 0
     timings: list[NodeTimingInfo] = Field(default_factory=list)
