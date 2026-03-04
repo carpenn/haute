@@ -91,22 +91,24 @@ export default function useEdgeHandlers({
   )
 
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
-    if (selectedNodes.length === 1) {
-      const node = selectedNodes[0]
-      setSelectedNode((prev) => {
-        if (prev?.id !== node.id) {
-          fetchPreview(node)
-          clearTrace()
-        }
-        return node
-      })
-      lastSelectedNodeRef.current = node
-    } else {
-      // Canvas click: deselect but keep panel showing last node
+    if (selectedNodes.length !== 1) {
+      // Canvas click or multi-select: deselect but keep panel showing last node
       setSelectedNode(null)
       clearTrace()
       // Don't clear previewData or lastSelectedNodeRef -- panel stays visible
     }
+  }, [setSelectedNode, clearTrace])
+
+  /** Opens panel on a full click (mousedown+mouseup) — skipped for drags. */
+  const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    setSelectedNode((prev) => {
+      if (prev?.id !== node.id) {
+        fetchPreview(node)
+        clearTrace()
+      }
+      return node
+    })
+    lastSelectedNodeRef.current = node
   }, [setSelectedNode, fetchPreview, clearTrace, lastSelectedNodeRef])
 
   const handleDeleteEdge = useCallback((edgeId: string) => {
@@ -168,6 +170,7 @@ export default function useEdgeHandlers({
   return {
     onConnect,
     onSelectionChange,
+    onNodeClick,
     handleDeleteEdge,
     onNodeContextMenu,
     onDragOver,

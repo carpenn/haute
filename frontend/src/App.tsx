@@ -226,7 +226,7 @@ function FlowEditor() {
   })
 
   const {
-    onConnect, onSelectionChange, handleDeleteEdge,
+    onConnect, onSelectionChange, onNodeClick, handleDeleteEdge,
     onNodeContextMenu, onDragOver, onDrop,
   } = useEdgeHandlers({
     graphRef, nodeIdCounter, lastSelectedNodeRef,
@@ -266,6 +266,7 @@ function FlowEditor() {
         }}
         onShowShortcuts={() => setShortcutsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onCentre={() => fitView({ padding: 0.8 })}
         onAutoLayout={handleAutoLayout}
         onSave={handleSave}
         wsStatus={wsStatus}
@@ -313,6 +314,7 @@ function FlowEditor() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
+                onNodeClick={onNodeClick}
                 onNodeContextMenu={onNodeContextMenu}
                 onNodeDoubleClick={(_event, node) => {
                   if (nodeData(node).nodeType === NODE_TYPES.SUBMODEL) {

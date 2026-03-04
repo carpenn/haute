@@ -3,6 +3,43 @@ import type { Node, Edge } from "@xyflow/react"
 
 const elk = new ELK()
 
+/**
+ * Cluster nearby coordinate values and snap each cluster to its median.
+ * E.g. y-values [100, 103, 108, 250, 253] with threshold 20
+ * → two clusters: [100,103,108]→103, [250,253]→250
+ */
+function clusterSnap(values: number[], threshold: number): Map<number, number> {
+  const sorted = [...new Set(values)].sort((a, b) => a - b)
+  const snap = new Map<number, number>()
+
+  let i = 0
+  while (i < sorted.length) {
+    let j = i
+    while (j < sorted.length && sorted[j] - sorted[i] <= threshold) {
+      j++
+    }
+    const cluster = sorted.slice(i, j)
+    const median = cluster[Math.floor(cluster.length / 2)]
+    for (const v of cluster) {
+      snap.set(v, median)
+    }
+    i = j
+  }
+  return snap
+}
+
+/** Snap positions so nodes at nearly-the-same x or y align exactly. */
+function alignPositions(posMap: Map<string, { x: number; y: number }>, threshold = 20): void {
+  const positions = [...posMap.values()]
+  const xSnap = clusterSnap(positions.map((p) => p.x), threshold)
+  const ySnap = clusterSnap(positions.map((p) => p.y), threshold)
+
+  for (const pos of posMap.values()) {
+    pos.x = xSnap.get(pos.x) ?? pos.x
+    pos.y = ySnap.get(pos.y) ?? pos.y
+  }
+}
+
 export async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise<Node[]> {
   const elkGraph = {
     id: "root",
@@ -30,6 +67,8 @@ export async function getLayoutedElements(nodes: Node[], edges: Edge[]): Promise
   for (const child of layout.children || []) {
     posMap.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 })
   }
+
+  alignPositions(posMap)
 
   return nodes.map((n) => ({
     ...n,

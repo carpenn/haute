@@ -100,19 +100,16 @@ describe("useEdgeHandlers", () => {
     expect(newEdges[0]).toHaveProperty("targetHandle", null)
   })
 
-  it("onSelectionChange with single node calls fetchPreview and clearTrace", () => {
+  it("onSelectionChange with single node does NOT open panel (drag-safe)", () => {
     const params = makeParams()
     const node = { id: "n1", data: { label: "A" } } as Node
     const { result } = renderHook(() => useEdgeHandlers(params))
     act(() => {
       result.current.onSelectionChange({ nodes: [node], edges: [] })
     })
-    expect(params.setSelectedNode).toHaveBeenCalled()
-    // The setSelectedNode callback should trigger fetchPreview/clearTrace when prev differs
-    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node
-    updater(null) // simulate prev !== node.id
-    expect(params.fetchPreview).toHaveBeenCalledWith(node)
-    expect(params.clearTrace).toHaveBeenCalled()
+    // Panel opening moved to onNodeClick — selection alone should not trigger it
+    expect(params.fetchPreview).not.toHaveBeenCalled()
+    expect(params.setSelectedNode).not.toHaveBeenCalled()
   })
 
   it("onSelectionChange with no nodes sets selectedNode to null", () => {
@@ -123,6 +120,36 @@ describe("useEdgeHandlers", () => {
     })
     expect(params.setSelectedNode).toHaveBeenCalledWith(null)
     expect(params.clearTrace).toHaveBeenCalled()
+  })
+
+  it("onNodeClick opens panel and fetches preview", () => {
+    const params = makeParams()
+    const node = { id: "n1", data: { label: "A" } } as Node
+    const event = {} as React.MouseEvent
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onNodeClick(event, node)
+    })
+    expect(params.setSelectedNode).toHaveBeenCalled()
+    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node
+    updater(null)
+    expect(params.fetchPreview).toHaveBeenCalledWith(node)
+    expect(params.clearTrace).toHaveBeenCalled()
+    expect(params.lastSelectedNodeRef.current).toBe(node)
+  })
+
+  it("onNodeClick skips fetchPreview when re-clicking the same node", () => {
+    const params = makeParams()
+    const node = { id: "n1", data: { label: "A" } } as Node
+    const event = {} as React.MouseEvent
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onNodeClick(event, node)
+    })
+    const updater = params.setSelectedNode.mock.calls[0][0] as (prev: Node | null) => Node
+    // Simulate prev === same node
+    updater(node)
+    expect(params.fetchPreview).not.toHaveBeenCalled()
   })
 
   it("handleDeleteEdge removes edge by id", () => {

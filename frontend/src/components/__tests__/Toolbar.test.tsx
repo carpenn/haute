@@ -16,6 +16,7 @@ function makeProps(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
     onToggleSnapToGrid: vi.fn(),
     onShowShortcuts: vi.fn(),
     onOpenSettings: vi.fn(),
+    onCentre: vi.fn(),
     onAutoLayout: vi.fn(),
     onSave: vi.fn(),
     wsStatus: "connected" as const,
@@ -62,6 +63,19 @@ describe("Toolbar", () => {
     render(<Toolbar {...props} />)
     fireEvent.click(screen.getByText("Layout"))
     expect(props.onAutoLayout).toHaveBeenCalledOnce()
+  })
+
+  it("Centre button is disabled when nodeCount is 0", () => {
+    render(<Toolbar {...makeProps({ nodeCount: 0 })} />)
+    const centreBtn = screen.getByText("Centre")
+    expect(centreBtn).toBeDisabled()
+  })
+
+  it("clicking Centre calls onCentre", () => {
+    const props = makeProps()
+    render(<Toolbar {...props} />)
+    fireEvent.click(screen.getByText("Centre"))
+    expect(props.onCentre).toHaveBeenCalledOnce()
   })
 
   it("clicking Imports calls onOpenSettings", () => {

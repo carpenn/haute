@@ -35,6 +35,7 @@ interface ToolbarProps {
   onToggleSnapToGrid: () => void
   onShowShortcuts: () => void
   onOpenSettings: () => void
+  onCentre: () => void
   onAutoLayout: () => void
   onSave: () => void
   wsStatus: WsStatus
@@ -48,7 +49,7 @@ export default function Toolbar({
   canUndo, canRedo, onUndo, onRedo,
   snapToGrid, onToggleSnapToGrid,
   onShowShortcuts,
-  onOpenSettings, onAutoLayout,
+  onOpenSettings, onCentre, onAutoLayout,
   onSave,
   wsStatus, lastRunMs, timings, memory,
 }: ToolbarProps) {
@@ -198,6 +199,17 @@ export default function Toolbar({
           style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
         />
       </div>
+      <button
+        onClick={onOpenSettings}
+        className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1 ml-3"
+        style={{ color: 'var(--text-secondary)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+        title="Pipeline settings (imports, helpers)"
+      >
+        <Settings size={13} />
+        Imports
+      </button>
       {/* Timing + memory breakdowns */}
       {lastRunMs != null && lastRunMs > 0 && (
         <div className="ml-3">
@@ -270,15 +282,15 @@ export default function Toolbar({
         </button>
         <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
         <button
-          onClick={onOpenSettings}
-          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
+          onClick={onCentre}
+          disabled={nodeCount === 0}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
           style={{ color: 'var(--text-secondary)' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-          title="Pipeline settings (imports, helpers)"
+          title="Fit all nodes in view"
         >
-          <Settings size={13} />
-          Imports
+          Centre
         </button>
         <button
           onClick={onAutoLayout}
