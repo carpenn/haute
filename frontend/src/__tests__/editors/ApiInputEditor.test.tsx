@@ -2,7 +2,7 @@
  * Render tests for ApiInputEditor.
  *
  * Tests: API banner, preview data label, FileBrowser with extensions filter,
- * row ID column warning, cache button visibility, JsonCacheButton states
+ * cache button visibility, JsonCacheButton states
  * (initial, after build, error on failure).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
@@ -82,21 +82,6 @@ describe("ApiInputEditor", () => {
     expect(screen.getByTestId("extensions").textContent).toBe(".json,.jsonl")
   })
 
-  it("row_id_column warning shown when not set", () => {
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{}} />)
-    expect(screen.getByText("Required for tracing")).toBeTruthy()
-  })
-
-  it("row_id_column warning hidden when set", () => {
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{ row_id_column: "id" }} />)
-    expect(screen.queryByText("Required for tracing")).toBeNull()
-  })
-
-  it("shows tracing info when row_id_column is set", () => {
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{ row_id_column: "quote_id", path: "data/input.json" }} />)
-    expect(screen.getByText(/Traces will identify rows by/)).toBeTruthy()
-    expect(screen.getByText("quote_id")).toBeTruthy()
-  })
 
   it("cache button shown for .json files", () => {
     render(<ApiInputEditor {...DEFAULT_PROPS} config={{ path: "data/input.json" }} />)
@@ -188,39 +173,10 @@ describe("ApiInputEditor", () => {
     expect(screen.getByText("Preview Data")).toBeTruthy()
   })
 
-  it("renders column options from schema when path is set", () => {
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{ path: "data/input.json" }} />)
-    const select = screen.getByRole("combobox") as HTMLSelectElement
-    const optionTexts = Array.from(select.options).map(o => o.text)
-    expect(optionTexts).toContain("col1 (Int64)")
-    expect(optionTexts).toContain("col2 (String)")
-  })
-
-  it("calls onUpdate when selecting a row_id_column", () => {
-    const onUpdate = vi.fn()
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{ path: "data/input.json" }} onUpdate={onUpdate} />)
-    const select = screen.getByRole("combobox")
-    fireEvent.change(select, { target: { value: "col1" } })
-    expect(onUpdate).toHaveBeenCalledWith("row_id_column", "col1")
-  })
-
-  it("clears row_id_column when selecting empty option", () => {
-    const onUpdate = vi.fn()
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{ path: "data/input.json", row_id_column: "col1" }} onUpdate={onUpdate} />)
-    const select = screen.getByRole("combobox")
-    fireEvent.change(select, { target: { value: "" } })
-    expect(onUpdate).toHaveBeenCalledWith("row_id_column", undefined)
-  })
 
   it("shows SchemaPreview component", () => {
     render(<ApiInputEditor {...DEFAULT_PROPS} />)
     expect(screen.getByTestId("schema-preview")).toBeTruthy()
   })
 
-  it("row ID column select has warning border when not set", () => {
-    render(<ApiInputEditor {...DEFAULT_PROPS} config={{}} />)
-    const select = screen.getByRole("combobox") as HTMLSelectElement
-    // Warning border color when no row_id_column
-    expect(select.style.border).toContain("rgba(245, 158, 11")
-  })
 })

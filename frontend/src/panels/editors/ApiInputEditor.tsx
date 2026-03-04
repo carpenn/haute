@@ -1,4 +1,4 @@
-import { Radio, AlertTriangle } from "lucide-react"
+import { Radio } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
@@ -88,39 +88,6 @@ export default function ApiInputEditor({
           <JsonCacheButton dataPath={currentPath} />
         )}
 
-        <div>
-          <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-            Row ID Column
-            {!config.row_id_column && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium normal-case tracking-normal" style={{ color: '#f59e0b' }}>
-                <AlertTriangle size={10} />
-                Required for tracing
-              </span>
-            )}
-          </label>
-          <select
-            value={configField(config, "row_id_column", "")}
-            onChange={(e) => onUpdate("row_id_column", e.target.value || undefined)}
-            className="w-full px-2.5 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-2 appearance-none"
-            style={{
-              background: 'var(--bg-input)',
-              border: config.row_id_column ? '1px solid var(--border)' : '1px solid rgba(245,158,11,.4)',
-              color: 'var(--text-primary)',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,.3)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = config.row_id_column ? 'var(--border)' : 'rgba(245,158,11,.4)'; e.currentTarget.style.boxShadow = 'none' }}
-          >
-            <option value="">Select ID column...</option>
-            {schema?.columns.map((col) => (
-              <option key={col.name} value={col.name}>{col.name} ({col.dtype})</option>
-            ))}
-          </select>
-          {Boolean(config.row_id_column) && (
-            <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Traces will identify rows by <span className="font-mono font-medium" style={{ color: 'var(--text-secondary)' }}>{configField(config, "row_id_column", "")}</span>
-            </div>
-          )}
-        </div>
       </div>
 
       {loadingSchema && (

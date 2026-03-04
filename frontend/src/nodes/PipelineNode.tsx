@@ -30,7 +30,6 @@ function PipelineNode({ data, selected }: NodeProps) {
   const accent = nodeTypeColors[nodeType] || nodeTypeColors[NODE_TYPES.TRANSFORM]
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = nodeType === NODE_TYPES.API_INPUT
-  const missingRowId = isDeployInput && !nodeData.config?.row_id_column
   const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH
   const activeScenario = useSettingsStore((s) => s.activeScenario)
   const showLiveBadge = isLiveSwitch && activeScenario === "live"
@@ -94,13 +93,6 @@ function PipelineNode({ data, selected }: NodeProps) {
             >
               <Radio size={8} />
               API
-              {missingRowId && (
-                <span
-                  className="w-[6px] h-[6px] rounded-full shrink-0 ml-0.5"
-                  style={{ backgroundColor: "#f59e0b" }}
-                  title="Row ID column not set — required for tracing"
-                />
-              )}
             </span>
           )}
           {showLiveBadge && (
