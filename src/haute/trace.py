@@ -21,17 +21,16 @@ TODO (future phases):
 from __future__ import annotations
 
 import math
-import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 
+from haute._fingerprint_cache import FingerprintCache
 from haute._logging import get_logger
 from haute.executor import _build_node_fn, _compile_preamble
 from haute.graph_utils import (
-    GraphNode,
     NodeType,
     PipelineGraph,
     _execute_eager_core,
@@ -169,28 +168,9 @@ def _jsonify_row(row: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class _TraceCache:
-    """Thread-safe single-entry cache for the most recent pipeline execution."""
-
-    __slots__ = ("fingerprint", "eager_outputs", "order", "parents_of",
-                 "node_map", "source_ids", "_lock")
-
-    def __init__(self) -> None:
-        self.fingerprint: str | None = None
-        self.eager_outputs: dict[str, pl.DataFrame] = {}
-        self.order: list[str] = []
-        self.parents_of: dict[str, list[str]] = {}
-        self.node_map: dict[str, GraphNode] = {}
-        self.source_ids: set[str] = set()
-        self._lock = threading.Lock()
-
-    def invalidate(self) -> None:
-        with self._lock:
-            self.fingerprint = None
-            self.eager_outputs.clear()
-
-
-_cache = _TraceCache()
+_cache = FingerprintCache(
+    slots=("eager_outputs", "order", "parents_of", "node_map", "source_ids"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -242,23 +222,22 @@ def execute_trace(
     # reuse them: first click ~1.7s, subsequent clicks <10ms.
     fp = graph_fingerprint(graph, target_node_id, f"{row_limit}:{scenario}")
 
-    cache_hit = False
-    with _cache._lock:
-        if fp == _cache.fingerprint and _cache.eager_outputs:
-            cache_hit = True
-            logger.debug(
-                "trace_cache_hit",
-                fingerprint=fp[:8],
-                target=target_node_id,
-                cached_nodes=len(_cache.eager_outputs),
-            )
-            node_map = _cache.node_map
-            order = _cache.order
-            parents_of = _cache.parents_of
-            source_ids = _cache.source_ids
-            eager_outputs = _cache.eager_outputs
-
-    if not cache_hit:
+    cached = _cache.try_get(fp)
+    if cached is not None:
+        cache_hit = True
+        logger.debug(
+            "trace_cache_hit",
+            fingerprint=fp[:8],
+            target=target_node_id,
+            cached_nodes=len(cached["eager_outputs"]),
+        )
+        eager_outputs = cached["eager_outputs"]
+        order = cached["order"]
+        parents_of = cached["parents_of"]
+        node_map = cached["node_map"]
+        source_ids = cached["source_ids"]
+    else:
+        cache_hit = False
         logger.debug(
             "trace_cache_miss",
             fingerprint=fp[:8],
@@ -286,13 +265,14 @@ def execute_trace(
         source_ids = {nid for nid in order if not parents_of.get(nid)}
 
         # Populate cache
-        with _cache._lock:
-            _cache.fingerprint = fp
-            _cache.eager_outputs = eager_outputs
-            _cache.order = order
-            _cache.parents_of = parents_of
-            _cache.node_map = node_map
-            _cache.source_ids = source_ids
+        _cache.store(
+            fp,
+            eager_outputs=eager_outputs,
+            order=order,
+            parents_of=parents_of,
+            node_map=node_map,
+            source_ids=source_ids,
+        )
 
     # Extract single row from each node's cached DataFrame
     cached_rows: dict[str, dict[str, Any]] = {}

@@ -96,36 +96,53 @@ def _placeholder_svg(width: int, height: int, message: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Double lift chart
+# Shared dual-axis chart renderer
 # ---------------------------------------------------------------------------
 
 
-def render_double_lift_svg(double_lift: list[dict[str, Any]]) -> str:
-    """Dual-axis double-lift chart: bars for count, lines for actual/predicted."""
-    width, height = 600, 360
-    if not double_lift:
-        return _placeholder_svg(width, height, "No double-lift data")
+def _render_dual_axis_chart(
+    *,
+    title: str,
+    x_labels: list[Any],
+    bar_values: list[float],
+    bar_label: str,
+    line_series: dict[str, tuple[list[float], str]],
+    width: int = 600,
+    height: int = 360,
+    bottom_margin: int = 50,
+    rotate_labels: bool = False,
+) -> str:
+    """Shared dual-axis chart: bars on the right axis, lines on the left.
 
-    margin = {"top": 30, "right": 55, "bottom": 50, "left": 55}
+    Parameters
+    ----------
+    title:       Chart title.
+    x_labels:    Labels for each bar/point on the x-axis.
+    bar_values:  Values for the bar series (right axis).
+    bar_label:   Legend label for bars (e.g. "Count", "Exposure").
+    line_series: ``{label: (values, color)}`` for each line series.
+    width/height: SVG dimensions.
+    bottom_margin: Bottom margin (taller for rotated labels).
+    rotate_labels: Rotate x-axis labels -45° when True.
+    """
+    margin = {"top": 30, "right": 55, "bottom": bottom_margin, "left": 55}
     plot_w = width - margin["left"] - margin["right"]
     plot_h = height - margin["top"] - margin["bottom"]
 
-    deciles = [d["decile"] for d in double_lift]
-    actuals = [d["actual"] for d in double_lift]
-    predicted = [d["predicted"] for d in double_lift]
-    counts = [d["count"] for d in double_lift]
-
-    n = len(double_lift)
+    n = len(x_labels)
     bar_w = max(plot_w / n * 0.6, 4)
     gap = plot_w / n
 
-    # Y-axis scales
-    max_count = max(counts) if counts else 1
-    all_vals = actuals + predicted
-    y_min = min(all_vals) if all_vals else 0
-    y_max = max(all_vals) if all_vals else 1
+    max_bar = max(bar_values) if bar_values else 1
+    if max_bar == 0:
+        max_bar = 1
+
+    all_line_vals = [v for vals, _c in line_series.values() for v in vals]
+    y_min = min(all_line_vals) if all_line_vals else 0
+    y_max = max(all_line_vals) if all_line_vals else 1
     if y_min == y_max:
-        y_min, y_max = y_min - 0.5, y_max + 0.5
+        y_min -= 0.5
+        y_max += 0.5
     y_pad = (y_max - y_min) * 0.1
     y_min -= y_pad
     y_max += y_pad
@@ -134,7 +151,7 @@ def render_double_lift_svg(double_lift: list[dict[str, Any]]) -> str:
         return margin["left"] + gap * i + gap / 2
 
     def y_bar(v: float) -> float:
-        return margin["top"] + plot_h * (1 - v / max_count)
+        return margin["top"] + plot_h * (1 - v / max_bar)
 
     def y_line(v: float) -> float:
         return margin["top"] + plot_h * (1 - (v - y_min) / (y_max - y_min))
@@ -144,10 +161,10 @@ def render_double_lift_svg(double_lift: list[dict[str, Any]]) -> str:
         f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
         f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
         f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
-        f'font-weight="600" fill="{COLOR_AXIS}">Double Lift (Actual vs Predicted by Decile)</text>',
+        f'font-weight="600" fill="{COLOR_AXIS}">{_escape(title)}</text>',
     ]
 
-    # Grid lines
+    # Grid lines + left-axis ticks
     for tick in _nice_ticks(y_min, y_max, 5):
         yp = y_line(tick)
         if margin["top"] <= yp <= margin["top"] + plot_h:
@@ -162,68 +179,98 @@ def render_double_lift_svg(double_lift: list[dict[str, Any]]) -> str:
                 f'font-size="10" fill="{COLOR_AXIS}">{_format_tick(tick)}</text>'
             )
 
-    # Bars (count)
-    for i, c in enumerate(counts):
+    # Bars
+    for i, bv in enumerate(bar_values):
         bx = x_pos(i) - bar_w / 2
-        by = y_bar(c)
-        bh = margin["top"] + plot_h - by
+        by = y_bar(bv)
+        bh = max(margin["top"] + plot_h - by, 0)
         parts.append(
             f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" '
             f'height="{bh:.1f}" fill="{COLOR_BARS}" rx="1"/>'
         )
 
-    # Actual line
-    points_a = " ".join(f"{x_pos(i):.1f},{y_line(actuals[i]):.1f}" for i in range(n))
-    parts.append(
-        f'<polyline points="{points_a}" fill="none" '
-        f'stroke="{COLOR_ACTUAL}" stroke-width="2" stroke-linejoin="round"/>'
-    )
-    for i in range(n):
-        parts.append(
-            f'<circle cx="{x_pos(i):.1f}" cy="{y_line(actuals[i]):.1f}" '
-            f'r="3" fill="{COLOR_ACTUAL}"/>'
-        )
-
-    # Predicted line
-    points_p = " ".join(f"{x_pos(i):.1f},{y_line(predicted[i]):.1f}" for i in range(n))
-    parts.append(
-        f'<polyline points="{points_p}" fill="none" '
-        f'stroke="{COLOR_PREDICTED}" stroke-width="2" stroke-linejoin="round"/>'
-    )
-    for i in range(n):
-        parts.append(
-            f'<circle cx="{x_pos(i):.1f}" cy="{y_line(predicted[i]):.1f}" '
-            f'r="3" fill="{COLOR_PREDICTED}"/>'
-        )
+    # Line series
+    for _label, (values, color) in line_series.items():
+        if n > 1:
+            pts = " ".join(f"{x_pos(i):.1f},{y_line(values[i]):.1f}" for i in range(n))
+            parts.append(
+                f'<polyline points="{pts}" fill="none" '
+                f'stroke="{color}" stroke-width="2" stroke-linejoin="round"/>'
+            )
+        for i in range(n):
+            parts.append(
+                f'<circle cx="{x_pos(i):.1f}" cy="{y_line(values[i]):.1f}" '
+                f'r="3" fill="{color}"/>'
+            )
 
     # X-axis labels
-    for i, d in enumerate(deciles):
-        parts.append(
-            f'<text x="{x_pos(i):.1f}" y="{margin["top"] + plot_h + 16}" '
-            f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">{d}</text>'
-        )
+    label_y = margin["top"] + plot_h + 14
+    for i, label in enumerate(x_labels):
+        display = _truncate_label(str(label), 15)
+        xp = x_pos(i)
+        if rotate_labels:
+            parts.append(
+                f'<text x="{xp:.1f}" y="{label_y}" '
+                f'text-anchor="end" font-size="9" fill="{COLOR_AXIS}" '
+                f'transform="rotate(-45, {xp:.1f}, {label_y})">'
+                f"{_escape(display)}</text>"
+            )
+        else:
+            parts.append(
+                f'<text x="{xp:.1f}" y="{label_y + 2}" '
+                f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_escape(str(label))}</text>"
+            )
 
-    # Right-axis label for count
+    # Right-axis label for bars
     parts.append(
         f'<text x="{width - 5}" y="{margin["top"] + plot_h // 2}" '
         f'text-anchor="end" font-size="10" fill="{COLOR_BARS}" '
-        f'transform="rotate(-90, {width - 5}, {margin["top"] + plot_h // 2})">Count</text>'
+        f'transform="rotate(-90, {width - 5}, {margin["top"] + plot_h // 2})">'
+        f"{_escape(bar_label)}</text>"
     )
 
     # Legend
     lx = margin["left"] + 10
     ly = margin["top"] + 12
+    offset = 0
+    for label, (_vals, color) in line_series.items():
+        parts.append(
+            f'<rect x="{lx + offset}" y="{ly - 4}" width="10" height="3" fill="{color}"/>'
+            f'<text x="{lx + offset + 14}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">'
+            f"{_escape(label)}</text>"
+        )
+        offset += len(label) * 7 + 24
     parts.append(
-        f'<rect x="{lx}" y="{ly - 4}" width="10" height="3" fill="{COLOR_ACTUAL}"/>'
-        f'<text x="{lx + 14}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">Actual</text>'
-        f'<rect x="{lx + 60}" y="{ly - 4}" width="10" height="3" fill="{COLOR_PREDICTED}"/>'
-        f'<text x="{lx + 74}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">Predicted</text>'
-        f'<rect x="{lx + 140}" y="{ly - 6}" width="10" height="10" fill="{COLOR_BARS}" rx="1"/>'
-        f'<text x="{lx + 154}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">Count</text>'
+        f'<rect x="{lx + offset}" y="{ly - 6}" width="10" height="10" fill="{COLOR_BARS}" rx="1"/>'
+        f'<text x="{lx + offset + 14}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">'
+        f"{_escape(bar_label)}</text>"
     )
 
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 1. Double lift chart
+# ---------------------------------------------------------------------------
+
+
+def render_double_lift_svg(double_lift: list[dict[str, Any]]) -> str:
+    """Dual-axis double-lift chart: bars for count, lines for actual/predicted."""
+    if not double_lift:
+        return _placeholder_svg(600, 360, "No double-lift data")
+
+    return _render_dual_axis_chart(
+        title="Double Lift (Actual vs Predicted by Decile)",
+        x_labels=[d["decile"] for d in double_lift],
+        bar_values=[d["count"] for d in double_lift],
+        bar_label="Count",
+        line_series={
+            "Actual": ([d["actual"] for d in double_lift], COLOR_ACTUAL),
+            "Predicted": ([d["predicted"] for d in double_lift], COLOR_PREDICTED),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -460,130 +507,22 @@ def render_ave_feature_svg(
     is_categorical: bool,
 ) -> str:
     """Dual-axis AvE chart for a single feature."""
-    width, height = 600, 320
     if not bins:
-        return _placeholder_svg(width, height, f"No data for {_escape(feature_name)}")
-
-    margin = {"top": 30, "right": 55, "bottom": 70, "left": 55}
-    plot_w = width - margin["left"] - margin["right"]
-    plot_h = height - margin["top"] - margin["bottom"]
+        return _placeholder_svg(600, 320, f"No data for {_escape(feature_name)}")
 
     labels = [b["label"] for b in bins]
-    exposures = [b["exposure"] for b in bins]
-    actuals = [b["avg_actual"] for b in bins]
-    predicted = [b["avg_predicted"] for b in bins]
-
-    n = len(bins)
-    bar_w = max(plot_w / n * 0.6, 4)
-    gap = plot_w / n
-
-    max_exp = max(exposures) if exposures else 1
-    if max_exp == 0:
-        max_exp = 1
-
-    all_line_vals = actuals + predicted
-    y_min = min(all_line_vals) if all_line_vals else 0
-    y_max = max(all_line_vals) if all_line_vals else 1
-    if y_min == y_max:
-        y_min -= 0.5
-        y_max += 0.5
-    y_pad = (y_max - y_min) * 0.1
-    y_min -= y_pad
-    y_max += y_pad
-
-    def x_pos(i: int) -> float:
-        return margin["left"] + gap * i + gap / 2
-
-    def y_bar(v: float) -> float:
-        return margin["top"] + plot_h * (1 - v / max_exp)
-
-    def y_line(v: float) -> float:
-        return margin["top"] + plot_h * (1 - (v - y_min) / (y_max - y_min))
-
-    # Check if we need rotated labels
     any_long = any(len(str(lab)) > 5 for lab in labels)
 
-    parts: list[str] = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
-        f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
-        f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
-        f'font-weight="600" fill="{COLOR_AXIS}">{_escape(feature_name)}</text>',
-    ]
-
-    # Grid
-    for tick in _nice_ticks(y_min, y_max, 5):
-        yp = y_line(tick)
-        if margin["top"] <= yp <= margin["top"] + plot_h:
-            parts.append(
-                f'<line x1="{margin["left"]}" y1="{yp:.1f}" '
-                f'x2="{margin["left"] + plot_w}" y2="{yp:.1f}" '
-                f'stroke="{COLOR_GRID}" stroke-width="1"/>'
-            )
-            parts.append(
-                f'<text x="{margin["left"] - 5}" y="{yp:.1f}" '
-                f'text-anchor="end" dominant-baseline="middle" '
-                f'font-size="10" fill="{COLOR_AXIS}">{_format_tick(tick)}</text>'
-            )
-
-    # Bars
-    for i, exp in enumerate(exposures):
-        bx = x_pos(i) - bar_w / 2
-        by = y_bar(exp)
-        bh = margin["top"] + plot_h - by
-        parts.append(
-            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" '
-            f'height="{max(bh, 0):.1f}" fill="{COLOR_BARS}" rx="1"/>'
-        )
-
-    # Actual line
-    if n > 1:
-        points_a = " ".join(
-            f"{x_pos(i):.1f},{y_line(actuals[i]):.1f}" for i in range(n)
-        )
-        parts.append(
-            f'<polyline points="{points_a}" fill="none" '
-            f'stroke="{COLOR_ACTUAL}" stroke-width="2" stroke-linejoin="round"/>'
-        )
-    for i in range(n):
-        parts.append(
-            f'<circle cx="{x_pos(i):.1f}" cy="{y_line(actuals[i]):.1f}" '
-            f'r="3" fill="{COLOR_ACTUAL}"/>'
-        )
-
-    # Predicted line
-    if n > 1:
-        points_p = " ".join(
-            f"{x_pos(i):.1f},{y_line(predicted[i]):.1f}" for i in range(n)
-        )
-        parts.append(
-            f'<polyline points="{points_p}" fill="none" '
-            f'stroke="{COLOR_PREDICTED}" stroke-width="2" stroke-linejoin="round"/>'
-        )
-    for i in range(n):
-        parts.append(
-            f'<circle cx="{x_pos(i):.1f}" cy="{y_line(predicted[i]):.1f}" '
-            f'r="3" fill="{COLOR_PREDICTED}"/>'
-        )
-
-    # X-axis labels
-    for i, label in enumerate(labels):
-        display = _truncate_label(str(label), 15)
-        xp = x_pos(i)
-        label_y = margin["top"] + plot_h + 14
-        if any_long:
-            parts.append(
-                f'<text x="{xp:.1f}" y="{label_y}" '
-                f'text-anchor="end" font-size="9" fill="{COLOR_AXIS}" '
-                f'transform="rotate(-45, {xp:.1f}, {label_y})">'
-                f"{_escape(display)}</text>"
-            )
-        else:
-            parts.append(
-                f'<text x="{xp:.1f}" y="{label_y}" '
-                f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
-                f"{_escape(display)}</text>"
-            )
-
-    parts.append("</svg>")
-    return "\n".join(parts)
+    return _render_dual_axis_chart(
+        title=feature_name,
+        x_labels=labels,
+        bar_values=[b["exposure"] for b in bins],
+        bar_label="Exposure",
+        line_series={
+            "Actual": ([b["avg_actual"] for b in bins], COLOR_ACTUAL),
+            "Predicted": ([b["avg_predicted"] for b in bins], COLOR_PREDICTED),
+        },
+        height=320,
+        bottom_margin=70,
+        rotate_labels=any_long,
+    )

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react"
-import { Check, ChevronDown, Loader2, Trash2, HardDriveDownload } from "lucide-react"
+import { useState, useRef } from "react"
+import { Check, ChevronDown, Loader2 } from "lucide-react"
 import {
   getWarehouses,
   getCatalogs,
@@ -11,6 +11,7 @@ import {
   deleteCache,
   ApiError,
 } from "../../api/client"
+import { CacheFetchButton } from "../../components/CacheFetchButton"
 
 // ─── WarehousePicker ──────────────────────────────────────────────
 
@@ -319,122 +320,27 @@ export function DatabricksFetchButton({
   query: string
   onFetched?: (info: CacheStatus) => void
 }) {
-  const [cache, setCache] = useState<CacheStatus | null>(null)
-  const [fetching, setFetching] = useState(false)
-  const [progress, setProgress] = useState<{ rows: number; elapsed: number } | null>(null)
-  const [error, setError] = useState("")
-
-  useEffect(() => {
-    if (!table) return
-    getCacheStatus(table)
-      .then((data) => {
-        setCache(data)
-        if (data.cached) onFetched?.(data)
-      })
-      .catch(() => setCache(null))
-  }, [table])
-
-  useEffect(() => {
-    if (!fetching || !table) return
-    const id = setInterval(() => {
-      getFetchProgress(table)
-        .then((data) => { if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0 }) })
-        .catch(() => { /* polling retry on next interval */ })
-    }, 1000)
-    return () => { clearInterval(id); setProgress(null) }
-  }, [fetching, table])
-
-  const doFetch = () => {
-    if (!table) return
-    setFetching(true)
-    setError("")
-    fetchDatabricksData({
-      table,
-      http_path: httpPath || undefined,
-      query: query || undefined,
-    })
-      .then((data) => {
-        const info: CacheStatus = { cached: true, ...data } as CacheStatus
-        setCache(info)
-        setFetching(false)
-        onFetched?.(info)
-      })
-      .catch((e: Error) => {
-        setError(e instanceof ApiError ? e.detail || e.message : e.message)
-        setFetching(false)
-      })
-  }
-
-  const formatBytes = (b: number) => {
-    if (b < 1024) return `${b} B`
-    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
-    return `${(b / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  const formatTime = (ts: number) => {
-    if (!ts) return ""
-    const d = new Date(ts * 1000)
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  }
-
   return (
-    <div>
-      <button
-        onClick={doFetch}
-        disabled={!table || fetching}
-        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
-        style={{
-          background: cache?.cached ? 'rgba(34,197,94,.1)' : 'var(--accent-soft)',
-          border: cache?.cached ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--accent)',
-          color: cache?.cached ? '#22c55e' : 'var(--accent)',
-        }}
-      >
-        {fetching ? (
-          <><Loader2 size={14} className="animate-spin" /> {progress ? `${progress.rows.toLocaleString()} rows · ${progress.elapsed}s` : "Connecting..."}</>
-        ) : cache?.cached ? (
-          <><HardDriveDownload size={14} /> Refresh Data</>
-        ) : (
-          <><HardDriveDownload size={14} /> Fetch Data</>
-        )}
-      </button>
-
-      {cache?.cached && (
-        <div className="mt-1.5 flex items-center gap-2 text-[10px] px-1" style={{ color: 'var(--text-muted)' }}>
-          <span>{cache.row_count.toLocaleString()} rows</span>
-          <span>·</span>
-          <span>{cache.column_count} cols</span>
-          <span>·</span>
-          <span>{formatBytes(cache.size_bytes)}</span>
-          {cache.fetched_at > 0 && (
-            <><span>·</span><span>{formatTime(cache.fetched_at)}</span></>
-          )}
-          <span>·</span>
-          <button
-            onClick={() => {
-              deleteCache(table)
-                .then((data) => setCache(data))
-                .catch((e: Error) => setError(e instanceof ApiError ? e.detail || e.message : e.message))
-            }}
-            className="inline-flex items-center gap-0.5 hover:opacity-70 transition-opacity"
-            style={{ color: '#ef4444' }}
-            title="Delete cached data"
-          >
-            <Trash2 size={10} /> clear
-          </button>
-        </div>
-      )}
-
-      {!cache?.cached && table && !fetching && (
-        <div className="mt-1.5 text-[10px] px-1" style={{ color: '#f59e0b' }}>
-          Not fetched yet — click to download from Databricks
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-1.5 text-[10px] px-2 py-1 rounded" style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444' }}>
-          {error}
-        </div>
-      )}
-    </div>
+    <CacheFetchButton<CacheStatus>
+      resourceKey={table}
+      getStatus={(key) => getCacheStatus(key)}
+      startFetch={(key) =>
+        fetchDatabricksData({
+          table: key,
+          http_path: httpPath || undefined,
+          query: query || undefined,
+        }).then((data) => ({ cached: true, ...data }) as CacheStatus)
+      }
+      getProgress={(key) => getFetchProgress(key)}
+      deleteCache={(key) => deleteCache(key)}
+      timestampField="fetched_at"
+      labels={{
+        fetchLabel: "Fetch Data",
+        refreshLabel: "Refresh Data",
+        notCachedHint: "Not fetched yet \u2014 click to download from Databricks",
+        pendingLabel: "Connecting...",
+      }}
+      onCacheReady={onFetched}
+    />
   )
 }

@@ -18,12 +18,10 @@ from haute._parser_helpers import (
     _build_edges,
     _build_rf_nodes,
     _extract_connect_calls,
+    _extract_decorated_nodes,
     _extract_function_bodies,
     _extract_submodel_meta,
-    _get_decorator_kwargs,
-    _get_docstring,
     _is_submodel_node_decorator,
-    _resolve_node_config,
 )
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 
@@ -73,41 +71,9 @@ def parse_submodel_source(
     submodel_name, submodel_desc = _extract_submodel_meta(tree)
 
     func_bodies = _extract_function_bodies(source, tree=tree)
-    raw_nodes: list[dict] = []
-
-    for stmt in ast.iter_child_nodes(tree):
-        if not isinstance(stmt, ast.FunctionDef):
-            continue
-
-        matched_decorator = None
-        for dec in stmt.decorator_list:
-            if _is_submodel_node_decorator(dec):
-                matched_decorator = dec
-                break
-
-        if matched_decorator is None:
-            continue
-
-        func_name = stmt.name
-        decorator_kwargs = _get_decorator_kwargs(matched_decorator)
-        param_names = [arg.arg for arg in stmt.args.args]
-        n_params = len(param_names)
-        description = _get_docstring(stmt)
-        body = func_bodies.get(func_name, "")
-
-        node_type, config = _resolve_node_config(
-            decorator_kwargs, body, param_names, n_params, _base_dir,
-        )
-
-        raw_nodes.append(
-            {
-                "func_name": func_name,
-                "node_type": node_type,
-                "description": description,
-                "config": config,
-                "param_names": param_names,
-            }
-        )
+    raw_nodes = _extract_decorated_nodes(
+        tree, _is_submodel_node_decorator, func_bodies, _base_dir,
+    )
 
     edges = _build_edges(raw_nodes, _extract_connect_calls(tree, receiver="submodel"))
     rf_nodes = _build_rf_nodes(raw_nodes)

@@ -13,12 +13,13 @@ can optimise the full plan end-to-end.
 from __future__ import annotations
 
 import re
-import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 
+from haute._fingerprint_cache import FingerprintCache
 from haute._logging import get_logger
 from haute._rating import (
     _apply_banding,
@@ -180,14 +181,22 @@ def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> Gr
 # Node builder registry
 # ---------------------------------------------------------------------------
 
+
+@dataclass(frozen=True, slots=True)
+class NodeBuildContext:
+    """Parameters shared by all node builder functions."""
+
+    node: GraphNode
+    source_names: list[str]
+    row_limit: int | None
+    node_map: dict[str, GraphNode] | None
+    orig_source_names: list[str] | None
+    preamble_ns: dict[str, Any] | None
+    scenario: str | None
+
+
 # Type alias for builder functions.
-# Each builder receives the same parameters as _build_node_fn and returns
-# (func_name, callable, is_source).
-NodeBuilder = Callable[
-    [GraphNode, list[str], int | None, dict[str, GraphNode] | None,
-     list[str] | None, dict[str, Any] | None, str | None],
-    tuple[str, Callable, bool],
-]
+NodeBuilder = Callable[[NodeBuildContext], tuple[str, Callable, bool]]
 
 _NODE_BUILDERS: dict[NodeType, NodeBuilder] = {}
 
@@ -206,17 +215,9 @@ def _passthrough_fn(*dfs: _Frame) -> _Frame:
 
 
 @_register(NodeType.API_INPUT)
-def _build_api_input(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     path = config.get("path", "")
     flat_schema = config.get("flattenSchema")
 
@@ -248,17 +249,9 @@ def _build_api_input(
 
 
 @_register(NodeType.DATA_SOURCE)
-def _build_data_source(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     path = config.get("path", "")
     source_type = config.get("sourceType", "flat_file")
 
@@ -279,17 +272,9 @@ def _build_data_source(
 
 
 @_register(NodeType.CONSTANT)
-def _build_constant(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_constant(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     raw_values = config.get("values", []) or []
 
     def constant_fn() -> _Frame:
@@ -311,20 +296,12 @@ def _build_constant(
 
 
 @_register(NodeType.LIVE_SWITCH)
-def _build_live_switch(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_live_switch(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
-    input_names = list(source_names)
-    _scenario = scenario or "live"
+    input_names = list(ctx.source_names)
+    _scenario = ctx.scenario or "live"
 
     def switch_fn(*dfs: _Frame) -> _Frame:
         # Find the input mapped to the active scenario
@@ -347,42 +324,26 @@ def _build_live_switch(
 
 
 @_register(NodeType.DATA_SINK)
-def _build_data_sink(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    func_name = _sanitize_func_name(node.data.label)
+def _build_data_sink(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(ctx.node.data.label)
     # During normal run/preview, dataSink is a pass-through.
     # Actual writing happens via execute_sink() on explicit user action.
     return func_name, _passthrough_fn, False
 
 
 @_register(NodeType.EXTERNAL_FILE)
-def _build_external_file(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_external_file(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     code = config.get("code", "").strip()
     path = config.get("path", "")
     file_type = config.get("fileType", "pickle")
     model_class = config.get("modelClass", "classifier")
-    _src_names = list(source_names)
+    _src_names = list(ctx.source_names)
 
-    _orig_src = list(orig_source_names) if orig_source_names else None
+    _orig_src = list(ctx.orig_source_names) if ctx.orig_source_names else None
     _in_map = dict(config.get("inputMapping", {})) or None
-    _preamble_ext = dict(preamble_ns) if preamble_ns else {}
+    _preamble_ext = dict(ctx.preamble_ns) if ctx.preamble_ns else {}
     if code:
 
         def external_fn(*dfs: _Frame) -> _Frame:
@@ -401,17 +362,9 @@ def _build_external_file(
 
 
 @_register(NodeType.OUTPUT)
-def _build_output(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_output(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     fields = config.get("fields", []) or []
 
     def output_fn(*dfs: _Frame) -> _Frame:
@@ -424,17 +377,9 @@ def _build_output(
 
 
 @_register(NodeType.BANDING)
-def _build_banding(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_banding(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     factors = _normalise_banding_factors(config)
 
     def banding_fn(*dfs: _Frame, _factors: list = list(factors)) -> _Frame:
@@ -455,17 +400,9 @@ def _build_banding(
 
 
 @_register(NodeType.RATING_STEP)
-def _build_rating_step(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_rating_step(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     tables: list[dict[str, Any]] = config.get("tables", []) or []
     # GUI config may send None for these fields, so `or` ensures a usable default
     _rs_operation: str = config.get("operation", "multiply") or "multiply"
@@ -498,17 +435,9 @@ def _build_rating_step(
 
 
 @_register(NodeType.SCENARIO_EXPANDER)
-def _build_scenario_expander(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     _col_name = config.get("column_name", "scenario_value")
     _min_val = float(config.get("min_value", _DEFAULT_SCENARIO_MIN))
     _max_val = float(config.get("max_value", _DEFAULT_SCENARIO_MAX))
@@ -538,32 +467,16 @@ def _build_scenario_expander(
 
 
 @_register(NodeType.OPTIMISER)
-def _build_optimiser(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    func_name = _sanitize_func_name(node.data.label)
+def _build_optimiser(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(ctx.node.data.label)
     # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
     return func_name, _passthrough_fn, False
 
 
 @_register(NodeType.OPTIMISER_APPLY)
-def _build_optimiser_apply(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_optimiser_apply(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     _artifact_path = config.get("artifact_path", "")
     _version_col = config.get("version_column", "__optimiser_version__")
     _source_type = config.get("sourceType", "")
@@ -610,32 +523,16 @@ def _build_optimiser_apply(
 
 
 @_register(NodeType.MODELLING)
-def _build_modelling(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    func_name = _sanitize_func_name(node.data.label)
+def _build_modelling(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(ctx.node.data.label)
     # Pass-through in preview mode. Training happens via /api/modelling/train.
     return func_name, _passthrough_fn, False
 
 
 @_register(NodeType.MODEL_SCORE)
-def _build_model_score(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     source_type = config.get("sourceType", "")
     _run_id = config.get("run_id", "")
     _artifact_path = config.get("artifact_path", "")
@@ -659,31 +556,23 @@ def _build_model_score(
         task=_task,
         output_col=config.get("output_column", "prediction"),
         code=config.get("code", "").strip(),
-        source_names=list(source_names),
-        scenario=scenario or "live",
-        row_limit=row_limit,
+        source_names=list(ctx.source_names),
+        scenario=ctx.scenario or "live",
+        row_limit=ctx.row_limit,
     )
 
     return func_name, scorer.score, False
 
 
 @_register(NodeType.TRANSFORM)
-def _build_transform(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    config = node.data.config
-    func_name = _sanitize_func_name(node.data.label)
+def _build_transform(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    config = ctx.node.data.config
+    func_name = _sanitize_func_name(ctx.node.data.label)
     code = config.get("code", "").strip()
-    _src_names = list(source_names)
-    _orig_src = list(orig_source_names) if orig_source_names else None
+    _src_names = list(ctx.source_names)
+    _orig_src = list(ctx.orig_source_names) if ctx.orig_source_names else None
     _in_map = dict(config.get("inputMapping", {})) or None
-    _preamble = dict(preamble_ns) if preamble_ns else None
+    _preamble = dict(ctx.preamble_ns) if ctx.preamble_ns else None
 
     if code:
 
@@ -703,30 +592,14 @@ def _build_transform(
 # SUBMODEL and SUBMODEL_PORT are pass-through types with no special logic.
 # Register them explicitly so _build_node_fn doesn't raise on unknown types.
 @_register(NodeType.SUBMODEL)
-def _build_submodel(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    func_name = _sanitize_func_name(node.data.label)
+def _build_submodel(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(ctx.node.data.label)
     return func_name, _passthrough_fn, False
 
 
 @_register(NodeType.SUBMODEL_PORT)
-def _build_submodel_port(
-    node: GraphNode,
-    source_names: list[str],
-    row_limit: int | None,
-    node_map: dict[str, GraphNode] | None,
-    orig_source_names: list[str] | None,
-    preamble_ns: dict[str, Any] | None,
-    scenario: str | None,
-) -> tuple[str, Callable, bool]:
-    func_name = _sanitize_func_name(node.data.label)
+def _build_submodel_port(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    func_name = _sanitize_func_name(ctx.node.data.label)
     return func_name, _passthrough_fn, False
 
 
@@ -761,12 +634,19 @@ def _build_node_fn(
     if source_names is None:
         source_names = []
 
+    ctx = NodeBuildContext(
+        node=node,
+        source_names=source_names,
+        row_limit=row_limit,
+        node_map=node_map,
+        orig_source_names=orig_source_names,
+        preamble_ns=preamble_ns,
+        scenario=scenario,
+    )
+
     builder = _NODE_BUILDERS.get(node.data.nodeType)
     if builder is not None:
-        return builder(
-            node, source_names, row_limit, node_map,
-            orig_source_names, preamble_ns, scenario,
-        )
+        return builder(ctx)
 
     # Fallback for any unrecognised node type: pass-through
     func_name = _sanitize_func_name(node.data.label)
@@ -900,36 +780,9 @@ def _apply_ratebook(
 # ---------------------------------------------------------------------------
 
 
-class _PreviewCache:
-    """Thread-safe single-entry cache for the most recent pipeline execution."""
-
-    __slots__ = (
-        "fingerprint", "eager_outputs", "errors", "order",
-        "timings", "memory_bytes", "_lock",
-    )
-
-    def __init__(self) -> None:
-        self.fingerprint: str | None = None
-        self.eager_outputs: dict[str, pl.DataFrame] = {}
-        self.errors: dict[str, str] = {}
-        self.order: list[str] = []
-        self.timings: dict[str, float] = {}
-        self.memory_bytes: dict[str, int] = {}
-        self._lock = threading.Lock()
-
-    def invalidate(self) -> None:
-        with self._lock:
-            had_data = bool(self.eager_outputs)
-            self.fingerprint = None
-            self.eager_outputs.clear()
-            self.errors.clear()
-            self.timings.clear()
-            self.memory_bytes.clear()
-            if had_data:
-                logger.debug("preview_cache_invalidated")
-
-
-_preview_cache = _PreviewCache()
+_preview_cache = FingerprintCache(
+    slots=("eager_outputs", "errors", "order", "timings", "memory_bytes"),
+)
 
 
 def execute_graph(
@@ -968,62 +821,72 @@ def execute_graph(
     errors: dict[str, str] = {}
 
     # Check if we can extend the cache (same graph, new target is a superset)
-    with _preview_cache._lock:
-        if fp == _preview_cache.fingerprint and _preview_cache.eager_outputs:
-            cached = _preview_cache.eager_outputs
-            if target_node_id is None or target_node_id in cached:
-                logger.debug(
-                    "preview_cache_hit",
-                    fingerprint=fp[:8],
-                    target=target_node_id,
-                    cached_nodes=len(cached),
-                )
-                eager_outputs = cached
-                order = _preview_cache.order
-                errors = _preview_cache.errors
-                timings = _preview_cache.timings
-                memory_bytes = _preview_cache.memory_bytes
-            else:
-                logger.debug(
-                    "preview_cache_extend",
-                    fingerprint=fp[:8],
-                    target=target_node_id,
-                    cached_nodes=len(cached),
-                )
-                raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
-                    graph, target_node_id, row_limit, scenario=scenario,
-                )
-                eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
-                merged = {**cached, **eager_outputs}
-                _preview_cache.eager_outputs = merged
-                _preview_cache.errors = {**_preview_cache.errors, **errors}
-                _preview_cache.timings = {**_preview_cache.timings, **timings}
-                _preview_cache.memory_bytes = {**_preview_cache.memory_bytes, **memory_bytes}
-                _preview_cache.order = list(
-                    dict.fromkeys(_preview_cache.order + order),
-                )
-                eager_outputs = merged
-                errors = _preview_cache.errors
-                timings = _preview_cache.timings
-                memory_bytes = _preview_cache.memory_bytes
-                order = _preview_cache.order
-        else:
+    cached = _preview_cache.try_get(fp)
+    if cached is not None:
+        prev_outputs = cached["eager_outputs"]
+        if target_node_id is None or target_node_id in prev_outputs:
+            # Full cache hit — all required nodes already materialised
             logger.debug(
-                "preview_cache_miss",
+                "preview_cache_hit",
                 fingerprint=fp[:8],
                 target=target_node_id,
-                prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
+                cached_nodes=len(prev_outputs),
+            )
+            eager_outputs = prev_outputs
+            order = cached["order"]
+            errors = cached["errors"]
+            timings = cached["timings"]
+            memory_bytes = cached["memory_bytes"]
+        else:
+            # Partial hit — extend with newly-needed nodes
+            logger.debug(
+                "preview_cache_extend",
+                fingerprint=fp[:8],
+                target=target_node_id,
+                cached_nodes=len(prev_outputs),
             )
             raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
                 graph, target_node_id, row_limit, scenario=scenario,
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
-            _preview_cache.fingerprint = fp
-            _preview_cache.eager_outputs = eager_outputs
-            _preview_cache.errors = errors
-            _preview_cache.timings = timings
-            _preview_cache.memory_bytes = memory_bytes
-            _preview_cache.order = order
+            merged = {**prev_outputs, **eager_outputs}
+            merged_errors = {**cached["errors"], **errors}
+            merged_timings = {**cached["timings"], **timings}
+            merged_memory = {**cached["memory_bytes"], **memory_bytes}
+            merged_order = list(dict.fromkeys(cached["order"] + order))
+            _preview_cache.store(
+                fp,
+                eager_outputs=merged,
+                errors=merged_errors,
+                order=merged_order,
+                timings=merged_timings,
+                memory_bytes=merged_memory,
+            )
+            eager_outputs = merged
+            errors = merged_errors
+            timings = merged_timings
+            memory_bytes = merged_memory
+            order = merged_order
+    else:
+        # Complete cache miss — execute from scratch
+        logger.debug(
+            "preview_cache_miss",
+            fingerprint=fp[:8],
+            target=target_node_id,
+            prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
+        )
+        raw_outputs, order, errors, timings, memory_bytes = _eager_execute(
+            graph, target_node_id, row_limit, scenario=scenario,
+        )
+        eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
+        _preview_cache.store(
+            fp,
+            eager_outputs=eager_outputs,
+            errors=errors,
+            order=order,
+            timings=timings,
+            memory_bytes=memory_bytes,
+        )
 
     # Pre-compute schema warnings for instance nodes by comparing the
     # columns available at the instance's inputs vs the original's inputs.

@@ -33,122 +33,25 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
     and returns the updated parent graph with the submodel node.
     """
     from haute.codegen import graph_to_code_multi
-    from haute.graph_utils import GraphEdge as _GEdge
-    from haute.graph_utils import GraphNode as _GNode
-    from haute.graph_utils import NodeData as _NData
-    from haute.graph_utils import NodeType, _sanitize_func_name
+    from haute.routes._submodel_ops import create_submodel_graph
 
-    graph = body.graph
-    cwd = Path.cwd()
-    sm_name = _sanitize_func_name(body.name)
-    sm_file = f"modules/{sm_name}.py"
-    selected_ids = set(body.node_ids)
+    try:
+        result = create_submodel_graph(body.graph, body.node_ids, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    if len(selected_ids) < 2:
+    if not body.source_file:
         raise HTTPException(
             status_code=400,
-            detail="A submodel must contain at least 2 nodes.",
+            detail="source_file is required — the frontend must track"
+            " and send the original pipeline file path",
         )
 
-    nodes = graph.nodes
-    edges = graph.edges
-
-    # Separate child vs parent nodes
-    child_nodes = [n for n in nodes if n.id in selected_ids]
-    parent_nodes = [n for n in nodes if n.id not in selected_ids]
-    child_node_ids = {n.id for n in child_nodes}
-
-    # Separate edges: internal (both ends inside), cross-boundary, external
-    internal_edges = [
-        e for e in edges
-        if e.source in child_node_ids and e.target in child_node_ids
-    ]
-    cross_edges = [
-        e for e in edges
-        if (e.source in child_node_ids) != (e.target in child_node_ids)
-    ]
-    external_edges = [
-        e for e in edges
-        if e.source not in child_node_ids
-        and e.target not in child_node_ids
-    ]
-
-    # Determine input/output ports
-    input_ports: list[str] = []
-    output_ports: list[str] = []
-    for e in cross_edges:
-        if e.target in child_node_ids and e.source not in child_node_ids:
-            if e.target not in input_ports:
-                input_ports.append(e.target)
-        if e.source in child_node_ids and e.target not in child_node_ids:
-            if e.source not in output_ports:
-                output_ports.append(e.source)
-
-    # Build the submodel internal graph (dict — stored in submodels metadata)
-    sm_graph = {
-        "nodes": [n.model_dump() for n in child_nodes],
-        "edges": [e.model_dump() for e in internal_edges],
-        "submodel_name": sm_name,
-        "submodel_description": "",
-        "source_file": sm_file,
-    }
-
-    # Build the submodel placeholder node
-    sm_node_id = f"submodel__{sm_name}"
-    sm_node = _GNode(
-        id=sm_node_id,
-        type=NodeType.SUBMODEL,
-        position={"x": 0, "y": 0},
-        data=_NData(
-            label=sm_name,
-            description="",
-            nodeType=NodeType.SUBMODEL,
-            config={
-                "file": sm_file,
-                "childNodeIds": list(child_node_ids),
-                "inputPorts": input_ports,
-                "outputPorts": output_ports,
-            },
-        ),
-    )
-
-    # Rewire cross-boundary edges to point to/from the submodel node
-    rewired_cross: list[_GEdge] = []
-    for e in cross_edges:
-        if e.target in child_node_ids:
-            rewired_cross.append(_GEdge(
-                id=f"e_{e.source}_{sm_node_id}__{e.target}",
-                source=e.source,
-                target=sm_node_id,
-                targetHandle=f"in__{e.target}",
-            ))
-        elif e.source in child_node_ids:
-            rewired_cross.append(_GEdge(
-                id=f"e_{sm_node_id}_{e.target}__{e.source}",
-                source=sm_node_id,
-                sourceHandle=f"out__{e.source}",
-                target=e.target,
-            ))
-
-    # Assemble the new parent graph (preserve existing submodels)
-    existing_submodels = dict(graph.submodels or {})
-    existing_submodels[sm_name] = {
-        "file": sm_file,
-        "childNodeIds": list(child_node_ids),
-        "inputPorts": input_ports,
-        "outputPorts": output_ports,
-        "graph": sm_graph,
-    }
-    new_graph = graph.model_copy(update={
-        "nodes": parent_nodes + [sm_node],
-        "edges": external_edges + rewired_cross,
-        "submodels": existing_submodels,
-    })
-
     # Write files to disk
+    cwd = Path.cwd()
     mark_self_write()
     files = graph_to_code_multi(
-        new_graph,
+        result.graph,
         pipeline_name=body.pipeline_name,
         preamble=body.preamble,
         source_file=body.source_file,
@@ -159,25 +62,16 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(code)
 
-    # Determine the main file path written
-    if not body.source_file:
-        raise HTTPException(
-            status_code=400,
-            detail="source_file is required — the frontend must track"
-            " and send the original pipeline file path",
-        )
-    parent_file = body.source_file
-
     # Save sidecar
-    py_path = (cwd / parent_file).resolve()
+    py_path = (cwd / body.source_file).resolve()
     if py_path.is_relative_to(cwd):
-        save_sidecar(py_path, new_graph)
+        save_sidecar(py_path, result.graph)
 
     return CreateSubmodelResponse(
         status="ok",
-        submodel_file=sm_file,
-        parent_file=parent_file,
-        graph=new_graph,
+        submodel_file=result.sm_file,
+        parent_file=body.source_file,
+        graph=result.graph,
     )
 
 

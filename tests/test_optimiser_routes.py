@@ -14,10 +14,8 @@ from fastapi.testclient import TestClient
 from haute._parser_helpers import _build_node_config, _infer_node_type
 from haute._sandbox import set_project_root
 from haute.graph_utils import NodeType
-from haute.routes.optimiser import (
-    _build_artifact_payload,
-    _compute_scenario_value_stats,
-)
+from haute.routes._optimiser_service import _compute_scenario_value_stats
+from haute.routes.optimiser import _build_artifact_payload
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 
@@ -998,7 +996,7 @@ class TestSolveBackgroundErrors:
         """ValueError in solver produces 'Data error' message."""
         graph = _make_optimiser_graph(scored_data)
         with patch(
-            "haute.routes.optimiser._solve_online",
+            "haute.routes._optimiser_service._solve_online",
             side_effect=ValueError("Invalid constraint column"),
         ):
             resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
@@ -1011,7 +1009,7 @@ class TestSolveBackgroundErrors:
         """RuntimeError in solver produces 'Algorithm error' message."""
         graph = _make_optimiser_graph(scored_data)
         with patch(
-            "haute.routes.optimiser._solve_online",
+            "haute.routes._optimiser_service._solve_online",
             side_effect=RuntimeError("Solver diverged"),
         ):
             resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
@@ -1024,7 +1022,7 @@ class TestSolveBackgroundErrors:
         """Generic Exception in solver produces 'Unexpected error' message."""
         graph = _make_optimiser_graph(scored_data)
         with patch(
-            "haute.routes.optimiser._solve_online",
+            "haute.routes._optimiser_service._solve_online",
             side_effect=Exception("something broke"),
         ):
             resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})

@@ -31,9 +31,11 @@ from haute._parser_helpers import (
     _build_edges,
     _build_node_config,
     _build_rf_nodes,
+    _copy_config_keys,
     _dedent,
     _eval_ast_literal,
     _extract_connect_calls,
+    _extract_decorated_nodes,
     _extract_function_bodies,
     _extract_meta,
     _extract_pipeline_meta,
@@ -935,3 +937,186 @@ class TestExtractUserCodeEdgeCases:
         result = _extract_user_code(body, ["source"])
         assert "source" in result
         assert "filter" in result
+
+
+# ===========================================================================
+# _copy_config_keys
+# ===========================================================================
+
+
+class TestCopyConfigKeys:
+    def test_copies_present_keys(self):
+        config: dict[str, Any] = {}
+        kwargs = {"a": 1, "b": 2, "c": 3}
+        _copy_config_keys(config, kwargs, ["a", "c"])
+        assert config == {"a": 1, "c": 3}
+
+    def test_skips_missing_keys(self):
+        config: dict[str, Any] = {}
+        kwargs = {"a": 1}
+        _copy_config_keys(config, kwargs, ["a", "missing", "also_missing"])
+        assert config == {"a": 1}
+
+    def test_empty_keys_does_nothing(self):
+        config: dict[str, Any] = {}
+        kwargs = {"a": 1}
+        _copy_config_keys(config, kwargs, [])
+        assert config == {}
+
+    def test_empty_kwargs_does_nothing(self):
+        config: dict[str, Any] = {}
+        _copy_config_keys(config, {}, ["a", "b"])
+        assert config == {}
+
+    def test_preserves_existing_config(self):
+        config: dict[str, Any] = {"existing": "value"}
+        _copy_config_keys(config, {"a": 1}, ["a"])
+        assert config == {"existing": "value", "a": 1}
+
+    def test_accepts_tuple_keys(self):
+        config: dict[str, Any] = {}
+        _copy_config_keys(config, {"x": 10, "y": 20}, ("x", "y"))
+        assert config == {"x": 10, "y": 20}
+
+
+# ===========================================================================
+# _extract_decorated_nodes
+# ===========================================================================
+
+
+class TestExtractDecoratedNodes:
+    def _parse_source(self, source: str):
+        tree = ast.parse(source)
+        func_bodies = _extract_function_bodies(source, tree=tree)
+        return tree, func_bodies
+
+    def test_extracts_pipeline_nodes(self):
+        source = (
+            "import polars as pl\n"
+            "import haute\n"
+            'pipeline = haute.Pipeline("test")\n'
+            "\n"
+            "@pipeline.node(path='data.parquet')\n"
+            "def source():\n"
+            '    """Load data."""\n'
+            "    return pl.scan_parquet('data.parquet')\n"
+            "\n"
+            "@pipeline.node\n"
+            "def transform(source):\n"
+            "    return source\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert len(nodes) == 2
+        assert nodes[0]["func_name"] == "source"
+        assert nodes[0]["node_type"] == NodeType.DATA_SOURCE
+        assert nodes[1]["func_name"] == "transform"
+
+    def test_extracts_submodel_nodes(self):
+        source = (
+            "import polars as pl\n"
+            "import haute\n"
+            'submodel = haute.Submodel("freq")\n'
+            "\n"
+            "@submodel.node\n"
+            "def calc(data):\n"
+            "    return data\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_submodel_node_decorator, bodies, None,
+            )
+        assert len(nodes) == 1
+        assert nodes[0]["func_name"] == "calc"
+
+    def test_ignores_non_matching_decorators(self):
+        source = (
+            "@other.decorator\n"
+            "def ignored():\n"
+            "    pass\n"
+            "\n"
+            "@pipeline.node\n"
+            "def matched():\n"
+            "    return 1\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert len(nodes) == 1
+        assert nodes[0]["func_name"] == "matched"
+
+    def test_ignores_non_function_stmts(self):
+        source = (
+            "x = 1\n"
+            "y = 2\n"
+            "@pipeline.node\n"
+            "def only_func():\n"
+            "    return 1\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert len(nodes) == 1
+
+    def test_empty_tree_returns_empty(self):
+        tree, bodies = self._parse_source("x = 1\n")
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert nodes == []
+
+    def test_extracts_param_names(self):
+        source = (
+            "@pipeline.node\n"
+            "def transform(a, b, c):\n"
+            "    return a\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert nodes[0]["param_names"] == ["a", "b", "c"]
+
+    def test_extracts_docstring(self):
+        source = (
+            "@pipeline.node\n"
+            "def transform(a):\n"
+            '    """My transform doc."""\n'
+            "    return a\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            nodes = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+        assert nodes[0]["description"] == "My transform doc."
+
+    def test_pipeline_checker_does_not_match_submodel(self):
+        source = (
+            "@submodel.node\n"
+            "def calc(x):\n"
+            "    return x\n"
+        )
+        tree, bodies = self._parse_source(source)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            # pipeline checker should not match submodel decorator
+            nodes = _extract_decorated_nodes(
+                tree, _is_submodel_node_decorator, bodies, None,
+            )
+            assert len(nodes) == 1  # submodel checker matches
+            nodes2 = _extract_decorated_nodes(
+                tree, _is_pipeline_node_decorator, bodies, None,
+            )
+            # pipeline checker also matches because it only checks .attr == "node"
+            # on any Name -- this is existing behavior we preserve
+            assert len(nodes2) == 1

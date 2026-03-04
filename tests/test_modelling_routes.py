@@ -11,7 +11,7 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from haute.routes.modelling import _clamp_row_limit, _friendly_error
+from haute.routes._train_service import _clamp_row_limit, _friendly_error
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 

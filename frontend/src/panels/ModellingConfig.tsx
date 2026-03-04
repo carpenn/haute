@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react"
-import { Play, Download, Loader2, ChevronDown, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
 import { trainModel, exportTraining, estimateTrainingRam } from "../api/client"
 import type { TrainEstimate } from "../api/client"
@@ -7,10 +6,10 @@ import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useSettingsStore from "../stores/useSettingsStore"
 import { configField } from "../utils/configField"
 import { buildGraph } from "../utils/buildGraph"
-import { LossChart } from "./modelling/LossChart"
-import { FeatureImportance } from "./modelling/FeatureImportance"
-import { MlflowExportSection } from "./modelling/MlflowExportSection"
-import { TrainingProgress as TrainingProgressPanel } from "./modelling/TrainingProgress"
+import { TargetAndTaskConfig } from "./modelling/TargetAndTaskConfig"
+import { FeatureAndAlgorithmConfig } from "./modelling/FeatureAndAlgorithmConfig"
+import { SplitAndMetricsConfig } from "./modelling/SplitAndMetricsConfig"
+import { TrainingActionsAndResults } from "./modelling/TrainingActionsAndResults"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -23,11 +22,6 @@ type ModellingConfigProps = {
 }
 
 import type { TrainResult, TrainProgress } from "../stores/useNodeResultsStore"
-
-const REGRESSION_METRICS = ["gini", "rmse", "mae", "mse", "r2", "poisson_deviance", "tweedie_deviance"]
-const CLASSIFICATION_METRICS = ["auc", "logloss"]
-const REGRESSION_LOSSES = ["RMSE", "MAE", "Poisson", "Tweedie"]
-const CLASSIFICATION_LOSSES = ["Logloss", "CrossEntropy"]
 
 export default function ModellingConfig({ config, onUpdate, upstreamColumns, allNodes, edges, submodels, preamble }: ModellingConfigProps) {
   // ── Store-backed state (survives panel unmount) ──
@@ -157,745 +151,67 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     }
   }, [config._nodeId, buildGraphCb])
 
-  const availableMetrics = task === "classification" ? CLASSIFICATION_METRICS : REGRESSION_METRICS
-
   return (
     <div className="px-4 py-3 space-y-4">
-      {/* Target & Weight */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Target & Weight</label>
-        <div className="mt-1.5 space-y-2">
-          <div>
-            <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Target column</label>
-            <select
-              value={target}
-              onChange={(e) => onUpdate("target", e.target.value)}
-              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            >
-              <option value="">Select target...</option>
-              {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Weight column (optional)</label>
-            <select
-              value={weight}
-              onChange={(e) => onUpdate("weight", e.target.value)}
-              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            >
-              <option value="">None</option>
-              {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Offset column (optional, e.g. log-exposure)</label>
-            <select
-              value={configField(config, "offset", "")}
-              onChange={(e) => onUpdate("offset", e.target.value || null)}
-              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            >
-              <option value="">None</option>
-              {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Task</label>
-            <div className="flex gap-2 mt-0.5">
-              {["regression", "classification"].map(t => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    onUpdate("task", t)
-                    onUpdate("metrics", t === "regression" ? ["gini", "rmse"] : ["auc", "logloss"])
-                  }}
-                  className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                  style={{
-                    background: task === t ? "var(--accent-soft)" : "var(--input-bg)",
-                    color: task === t ? "var(--accent)" : "var(--text-secondary)",
-                    border: `1px solid ${task === t ? "var(--accent)" : "var(--border)"}`,
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      <TargetAndTaskConfig
+        config={config}
+        onUpdate={onUpdate}
+        columns={columns}
+        target={target}
+        weight={weight}
+        task={task}
+      />
 
-      {/* Feature Selection */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-          Features {columns.length > 0 && <span className="font-normal">({featureCount} of {columns.length})</span>}
-        </label>
-        <div className="mt-1.5">
-          <label className="text-xs" style={{ color: "var(--text-secondary)" }}>Exclude columns</label>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {columns.filter(c => c.name !== target && c.name !== weight).map(c => {
-              const excluded = exclude.includes(c.name)
-              return (
-                <button
-                  key={c.name}
-                  onClick={() => {
-                    const newExclude = excluded ? exclude.filter(e => e !== c.name) : [...exclude, c.name]
-                    onUpdate("exclude", newExclude)
-                  }}
-                  className="px-2 py-0.5 rounded text-[11px] font-mono transition-colors"
-                  style={{
-                    background: excluded ? "rgba(239,68,68,.15)" : "var(--chrome-hover)",
-                    color: excluded ? "#ef4444" : "var(--text-secondary)",
-                    textDecoration: excluded ? "line-through" : "none",
-                  }}
-                >
-                  {c.name}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
+      <FeatureAndAlgorithmConfig
+        config={config}
+        onUpdate={onUpdate}
+        columns={columns}
+        target={target}
+        weight={weight}
+        exclude={exclude}
+        algorithm={algorithm}
+        task={task}
+        params={params}
+        featureCount={featureCount}
+        advancedOpen={advancedOpen}
+        toggleSection={toggleSection}
+        onParamUpdate={handleParamUpdate}
+      />
 
-      {/* Algorithm & Key Params */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Algorithm</label>
-        <div className="mt-1.5 space-y-2">
-          <select
-            value={algorithm}
-            onChange={(e) => onUpdate("algorithm", e.target.value)}
-            className="w-full px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-          >
-            <option value="catboost">CatBoost</option>
-          </select>
-          <div>
-            <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Loss function</label>
-            <select
-              value={configField(config, "loss_function", "")}
-              onChange={(e) => onUpdate("loss_function", e.target.value || null)}
-              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            >
-              <option value="">Default</option>
-              {(task === "classification" ? CLASSIFICATION_LOSSES : REGRESSION_LOSSES).map(l => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </select>
-          </div>
-          {configField(config, "loss_function", "") === "Tweedie" && (
-            <div>
-              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Variance power (1.0=Poisson, 2.0=Gamma)</label>
-              <input
-                type="range" min={1.0} max={2.0} step={0.05}
-                value={configField(config, "variance_power", 1.5)}
-                onChange={(e) => onUpdate("variance_power", parseFloat(e.target.value))}
-                className="w-full mt-0.5"
-              />
-              <div className="text-[11px] font-mono text-right" style={{ color: "var(--text-muted)" }}>
-                {configField(config, "variance_power", 1.5).toFixed(2)}
-              </div>
-            </div>
-          )}
-          {/* Core params */}
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { key: "iterations", label: "Iterations", default: 1000, step: 1 },
-              { key: "learning_rate", label: "Learning Rate", default: 0.05, step: 0.01 },
-              { key: "depth", label: "Depth", default: 6, step: 1 },
-              { key: "l2_leaf_reg", label: "L2 Reg", default: 3, step: 0.1 },
-            ].map(p => (
-              <div key={p.key}>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>{p.label}</label>
-                <input
-                  type="number"
-                  step={p.step}
-                  value={(params[p.key] as number) ?? p.default}
-                  onChange={(e) => handleParamUpdate(p.key, parseFloat(e.target.value) || p.default)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            ))}
-          </div>
-          {/* Regularisation params */}
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { key: "random_strength", label: "Random Strength", default: 1, step: 0.1 },
-              { key: "bagging_temperature", label: "Bagging Temp", default: 1, step: 0.1 },
-              { key: "min_data_in_leaf", label: "Min Data in Leaf", default: 1, step: 1 },
-              { key: "border_count", label: "Border Count", default: 254, step: 1 },
-            ].map(p => (
-              <div key={p.key}>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>{p.label}</label>
-                <input
-                  type="number"
-                  step={p.step}
-                  value={(params[p.key] as number) ?? p.default}
-                  onChange={(e) => handleParamUpdate(p.key, parseFloat(e.target.value) || p.default)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            ))}
-          </div>
-          {/* Grow policy */}
-          <div>
-            <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Grow policy</label>
-            <select
-              value={configField(params, "grow_policy", "SymmetricTree")}
-              onChange={(e) => handleParamUpdate("grow_policy", e.target.value)}
-              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            >
-              {["SymmetricTree", "Lossguide", "Depthwise"].map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Early stopping rounds (0 = disabled)</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={(params.early_stopping_rounds as number) ?? 50}
-              onChange={(e) => handleParamUpdate("early_stopping_rounds", parseInt(e.target.value) || 0)}
-              className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            />
-          </div>
-          {/* GPU toggle */}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={(params.task_type as string) === "GPU"}
-              onChange={(e) => handleParamUpdate("task_type", e.target.checked ? "GPU" : "CPU")}
-              className="accent-purple-500"
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-primary)" }}>
-              GPU training
-            </span>
-            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-              (CUDA)
-            </span>
-          </label>
-          <button
-            onClick={() => toggleSection("modelling.advanced")}
-            className="flex items-center gap-1 text-[11px]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            Advanced params (JSON)
-          </button>
-          {advancedOpen && (
-            <textarea
-              value={JSON.stringify(params, null, 2)}
-              onChange={(e) => {
-                try { onUpdate("params", JSON.parse(e.target.value)) } catch { /* invalid JSON */ }
-              }}
-              rows={6}
-              className="w-full px-2.5 py-2 rounded-lg text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-            />
-          )}
-        </div>
-      </div>
+      <SplitAndMetricsConfig
+        config={config}
+        onUpdate={onUpdate}
+        columns={columns}
+        target={target}
+        weight={weight}
+        exclude={exclude}
+        task={task}
+        split={split}
+        metrics={metrics}
+        mlflowOpen={mlflowOpen}
+        monotonicOpen={monotonicOpen}
+        toggleSection={toggleSection}
+        onSplitUpdate={handleSplitUpdate}
+      />
 
-      {/* Split Strategy */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Split Strategy</label>
-        <div className="mt-1.5 space-y-2">
-          <div className="flex gap-2">
-            {["random", "temporal", "group"].map(s => (
-              <button
-                key={s}
-                onClick={() => handleSplitUpdate("strategy", s)}
-                className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                style={{
-                  background: split.strategy === s ? "var(--accent-soft)" : "var(--input-bg)",
-                  color: split.strategy === s ? "var(--accent)" : "var(--text-secondary)",
-                  border: `1px solid ${split.strategy === s ? "var(--accent)" : "var(--border)"}`,
-                }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          {split.strategy === "random" && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Test size</label>
-                <input
-                  type="number" step={0.05} min={0.05} max={0.5}
-                  value={(split.test_size as number) ?? 0.2}
-                  onChange={(e) => handleSplitUpdate("test_size", parseFloat(e.target.value) || 0.2)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Seed</label>
-                <input
-                  type="number"
-                  value={(split.seed as number) ?? 42}
-                  onChange={(e) => handleSplitUpdate("seed", parseInt(e.target.value) || 42)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            </div>
-          )}
-          {split.strategy === "temporal" && (
-            <div className="space-y-2">
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Date column</label>
-                <select
-                  value={configField(split, "date_column", "")}
-                  onChange={(e) => handleSplitUpdate("date_column", e.target.value)}
-                  className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                >
-                  <option value="">Select...</option>
-                  {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Cutoff date</label>
-                <input
-                  type="date"
-                  value={configField(split, "cutoff_date", "")}
-                  onChange={(e) => handleSplitUpdate("cutoff_date", e.target.value)}
-                  className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            </div>
-          )}
-          {split.strategy === "group" && (
-            <div className="space-y-2">
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Group column</label>
-                <select
-                  value={configField(split, "group_column", "")}
-                  onChange={(e) => handleSplitUpdate("group_column", e.target.value)}
-                  className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                >
-                  <option value="">Select...</option>
-                  {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Test size</label>
-                <input
-                  type="number" step={0.05} min={0.05} max={0.5}
-                  value={(split.test_size as number) ?? 0.2}
-                  onChange={(e) => handleSplitUpdate("test_size", parseFloat(e.target.value) || 0.2)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            </div>
-          )}
-          {/* Cross-validation */}
-          <div className="flex items-center gap-2 mt-2">
-            <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Cross-validate</label>
-            <button
-              onClick={() => onUpdate("cv_folds", config.cv_folds ? null : 5)}
-              className="px-2 py-0.5 rounded text-[11px] font-mono"
-              style={{
-                background: config.cv_folds ? "rgba(168,85,247,.15)" : "var(--chrome-hover)",
-                color: config.cv_folds ? "#a855f7" : "var(--text-muted)",
-                border: `1px solid ${config.cv_folds ? "rgba(168,85,247,.3)" : "transparent"}`,
-              }}
-            >
-              {config.cv_folds ? "On" : "Off"}
-            </button>
-            {!!config.cv_folds && (
-              <div className="flex items-center gap-1">
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Folds:</label>
-                <input
-                  type="number" min={2} max={20} step={1}
-                  value={configField(config, "cv_folds", 5)}
-                  onChange={(e) => onUpdate("cv_folds", parseInt(e.target.value) || 5)}
-                  className="w-14 px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
-            )}
-          </div>
-          {/* Row limit */}
-          {(() => {
-            const rowLimit = typeof config.row_limit === "number" ? config.row_limit : null
-            return (
-              <div className="flex items-center gap-2 mt-2">
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Row limit</label>
-                <input
-                  type="number" min={0} step={100000}
-                  value={rowLimit ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    onUpdate("row_limit", v === "" ? null : Math.max(0, parseInt(v) || 0));
-                  }}
-                  placeholder="All rows"
-                  className="w-32 px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-                {rowLimit != null && rowLimit > 0 && (
-                  <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-                    {rowLimit.toLocaleString()} rows
-                  </span>
-                )}
-              </div>
-            )
-          })()}
-        </div>
-      </div>
-
-      {/* Metrics */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Metrics</label>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {availableMetrics.map(m => {
-            const selected = metrics.includes(m)
-            return (
-              <button
-                key={m}
-                onClick={() => {
-                  const newMetrics = selected ? metrics.filter(x => x !== m) : [...metrics, m]
-                  onUpdate("metrics", newMetrics)
-                }}
-                className="px-2.5 py-1 rounded-md text-xs font-mono transition-colors"
-                style={{
-                  background: selected ? "rgba(168,85,247,.15)" : "var(--chrome-hover)",
-                  color: selected ? "#a855f7" : "var(--text-muted)",
-                  border: `1px solid ${selected ? "rgba(168,85,247,.3)" : "transparent"}`,
-                }}
-              >
-                {m}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* MLflow (collapsible) */}
-      <div>
-        <button
-          onClick={() => toggleSection("modelling.mlflow")}
-          className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em]"
-          style={{ color: "var(--text-muted)" }}
-        >
-          {mlflowOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          MLflow Logging
-        </button>
-        {mlflowOpen && (
-          <div className="mt-1.5 space-y-2">
-            <div>
-              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Experiment path</label>
-              <input
-                type="text"
-                placeholder="/Shared/haute/experiment"
-                value={configField(config, "mlflow_experiment", "")}
-                onChange={(e) => onUpdate("mlflow_experiment", e.target.value)}
-                className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-              />
-            </div>
-            <div>
-              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Model name (registered model)</label>
-              <input
-                type="text"
-                placeholder="Optional"
-                value={configField(config, "model_name", "")}
-                onChange={(e) => onUpdate("model_name", e.target.value)}
-                className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Monotonic Constraints (collapsible) */}
-      {columns.length > 0 && (
-        <div>
-          <button
-            onClick={() => toggleSection("modelling.monotonic")}
-            className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.08em]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {monotonicOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            Monotonic Constraints
-          </button>
-          {monotonicOpen && (
-            <div className="mt-1.5 space-y-1">
-              <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Set per-feature constraints (numeric features only)</div>
-              {columns
-                .filter(c => c.name !== target && c.name !== weight && !exclude.includes(c.name) && !["Utf8", "Categorical", "String"].includes(c.dtype))
-                .map(c => {
-                  const mc = configField<Record<string, number>>(config, "monotone_constraints", {})
-                  const val = mc[c.name] ?? 0
-                  return (
-                    <div key={c.name} className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono flex-1 truncate" style={{ color: "var(--text-secondary)" }}>{c.name}</span>
-                      {([-1, 0, 1] as const).map(v => (
-                        <button
-                          key={v}
-                          onClick={() => {
-                            const newMc = { ...mc }
-                            if (v === 0) { delete newMc[c.name] } else { newMc[c.name] = v }
-                            onUpdate("monotone_constraints", Object.keys(newMc).length > 0 ? newMc : null)
-                          }}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono"
-                          style={{
-                            background: val === v ? (v === 1 ? "rgba(34,197,94,.15)" : v === -1 ? "rgba(239,68,68,.15)" : "var(--accent-soft)") : "var(--chrome-hover)",
-                            color: val === v ? (v === 1 ? "#22c55e" : v === -1 ? "#ef4444" : "var(--accent)") : "var(--text-muted)",
-                            border: `1px solid ${val === v ? (v === 1 ? "rgba(34,197,94,.3)" : v === -1 ? "rgba(239,68,68,.3)" : "var(--accent)") : "transparent"}`,
-                          }}
-                        >
-                          {v === 1 ? "+1" : v === -1 ? "-1" : "0"}
-                        </button>
-                      ))}
-                    </div>
-                  )
-                })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Staleness indicator */}
-      {isStale && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.2)" }}>
-          <RefreshCw size={12} style={{ color: "#f59e0b" }} className="shrink-0" />
-          <span style={{ color: "#fbbf24" }}>Config changed since last training</span>
-          <button
-            onClick={handleTrain}
-            disabled={training || !target}
-            className="ml-auto px-2 py-0.5 rounded text-[11px] font-medium"
-            style={{ background: "rgba(168,85,247,.15)", color: "#a855f7" }}
-          >
-            Re-train
-          </button>
-        </div>
-      )}
-
-      {/* RAM Estimate */}
-      {ramEstimateLoading && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(168,85,247,.06)", border: "1px solid rgba(168,85,247,.15)" }}>
-          <Loader2 size={12} className="animate-spin" style={{ color: "#a855f7" }} />
-          <span style={{ color: "var(--text-muted)" }}>Estimating dataset size...</span>
-        </div>
-      )}
-      {ramEstimate && !ramEstimateLoading && ramEstimate.total_rows != null && (
-        <div className="px-3 py-2.5 rounded-lg text-xs space-y-1.5" style={{
-          background: ramEstimate.was_downsampled ? "rgba(245,158,11,.06)" : "rgba(34,197,94,.06)",
-          border: `1px solid ${ramEstimate.was_downsampled ? "rgba(245,158,11,.2)" : "rgba(34,197,94,.15)"}`,
-        }}>
-          <div className="flex items-center gap-2">
-            {ramEstimate.was_downsampled && <AlertTriangle size={12} className="shrink-0" style={{ color: "#f59e0b" }} />}
-            <span className="font-medium" style={{ color: ramEstimate.was_downsampled ? "#fbbf24" : "#22c55e" }}>
-              {ramEstimate.was_downsampled ? "Will downsample" : "Dataset fits in memory"}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
-            <span>Source rows</span>
-            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.total_rows!.toLocaleString()}</span>
-            <span>Est. training RAM</span>
-            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.training_mb < 1024 ? `${ramEstimate.training_mb.toFixed(0)} MB` : `${(ramEstimate.training_mb / 1024).toFixed(1)} GB`}</span>
-            <span>Available RAM</span>
-            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.available_mb < 1024 ? `${ramEstimate.available_mb.toFixed(0)} MB` : `${(ramEstimate.available_mb / 1024).toFixed(1)} GB`}</span>
-            {ramEstimate.was_downsampled && ramEstimate.safe_row_limit != null && (
-              <>
-                <span>Training rows</span>
-                <span style={{ color: "#f59e0b" }}>{ramEstimate.safe_row_limit.toLocaleString()}</span>
-              </>
-            )}
-            {ramEstimate.gpu_vram_estimated_mb != null && (
-              <>
-                <span>Est. GPU VRAM</span>
-                <span style={{ color: ramEstimate.gpu_warning ? "#f59e0b" : "var(--text-primary)" }}>
-                  {ramEstimate.gpu_vram_estimated_mb < 1024 ? `${ramEstimate.gpu_vram_estimated_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_estimated_mb / 1024).toFixed(1)} GB`}
-                </span>
-                {ramEstimate.gpu_vram_available_mb != null && (
-                  <>
-                    <span>GPU VRAM</span>
-                    <span style={{ color: "var(--text-primary)" }}>
-                      {ramEstimate.gpu_vram_available_mb < 1024 ? `${ramEstimate.gpu_vram_available_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_available_mb / 1024).toFixed(1)} GB`}
-                    </span>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-          {ramEstimate.gpu_warning && (
-            <div className="flex items-center gap-2 mt-1" style={{ color: "#f59e0b" }}>
-              <AlertTriangle size={12} className="shrink-0" />
-              <span>{ramEstimate.gpu_warning}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="space-y-2 pt-2" style={{ borderTop: "1px solid var(--border)" }}>
-        <button
-          onClick={handleTrain}
-          disabled={training || !target}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-          style={{
-            background: training ? "var(--chrome-hover)" : "#a855f7",
-            color: training ? "var(--text-muted)" : "#fff",
-            opacity: !target ? 0.5 : 1,
-          }}
-        >
-          {training ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {training ? "Training..." : "Train Model"}
-        </button>
-
-        <button
-          onClick={handleExport}
-          disabled={exporting || !target}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-          style={{
-            background: "var(--chrome-hover)",
-            color: "var(--text-secondary)",
-            opacity: !target ? 0.5 : 1,
-          }}
-        >
-          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          Export Training Script
-        </button>
-      </div>
-
-      {/* Live Training Progress */}
-      {trainProgress && <TrainingProgressPanel trainProgress={trainProgress} />}
-
-      {/* Train Results */}
-      {trainResult && (
-        <div className="space-y-2">
-          {trainResult.status === "error" ? (
-            <div className="px-3 py-2.5 rounded-lg text-xs space-y-1.5" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)" }}>
-              <div className="flex items-start gap-2">
-                <AlertTriangle size={14} className="shrink-0 mt-0.5" style={{ color: "#ef4444" }} />
-                <div className="space-y-1 min-w-0">
-                  <div className="font-semibold" style={{ color: "#ef4444" }}>Training failed</div>
-                  <div style={{ color: "#fca5a5", lineHeight: "1.5" }}>{trainResult.error}</div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="px-3 py-2 rounded-lg text-xs space-y-0.5" style={{ background: "rgba(34,197,94,.1)", color: "#22c55e" }}>
-                <div>Model saved to {trainResult.model_path} ({trainResult.train_rows.toLocaleString()} train / {trainResult.test_rows.toLocaleString()} test)</div>
-                {trainResult.best_iteration != null && (
-                  <div style={{ color: "#f59e0b" }}>
-                    Stopped early at iteration {trainResult.best_iteration} / {(params.iterations as number) ?? 1000}
-                  </div>
-                )}
-              </div>
-              {trainResult.warning && (
-                <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
-                  <AlertTriangle size={12} className="shrink-0 mt-0.5" style={{ color: "#f59e0b" }} />
-                  <span style={{ color: "#fbbf24" }}>{trainResult.warning}</span>
-                </div>
-              )}
-              {/* Log to MLflow button */}
-              {mlflowBackend?.installed && trainJobId && (
-                <MlflowExportSection
-                  trainJobId={trainJobId}
-                  mlflowBackend={mlflowBackend}
-                  config={config}
-                  onMlflowResult={setMlflowResult}
-                />
-              )}
-              <div>
-                <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Metrics</label>
-                <div className="mt-1 space-y-0.5">
-                  {Object.entries(trainResult.metrics).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-xs font-mono">
-                      <span style={{ color: "var(--text-secondary)" }}>{k}</span>
-                      <span style={{ color: "var(--text-primary)" }}>{v.toFixed(4)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {trainResult.cv_results && (
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                    Cross-Validation ({trainResult.cv_results.n_folds}-fold)
-                  </label>
-                  <div className="mt-1 space-y-0.5">
-                    {Object.entries(trainResult.cv_results.mean_metrics).map(([k, v]) => (
-                      <div key={k} className="flex justify-between text-xs font-mono">
-                        <span style={{ color: "var(--text-secondary)" }}>{k}</span>
-                        <span style={{ color: "var(--text-primary)" }}>
-                          {v.toFixed(4)}
-                          {trainResult.cv_results?.std_metrics[k] != null && (
-                            <span style={{ color: "var(--text-muted)" }}> +/- {trainResult.cv_results.std_metrics[k].toFixed(4)}</span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {trainResult.loss_history && trainResult.loss_history.length > 1 && (
-                <LossChart lossHistory={trainResult.loss_history} bestIteration={trainResult.best_iteration} />
-              )}
-              {trainResult.double_lift && trainResult.double_lift.length > 0 && (
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Double Lift (Actual vs Predicted by Decile)</label>
-                  <div className="mt-1 text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
-                    <div className="grid grid-cols-4 gap-1 pb-0.5 mb-0.5" style={{ borderBottom: "1px solid var(--border)" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Decile</span>
-                      <span style={{ color: "var(--text-muted)" }}>Actual</span>
-                      <span style={{ color: "var(--text-muted)" }}>Predicted</span>
-                      <span style={{ color: "var(--text-muted)" }}>Count</span>
-                    </div>
-                    {trainResult.double_lift.map(row => (
-                      <div key={row.decile} className="grid grid-cols-4 gap-1">
-                        <span>{row.decile}</span>
-                        <span style={{ color: "var(--text-primary)" }}>{row.actual.toFixed(4)}</span>
-                        <span style={{ color: "#a855f7" }}>{row.predicted.toFixed(4)}</span>
-                        <span>{row.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {trainResult.feature_importance.length > 0 && (
-                <FeatureImportance trainResult={trainResult} />
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Exported Script */}
-      {exportedScript && (
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Generated Script</label>
-            <button
-              onClick={() => { navigator.clipboard.writeText(exportedScript) }}
-              className="text-[11px] px-2 py-0.5 rounded"
-              style={{ color: "var(--accent)", background: "var(--accent-soft)" }}
-            >
-              Copy
-            </button>
-          </div>
-          <pre
-            className="px-3 py-2 rounded-lg text-[11px] font-mono overflow-x-auto max-h-60 overflow-y-auto"
-            style={{ background: "var(--input-bg)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-          >
-            {exportedScript}
-          </pre>
-        </div>
-      )}
+      <TrainingActionsAndResults
+        config={config}
+        target={target}
+        params={params}
+        training={training}
+        trainProgress={trainProgress}
+        trainResult={trainResult}
+        trainJobId={trainJobId}
+        isStale={isStale}
+        exporting={exporting}
+        exportedScript={exportedScript}
+        mlflowBackend={mlflowBackend}
+        ramEstimate={ramEstimate}
+        ramEstimateLoading={ramEstimateLoading}
+        onTrain={handleTrain}
+        onExport={handleExport}
+        onMlflowResult={setMlflowResult}
+      />
     </div>
   )
 }

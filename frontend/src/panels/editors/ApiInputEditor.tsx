@@ -1,15 +1,14 @@
-import { useState, useEffect } from "react"
-import { Radio, AlertTriangle, Loader2, HardDriveDownload, Trash2 } from "lucide-react"
+import { Radio, AlertTriangle } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
 import { configField } from "../../utils/configField"
+import { CacheFetchButton } from "../../components/CacheFetchButton"
 import {
   buildJsonCache,
   getJsonCacheProgress,
   getJsonCacheStatus,
   deleteJsonCache,
-  ApiError,
 } from "../../api/client"
 
 // ─── JsonCacheButton ──────────────────────────────────────────────
@@ -25,115 +24,25 @@ type JsonCacheStatus = {
 }
 
 function JsonCacheButton({ dataPath }: { dataPath: string }) {
-  const [cache, setCache] = useState<JsonCacheStatus | null>(null)
-  const [building, setBuilding] = useState(false)
-  const [progress, setProgress] = useState<{ rows: number; elapsed: number } | null>(null)
-  const [error, setError] = useState("")
-
-  useEffect(() => {
-    if (!dataPath) return
-    getJsonCacheStatus(dataPath)
-      .then((data) => setCache(data))
-      .catch(() => setCache(null))
-  }, [dataPath])
-
-  useEffect(() => {
-    if (!building || !dataPath) return
-    const id = setInterval(() => {
-      getJsonCacheProgress(dataPath)
-        .then((data) => { if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0 }) })
-        .catch(() => { /* polling retry on next interval */ })
-    }, 1000)
-    return () => { clearInterval(id); setProgress(null) }
-  }, [building, dataPath])
-
-  const doBuild = () => {
-    if (!dataPath) return
-    setBuilding(true)
-    setError("")
-    buildJsonCache({ path: dataPath })
-      .then((data) => {
-        const info: JsonCacheStatus = { cached: true, ...data } as JsonCacheStatus
-        setCache(info)
-        setBuilding(false)
-      })
-      .catch((e: Error) => {
-        setError(e instanceof ApiError ? e.detail || e.message : e.message)
-        setBuilding(false)
-      })
-  }
-
-  const formatBytes = (b: number) => {
-    if (b < 1024) return `${b} B`
-    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
-    return `${(b / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  const formatTime = (ts: number) => {
-    if (!ts) return ""
-    const d = new Date(ts * 1000)
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  }
-
   return (
-    <div>
-      <button
-        onClick={doBuild}
-        disabled={!dataPath || building}
-        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
-        style={{
-          background: cache?.cached ? 'rgba(34,197,94,.1)' : 'var(--accent-soft)',
-          border: cache?.cached ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--accent)',
-          color: cache?.cached ? '#22c55e' : 'var(--accent)',
-        }}
-      >
-        {building ? (
-          <><Loader2 size={14} className="animate-spin" /> {progress ? `${progress.rows.toLocaleString()} rows · ${progress.elapsed}s` : "Processing..."}</>
-        ) : cache?.cached ? (
-          <><HardDriveDownload size={14} /> Refresh Cache</>
-        ) : (
-          <><HardDriveDownload size={14} /> Cache as Parquet</>
-        )}
-      </button>
-
-      {cache?.cached && (
-        <div className="mt-1.5 flex items-center gap-2 text-[10px] px-1" style={{ color: 'var(--text-muted)' }}>
-          <span>{cache.row_count.toLocaleString()} rows</span>
-          <span>&middot;</span>
-          <span>{cache.column_count} cols</span>
-          <span>&middot;</span>
-          <span>{formatBytes(cache.size_bytes)}</span>
-          {cache.cached_at > 0 && (
-            <><span>&middot;</span><span>{formatTime(cache.cached_at)}</span></>
-          )}
-          <span>&middot;</span>
-          <button
-            onClick={() => {
-              deleteJsonCache(dataPath)
-                .then((data) => setCache(data as JsonCacheStatus))
-                .catch((e: Error) => setError(e instanceof ApiError ? e.detail || e.message : e.message))
-            }}
-            className="inline-flex items-center gap-0.5 hover:opacity-70 transition-opacity"
-            style={{ color: '#ef4444' }}
-            title="Delete cached data"
-          >
-            <Trash2 size={10} /> clear
-          </button>
-        </div>
-      )}
-
-      {!cache?.cached && dataPath && !building && (
-        <div className="mt-1.5 text-[10px] px-1" style={{ color: '#f59e0b' }}>
-          Not cached yet — click to flatten and cache as Parquet
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-1.5 text-[10px] px-2 py-1 rounded" style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444' }}>
-          {error}
-        </div>
-      )}
-    </div>
+    <CacheFetchButton<JsonCacheStatus>
+      resourceKey={dataPath}
+      getStatus={(key) => getJsonCacheStatus(key)}
+      startFetch={(key) =>
+        buildJsonCache({ path: key }).then(
+          (data) => ({ cached: true, ...data }) as JsonCacheStatus,
+        )
+      }
+      getProgress={(key) => getJsonCacheProgress(key)}
+      deleteCache={(key) => deleteJsonCache(key) as Promise<JsonCacheStatus>}
+      timestampField="cached_at"
+      labels={{
+        fetchLabel: "Cache as Parquet",
+        refreshLabel: "Refresh Cache",
+        notCachedHint: "Not cached yet \u2014 click to flatten and cache as Parquet",
+        pendingLabel: "Processing...",
+      }}
+    />
   )
 }
 

@@ -6,7 +6,7 @@ import gc
 import os
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -223,27 +223,7 @@ class TrainingJob:
         _report("Saving model", 0.9)
         model_path = self._save_artifacts(train_result)
 
-        if self.mlflow_experiment:
-            self._log_to_mlflow(
-                metrics_result.metrics, metrics_result.importance, str(model_path),
-                shap_summary=metrics_result.shap_summary,
-                feature_importance_loss=metrics_result.feature_importance_loss,
-                cv_results=metrics_result.cv_results,
-                double_lift=metrics_result.double_lift,
-                loss_history=train_result.fit_result.loss_history,
-                ave_per_feature=metrics_result.ave_per_feature,
-                algorithm=self.algorithm,
-                task=self.task,
-                train_rows=split_result.n_train,
-                test_rows=split_result.n_test,
-                best_iteration=train_result.fit_result.best_iteration,
-                features=prepared.features,
-                split_config=self.split_config.__dict__,
-            )
-
-        _report("Done", 1.0)
-
-        return TrainResult(
+        result = TrainResult(
             metrics=metrics_result.metrics,
             feature_importance=metrics_result.importance,
             model_path=str(model_path),
@@ -259,6 +239,12 @@ class TrainingJob:
             cv_results=metrics_result.cv_results,
             ave_per_feature=metrics_result.ave_per_feature,
         )
+
+        if self.mlflow_experiment:
+            self._log_to_mlflow(result)
+
+        _report("Done", 1.0)
+        return result
 
     # ------------------------------------------------------------------
     # Pipeline sub-methods
@@ -287,16 +273,10 @@ class TrainingJob:
             self._data = None
             _mem_checkpoint(f"data loaded ({len(df):,} rows)")
 
-            _report("Validating columns", 0.05)
-            if len(df) == 0:
-                raise ValueError("DataFrame is empty — cannot train on zero rows")
-            self._validate_columns(df)
-
-            # Drop null targets
-            null_count = df[self.target].null_count()
-            if null_count is not None and null_count > 0:
-                df = df.filter(pl.col(self.target).is_not_null())
-                _mem_checkpoint(f"dropped {null_count:,} rows with null target")
+            if self.target in df.columns:
+                null_count = df[self.target].null_count()
+                if null_count is not None and null_count > 0:
+                    _mem_checkpoint(f"target has {null_count:,} null rows (will be cleaned)")
 
             tmp_fd, data_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_split_")
             os.close(tmp_fd)
@@ -700,25 +680,7 @@ class TrainingJob:
 
         return features, cat_features
 
-    def _log_to_mlflow(
-        self,
-        metrics: dict[str, float],
-        importance: list[dict[str, Any]],
-        model_path: str,
-        shap_summary: list[dict[str, float]] | None = None,
-        feature_importance_loss: list[dict[str, Any]] | None = None,
-        cv_results: dict[str, Any] | None = None,
-        double_lift: list[dict[str, Any]] | None = None,
-        loss_history: list[dict[str, float]] | None = None,
-        ave_per_feature: list[dict[str, Any]] | None = None,
-        algorithm: str = "",
-        task: str = "",
-        train_rows: int = 0,
-        test_rows: int = 0,
-        best_iteration: int | None = None,
-        features: list[str] | None = None,
-        split_config: dict[str, Any] | None = None,
-    ) -> None:
+    def _log_to_mlflow(self, result: TrainResult) -> None:
         """Log training run to MLflow (conditional import).
 
         Delegates to the standalone ``log_experiment()`` function so the
@@ -735,7 +697,7 @@ class TrainingJob:
         log_experiment(
             experiment_name=self.mlflow_experiment,
             run_name=self.name,
-            metrics=metrics,
+            metrics=result.metrics,
             params={
                 "algorithm": self.algorithm,
                 "task": self.task,
@@ -745,20 +707,20 @@ class TrainingJob:
                 "test_size": self.split_config.test_size,
                 **{f"param_{k}": v for k, v in self.params.items()},
             },
-            model_path=model_path,
+            model_path=result.model_path or None,
             model_name=self.model_name,
-            shap_summary=shap_summary,
-            feature_importance_loss=feature_importance_loss,
-            cv_results=cv_results,
-            feature_importance=importance,
-            double_lift=double_lift,
-            loss_history=loss_history,
-            ave_per_feature=ave_per_feature,
-            algorithm=algorithm or self.algorithm,
-            task=task or self.task,
-            train_rows=train_rows,
-            test_rows=test_rows,
-            best_iteration=best_iteration,
-            features=features,
-            split_config=split_config,
+            shap_summary=result.shap_summary or None,
+            feature_importance_loss=result.feature_importance_loss or None,
+            cv_results=result.cv_results,
+            feature_importance=result.feature_importance or None,
+            double_lift=result.double_lift or None,
+            loss_history=result.loss_history or None,
+            ave_per_feature=result.ave_per_feature or None,
+            algorithm=self.algorithm,
+            task=self.task,
+            train_rows=result.train_rows,
+            test_rows=result.test_rows,
+            best_iteration=result.best_iteration,
+            features=result.features or None,
+            split_config=asdict(self.split_config) if self.split_config else None,
         )

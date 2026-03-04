@@ -406,6 +406,8 @@ class TrainResponse(BaseModel):
     model_path: str = ""
     train_rows: int = 0
     test_rows: int = 0
+    features: list[str] = Field(default_factory=list)
+    cat_features: list[str] = Field(default_factory=list)
     error: str | None = None
     best_iteration: int | None = None
     loss_history: list[dict[str, float]] = Field(default_factory=list)

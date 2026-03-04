@@ -50,6 +50,21 @@ def _build_params(source_names: list[str]) -> str:
     return "df: pl.LazyFrame"
 
 
+def _common_node_fields(node: GraphNode) -> tuple[str, str, dict]:
+    """Extract the (func_name, description, config) triple used by every builder."""
+    data = node.data
+    return (
+        _sanitize_func_name(data.label),
+        data.description or f"{data.label} node",
+        data.config,
+    )
+
+
+def _first_source(source_names: list[str]) -> str:
+    """Return the first upstream name, defaulting to ``"df"``."""
+    return source_names[0] if source_names else "df"
+
+
 # Template fragments for each node type
 
 
@@ -255,39 +270,12 @@ def {func_name}() -> pl.LazyFrame:
     return pl.LazyFrame({data_dict})
 '''
 
-_EXTERNAL_PICKLE = '''\
-@pipeline.node(external="{path}", file_type="pickle")
+_EXTERNAL = '''\
+@pipeline.node(external="{path}", file_type="{file_type}"{extra_dec})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute.graph_utils import load_external_object
-    obj = load_external_object("{path}", "pickle")
-{body}
-'''
-
-_EXTERNAL_JSON = '''\
-@pipeline.node(external="{path}", file_type="json")
-def {func_name}({params}) -> pl.LazyFrame:
-    """{description}"""
-    from haute.graph_utils import load_external_object
-    obj = load_external_object("{path}", "json")
-{body}
-'''
-
-_EXTERNAL_JOBLIB = '''\
-@pipeline.node(external="{path}", file_type="joblib")
-def {func_name}({params}) -> pl.LazyFrame:
-    """{description}"""
-    from haute.graph_utils import load_external_object
-    obj = load_external_object("{path}", "joblib")
-{body}
-'''
-
-_EXTERNAL_CATBOOST = '''\
-@pipeline.node(external="{path}", file_type="catboost", model_class="{model_class}")
-def {func_name}({params}) -> pl.LazyFrame:
-    """{description}"""
-    from haute.graph_utils import load_external_object
-    obj = load_external_object("{path}", "catboost", "{model_class}")
+    obj = load_external_object("{path}", "{file_type}"{extra_load})
 {body}
 '''
 
@@ -381,16 +369,12 @@ def _register_codegen(node_type: NodeType) -> Callable[[CodegenBuilder], Codegen
 
 @_register_codegen(NodeType.API_INPUT)
 def _gen_api_input(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     path = config.get("path", "")
     row_id_kw = ""
     if config.get("row_id_column"):
         row_id_kw = f', row_id_column="{config["row_id_column"]}"'
-    cfg_path = str(config_path_for_node(data.nodeType, func_name))
+    cfg_path = str(config_path_for_node(node.data.nodeType, func_name))
     template = _api_input_template(path)
     return template.format(
         func_name=func_name,
@@ -403,14 +387,10 @@ def _gen_api_input(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.LIVE_SWITCH)
 def _gen_live_switch(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     params = ", ".join(f"{s}: pl.LazyFrame" for s in source_names)
     input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
-    first_param = source_names[0] if source_names else "df"
+    first_param = _first_source(source_names)
     # Generated code always routes to the "live" input
     active_param = first_param
     for inp, scn in input_scenario_map.items():
@@ -428,11 +408,7 @@ def _gen_live_switch(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.DATA_SOURCE)
 def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     path = config.get("path", "")
     source_type = config.get("sourceType", "flat_file")
     if source_type == "databricks":
@@ -464,11 +440,7 @@ def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.CONSTANT)
 def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     raw_values = config.get("values", []) or []
     # Build the repr for the decorator kwarg
     values_repr = repr([
@@ -497,17 +469,13 @@ def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.MODEL_SCORE)
 def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     source_type = config.get("sourceType", "run")
     task_val = config.get("task", "regression")
     output_column = config.get("output_column", "prediction")
     user_code = (config.get("code") or "").strip()
     params = _build_params(source_names)
-    first_param = source_names[0] if source_names else "df"
+    first_param = _first_source(source_names)
 
     proba_block_batched = ""
     if task_val == "classification":
@@ -579,11 +547,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.BANDING)
 def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     factors = config.get("factors", []) or []
     params = _build_params(source_names)
     if len(factors) == 1:
@@ -628,11 +592,7 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.RATING_STEP)
 def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     tables = config.get("tables", []) or []
     params = _build_params(source_names)
     emit_tables = []
@@ -665,13 +625,9 @@ def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.SCENARIO_EXPANDER)
 def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     params = _build_params(source_names)
-    first = source_names[0] if source_names else "df"
+    first = _first_source(source_names)
     extra_parts = _build_extra_kwargs(config, SCENARIO_EXPANDER_CONFIG_KEYS)
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
     return _SCENARIO_EXPANDER.format(
@@ -685,13 +641,9 @@ def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.OPTIMISER)
 def _gen_optimiser(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     params = _build_params(source_names)
-    first = source_names[0] if source_names else "df"
+    first = _first_source(source_names)
     extra_parts = _build_extra_kwargs(config, OPTIMISER_CONFIG_KEYS)
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
     return _OPTIMISER.format(
@@ -705,13 +657,9 @@ def _gen_optimiser(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.OPTIMISER_APPLY)
 def _gen_optimiser_apply(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     params = _build_params(source_names)
-    first = source_names[0] if source_names else "df"
+    first = _first_source(source_names)
     extra_parts = _build_extra_kwargs(config, OPTIMISER_APPLY_CONFIG_KEYS)
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
     return _OPTIMISER_APPLY.format(
@@ -725,11 +673,7 @@ def _gen_optimiser_apply(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.MODELLING)
 def _gen_modelling(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     params = _build_params(source_names)
     extra_parts = _build_extra_kwargs(config, MODELLING_CONFIG_KEYS)
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
@@ -743,54 +687,37 @@ def _gen_modelling(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.EXTERNAL_FILE)
 def _gen_external_file(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     path = config.get("path", "model.pkl")
     file_type = config.get("fileType", "pickle")
     code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     body = _wrap_external_code(code)
+    extra_dec = ""
+    extra_load = ""
     if file_type == "catboost":
         model_class = config.get("modelClass", "classifier")
-        cb_class = "CatBoostRegressor" if model_class == "regressor" else "CatBoostClassifier"
-        return _EXTERNAL_CATBOOST.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-            params=params,
-            body=body,
-            model_class=model_class,
-            cb_class=cb_class,
-        )
-    templates = {
-        "pickle": _EXTERNAL_PICKLE,
-        "json": _EXTERNAL_JSON,
-        "joblib": _EXTERNAL_JOBLIB,
-    }
-    template = templates.get(file_type, _EXTERNAL_PICKLE)
-    return template.format(
+        extra_dec = f', model_class="{model_class}"'
+        extra_load = f', "{model_class}"'
+    return _EXTERNAL.format(
         func_name=func_name,
         description=description,
         path=path,
+        file_type=file_type,
         params=params,
         body=body,
+        extra_dec=extra_dec,
+        extra_load=extra_load,
     )
 
 
 @_register_codegen(NodeType.DATA_SINK)
 def _gen_data_sink(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     path = config.get("path", "output.parquet")
     fmt = config.get("format", "parquet")
     params = _build_params(source_names)
-    first = source_names[0] if source_names else "df"
+    first = _first_source(source_names)
     template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET
     return template.format(
         func_name=func_name,
@@ -803,14 +730,10 @@ def _gen_data_sink(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.OUTPUT)
 def _gen_output(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     fields = config.get("fields", []) or []
     params = _build_params(source_names)
-    first = source_names[0] if source_names else "df"
+    first = _first_source(source_names)
     dec_parts = ["output=True"]
     if fields:
         dec_parts.append(f"fields={fields!r}")
@@ -829,11 +752,7 @@ def _gen_output(node: GraphNode, source_names: list[str]) -> str:
 
 @_register_codegen(NodeType.TRANSFORM)
 def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
-    data = node.data
-    config = data.config
-    func_name = _sanitize_func_name(data.label)
-    description = data.description or f"{data.label} node"
-
+    func_name, description, config = _common_node_fields(node)
     code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     body = _wrap_user_code(code, source_names)
@@ -932,88 +851,20 @@ def graph_to_code(
     preamble: str = "",
     preserved_blocks: list[str] | None = None,
 ) -> str:
-    """Convert a React Flow graph to a valid haute pipeline .py file."""
-    nodes = graph.nodes
-    edges = graph.edges
+    """Convert a React Flow graph to a valid haute pipeline .py file.
 
-    sorted_nodes = _topo_sort(nodes, edges)
-
-    # Build a map from node id → function name
-    id_to_func: dict[str, str] = {}
-    for node in sorted_nodes:
-        id_to_func[node.id] = _sanitize_func_name(node.data.label)
-
-    lines = [
-        f'"""Pipeline: {pipeline_name}"""',
-        "",
-        "import polars as pl",
-        "import haute",
-    ]
-
-    # User-defined preamble (extra imports, helpers, constants)
-    if preamble.strip():
-        lines.append("")
-        lines.append(preamble.rstrip())
-
-    lines += [
-        "",
-        f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
-        "",
-        "",
-    ]
-
-    # Preserved blocks (user code that survives GUI regeneration)
-    all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
-    if all_preserved:
-        lines.extend(_emit_preserved_blocks(all_preserved))
-        lines.append("")
-
-    # Build source names per node from edges (ordered list of upstream func names)
-    node_sources: dict[str, list[str]] = {}
-    for edge in edges:
-        src_name = id_to_func.get(edge.source, edge.source)
-        node_sources.setdefault(edge.target, []).append(src_name)
-
-    # Partition: emit originals before instances to ensure the function exists
-    # when the instance wrapper calls it.
-    instance_of_map: dict[str, str] = {}
-    for node in sorted_nodes:
-        ref = node.data.config.get("instanceOf")
-        if ref:
-            instance_of_map[node.id] = ref
-
-    originals = [n for n in sorted_nodes if n.id not in instance_of_map]
-    instances = [n for n in sorted_nodes if n.id in instance_of_map]
-
-    for node in originals:
-        source_names = node_sources.get(node.id, [])
-        lines.append(_node_to_code(node, source_names=source_names))
-        lines.append("")
-
-    for node in instances:
-        source_names = node_sources.get(node.id, [])
-        orig_id = instance_of_map[node.id]
-        orig_func = id_to_func.get(orig_id, orig_id)
-        orig_src = node_sources.get(orig_id, [])
-        lines.append(_instance_to_code(
-            node, orig_func,
-            source_names=source_names,
-            orig_source_names=orig_src,
-        ))
-        lines.append("")
-
-    # Emit edges as pipeline.connect() calls
-    if edges:
-        lines.append("")
-        lines.append("# Wire nodes together - edges define data flow")
-        for edge in edges:
-            src_func = id_to_func.get(edge.source, edge.source)
-            tgt_func = id_to_func.get(edge.target, edge.target)
-            lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
-        lines.append("")
-
-    logger.info("code_generated", pipeline_name=pipeline_name, node_count=len(sorted_nodes))
-    return "\n".join(lines)
+    Delegates to :func:`graph_to_code_multi` and returns the single generated
+    file's code.
+    """
+    files = graph_to_code_multi(
+        graph,
+        pipeline_name=pipeline_name,
+        description=description,
+        preamble=preamble,
+        preserved_blocks=preserved_blocks,
+    )
+    # graph_to_code_multi returns {filename: code}; extract the sole value.
+    return next(iter(files.values()))
 
 
 def _submodel_node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str:
@@ -1044,10 +895,79 @@ def graph_to_code_multi(
     submodels = graph.submodels or {}
 
     if not submodels:
-        # No submodels — single-file output
+        # No submodels — single-file output (inlined to avoid circular call)
         main_key = source_file or f"{pipeline_name}.py"
-        code = graph_to_code(graph, pipeline_name, description, preamble, preserved_blocks)
-        return {main_key: code}
+        nodes = graph.nodes
+        edges = graph.edges
+        sorted_nodes = _topo_sort(nodes, edges)
+
+        id_to_func: dict[str, str] = {}
+        for node in sorted_nodes:
+            id_to_func[node.id] = _sanitize_func_name(node.data.label)
+
+        lines = [
+            f'"""Pipeline: {pipeline_name}"""',
+            "",
+            "import polars as pl",
+            "import haute",
+        ]
+        if preamble.strip():
+            lines.append("")
+            lines.append(preamble.rstrip())
+        lines += [
+            "",
+            f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
+            "",
+            "",
+        ]
+
+        all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
+        if all_preserved:
+            lines.extend(_emit_preserved_blocks(all_preserved))
+            lines.append("")
+
+        node_sources: dict[str, list[str]] = {}
+        for edge in edges:
+            src_name = id_to_func.get(edge.source, edge.source)
+            node_sources.setdefault(edge.target, []).append(src_name)
+
+        instance_of_map: dict[str, str] = {}
+        for node in sorted_nodes:
+            ref = node.data.config.get("instanceOf")
+            if ref:
+                instance_of_map[node.id] = ref
+
+        originals = [n for n in sorted_nodes if n.id not in instance_of_map]
+        instances = [n for n in sorted_nodes if n.id in instance_of_map]
+
+        for node in originals:
+            source_names = node_sources.get(node.id, [])
+            lines.append(_node_to_code(node, source_names=source_names))
+            lines.append("")
+
+        for node in instances:
+            source_names = node_sources.get(node.id, [])
+            orig_id = instance_of_map[node.id]
+            orig_func = id_to_func.get(orig_id, orig_id)
+            orig_src = node_sources.get(orig_id, [])
+            lines.append(_instance_to_code(
+                node, orig_func,
+                source_names=source_names,
+                orig_source_names=orig_src,
+            ))
+            lines.append("")
+
+        if edges:
+            lines.append("")
+            lines.append("# Wire nodes together - edges define data flow")
+            for edge in edges:
+                src_func = id_to_func.get(edge.source, edge.source)
+                tgt_func = id_to_func.get(edge.target, edge.target)
+                lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
+            lines.append("")
+
+        logger.info("code_generated", pipeline_name=pipeline_name, node_count=len(sorted_nodes))
+        return {main_key: "\n".join(lines)}
 
     # ── Separate nodes into root-level vs submodel children ──────────
     all_child_ids: set[str] = set()

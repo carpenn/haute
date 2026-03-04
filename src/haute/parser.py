@@ -18,14 +18,12 @@ from haute._parser_helpers import (
     _build_edges,
     _build_rf_nodes,
     _extract_connect_calls,
+    _extract_decorated_nodes,
     _extract_function_bodies,
     _extract_pipeline_meta,
     _extract_preamble,
     _extract_preserved_blocks,
-    _get_decorator_kwargs,
-    _get_docstring,
     _is_pipeline_node_decorator,
-    _resolve_node_config,
 )
 from haute._parser_regex import fallback_parse as _fallback_parse
 from haute._parser_submodels import extract_submodel_calls as _extract_submodel_calls
@@ -114,42 +112,9 @@ def parse_pipeline_source(
 
     # Find @pipeline.node decorated functions
     func_bodies = _extract_function_bodies(source, tree=tree)
-    raw_nodes: list[dict] = []
-
-    for stmt in ast.iter_child_nodes(tree):
-        if not isinstance(stmt, ast.FunctionDef):
-            continue
-
-        # Check for @pipeline.node decorator
-        matched_decorator = None
-        for dec in stmt.decorator_list:
-            if _is_pipeline_node_decorator(dec):
-                matched_decorator = dec
-                break
-
-        if matched_decorator is None:
-            continue
-
-        func_name = stmt.name
-        decorator_kwargs = _get_decorator_kwargs(matched_decorator)
-        param_names = [arg.arg for arg in stmt.args.args]
-        n_params = len(param_names)
-        description = _get_docstring(stmt)
-        body = func_bodies.get(func_name, "")
-
-        node_type, config = _resolve_node_config(
-            decorator_kwargs, body, param_names, n_params, _base_dir,
-        )
-
-        raw_nodes.append(
-            {
-                "func_name": func_name,
-                "node_type": node_type,
-                "description": description,
-                "config": config,
-                "param_names": param_names,
-            }
-        )
+    raw_nodes = _extract_decorated_nodes(
+        tree, _is_pipeline_node_decorator, func_bodies, _base_dir,
+    )
 
     if not raw_nodes:
         return PipelineGraph(
