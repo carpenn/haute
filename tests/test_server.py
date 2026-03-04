@@ -118,33 +118,6 @@ class TestGetPipelineByName:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/pipeline/run
-# ---------------------------------------------------------------------------
-
-class TestRunPipeline:
-    def _graph_payload(self, pipeline_dir: Path) -> dict:
-        from haute.parser import parse_pipeline_file
-        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
-        return {"graph": graph.model_dump()}
-
-    def test_run_returns_results(self, client: TestClient, pipeline_dir: Path):
-        body = self._graph_payload(pipeline_dir)
-        resp = client.post("/api/pipeline/run", json=body)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert len(data["results"]) >= 2
-        # Every node should have status ok
-        for nid, res in data["results"].items():
-            assert res["status"] == "ok", f"Node {nid} failed: {res.get('error')}"
-            assert res["row_count"] > 0
-
-    def test_run_empty_graph_returns_400(self, client: TestClient):
-        resp = client.post("/api/pipeline/run", json={"graph": {"nodes": [], "edges": []}})
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
 # POST /api/pipeline/preview
 # ---------------------------------------------------------------------------
 
@@ -163,6 +136,9 @@ class TestPreviewNode:
         assert data["status"] == "ok"
         assert data["row_count"] <= 10
         assert len(data["columns"]) > 0
+        assert "node_statuses" in data
+        assert node_id in data["node_statuses"]
+        assert data["node_statuses"][node_id] == "ok"
 
     def test_preview_empty_graph_returns_400(self, client: TestClient):
         resp = client.post("/api/pipeline/preview", json={
@@ -750,22 +726,6 @@ class TestFileWatcher:
 class TestPipelineTimeouts:
     """Timeout paths — mock asyncio.wait_for to raise TimeoutError."""
 
-    def test_run_timeout(self, client: TestClient, pipeline_dir: Path):
-        from unittest.mock import AsyncMock, patch
-
-        from haute.parser import parse_pipeline_file
-
-        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
-
-        with patch(
-            "haute.routes.pipeline.asyncio.wait_for",
-            new_callable=AsyncMock,
-            side_effect=TimeoutError,
-        ):
-            resp = client.post("/api/pipeline/run", json={"graph": graph.model_dump()})
-        assert resp.status_code == 504
-        assert "timed out" in resp.json()["detail"].lower()
-
     def test_trace_timeout(self, client: TestClient, pipeline_dir: Path):
         from unittest.mock import AsyncMock, patch
 
@@ -827,21 +787,6 @@ class TestPipelineTimeouts:
 
 class TestPipelineExceptions:
     """Exception paths — mock execute_graph to raise RuntimeError → 500."""
-
-    def test_run_exception(self, client: TestClient, pipeline_dir: Path):
-        from unittest.mock import patch
-
-        from haute.parser import parse_pipeline_file
-
-        graph = parse_pipeline_file(pipeline_dir / "test_pipeline.py")
-
-        with patch(
-            "haute.executor.execute_graph",
-            side_effect=RuntimeError("segfault in transform"),
-        ):
-            resp = client.post("/api/pipeline/run", json={"graph": graph.model_dump()})
-        assert resp.status_code == 500
-        assert "segfault in transform" in resp.json()["detail"]
 
     def test_trace_exception(self, client: TestClient, pipeline_dir: Path):
         from unittest.mock import patch

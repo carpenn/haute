@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import type { PreviewData } from "../panels/DataPreview"
 import { makePreviewData } from "../utils/makePreviewData"
-import { loadPipeline, previewNode, runPipeline, savePipeline, ApiError } from "../api/client"
+import { loadPipeline, previewNode, savePipeline, ApiError } from "../api/client"
 import { resolveGraphFromRefs } from "../utils/buildGraph"
 import type { NodeResult } from "../api/types"
 import useToastStore from "../stores/useToastStore"
@@ -31,9 +31,7 @@ export interface PipelineAPIReturn {
   previewData: PreviewData | null
   setPreviewData: React.Dispatch<React.SetStateAction<PreviewData | null>>
   nodeStatuses: Record<string, "ok" | "error" | "running">
-  runStatus: string | null
   fetchPreview: (node: Node) => void
-  handleRun: () => void
   handleSave: () => void
 }
 
@@ -73,7 +71,6 @@ export default function usePipelineAPI({
   const [loading, setLoading] = useState(true)
   const [previewData, setPreviewData] = useState<PreviewData | null>(null)
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, "ok" | "error" | "running">>({})
-  const [runStatus, setRunStatus] = useState<string | null>(null)
   const previewAbort = useRef<AbortController | null>(null)
   const previewDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -83,9 +80,6 @@ export default function usePipelineAPI({
   rowLimitRef.current = rowLimit
   const activeScenarioRef = useRef(activeScenario)
   activeScenarioRef.current = activeScenario
-  const selectedNodeRef = useRef(selectedNode)
-  selectedNodeRef.current = selectedNode
-
   // Initial pipeline load
   useEffect(() => {
     loadPipeline()
@@ -146,6 +140,9 @@ export default function usePipelineAPI({
         setPreviewData(preview)
         // Cache the result for next time
         storePreview(node.id, preview, useNodeResultsStore.getState().graphVersion)
+        if (result.node_statuses) {
+          setNodeStatuses(result.node_statuses as Record<string, "ok" | "error" | "running">)
+        }
         if (result.columns) {
           setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
         }
@@ -153,6 +150,7 @@ export default function usePipelineAPI({
       .catch((err) => {
         if (err instanceof ApiError || err.name !== "AbortError") {
           setPreviewData(makePreviewData(node.id, label, { status: "error", error: err.message }))
+          setNodeStatuses({})
         }
       })
   }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
@@ -168,64 +166,6 @@ export default function usePipelineAPI({
     }
     previewDebounce.current = setTimeout(() => fetchPreviewImmediate(node), 200)
   }, [fetchPreviewImmediate])
-
-  const handleRun = useCallback(() => {
-    const { nodes: currentNodes, edges: currentEdges } = graphRef.current
-    if (currentNodes.length === 0) return
-    // Cancel any pending preview since run results will replace it
-    previewAbort.current?.abort()
-    if (previewDebounce.current) clearTimeout(previewDebounce.current)
-    setRunStatus("Running...")
-    const running: Record<string, "running"> = {}
-    currentNodes.forEach((n) => { running[n.id] = "running" })
-    setNodeStatuses(running)
-
-    runPipeline({ nodes: currentNodes, edges: currentEdges, preamble: preambleRef.current }, useSettingsStore.getState().activeScenario)
-      .then((data) => {
-        const statuses: Record<string, "ok" | "error"> = {}
-        const results = data.results ?? {}
-        for (const [nid, result] of Object.entries(results)) {
-          statuses[nid] = result.status === "ok" ? "ok" : "error"
-        }
-        setNodeStatuses(statuses)
-        setRunStatus("Done")
-        setTimeout(() => setRunStatus(null), 3000)
-
-        setNodes((nds) => nds.map((n) => {
-          const r = results[n.id]
-          return r?.columns ? { ...n, data: { ...n.data, _columns: r.columns } } : n
-        }))
-
-        const sel = selectedNodeRef.current
-        // Read nodes from ref for label lookup (graph may have changed during async run)
-        const latestNodes = graphRef.current.nodes
-        if (sel && results[sel.id]) {
-          // Build timings from all run results so the toolbar can show the full breakdown
-          const allTimings = Object.entries(results).map(([nid, r]) => {
-            const matchingNode = latestNodes.find((n) => n.id === nid)
-            return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, timing_ms: r.timing_ms ?? 0 }
-          })
-          const allMemory = Object.entries(results).map(([nid, r]) => {
-            const matchingNode = latestNodes.find((n) => n.id === nid)
-            return { node_id: nid, label: matchingNode ? nodeLabel(matchingNode) : nid, memory_bytes: r.memory_bytes ?? 0 }
-          })
-          const totalMs = allTimings.reduce((s, t) => s + t.timing_ms, 0)
-          const totalMemory = allMemory.reduce((s, m) => s + m.memory_bytes, 0)
-          const preview = resultToPreview(sel.id, nodeLabel(sel), results[sel.id])
-          preview.timings = allTimings
-          preview.timing_ms = totalMs
-          preview.memory = allMemory
-          preview.memory_bytes = totalMemory
-          setPreviewData(preview)
-        }
-      })
-      .catch((err) => {
-        setRunStatus("Error")
-        setNodeStatuses({})
-        addToast("error", `Run failed: ${err.message}`)
-        setTimeout(() => setRunStatus(null), 3000)
-      })
-  }, [graphRef, preambleRef, setNodes, addToast])
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
@@ -250,6 +190,11 @@ export default function usePipelineAPI({
       })
   }, [graphRef, submodelsRef, preambleRef, sourceFileRef, pipelineNameRef, lastSavedRef, setDirty, addToast])
 
+  // Clear node statuses when nothing is selected
+  useEffect(() => {
+    if (!selectedNode) setNodeStatuses({})
+  }, [selectedNode])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -262,7 +207,6 @@ export default function usePipelineAPI({
     loading,
     previewData, setPreviewData,
     nodeStatuses,
-    runStatus,
-    fetchPreview, handleRun, handleSave,
+    fetchPreview, handleSave,
   }
 }

@@ -10,7 +10,6 @@ import useNodeResultsStore from "../../stores/useNodeResultsStore"
 vi.mock("../../api/client", () => ({
   loadPipeline: vi.fn(),
   previewNode: vi.fn(),
-  runPipeline: vi.fn(),
   savePipeline: vi.fn(),
   ApiError: class ApiError extends Error {},
 }))
@@ -37,10 +36,9 @@ vi.mock("../../utils/makePreviewData", () => ({
   })),
 }))
 
-import { loadPipeline, previewNode, runPipeline, savePipeline } from "../../api/client"
+import { loadPipeline, previewNode, savePipeline } from "../../api/client"
 const mockLoad = vi.mocked(loadPipeline)
 const mockPreview = vi.mocked(previewNode)
-const mockRun = vi.mocked(runPipeline)
 const mockSave = vi.mocked(savePipeline)
 
 function makeNode(id: string): Node {
@@ -75,7 +73,7 @@ describe("usePipelineAPI", () => {
     useNodeResultsStore.setState({ previews: {}, graphVersion: 0, columnCache: {} })
     mockLoad.mockReset()
     mockPreview.mockReset()
-    mockRun.mockReset()
+
     mockSave.mockReset()
   })
 
@@ -109,51 +107,6 @@ describe("usePipelineAPI", () => {
       const toasts = useToastStore.getState().toasts
       expect(toasts.some((t) => t.type === "error" && t.text.includes("Server down"))).toBe(true)
     })
-  })
-
-  it("handleRun does nothing with empty graph", async () => {
-    mockLoad.mockResolvedValue({ nodes: [], edges: [] })
-    const params = makeParams()
-    params.graphRef.current = { nodes: [], edges: [] }
-    const { result } = renderHook(() => usePipelineAPI(params))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    act(() => {
-      result.current.handleRun()
-    })
-    expect(mockRun).not.toHaveBeenCalled()
-  })
-
-  it("handleRun calls runPipeline and sets status to Done", async () => {
-    mockLoad.mockResolvedValue({ nodes: [], edges: [] })
-    const n1 = makeNode("n1")
-    mockRun.mockResolvedValue({
-      results: {
-        n1: { status: "ok", columns: [{ name: "a", dtype: "f64" }], preview: [], row_count: 10, column_count: 1, timing_ms: 42, memory_bytes: 100 },
-      },
-    })
-    const params = makeParams({ selectedNode: n1 })
-    params.graphRef.current = { nodes: [n1], edges: [] }
-    const { result } = renderHook(() => usePipelineAPI(params))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    await act(async () => {
-      result.current.handleRun()
-    })
-    await waitFor(() => expect(result.current.runStatus).toBe("Done"))
-  })
-
-  it("handleRun shows toast on error", async () => {
-    mockLoad.mockResolvedValue({ nodes: [], edges: [] })
-    mockRun.mockRejectedValue(new Error("Run failed"))
-    const params = makeParams()
-    params.graphRef.current = { nodes: [makeNode("n1")], edges: [] }
-    const { result } = renderHook(() => usePipelineAPI(params))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    await act(async () => {
-      result.current.handleRun()
-    })
-    await waitFor(() => expect(result.current.runStatus).toBe("Error"))
-    const toasts = useToastStore.getState().toasts
-    expect(toasts.some((t) => t.text.includes("Run failed"))).toBe(true)
   })
 
   it("handleSave calls savePipeline and shows success toast", async () => {
@@ -241,5 +194,26 @@ describe("usePipelineAPI", () => {
     })
     // Should show loading state immediately
     expect(result.current.previewData?.status).toBe("loading")
+  })
+
+  it("fetchPreview populates nodeStatuses from response", async () => {
+    mockLoad.mockResolvedValue({ nodes: [], edges: [] })
+    mockPreview.mockResolvedValue({
+      status: "ok",
+      columns: [{ name: "a", dtype: "f64" }],
+      preview: [{ a: 1 }],
+      row_count: 1,
+      column_count: 1,
+      node_statuses: { n1: "ok", n0: "ok" },
+    })
+    const params = makeParams()
+    const { result } = renderHook(() => usePipelineAPI(params))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const node = makeNode("n1")
+    act(() => {
+      result.current.fetchPreview(node)
+    })
+    // Wait for the async preview to resolve
+    await waitFor(() => expect(result.current.nodeStatuses).toEqual({ n1: "ok", n0: "ok" }))
   })
 })

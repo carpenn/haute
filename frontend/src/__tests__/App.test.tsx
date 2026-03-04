@@ -64,9 +64,7 @@ vi.mock("../hooks/usePipelineAPI", () => ({
     previewData: null,
     setPreviewData: vi.fn(),
     nodeStatuses: {},
-    runStatus: "idle",
     fetchPreview: vi.fn(),
-    handleRun: vi.fn(),
     handleSave: vi.fn(),
   }),
 }))

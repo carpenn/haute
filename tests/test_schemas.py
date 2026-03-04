@@ -10,16 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from haute.schemas import (
-    ColumnInfo,
     FileItem,
     Graph,
     GraphEdge,
     GraphNode,
     GraphNodeData,
-    NodeResult,
     PreviewNodeRequest,
-    RunPipelineRequest,
-    RunPipelineResponse,
     SavePipelineRequest,
     SinkRequest,
     TraceRequest,
@@ -32,10 +28,6 @@ class TestValidation:
     def test_graph_edge_requires_fields(self):
         with pytest.raises(ValidationError):
             GraphEdge()
-
-    def test_run_pipeline_requires_graph(self):
-        with pytest.raises(ValidationError):
-            RunPipelineRequest()
 
     def test_sink_request_requires_node_id(self):
         with pytest.raises(ValidationError):
@@ -65,19 +57,6 @@ class TestCompositeStructure:
         )
         assert len(g.nodes) == 2
         assert g.edges[0].target == "b"
-
-    def test_run_pipeline_response_nested_results(self):
-        r = RunPipelineResponse(
-            status="ok",
-            results={
-                "n1": NodeResult(
-                    status="ok", row_count=10, column_count=2,
-                    columns=[ColumnInfo(name="x", dtype="Int64")],
-                ),
-            },
-        )
-        assert r.results["n1"].row_count == 10
-        assert r.results["n1"].columns[0].name == "x"
 
     def test_file_item_optional_size(self):
         f_file = FileItem(name="data.parquet", path="data.parquet", type="file", size=1024)

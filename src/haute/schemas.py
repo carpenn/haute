@@ -45,14 +45,8 @@ class SavePipelineResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# /api/pipeline/run
+# Shared result models
 # ---------------------------------------------------------------------------
-
-
-class RunPipelineRequest(BaseModel):
-    graph: Graph
-    row_limit: int = 100_000
-    scenario: str = "live"
 
 
 class NodeResult(BaseModel):
@@ -66,11 +60,6 @@ class NodeResult(BaseModel):
     timing_ms: float = 0
     memory_bytes: int = 0
     schema_warnings: list[SchemaWarning] = Field(default_factory=list)
-
-
-class RunPipelineResponse(BaseModel):
-    status: str
-    results: dict[str, NodeResult] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +105,7 @@ class PreviewNodeResponse(BaseModel):
     timings: list[NodeTimingInfo] = Field(default_factory=list)
     memory: list[NodeMemoryInfo] = Field(default_factory=list)
     schema_warnings: list[SchemaWarning] = Field(default_factory=list)
+    node_statuses: dict[str, str] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

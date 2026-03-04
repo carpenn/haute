@@ -161,8 +161,8 @@ function FlowEditor() {
 
   const {
     loading, previewData, setPreviewData,
-    nodeStatuses, runStatus,
-    fetchPreview, handleRun, handleSave,
+    nodeStatuses,
+    fetchPreview, handleSave,
   } = usePipelineAPI({
     selectedNode,
     graphRef, parentGraphRef, submodelsRef, setNodes,
@@ -267,8 +267,6 @@ function FlowEditor() {
         onShowShortcuts={() => setShortcutsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onAutoLayout={handleAutoLayout}
-        onRun={handleRun}
-        runStatus={runStatus}
         onSave={handleSave}
         wsStatus={wsStatus}
         lastRunMs={previewData?.timing_ms}
@@ -321,7 +319,7 @@ function FlowEditor() {
                     handleDrillIntoSubmodel(node.id)
                   }
                 }}
-                onPaneClick={() => { setContextMenu(null); clearTrace() }}
+                onPaneClick={() => { setContextMenu(null); clearTrace(); setSelectedNode(null); lastSelectedNodeRef.current = null }}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 nodeTypes={nodeTypes}

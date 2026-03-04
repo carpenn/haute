@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo } from "react"
-import { X, Link2, AlertTriangle } from "lucide-react"
+import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
 import ModellingConfig from "./ModellingConfig"
@@ -41,6 +41,18 @@ type NodePanelProps = {
   /** 1-based line number of the error in user code, if any */
   errorLine?: number | null
 }
+
+// ─── Node types that show a refresh-preview button in the panel header ──
+
+const REFRESHABLE_TYPES = new Set([
+  NODE_TYPES.CONSTANT,
+  NODE_TYPES.TRANSFORM,
+  NODE_TYPES.BANDING,
+  NODE_TYPES.SCENARIO_EXPANDER,
+  NODE_TYPES.RATING_STEP,
+  NODE_TYPES.MODEL_SCORE,
+  NODE_TYPES.OPTIMISER_APPLY,
+])
 
 // ─── Panel sizing ─────────────────────────────────────────────────
 
@@ -453,6 +465,18 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
           onBlur={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.boxShadow = 'none' }}
         />
         <span className="text-[11px] font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>{node.id}</span>
+        {onRefreshPreview && REFRESHABLE_TYPES.has(nodeType) && (
+          <button
+            onClick={onRefreshPreview}
+            className="p-1 rounded shrink-0 transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+            title="Refresh preview"
+          >
+            <RefreshCw size={13} />
+          </button>
+        )}
         <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}

@@ -1,4 +1,4 @@
-"""Pipeline CRUD, run, preview, trace, and sink endpoints."""
+"""Pipeline CRUD, preview, trace, and sink endpoints."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ from haute.schemas import (
     PipelineSummary,
     PreviewNodeRequest,
     PreviewNodeResponse,
-    RunPipelineRequest,
-    RunPipelineResponse,
     SavePipelineRequest,
     SavePipelineResponse,
     SinkRequest,
@@ -34,7 +32,6 @@ logger = get_logger(component="server.pipeline")
 router = APIRouter(prefix="/api", tags=["pipeline"])
 
 # ── Timeout constants (seconds) ──────────────────────────────────
-_RUN_TIMEOUT = 300.0  # full pipeline execution
 _TRACE_TIMEOUT = 120.0  # single-row trace
 _PREVIEW_TIMEOUT = 120.0  # node preview execution
 _SINK_TIMEOUT = 300.0  # sink (write-to-disk) execution
@@ -131,33 +128,6 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
 
     svc = SavePipelineService(project_root=Path.cwd())
     return svc.save(body)
-
-
-@router.post("/pipeline/run", response_model=RunPipelineResponse)
-async def run_pipeline(body: RunPipelineRequest) -> RunPipelineResponse:
-    """Execute the full pipeline graph and return per-node results."""
-    from haute.executor import execute_graph
-    from haute.graph_utils import flatten_graph
-
-    graph = flatten_graph(body.graph)
-    if not graph.nodes:
-        raise HTTPException(status_code=400, detail="Empty graph")
-
-    try:
-        results = await asyncio.wait_for(
-            asyncio.to_thread(execute_graph, graph, scenario=body.scenario),
-            timeout=_RUN_TIMEOUT,
-        )
-        return RunPipelineResponse(status="ok", results=results)
-    except TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail=f"Pipeline execution timed out ({_RUN_TIMEOUT:.0f}s limit)",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/pipeline/trace", response_model=TraceResponse)
@@ -269,6 +239,10 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             if nid in node_map and nid in relevant
         ]
 
+        node_statuses = {
+            nid: r.status for nid, r in results.items() if nid in relevant
+        }
+
         return PreviewNodeResponse(
             node_id=body.node_id,
             status=node_result.status,
@@ -283,6 +257,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             timings=timings,
             memory=memory,
             schema_warnings=node_result.schema_warnings,
+            node_statuses=node_statuses,
         )
     except TimeoutError:
         raise HTTPException(

@@ -3,7 +3,6 @@ import {
   ApiError,
   loadPipeline,
   previewNode,
-  runPipeline,
   savePipeline,
   traceCell,
   executeSink,
@@ -135,24 +134,6 @@ describe("request() core via loadPipeline", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // POST requests — tested through specific endpoints
 // ═══════════════════════════════════════════════════════════════════════════
-
-describe("post() via runPipeline", () => {
-  it("sends POST with JSON Content-Type and body", async () => {
-    const responseData = { status: "ok", results: {} }
-    mockFetch.mockReturnValue(jsonResponse(responseData))
-
-    await runPipeline(dummyGraph)
-
-    const [url, options] = mockFetch.mock.calls[0]
-    expect(url).toBe("/api/pipeline/run")
-    expect(options.method).toBe("POST")
-    expect(options.headers["Content-Type"]).toBe("application/json")
-
-    const body = JSON.parse(options.body)
-    expect(body.graph).toEqual(dummyGraph)
-    expect(body.scenario).toBe("live")
-  })
-})
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Per-endpoint contract tests

@@ -36,8 +36,6 @@ interface ToolbarProps {
   onShowShortcuts: () => void
   onOpenSettings: () => void
   onAutoLayout: () => void
-  onRun: () => void
-  runStatus: string | null
   onSave: () => void
   wsStatus: WsStatus
   lastRunMs?: number | null
@@ -51,7 +49,7 @@ export default function Toolbar({
   snapToGrid, onToggleSnapToGrid,
   onShowShortcuts,
   onOpenSettings, onAutoLayout,
-  onRun, runStatus, onSave,
+  onSave,
   wsStatus, lastRunMs, timings, memory,
 }: ToolbarProps) {
   const rowLimit = useSettingsStore((s) => s.rowLimit)
@@ -292,16 +290,6 @@ export default function Toolbar({
           title="Auto-arrange nodes"
         >
           Layout
-        </button>
-        <button
-          onClick={onRun}
-          disabled={nodeCount === 0}
-          className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors disabled:opacity-30"
-          style={{ background: '#22c55e' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = '#4ade80'}
-          onMouseLeave={(e) => e.currentTarget.style.background = '#22c55e'}
-        >
-          {runStatus === "Running..." ? "Running..." : "Run"}
         </button>
         <button
           onClick={onSave}

@@ -17,8 +17,6 @@ function makeProps(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
     onShowShortcuts: vi.fn(),
     onOpenSettings: vi.fn(),
     onAutoLayout: vi.fn(),
-    onRun: vi.fn(),
-    runStatus: null as string | null,
     onSave: vi.fn(),
     wsStatus: "connected" as const,
     ...overrides,
@@ -46,29 +44,11 @@ describe("Toolbar", () => {
     expect(screen.getByText("Haute")).toBeInTheDocument()
   })
 
-  it("clicking Run calls onRun", () => {
-    const props = makeProps()
-    render(<Toolbar {...props} />)
-    fireEvent.click(screen.getByText("Run"))
-    expect(props.onRun).toHaveBeenCalledOnce()
-  })
-
   it("clicking Save calls onSave", () => {
     const props = makeProps()
     render(<Toolbar {...props} />)
     fireEvent.click(screen.getByText("Save"))
     expect(props.onSave).toHaveBeenCalledOnce()
-  })
-
-  it("shows Running... when runStatus is Running...", () => {
-    render(<Toolbar {...makeProps({ runStatus: "Running..." })} />)
-    expect(screen.getByText("Running...")).toBeInTheDocument()
-  })
-
-  it("Run button is disabled when nodeCount is 0", () => {
-    render(<Toolbar {...makeProps({ nodeCount: 0 })} />)
-    const runBtn = screen.getByText("Run")
-    expect(runBtn).toBeDisabled()
   })
 
   it("Layout button is disabled when nodeCount is 0", () => {

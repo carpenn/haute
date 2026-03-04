@@ -11,7 +11,6 @@
 import type { Node, Edge } from "@xyflow/react"
 import type {
   PipelineGraph,
-  RunPipelineResponse,
   SavePipelineResponse,
   TraceResponse,
   NodeResult,
@@ -112,14 +111,6 @@ export function previewNode(
     timeout: 120_000,
     ...options,
   })
-}
-
-export function runPipeline(
-  graph: GraphPayload,
-  scenario?: string,
-  options?: { signal?: AbortSignal; timeout?: number },
-): Promise<RunPipelineResponse> {
-  return post("/api/pipeline/run", { graph, scenario: scenario ?? "live" }, { timeout: 300_000, ...options })
 }
 
 export function savePipeline(

@@ -35,6 +35,7 @@ export interface NodeResult {
   timings?: NodeTiming[]
   memory?: NodeMemory[]
   schema_warnings?: SchemaWarning[]
+  node_statuses?: Record<string, string>
 }
 
 export interface NodeTiming {
@@ -47,11 +48,6 @@ export interface NodeMemory {
   node_id: string
   label: string
   memory_bytes: number
-}
-
-export interface RunPipelineResponse {
-  status: string
-  results: Record<string, NodeResult>
 }
 
 export interface SavePipelineResponse {
