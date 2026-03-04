@@ -325,9 +325,11 @@ function FlowEditor() {
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 nodeTypes={nodeTypes}
-                selectNodesOnDrag={false}
+                panOnDrag={[2]}
+                selectionOnDrag
+                selectNodesOnDrag
                 selectionMode={SelectionMode.Partial}
-                selectionKeyCode={"Shift"}
+                selectionKeyCode={null}
                 snapToGrid={snapToGrid}
                 snapGrid={[20, 20]}
                 fitView

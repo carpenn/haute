@@ -42,19 +42,19 @@ describe("NODE_TYPE_META", () => {
 })
 
 describe("SINGLETON_TYPES", () => {
-  it("contains apiInput, output, and liveSwitch", () => {
+  it("contains apiInput and output", () => {
     expect(SINGLETON_TYPES.has(NODE_TYPES.API_INPUT)).toBe(true)
     expect(SINGLETON_TYPES.has(NODE_TYPES.OUTPUT)).toBe(true)
-    expect(SINGLETON_TYPES.has(NODE_TYPES.LIVE_SWITCH)).toBe(true)
   })
 
   it("does not contain non-singleton types", () => {
     expect(SINGLETON_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
     expect(SINGLETON_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(false)
+    expect(SINGLETON_TYPES.has(NODE_TYPES.LIVE_SWITCH)).toBe(false)
   })
 
-  it("has exactly 3 entries", () => {
-    expect(SINGLETON_TYPES.size).toBe(3)
+  it("has exactly 2 entries", () => {
+    expect(SINGLETON_TYPES.size).toBe(2)
   })
 })
 

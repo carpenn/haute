@@ -189,6 +189,31 @@ describe("DataPreview", () => {
     expect(cell.style.background).toBe("var(--accent-soft)")
   })
 
+  it("column search filters displayed columns", () => {
+    render(<DataPreview data={makePreview()} onClose={vi.fn()} />)
+    const searchInput = screen.getByPlaceholderText("Search columns...")
+    fireEvent.change(searchInput, { target: { value: "prem" } })
+    // "premium" column should still be visible
+    expect(screen.getByText("premium")).toBeInTheDocument()
+    // "age" column header should be filtered out
+    const headers = screen.getAllByRole("columnheader")
+    const headerTexts = headers.map((h) => h.textContent)
+    expect(headerTexts.some((t) => t?.includes("age"))).toBe(false)
+  })
+
+  it("clearing column search shows all columns again", () => {
+    render(<DataPreview data={makePreview()} onClose={vi.fn()} />)
+    const searchInput = screen.getByPlaceholderText("Search columns...")
+    fireEvent.change(searchInput, { target: { value: "prem" } })
+    // Clear via the X button
+    const clearBtn = screen.getAllByRole("button").find((b) => b.closest(".flex")?.querySelector("input"))
+    if (clearBtn) fireEvent.click(clearBtn)
+    else fireEvent.change(searchInput, { target: { value: "" } })
+    // Both columns should be back
+    expect(screen.getByText("age")).toBeInTheDocument()
+    expect(screen.getByText("premium")).toBeInTheDocument()
+  })
+
   it("error status shows error icon and message in body", () => {
     render(
       <DataPreview

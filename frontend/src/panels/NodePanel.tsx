@@ -430,10 +430,10 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
       {/* Drag handle */}
       <div
         onMouseDown={onDragStart}
-        className="shrink-0 h-full w-1 cursor-col-resize transition-colors"
-        style={{ background: 'transparent' }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-soft)' }}
-        onMouseLeave={(e) => { if (!isDragging.current) e.currentTarget.style.background = 'transparent' }}
+        className="shrink-0 h-full w-2 cursor-col-resize transition-colors"
+        style={{ background: 'var(--chrome-border)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent)' }}
+        onMouseLeave={(e) => { if (!isDragging.current) e.currentTarget.style.background = 'var(--chrome-border)' }}
       />
       <div className="flex-1 min-w-0 h-full overflow-y-auto flex flex-col">
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>

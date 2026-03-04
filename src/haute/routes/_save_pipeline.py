@@ -22,7 +22,7 @@ logger = get_logger(component="server.pipeline.save")
 _SINGLETON_NODE_TYPES: list[tuple[NodeType, str]] = [
     (NodeType.API_INPUT, "API Input"),
     (NodeType.OUTPUT, "Output"),
-    (NodeType.LIVE_SWITCH, "Live Switch"),
+    (NodeType.LIVE_SWITCH, "Source Switch"),
 ]
 
 

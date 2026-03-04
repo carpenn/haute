@@ -210,42 +210,40 @@ describe("Toolbar", () => {
     expect(screen.queryByTitle("Unsaved changes")).not.toBeInTheDocument()
   })
 
-  it("scenario selector renders with default 'live' option", () => {
+  it("scenario selector shows active scenario on trigger button", () => {
     render(<Toolbar {...makeProps()} />)
-    const select = screen.getByRole("combobox") as HTMLSelectElement
-    expect(select.value).toBe("live")
+    const trigger = screen.getByTitle("Data source")
+    expect(trigger.textContent).toContain("live")
   })
 
-  it("scenario selector shows all scenarios", () => {
+  it("scenario selector shows all scenarios when opened", () => {
     useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "live" })
     render(<Toolbar {...makeProps()} />)
-    const options = screen.getAllByRole("option")
-    const optionTexts = options.map((o) => o.textContent)
-    expect(optionTexts).toContain("● live")
-    expect(optionTexts).toContain("test_scenario")
+    fireEvent.click(screen.getByTitle("Data source"))
+    // "live" appears in trigger + dropdown item, so check both exist
+    expect(screen.getAllByText("live").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText("test_scenario")).toBeInTheDocument()
   })
 
   it("switching scenario updates store", () => {
     useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "live" })
     render(<Toolbar {...makeProps()} />)
-    const select = screen.getByRole("combobox")
-    fireEvent.change(select, { target: { value: "test_scenario" } })
+    fireEvent.click(screen.getByTitle("Data source"))
+    fireEvent.click(screen.getByText("test_scenario"))
     expect(useSettingsStore.getState().activeScenario).toBe("test_scenario")
   })
 
   it("shows remove option for non-live scenarios", () => {
     useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "test_scenario" })
     render(<Toolbar {...makeProps()} />)
-    const options = screen.getAllByRole("option")
-    const removeOption = options.find((o) => o.textContent?.includes("Remove"))
-    expect(removeOption).toBeTruthy()
+    fireEvent.click(screen.getByTitle("Data source"))
+    expect(screen.getByText(/Remove "test_scenario"/)).toBeInTheDocument()
   })
 
   it("does not show remove option when live is active", () => {
     useSettingsStore.setState({ scenarios: ["live"], activeScenario: "live" })
     render(<Toolbar {...makeProps()} />)
-    const options = screen.getAllByRole("option")
-    const removeOption = options.find((o) => o.textContent?.includes("Remove"))
-    expect(removeOption).toBeUndefined()
+    fireEvent.click(screen.getByTitle("Data source"))
+    expect(screen.queryByText(/Remove/)).not.toBeInTheDocument()
   })
 })

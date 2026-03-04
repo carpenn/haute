@@ -20,7 +20,7 @@ function resetStore() {
     snapToGrid: false,
     syncBanner: null,
     dirty: false,
-    nodePanelWidth: 400,
+    nodePanelWidth: 900,
   })
 }
 
@@ -128,8 +128,8 @@ describe("useUIStore", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("nodePanelWidth", () => {
-    it("has a default value of 400", () => {
-      expect(useUIStore.getState().nodePanelWidth).toBe(400)
+    it("has a default value of 900", () => {
+      expect(useUIStore.getState().nodePanelWidth).toBe(900)
     })
 
     it("setNodePanelWidth updates the width", () => {

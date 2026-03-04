@@ -49,7 +49,7 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
 }
 
 export const SINGLETON_TYPES = new Set<NodeTypeValue>([
-  NODE_TYPES.API_INPUT, NODE_TYPES.OUTPUT, NODE_TYPES.LIVE_SWITCH,
+  NODE_TYPES.API_INPUT, NODE_TYPES.OUTPUT,
 ])
 
 /** Nodes that only produce data — no input handle. */

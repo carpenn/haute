@@ -4,6 +4,7 @@ import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import { NODE_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
+import useSettingsStore from "../stores/useSettingsStore"
 
 const statusColors: Record<string, string> = {
   ok: "#22c55e",
@@ -31,7 +32,8 @@ function PipelineNode({ data, selected }: NodeProps) {
   const isDeployInput = nodeType === NODE_TYPES.API_INPUT
   const missingRowId = isDeployInput && !nodeData.config?.row_id_column
   const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH
-  const switchMode = isLiveSwitch ? ((nodeData.config?.mode as string) || "live") : null
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  const showLiveBadge = isLiveSwitch && activeScenario === "live"
   const isInstance = !!(nodeData.config?.instanceOf)
   const isSourceOnly = SOURCE_ONLY_TYPES.has(nodeType)
   const isSinkOnly = SINK_ONLY_TYPES.has(nodeType)
@@ -101,15 +103,12 @@ function PipelineNode({ data, selected }: NodeProps) {
               )}
             </span>
           )}
-          {switchMode && (
+          {showLiveBadge && (
             <span
               className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
-              style={switchMode === "live"
-                ? { background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }
-                : { background: "rgba(245,158,11,.12)", color: "#f59e0b", border: "1px solid rgba(245,158,11,.2)" }
-              }
+              style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
             >
-              {switchMode === "live" ? "LIVE" : switchMode}
+              LIVE
             </span>
           )}
           {nodeData._status && (

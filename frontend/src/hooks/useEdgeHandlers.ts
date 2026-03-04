@@ -27,7 +27,7 @@ const labelMap: Record<string, string> = {
   [NODE_TYPES.OUTPUT]: "API Output",
   [NODE_TYPES.DATA_SINK]: "Data Sink",
   [NODE_TYPES.EXTERNAL_FILE]: "Load File",
-  [NODE_TYPES.LIVE_SWITCH]: "Live Switch",
+  [NODE_TYPES.LIVE_SWITCH]: "Source Switch",
   [NODE_TYPES.MODELLING]: "Model Training",
   [NODE_TYPES.OPTIMISER]: "Optimisation",
   [NODE_TYPES.OPTIMISER_APPLY]: "Apply Optimisation",

@@ -59,7 +59,7 @@ function renderPanel(overrides: Partial<Parameters<typeof NodePanel>[0]> = {}) {
 
 describe("NodePanel", () => {
   beforeEach(() => {
-    useUIStore.setState({ nodePanelWidth: 400 })
+    useUIStore.setState({ nodePanelWidth: 900 })
   })
 
   afterEach(cleanup)
@@ -358,6 +358,7 @@ describe("NodePanel", () => {
 
   describe("Panel resize", () => {
     it("drag handle updates panel width via mouse events", () => {
+      useUIStore.setState({ nodePanelWidth: 400 })
       const { container } = renderPanel()
       const panel = container.firstElementChild as HTMLElement
       // The drag handle is the first child div with cursor-col-resize class
@@ -390,12 +391,12 @@ describe("NodePanel", () => {
     })
 
     it("resize clamps to maximum width of 900", () => {
-      useUIStore.setState({ nodePanelWidth: 400 })
+      useUIStore.setState({ nodePanelWidth: 900 })
       const { container } = renderPanel()
       const panel = container.firstElementChild as HTMLElement
       const dragHandle = panel.querySelector(".cursor-col-resize") as HTMLElement
 
-      // Start drag at x=500, move left by 600 → delta = 600 → width = 400 + 600 = 1000 → clamped to 900
+      // Start drag at x=500, move left by 600 → delta = 600 → width = 900 + 600 = 1500 → clamped to 900
       fireEvent.mouseDown(dragHandle, { clientX: 500 })
       fireEvent.mouseMove(window, { clientX: -100 })
       fireEvent.mouseUp(window)

@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react"
-import { Settings, Undo2, Redo2, Grid3X3, Keyboard, Timer, HardDrive } from "lucide-react"
+import { useState, useMemo, useRef, useCallback } from "react"
+import { Settings, Undo2, Redo2, Grid3X3, Keyboard, Timer, HardDrive, ChevronDown, Plus, Trash2 } from "lucide-react"
 import type { WsStatus } from "../hooks/useWebSocketSync"
 import type { NodeTiming, NodeMemory } from "../api/types"
 import BreakdownDropdown, { type BreakdownItem } from "./BreakdownDropdown"
 import useSettingsStore from "../stores/useSettingsStore"
+import useClickOutside from "../hooks/useClickOutside"
 
 function formatTiming(ms: number): string {
   return ms < 1000 ? `${ms.toFixed(1)}ms` : `${(ms / 1000).toFixed(2)}s`
@@ -62,6 +63,10 @@ export default function Toolbar({
   const removeScenario = useSettingsStore((s) => s.removeScenario)
   const [addingScenario, setAddingScenario] = useState(false)
   const [newScenarioName, setNewScenarioName] = useState("")
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const sourceRef = useRef<HTMLDivElement>(null)
+  const closeSource = useCallback(() => setSourceOpen(false), [])
+  useClickOutside(sourceRef, closeSource, sourceOpen)
   const wsConfig = WS_STATUS_CONFIG[wsStatus]
 
   const timingItems: BreakdownItem[] = useMemo(
@@ -86,8 +91,8 @@ export default function Toolbar({
           title={wsConfig.title}
         />
       </div>
-      {/* Scenario selector — aligned after the left node palette (180px wide) */}
-      <div className="flex items-center gap-1 ml-12" title="Data source">
+      {/* Scenario selector — custom dropdown */}
+      <div ref={sourceRef} className="relative flex items-center gap-1 ml-12">
         <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Source</label>
         {addingScenario ? (
           <form
@@ -108,38 +113,92 @@ export default function Toolbar({
               onChange={(e) => setNewScenarioName(e.target.value)}
               onBlur={() => { setAddingScenario(false); setNewScenarioName("") }}
               placeholder="name"
-              className="w-20 px-1 py-0.5 text-[11px] font-mono rounded focus:outline-none"
+              className="w-20 px-1.5 py-1 text-[11px] font-mono rounded focus:outline-none"
               style={{ background: 'var(--chrome-hover)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}
             />
           </form>
         ) : (
-          <select
-            value={activeScenario}
-            onChange={(e) => {
-              const val = e.target.value
-              if (val === "__add__") {
-                setAddingScenario(true)
-                e.target.value = activeScenario // reset select to current
-              } else if (val === "__remove__") {
-                removeScenario(activeScenario)
-                e.target.value = "live" // reset select after removal
-              } else {
-                setActiveScenario(val)
-              }
+          <button
+            onClick={() => setSourceOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2 py-1 text-[12px] font-mono rounded-md transition-colors"
+            style={{
+              background: sourceOpen ? 'var(--accent-soft)' : 'var(--chrome-hover)',
+              border: `1px solid ${sourceOpen ? 'var(--accent)' : 'var(--chrome-border)'}`,
+              color: 'var(--text-primary)',
             }}
-            className="px-1.5 py-0.5 text-[12px] font-mono rounded focus:outline-none"
-            style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
+            title="Data source"
           >
-            {scenarios.map((s) => (
-              <option key={s} value={s}>{s === "live" ? "● live" : s}</option>
-            ))}
-            <option disabled>───</option>
-            <option value="__add__">+ Add scenario</option>
-            {activeScenario !== "live" && (
-              <option value="__remove__">− Remove "{activeScenario}"</option>
+            {activeScenario === "live" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
             )}
-          </select>
+            <span>{activeScenario}</span>
+            <ChevronDown size={11} style={{ color: 'var(--text-muted)', transition: 'transform 150ms', transform: sourceOpen ? 'rotate(180deg)' : undefined }} />
+          </button>
         )}
+        {sourceOpen && (
+          <div
+            className="absolute top-full left-0 mt-1 rounded-lg shadow-2xl z-50 min-w-[160px] overflow-hidden"
+            style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}
+          >
+            <div className="py-1">
+              {scenarios.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => { setActiveScenario(s); setSourceOpen(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono text-left transition-colors"
+                  style={{
+                    color: s === activeScenario ? 'var(--accent)' : 'var(--text-secondary)',
+                    background: s === activeScenario ? 'var(--accent-soft)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => { if (s !== activeScenario) e.currentTarget.style.background = 'var(--chrome-hover)' }}
+                  onMouseLeave={(e) => { if (s !== activeScenario) e.currentTarget.style.background = 'transparent' }}
+                >
+                  {s === "live"
+                    ? <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                    : <span className="w-1.5 shrink-0" />}
+                  {s}
+                </button>
+              ))}
+            </div>
+            <div className="py-1" style={{ borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={() => { setAddingScenario(true); setSourceOpen(false) }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+              >
+                <Plus size={12} />
+                Add scenario
+              </button>
+              {activeScenario !== "live" && (
+                <button
+                  onClick={() => { removeScenario(activeScenario); setSourceOpen(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
+                  style={{ color: '#ef4444' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,.1)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Trash2 size={12} />
+                  Remove "{activeScenario}"
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      {/* Row limit — next to source */}
+      <div className="flex items-center gap-1 ml-3" title="Row limit for preview (0 = no limit)">
+        <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
+        <input
+          type="number"
+          min={0}
+          step={100}
+          value={rowLimit}
+          onChange={(e) => setRowLimit(Math.max(0, parseInt(e.target.value) || 0))}
+          className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
+          style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
+        />
       </div>
       {/* Timing + memory breakdowns */}
       {lastRunMs != null && lastRunMs > 0 && (
@@ -211,19 +270,6 @@ export default function Toolbar({
         >
           <Keyboard size={14} aria-hidden="true" />
         </button>
-        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
-        <div className="flex items-center gap-1 mr-1" title="Row limit for preview (0 = no limit)">
-          <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Rows</label>
-          <input
-            type="number"
-            min={0}
-            step={100}
-            value={rowLimit}
-            onChange={(e) => setRowLimit(Math.max(0, parseInt(e.target.value) || 0))}
-            className="w-16 px-1.5 py-0.5 text-[12px] font-mono rounded text-center focus:outline-none"
-            style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
-          />
-        </div>
         <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
         <button
           onClick={onOpenSettings}

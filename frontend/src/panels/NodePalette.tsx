@@ -23,8 +23,8 @@ const nodeTemplates = [
   },
   {
     type: NODE_TYPES.LIVE_SWITCH,
-    label: "Live Switch",
-    description: "Switch between live API and batch data (max 1)",
+    label: "Source Switch",
+    description: "Switch between live API and batch data",
     icon: ToggleLeft,
     accent: "#f59e0b",
     defaultConfig: { mode: "live" },

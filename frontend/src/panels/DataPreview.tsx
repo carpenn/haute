@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react"
-import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2 } from "lucide-react"
+import { useState, useCallback, useRef, useEffect, useMemo } from "react"
+import { X, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Table2, Search } from "lucide-react"
 import { getDtypeColor } from "../utils/dtypeColors"
 import { formatValue } from "../utils/formatValue"
 import { useDragResize } from "../hooks/useDragResize"
@@ -36,7 +36,18 @@ const OVERSCAN = 10
 
 export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
+  const [columnSearch, setColumnSearch] = useState("")
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 256, minHeight: 120, maxHeight: 600 })
+
+  // Clear search when selected node changes
+  const nodeId = data?.nodeId
+  useEffect(() => { setColumnSearch("") }, [nodeId])
+
+  const filteredColumns = useMemo(() => {
+    if (!data || !columnSearch.trim()) return data?.columns ?? []
+    const q = columnSearch.toLowerCase()
+    return data.columns.filter((col) => col.name.toLowerCase().includes(q))
+  }, [data, columnSearch])
   // Virtual scrolling state
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -126,7 +137,23 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
           <span className="text-[11px] animate-pulse" style={{ color: 'var(--text-muted)' }}>Running...</span>
         )}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md" style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)' }}>
+            <Search size={11} style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              value={columnSearch}
+              onChange={(e) => setColumnSearch(e.target.value)}
+              placeholder="Search columns..."
+              className="w-28 text-[11px] font-mono bg-transparent focus:outline-none"
+              style={{ color: 'var(--text-primary)' }}
+            />
+            {columnSearch && (
+              <button onClick={() => setColumnSearch("")} className="shrink-0" style={{ color: 'var(--text-muted)' }}>
+                <X size={10} />
+              </button>
+            )}
+          </div>
           <button
             onClick={() => setCollapsed(true)}
             className="p-1 rounded transition-colors"
@@ -181,7 +208,7 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
                       style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
                       #
                     </th>
-                    {data.columns.map((col) => (
+                    {filteredColumns.map((col) => (
                       <th
                         key={col.name}
                         className="px-3 py-1.5 text-left whitespace-nowrap"
@@ -207,7 +234,7 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
                         <td className="px-3 py-1 font-mono" style={{ color: 'var(--text-muted)', borderRight: '1px solid var(--border)' }}>
                           {i + 1}
                         </td>
-                        {data.columns.map((col) => {
+                        {filteredColumns.map((col) => {
                           const isTraced = tracedCell?.rowIndex === i && tracedCell?.column === col.name
                           return (
                             <td

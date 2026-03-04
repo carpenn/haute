@@ -4,6 +4,7 @@ import { ReactFlowProvider } from "@xyflow/react"
 import PipelineNode from "../PipelineNode"
 import type { PipelineNodeData } from "../PipelineNode"
 import { NODE_TYPES, nodeTypeLabels, nodeTypeColors } from "../../utils/nodeTypes"
+import useSettingsStore from "../../stores/useSettingsStore"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,24 +234,24 @@ describe("PipelineNode", () => {
     expect(rawStyle).toContain("dashed")
   })
 
-  // ── Live switch mode badge ─────────────────────────────────────────
+  // ── Source switch mode badge ────────────────────────────────────────
 
-  it("shows LIVE badge when liveSwitch mode is live", () => {
+  it("shows LIVE badge when active scenario is live", () => {
+    useSettingsStore.setState({ activeScenario: "live" })
     renderNode({
       label: "Switch",
       nodeType: NODE_TYPES.LIVE_SWITCH,
-      config: { mode: "live" },
     })
     expect(screen.getByText("LIVE")).toBeInTheDocument()
   })
 
-  it("shows mode name when liveSwitch mode is not live", () => {
+  it("hides LIVE badge when active scenario is not live", () => {
+    useSettingsStore.setState({ activeScenario: "backtest" })
     renderNode({
       label: "Switch",
       nodeType: NODE_TYPES.LIVE_SWITCH,
-      config: { mode: "backtest" },
     })
-    expect(screen.getByText("backtest")).toBeInTheDocument()
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument()
   })
 
   // ── Trace state ────────────────────────────────────────────────────

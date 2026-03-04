@@ -13,7 +13,7 @@ from helpers.features import (
     RENAME_MAP,
 )
 
-pipeline = haute.Pipeline("my_pipeline", description="")
+pipeline = haute.Pipeline("my_pipeline", description='')
 
 
 @pipeline.node(config="config/datasource/batch_quotes.json")
@@ -73,6 +73,7 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
      
+    df
     df
     df
     df

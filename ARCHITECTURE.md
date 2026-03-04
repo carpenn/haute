@@ -52,7 +52,7 @@ Nodes are the building blocks. Each node is a decorated Python function with def
 |---|---|---|
 | **ApiInput** | Live API input for deployment (max 1 per pipeline) | `@pipeline.node(api_input=True, path="data/policies.json")` |
 | **DataSource** | Read data (local CSV/Parquet, Databricks table) | `@pipeline.node(path="data/claims.parquet")` |
-| **LiveSwitch** | Route live API or batch data into pipeline (max 1) | `@pipeline.node(live_switch=True)` |
+| **SourceSwitch** | Route live API or batch data into pipeline | `@pipeline.node(live_switch=True)` |
 | **Transform** | Data processing / feature engineering | `@pipeline.node` with 1+ input params |
 | **ModelScore** | Score records using a CatBoost / external model | `@pipeline.node(model="models/freq.cbm")` |
 | **RatingStep** | Individual rating operation (lookup, factor, cap/floor) | `@pipeline.node(rating_step=True)` |
