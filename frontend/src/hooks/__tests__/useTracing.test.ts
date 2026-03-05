@@ -4,6 +4,7 @@ import type { Node, Edge } from "@xyflow/react"
 import useTracing from "../useTracing"
 import useToastStore from "../../stores/useToastStore"
 import useSettingsStore from "../../stores/useSettingsStore"
+import { makeNode, makeEdge } from "../../test-utils/factories"
 
 vi.mock("../../api/client", () => ({
   traceCell: vi.fn(),
@@ -15,14 +16,6 @@ vi.mock("../../utils/buildGraph", () => ({
 
 import { traceCell } from "../../api/client"
 const mockTraceCell = vi.mocked(traceCell)
-
-function makeNode(id: string, nodeType = "transform"): Node {
-  return { id, position: { x: 0, y: 0 }, data: { label: id, nodeType } } as Node
-}
-
-function makeEdge(source: string, target: string): Edge {
-  return { id: `e_${source}_${target}`, source, target } as Edge
-}
 
 function makeParams(overrides: Partial<Parameters<typeof useTracing>[0]> = {}) {
   return {

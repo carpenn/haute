@@ -236,7 +236,7 @@ describe("useJobPolling", () => {
       await advance(13000)
 
       const warningCalls = addToast.mock.calls.filter(
-        ([type]: [string]) => type === "warning",
+        ([type]: unknown[]) => type === "warning",
       )
       expect(warningCalls.length).toBe(1)
       expect(warningCalls[0][1]).toContain("Polling is struggling")

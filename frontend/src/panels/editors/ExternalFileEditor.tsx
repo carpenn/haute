@@ -2,6 +2,7 @@ import { useState } from "react"
 import { InputSourcesBar, FileBrowser, CodeEditor } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
+import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 
 export default function ExternalFileEditor({
   config,
@@ -9,12 +10,14 @@ export default function ExternalFileEditor({
   inputSources,
   onDeleteInput,
   errorLine,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   errorLine?: number | null
+  accentColor: string
 }) {
   const [fileType, setFileType] = useState<string>(configField(config, "fileType", "pickle"))
   const [modelClass, setModelClass] = useState<string>(configField(config, "modelClass", "classifier"))
@@ -43,48 +46,34 @@ export default function ExternalFileEditor({
 
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>File Type</label>
-        <div className="mt-1 flex gap-1.5">
-          {["pickle", "json", "joblib", "catboost"].map((ft) => (
-            <button
-              key={ft}
-              onClick={() => {
-                setFileType(ft)
-                onUpdate("fileType", ft)
-              }}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: fileType === ft ? 'rgba(236,72,153,.1)' : 'var(--bg-input)',
-                border: fileType === ft ? '1px solid #ec4899' : '1px solid var(--border)',
-                color: fileType === ft ? '#ec4899' : 'var(--text-secondary)',
-              }}
-            >
-              {ft.toUpperCase()}
-            </button>
-          ))}
+        <div className="mt-1">
+          <ToggleButtonGroup
+            value={fileType}
+            onChange={(ft) => { setFileType(ft); onUpdate("fileType", ft) }}
+            options={[
+              { key: "pickle", label: "PICKLE" },
+              { key: "json", label: "JSON" },
+              { key: "joblib", label: "JOBLIB" },
+              { key: "catboost", label: "CATBOOST" },
+            ]}
+            accentColor={accentColor}
+          />
         </div>
       </div>
 
       {fileType === "catboost" && (
         <div>
           <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Model Type</label>
-          <div className="mt-1 flex gap-1.5">
-            {["classifier", "regressor"].map((mc) => (
-              <button
-                key={mc}
-                onClick={() => {
-                  setModelClass(mc)
-                  onUpdate("modelClass", mc)
-                }}
-                className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                style={{
-                  background: modelClass === mc ? 'rgba(236,72,153,.1)' : 'var(--bg-input)',
-                  border: modelClass === mc ? '1px solid #ec4899' : '1px solid var(--border)',
-                  color: modelClass === mc ? '#ec4899' : 'var(--text-secondary)',
-                }}
-              >
-                {mc.charAt(0).toUpperCase() + mc.slice(1)}
-              </button>
-            ))}
+          <div className="mt-1">
+            <ToggleButtonGroup
+              value={modelClass}
+              onChange={(mc) => { setModelClass(mc); onUpdate("modelClass", mc) }}
+              options={[
+                { key: "classifier", label: "Classifier" },
+                { key: "regressor", label: "Regressor" },
+              ]}
+              accentColor={accentColor}
+            />
           </div>
         </div>
       )}

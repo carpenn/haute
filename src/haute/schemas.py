@@ -70,7 +70,7 @@ class NodeResult(BaseModel):
 class PreviewNodeRequest(BaseModel):
     graph: Graph
     node_id: str
-    row_limit: int = 1000
+    row_limit: int = 100
     scenario: str = "live"
 
 
@@ -118,7 +118,7 @@ class TraceRequest(BaseModel):
     row_index: int = 0
     target_node_id: str | None = None
     column: str | None = None
-    row_limit: int = 1000
+    row_limit: int = 100
     scenario: str = "live"
 
 

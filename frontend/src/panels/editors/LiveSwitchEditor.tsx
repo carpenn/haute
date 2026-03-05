@@ -1,16 +1,19 @@
 import { ToggleLeft } from "lucide-react"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
+import { withAlpha } from "../../utils/color"
 import useSettingsStore from "../../stores/useSettingsStore"
 
 export default function LiveSwitchEditor({
   config,
   onUpdate,
   inputSources,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
+  accentColor: string
 }) {
   const scenarios = useSettingsStore((s) => s.scenarios)
   const activeScenario = useSettingsStore((s) => s.activeScenario)
@@ -24,7 +27,7 @@ export default function LiveSwitchEditor({
   return (
     <div className="px-4 py-3 space-y-3">
       <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium"
-        style={{ background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: '#f59e0b' }}
+        style={{ background: withAlpha(accentColor, 0.1), border: `1px solid ${withAlpha(accentColor, 0.3)}`, color: accentColor }}
       >
         <ToggleLeft size={14} />
         <span>Routes inputs based on the active scenario</span>
@@ -57,13 +60,13 @@ export default function LiveSwitchEditor({
                 key={src.varName}
                 className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs"
                 style={{
-                  background: isActive ? 'rgba(245,158,11,.1)' : 'var(--bg-surface)',
-                  border: isActive ? '1px solid rgba(245,158,11,.3)' : '1px solid var(--border)',
+                  background: isActive ? withAlpha(accentColor, 0.1) : 'var(--bg-surface)',
+                  border: isActive ? `1px solid ${withAlpha(accentColor, 0.3)}` : '1px solid var(--border)',
                 }}
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: isActive ? '#f59e0b' : 'var(--text-muted)' }}
+                  style={{ background: isActive ? accentColor : 'var(--text-muted)' }}
                 />
                 <span className="font-mono truncate min-w-0 flex-1" style={{ color: 'var(--text-primary)' }}>
                   {src.sourceLabel}
@@ -84,7 +87,7 @@ export default function LiveSwitchEditor({
                   ))}
                 </select>
                 {isActive && (
-                  <span className="text-[10px] font-medium shrink-0" style={{ color: '#f59e0b' }}>
+                  <span className="text-[10px] font-medium shrink-0" style={{ color: accentColor }}>
                     active
                   </span>
                 )}

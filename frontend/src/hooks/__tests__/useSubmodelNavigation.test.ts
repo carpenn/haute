@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, cleanup, act, waitFor } from "@testing-library/react"
+import { renderHook, cleanup, act } from "@testing-library/react"
 import type { Node, Edge } from "@xyflow/react"
 import useSubmodelNavigation from "../useSubmodelNavigation"
 import useToastStore from "../../stores/useToastStore"
 import useUIStore from "../../stores/useUIStore"
+import { makeNode } from "../../test-utils/factories"
 
 vi.mock("../../api/client", () => ({
   createSubmodel: vi.fn(),
@@ -19,10 +20,6 @@ import { createSubmodel, loadSubmodel, dissolveSubmodel } from "../../api/client
 const mockCreate = vi.mocked(createSubmodel)
 const mockLoad = vi.mocked(loadSubmodel)
 const mockDissolve = vi.mocked(dissolveSubmodel)
-
-function makeNode(id: string, nodeType = "transform"): Node {
-  return { id, position: { x: 0, y: 0 }, data: { label: `Node ${id}`, nodeType, config: {} } } as Node
-}
 
 function makeParams(overrides: Partial<Parameters<typeof useSubmodelNavigation>[0]> = {}) {
   return {

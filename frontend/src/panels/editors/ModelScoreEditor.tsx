@@ -4,6 +4,7 @@ import { InputSourcesBar, CodeEditor, MlflowStatusBadge, SELECT_STYLE } from "./
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { useMlflowBrowser } from "../../hooks/useMlflowBrowser"
 import { configField } from "../../utils/configField"
+import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 
 export default function ModelScoreEditor({
   config,
@@ -11,12 +12,14 @@ export default function ModelScoreEditor({
   inputSources,
   onDeleteInput,
   errorLine,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   errorLine?: number | null
+  accentColor: string
 }) {
   const sourceType = configField(config, "sourceType", "registered")
   const task = configField(config, "task", "regression")
@@ -44,24 +47,16 @@ export default function ModelScoreEditor({
       {/* Source Type Toggle */}
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Model Source</label>
-        <div className="mt-1 flex gap-1.5">
-          {[
-            { key: "registered", label: "Registered Model" },
-            { key: "run", label: "Experiment Run" },
-          ].map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => onUpdate("sourceType", opt.key)}
-              className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: sourceType === opt.key ? "rgba(139,92,246,.1)" : "var(--bg-input)",
-                border: sourceType === opt.key ? "1px solid #8b5cf6" : "1px solid var(--border)",
-                color: sourceType === opt.key ? "#8b5cf6" : "var(--text-secondary)",
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="mt-1">
+          <ToggleButtonGroup
+            value={sourceType}
+            onChange={(v) => onUpdate("sourceType", v)}
+            options={[
+              { key: "registered", label: "Registered Model" },
+              { key: "run", label: "Experiment Run" },
+            ]}
+            accentColor={accentColor}
+          />
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { NODE_TYPES, NODE_TYPE_META, SINGLETON_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../nodeTypes"
+import { NODE_TYPES, NODE_TYPE_META, PALETTE_TYPES, SINGLETON_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../nodeTypes"
 
 describe("NODE_TYPES", () => {
   it("contains all expected node types", () => {
@@ -33,11 +33,22 @@ describe("NODE_TYPE_META", () => {
       expect(meta.icon).toBeDefined()
       expect(meta.color).toMatch(/^#[0-9a-f]{6}$/i)
       expect(meta.label.length).toBeGreaterThan(0)
+      expect(meta.name.length).toBeGreaterThan(0)
+      expect(meta.description.length).toBeGreaterThan(0)
+      expect(meta.defaultConfig).toBeDefined()
     }
   })
 
   it("has exactly one entry per NODE_TYPES value", () => {
     expect(Object.keys(NODE_TYPE_META)).toHaveLength(Object.keys(NODE_TYPES).length)
+  })
+
+  it("label is UPPER CASE, name is Title Case", () => {
+    for (const value of Object.values(NODE_TYPES)) {
+      const meta = NODE_TYPE_META[value]
+      expect(meta.label).toBe(meta.label.toUpperCase())
+      expect(meta.name).not.toBe(meta.name.toUpperCase())
+    }
   })
 })
 
@@ -92,6 +103,24 @@ describe("SINK_ONLY_TYPES", () => {
 
   it("has exactly 4 entries", () => {
     expect(SINK_ONLY_TYPES.size).toBe(4)
+  })
+})
+
+describe("PALETTE_TYPES", () => {
+  it("contains only valid node types", () => {
+    const allTypes = new Set(Object.values(NODE_TYPES))
+    for (const t of PALETTE_TYPES) {
+      expect(allTypes.has(t)).toBe(true)
+    }
+  })
+
+  it("excludes submodel and submodelPort", () => {
+    expect(PALETTE_TYPES).not.toContain(NODE_TYPES.SUBMODEL)
+    expect(PALETTE_TYPES).not.toContain(NODE_TYPES.SUBMODEL_PORT)
+  })
+
+  it("has no duplicates", () => {
+    expect(new Set(PALETTE_TYPES).size).toBe(PALETTE_TYPES.length)
   })
 })
 

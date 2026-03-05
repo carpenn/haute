@@ -161,7 +161,7 @@ describe("tableStats", () => {
   })
 
   it("handles entries with missing value key", () => {
-    const entries = [{ age: "young" }, { value: 1.5 }]
+    const entries: Record<string, string | number>[] = [{ age: "young" }, { value: 1.5 }]
     const stats = tableStats(entries)
     expect(stats!.count).toBe(1)
   })

@@ -140,7 +140,7 @@ describe("WarehousePicker", () => {
 
   it("shows checkmark next to the currently selected warehouse", async () => {
     mockGetWarehouses.mockResolvedValue({ warehouses })
-    const { container } = render(
+    render(
       <WarehousePicker httpPath="/sql/1.0/warehouses/abc" onSelect={vi.fn()} />,
     )
 

@@ -70,7 +70,8 @@ import ModelScoreEditor from "../ModelScoreEditor"
 const defaultProps = () => ({
   config: {} as Record<string, unknown>,
   onUpdate: vi.fn(),
-  inputSources: [],
+  inputSources: [] as { varName: string; sourceLabel: string; edgeId: string }[],
+  accentColor: "#a855f7",
 })
 
 function resetMlflow() {
@@ -108,17 +109,17 @@ describe("ModelScoreEditor", () => {
   it("renders with default registered source type selected", () => {
     render(<ModelScoreEditor {...defaultProps()} />)
     const registeredBtn = screen.getByText("Registered Model")
-    // Active button has the purple border (jsdom converts hex to rgb)
-    expect(registeredBtn.style.border).toContain("rgb(139, 92, 246)")
+    // Active button has the purple border (jsdom converts hex #a855f7 to rgb)
+    expect(registeredBtn.style.border).toContain("rgb(168, 85, 247)")
     // Run button should not be active
     const runBtn = screen.getByText("Experiment Run")
-    expect(runBtn.style.border).not.toContain("rgb(139, 92, 246)")
+    expect(runBtn.style.border).not.toContain("rgb(168, 85, 247)")
   })
 
   // 2. Source type toggle switches between registered and run
   it("calls onUpdate when toggling source type to run", () => {
     const { onUpdate } = defaultProps()
-    render(<ModelScoreEditor config={{}} onUpdate={onUpdate} inputSources={[]} />)
+    render(<ModelScoreEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#a855f7" />)
     fireEvent.click(screen.getByText("Experiment Run"))
     expect(onUpdate).toHaveBeenCalledWith("sourceType", "run")
   })

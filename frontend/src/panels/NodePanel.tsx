@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useMemo } from "react"
 import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
-import { NODE_TYPES } from "../utils/nodeTypes"
+import { NODE_TYPES, NODE_TYPE_META } from "../utils/nodeTypes"
+import type { NodeTypeValue } from "../utils/nodeTypes"
 import { sanitizeName } from "../utils/sanitizeName"
 import ModellingConfig from "./ModellingConfig"
 import OptimiserConfig from "./OptimiserConfig"
@@ -44,7 +45,7 @@ type NodePanelProps = {
 
 // ─── Node types that show a refresh-preview button in the panel header ──
 
-const REFRESHABLE_TYPES = new Set([
+const REFRESHABLE_TYPES = new Set<string>([
   NODE_TYPES.CONSTANT,
   NODE_TYPES.TRANSFORM,
   NODE_TYPES.BANDING,
@@ -304,6 +305,8 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
 
   // ── Render the right editor based on nodeType ──
 
+  const accentColor = NODE_TYPE_META[nodeType as NodeTypeValue]?.color ?? "var(--accent)"
+
   const renderEditor = () => {
     if (isInstance) {
       return (
@@ -320,19 +323,19 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
 
     switch (nodeType) {
       case NODE_TYPES.API_INPUT:
-        return <ApiInputEditor config={config} onUpdate={handleConfigUpdate} />
+        return <ApiInputEditor config={config} onUpdate={handleConfigUpdate} accentColor={accentColor} />
 
       case NODE_TYPES.LIVE_SWITCH:
-        return <LiveSwitchEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} />
+        return <LiveSwitchEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} accentColor={accentColor} />
 
       case NODE_TYPES.DATA_SOURCE:
-        return <DataSourceEditor config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} />
+        return <DataSourceEditor config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} accentColor={accentColor} />
 
       case NODE_TYPES.DATA_SINK:
-        return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} preamble={preamble} />
+        return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} preamble={preamble} accentColor={accentColor} />
 
       case NODE_TYPES.EXTERNAL_FILE:
-        return <ExternalFileEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
+        return <ExternalFileEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} accentColor={accentColor} />
 
       case NODE_TYPES.OUTPUT:
         return <OutputEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} />
@@ -345,6 +348,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
             inputSources={inputSources}
             onDeleteInput={onDeleteEdge}
             upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
+            accentColor={accentColor}
           />
         )
 
@@ -356,14 +360,15 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
             inputSources={inputSources}
             onDeleteInput={onDeleteEdge}
             upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
+            accentColor={accentColor}
           />
         )
 
       case NODE_TYPES.RATING_STEP:
-        return <RatingStepEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} allNodes={allNodes} />
+        return <RatingStepEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} allNodes={allNodes} accentColor={accentColor} />
 
       case NODE_TYPES.MODEL_SCORE:
-        return <ModelScoreEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
+        return <ModelScoreEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} accentColor={accentColor} />
 
       case NODE_TYPES.MODELLING: {
         const upstreamCols = collectUpstreamColumns(node.id, edges, nodeMap)
@@ -397,6 +402,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
             edges={edges}
             submodels={submodels}
             upstreamColumns={effectiveCols}
+            accentColor={accentColor}
           />
         )
       }
@@ -408,6 +414,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
             onUpdate={handleConfigUpdate}
             inputSources={inputSources}
             onDeleteInput={onDeleteEdge}
+            accentColor={accentColor}
           />
         )
 
@@ -418,7 +425,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
 
       case NODE_TYPES.SUBMODEL:
-        return <SubmodelEditor config={config} />
+        return <SubmodelEditor config={config} accentColor={accentColor} />
 
       default:
         // Fallback: show raw config
@@ -480,6 +487,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
           onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          title="Close"
         >
           <X size={14} />
         </button>

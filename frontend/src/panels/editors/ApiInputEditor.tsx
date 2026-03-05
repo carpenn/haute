@@ -3,6 +3,7 @@ import { FileBrowser, SchemaPreview } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
 import { configField } from "../../utils/configField"
+import { withAlpha } from "../../utils/color"
 import { CacheFetchButton } from "../../components/CacheFetchButton"
 import {
   buildJsonCache,
@@ -51,9 +52,11 @@ function JsonCacheButton({ dataPath }: { dataPath: string }) {
 export default function ApiInputEditor({
   config,
   onUpdate,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
+  accentColor: string
 }) {
   const currentPath = configField<string | undefined>(config, "path", undefined)
   const { schema, loading: loadingSchema, fetchForPath } = useSchemaFetch(currentPath)
@@ -63,7 +66,7 @@ export default function ApiInputEditor({
     <>
       <div className="px-4 py-3 space-y-3">
         <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium"
-          style={{ background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.3)', color: '#22c55e' }}
+          style={{ background: withAlpha(accentColor, 0.1), border: `1px solid ${withAlpha(accentColor, 0.3)}`, color: accentColor }}
         >
           <Radio size={14} />
           <span>This node receives live API requests at deploy time</span>

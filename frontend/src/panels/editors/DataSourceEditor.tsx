@@ -2,6 +2,7 @@ import { useState } from "react"
 import { FileText, Database } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
+import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 import { useSchemaFetch } from "../../hooks/useSchemaFetch"
 import { fetchDatabricksSchema } from "../../api/client"
 import { WarehousePicker, CatalogTablePicker, DatabricksFetchButton } from "./_DatabricksSelector"
@@ -11,10 +12,12 @@ export default function DataSourceEditor({
   config,
   onUpdate,
   onRefreshPreview,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   onRefreshPreview?: () => void
+  accentColor: string
 }) {
   const [sourceType, setSourceType] = useState<string>(configField(config, "sourceType", "flat_file"))
   const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(configField<string | undefined>(config, "path", undefined))
@@ -24,37 +27,16 @@ export default function DataSourceEditor({
       <div className="px-4 py-3 space-y-3">
         <div>
           <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Source Type</label>
-          <div className="mt-1 flex gap-1.5">
-            <button
-              onClick={() => {
-                setSourceType("flat_file")
-                onUpdate("sourceType", "flat_file")
-              }}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: sourceType === "flat_file" ? 'var(--accent-soft)' : 'var(--bg-input)',
-                border: sourceType === "flat_file" ? '1px solid var(--accent)' : '1px solid var(--border)',
-                color: sourceType === "flat_file" ? 'var(--accent)' : 'var(--text-secondary)',
-              }}
-            >
-              <FileText size={12} />
-              Flat File
-            </button>
-            <button
-              onClick={() => {
-                setSourceType("databricks")
-                onUpdate("sourceType", "databricks")
-              }}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: sourceType === "databricks" ? 'var(--accent-soft)' : 'var(--bg-input)',
-                border: sourceType === "databricks" ? '1px solid var(--accent)' : '1px solid var(--border)',
-                color: sourceType === "databricks" ? 'var(--accent)' : 'var(--text-secondary)',
-              }}
-            >
-              <Database size={12} />
-              Databricks
-            </button>
+          <div className="mt-1">
+            <ToggleButtonGroup
+              value={sourceType}
+              onChange={(v) => { setSourceType(v); onUpdate("sourceType", v) }}
+              options={[
+                { key: "flat_file", label: "Flat File", icon: <FileText size={12} /> },
+                { key: "databricks", label: "Databricks", icon: <Database size={12} /> },
+              ]}
+              accentColor={accentColor}
+            />
           </div>
         </div>
 

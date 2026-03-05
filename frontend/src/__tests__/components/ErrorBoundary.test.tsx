@@ -155,7 +155,7 @@ describe("ErrorBoundary", () => {
       // ErrorBoundary's componentDidCatch calls console.error with
       // the boundary prefix, the error, and the component stack
       const boundaryLogCall = consoleErrorSpy.mock.calls.find(
-        (args) => typeof args[0] === "string" && args[0].includes("[ErrorBoundary]"),
+        (args: unknown[]) => typeof args[0] === "string" && args[0].includes("[ErrorBoundary]"),
       )
       expect(boundaryLogCall).toBeTruthy()
       // Second argument should be the error object
@@ -171,7 +171,7 @@ describe("ErrorBoundary", () => {
       )
 
       const boundaryLogCall = consoleErrorSpy.mock.calls.find(
-        (args) => typeof args[0] === "string" && args[0].includes("[ErrorBoundary: TestPanel]"),
+        (args: unknown[]) => typeof args[0] === "string" && args[0].includes("[ErrorBoundary: TestPanel]"),
       )
       expect(boundaryLogCall).toBeTruthy()
     })
@@ -184,7 +184,7 @@ describe("ErrorBoundary", () => {
       )
 
       const boundaryLogCall = consoleErrorSpy.mock.calls.find(
-        (args) => typeof args[0] === "string" && args[0] === "[ErrorBoundary]",
+        (args: unknown[]) => typeof args[0] === "string" && args[0] === "[ErrorBoundary]",
       )
       expect(boundaryLogCall).toBeTruthy()
     })

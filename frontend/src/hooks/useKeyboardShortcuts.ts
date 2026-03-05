@@ -29,7 +29,7 @@ export default function useKeyboardShortcuts({
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       const el = e.target as HTMLElement
-      const isTyping = tag === "INPUT" || tag === "TEXTAREA" || el.closest(".cm-editor") != null
+      const isTyping = tag === "INPUT" || tag === "TEXTAREA" || el.closest?.(".cm-editor") != null
       const mod = e.ctrlKey || e.metaKey
 
       // Ctrl+S / Cmd+S → save

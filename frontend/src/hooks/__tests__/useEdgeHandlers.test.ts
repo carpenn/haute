@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, cleanup, act } from "@testing-library/react"
 import type { Node, Edge } from "@xyflow/react"
 import useEdgeHandlers from "../useEdgeHandlers"
@@ -12,7 +12,7 @@ vi.mock("@xyflow/react", async () => {
   }
 })
 
-function makeParams(overrides: Partial<Parameters<typeof useEdgeHandlers>[0]> = {}) {
+function makeParams() {
   return {
     graphRef: { current: { nodes: [] as Node[], edges: [] as Edge[] } },
     nodeIdCounter: { current: 0 },
@@ -24,7 +24,6 @@ function makeParams(overrides: Partial<Parameters<typeof useEdgeHandlers>[0]> = 
     fetchPreview: vi.fn(),
     clearTrace: vi.fn(),
     screenToFlowPosition: vi.fn((pos: { x: number; y: number }) => pos),
-    ...overrides,
   }
 }
 
@@ -102,7 +101,7 @@ describe("useEdgeHandlers", () => {
 
   it("onSelectionChange with single node does NOT open panel (drag-safe)", () => {
     const params = makeParams()
-    const node = { id: "n1", data: { label: "A" } } as Node
+    const node = { id: "n1", position: { x: 0, y: 0 }, data: { label: "A" } } as Node
     const { result } = renderHook(() => useEdgeHandlers(params))
     act(() => {
       result.current.onSelectionChange({ nodes: [node], edges: [] })
@@ -124,7 +123,7 @@ describe("useEdgeHandlers", () => {
 
   it("onNodeClick opens panel and fetches preview", () => {
     const params = makeParams()
-    const node = { id: "n1", data: { label: "A" } } as Node
+    const node = { id: "n1", position: { x: 0, y: 0 }, data: { label: "A" } } as Node
     const event = {} as React.MouseEvent
     const { result } = renderHook(() => useEdgeHandlers(params))
     act(() => {
@@ -140,7 +139,7 @@ describe("useEdgeHandlers", () => {
 
   it("onNodeClick skips fetchPreview when re-clicking the same node", () => {
     const params = makeParams()
-    const node = { id: "n1", data: { label: "A" } } as Node
+    const node = { id: "n1", position: { x: 0, y: 0 }, data: { label: "A" } } as Node
     const event = {} as React.MouseEvent
     const { result } = renderHook(() => useEdgeHandlers(params))
     act(() => {

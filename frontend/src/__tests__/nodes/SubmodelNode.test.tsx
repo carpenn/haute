@@ -91,9 +91,7 @@ describe("SubmodelNode", () => {
   })
 
   it("does not render file path when config.file is not set", () => {
-    const { container } = renderNode({ label: "Test" })
-    // The file path element should not exist
-    const muted = container.querySelectorAll('[style*="--text-muted"]')
+    renderNode({ label: "Test" })
     // Only the port labels use --text-muted; without a file, there should be none
     // in the header area. We verify by ensuring the specific text is absent.
     expect(screen.queryByText("submodels/pricing.py")).toBeNull()

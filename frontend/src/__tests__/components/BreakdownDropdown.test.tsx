@@ -4,7 +4,7 @@
  * Tests: null rendering for empty items, total display, toggle open/close,
  * sorted item display, and total text in the dropdown panel.
  */
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import BreakdownDropdown, { type BreakdownItem } from "../../components/BreakdownDropdown"
 

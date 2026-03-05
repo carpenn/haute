@@ -120,8 +120,8 @@ def infer_output_schema(
 
 
 def _find_node(graph: PipelineGraph, node_id: str) -> GraphNode:
-    """Find a node by ID in a graph."""
-    for n in graph.nodes:
-        if n.id == node_id:
-            return n
-    raise ValueError(f"Node '{node_id}' not found in graph")
+    """Find a node by ID in a graph using the cached node_map."""
+    try:
+        return graph.node_map[node_id]
+    except KeyError:
+        raise ValueError(f"Node '{node_id}' not found in graph") from None

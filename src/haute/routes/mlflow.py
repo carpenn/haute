@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from mlflow.tracking import MlflowClient
 
 from haute._logging import get_logger
+from haute._mlflow_utils import search_versions
 from haute.schemas import (
     MlflowExperimentSummary,
     MlflowModelSummary,
@@ -174,8 +175,7 @@ def list_model_versions(
     _mlflow, client = _ensure_tracking()
 
     try:
-        safe_name = model_name.replace("'", "\\'")
-        versions = client.search_model_versions(f"name='{safe_name}'")
+        versions = search_versions(client, model_name)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
 

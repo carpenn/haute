@@ -81,9 +81,7 @@ describe("NodePanel", () => {
 
   it("close button calls onClose", () => {
     const { props } = renderPanel()
-    // The close button has an X icon — find all buttons, the last in the header row
-    const buttons = screen.getAllByRole("button")
-    const closeBtn = buttons[0]
+    const closeBtn = screen.getByTitle("Close")
     fireEvent.click(closeBtn)
     expect(props.onClose).toHaveBeenCalledOnce()
   })

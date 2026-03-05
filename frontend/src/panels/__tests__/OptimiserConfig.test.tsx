@@ -59,6 +59,7 @@ function makeProps(overrides: Partial<Parameters<typeof OptimiserConfig>[0]> = {
       constraints: {},
     } as Record<string, unknown>,
     onUpdate: vi.fn(),
+    accentColor: "#f97316",
     upstreamColumns: [
       { name: "premium", dtype: "Float64" },
       { name: "loss_ratio", dtype: "Float64" },
@@ -189,7 +190,7 @@ describe("OptimiserConfig", () => {
     })
 
     it("shows banding source selector when banding nodes are connected", () => {
-      vi.mocked(extractBandingLevelsForNode).mockReturnValue({ age: [1, 2, 3], region: ["A", "B"] })
+      vi.mocked(extractBandingLevelsForNode).mockReturnValue({ age: ["1", "2", "3"], region: ["A", "B"] })
 
       render(
         <OptimiserConfig

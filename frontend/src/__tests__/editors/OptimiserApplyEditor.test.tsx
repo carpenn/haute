@@ -53,6 +53,7 @@ const DEFAULT_PROPS = {
   config: {},
   onUpdate: vi.fn(),
   inputSources: [],
+  accentColor: "#fb923c",
 }
 
 describe("OptimiserApplyEditor", () => {
@@ -81,6 +82,7 @@ describe("OptimiserApplyEditor", () => {
       <OptimiserApplyEditor
         {...DEFAULT_PROPS}
         config={{ artifact_path: "results/opt.json" }}
+        accentColor="#fb923c"
       />,
     )
     const input = screen.getByDisplayValue("results/opt.json") as HTMLInputElement
@@ -114,6 +116,7 @@ describe("OptimiserApplyEditor", () => {
       <OptimiserApplyEditor
         {...DEFAULT_PROPS}
         config={{ sourceType: "registered" }}
+        accentColor="#fb923c"
       />,
     )
     expect(screen.getByText("Model Name")).toBeTruthy()
@@ -125,6 +128,7 @@ describe("OptimiserApplyEditor", () => {
       <OptimiserApplyEditor
         {...DEFAULT_PROPS}
         config={{ sourceType: "run" }}
+        accentColor="#fb923c"
       />,
     )
     expect(screen.getByText("Experiment")).toBeTruthy()
@@ -136,6 +140,7 @@ describe("OptimiserApplyEditor", () => {
       <OptimiserApplyEditor
         {...DEFAULT_PROPS}
         config={{ sourceType: "run" }}
+        accentColor="#fb923c"
       />,
     )
     expect(screen.getByText("Run ID")).toBeTruthy()

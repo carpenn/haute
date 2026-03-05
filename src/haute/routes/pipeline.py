@@ -193,6 +193,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 graph,
                 target_node_id=body.node_id,
                 row_limit=body.row_limit,
+                max_preview_rows=body.row_limit,
                 scenario=body.scenario,
             ),
             timeout=_PREVIEW_TIMEOUT,

@@ -3,6 +3,7 @@ import { X, Plus, Table2 } from "lucide-react"
 import { InputSourcesBar, INPUT_STYLE } from "./_shared"
 import type { InputSource, SimpleNode, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
+import { withAlpha } from "../../utils/color"
 import { extractBandingLevels } from "../../utils/banding"
 import type { RatingTable } from "./rating/ratingTableUtils"
 import { normaliseRatingTables, buildCartesianEntries, tableStats } from "./rating/ratingTableUtils"
@@ -17,12 +18,14 @@ export default function RatingStepEditor({
   inputSources,
   onDeleteInput,
   allNodes,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   allNodes: SimpleNode[]
+  accentColor: string
 }) {
   const [activeTab, setActiveTab] = useState(0)
   const [sliceIdx, setSliceIdx] = useState(0)
@@ -94,7 +97,7 @@ export default function RatingStepEditor({
       <InputSourcesBar inputSources={inputSources} onDeleteInput={onDeleteInput} />
 
       <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium"
-        style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.3)', color: '#10b981' }}>
+        style={{ background: withAlpha(accentColor, 0.1), border: `1px solid ${withAlpha(accentColor, 0.3)}`, color: accentColor }}>
         <Table2 size={13} />
         <span>Rating Tables · {tables.length} table{tables.length !== 1 ? 's' : ''}</span>
       </div>
@@ -133,7 +136,7 @@ export default function RatingStepEditor({
             return (
               <div className="text-[10px] font-mono px-2 py-1.5 rounded flex items-center gap-1.5"
                 style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                <span style={{ color: '#10b981', fontWeight: 600 }}>{lhs}</span>
+                <span style={{ color: accentColor, fontWeight: 600 }}>{lhs}</span>
                 <span style={{ color: 'var(--text-muted)' }}>=</span>
                 <span>{formula}</span>
                 {!combinedColumn && <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}> — name the output above</span>}
@@ -151,14 +154,14 @@ export default function RatingStepEditor({
             <button key={i} onClick={() => { setActiveTab(i); setSliceIdx(0) }}
               className="group flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors"
               style={{
-                background: i === safeIdx ? 'rgba(16,185,129,.12)' : 'var(--bg-surface)',
-                border: i === safeIdx ? '1px solid rgba(16,185,129,.4)' : '1px solid var(--border)',
-                color: i === safeIdx ? '#10b981' : 'var(--text-secondary)',
+                background: i === safeIdx ? withAlpha(accentColor, 0.12) : 'var(--bg-surface)',
+                border: i === safeIdx ? `1px solid ${withAlpha(accentColor, 0.4)}` : '1px solid var(--border)',
+                color: i === safeIdx ? accentColor : 'var(--text-secondary)',
               }}>
               {t.name || `Table ${i + 1}`}
               {tStats && (
                 <span className="text-[9px] font-mono px-1 py-0.5 rounded"
-                  style={{ background: i === safeIdx ? 'rgba(16,185,129,.15)' : 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
+                  style={{ background: i === safeIdx ? withAlpha(accentColor, 0.15) : 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
                   {tStats.count}
                 </span>
               )}
@@ -172,7 +175,7 @@ export default function RatingStepEditor({
         })}
         <button onClick={addTable}
           className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-muted)', border: '1px dashed var(--border)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#10b981'; e.currentTarget.style.color = '#10b981' }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.color = accentColor }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}>
           <Plus size={12} />
         </button>
@@ -253,7 +256,7 @@ export default function RatingStepEditor({
         <button onClick={rebuildCurrentEntries}
           className="w-full px-2 py-1.5 text-[11px] font-medium rounded-lg transition-colors"
           style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#10b981'; e.currentTarget.style.color = '#10b981' }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.color = accentColor }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)' }}>
           ↻ Rebuild from banding levels
         </button>

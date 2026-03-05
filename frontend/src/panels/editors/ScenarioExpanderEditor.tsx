@@ -8,12 +8,14 @@ export default function ScenarioExpanderEditor({
   inputSources,
   onDeleteInput,
   upstreamColumns,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns: { name: string; dtype: string }[]
+  accentColor: string
 }) {
   const quoteId = configField(config, "quote_id", "")
   const columnName = configField(config, "column_name", "scenario_value")
@@ -139,7 +141,7 @@ export default function ScenarioExpanderEditor({
       {/* Preview line */}
       <div className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
         <div className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
-          Each input row &rarr; <span style={{ color: '#0ea5e9', fontWeight: 600 }}>{steps}</span> output rows
+          Each input row &rarr; <span style={{ color: accentColor, fontWeight: 600 }}>{steps}</span> output rows
         </div>
         <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--text-muted)' }}>
           {columnName || "value"}: {minValue} &rarr; {maxValue} ({steps} steps)

@@ -1,22 +1,14 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import { renderHook, cleanup, act } from "@testing-library/react"
-import type { Node, Edge } from "@xyflow/react"
 import useUndoRedo from "../useUndoRedo"
-
-function makeNode(id: string): Node {
-  return { id, position: { x: 0, y: 0 }, data: { label: id } } as Node
-}
-
-function makeEdge(id: string, source: string, target: string): Edge {
-  return { id, source, target } as Edge
-}
+import { makeNode, makeEdge } from "../../test-utils/factories"
 
 describe("useUndoRedo", () => {
   afterEach(cleanup)
 
   it("initialises with provided nodes and edges", () => {
     const nodes = [makeNode("n1")]
-    const edges = [makeEdge("e1", "n1", "n2")]
+    const edges = [makeEdge("n1", "n2", { id: "e1" })]
     const { result } = renderHook(() => useUndoRedo(nodes, edges))
     expect(result.current.nodes).toHaveLength(1)
     expect(result.current.edges).toHaveLength(1)
@@ -36,7 +28,7 @@ describe("useUndoRedo", () => {
   it("setEdges pushes snapshot and enables undo", () => {
     const { result } = renderHook(() => useUndoRedo([], []))
     act(() => {
-      result.current.setEdges([makeEdge("e1", "a", "b")])
+      result.current.setEdges([makeEdge("a", "b", { id: "e1" })])
     })
     expect(result.current.canUndo).toBe(true)
   })
@@ -117,7 +109,7 @@ describe("useUndoRedo", () => {
   it("setEdgesRaw bypasses history", () => {
     const { result } = renderHook(() => useUndoRedo([], []))
     act(() => {
-      result.current.setEdgesRaw([makeEdge("e1", "a", "b")])
+      result.current.setEdgesRaw([makeEdge("a", "b", { id: "e1" })])
     })
     expect(result.current.edges).toHaveLength(1)
     expect(result.current.canUndo).toBe(false)
@@ -132,7 +124,7 @@ describe("useUndoRedo", () => {
   })
 
   it("onEdgesChange with structural change pushes snapshot", () => {
-    const { result } = renderHook(() => useUndoRedo([], [makeEdge("e1", "a", "b")]))
+    const { result } = renderHook(() => useUndoRedo([], [makeEdge("a", "b", { id: "e1" })]))
     act(() => {
       result.current.onEdgesChange([{ type: "remove", id: "e1" }])
     })

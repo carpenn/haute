@@ -14,9 +14,9 @@ from haute._mlflow_io import (
     _find_cbm_artifact,
     _model_cache,
     _prepare_predict_frame,
-    _resolve_version,
     load_mlflow_model,
 )
+from haute._mlflow_utils import resolve_version as _resolve_version
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +108,7 @@ class TestLoadRegisteredModel:
 
         with modules_patch, resolve_patch, \
              patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
-             patch("haute._mlflow_io._resolve_version", return_value="2"), \
+             patch("haute._mlflow_io.resolve_version", return_value="2"), \
              patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
             result = load_mlflow_model(
                 source_type="registered",

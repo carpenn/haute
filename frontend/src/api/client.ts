@@ -357,7 +357,7 @@ export function getCacheStatus(
 export function getFetchProgress(
   table: string,
   options?: { signal?: AbortSignal },
-): Promise<{ active?: boolean; rows?: number; elapsed?: number }> {
+): Promise<{ active: boolean; rows?: number; elapsed?: number }> {
   return request(`/api/databricks/fetch/progress?table=${encodeURIComponent(table)}`, options)
 }
 
@@ -389,7 +389,7 @@ export function buildJsonCache(
 export function getJsonCacheProgress(
   path: string,
   options?: { signal?: AbortSignal },
-): Promise<{ active?: boolean; rows?: number; elapsed?: number }> {
+): Promise<{ active: boolean; rows?: number; elapsed?: number }> {
   return request(`/api/json-cache/progress?path=${encodeURIComponent(path)}`, options)
 }
 

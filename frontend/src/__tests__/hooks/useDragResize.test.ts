@@ -20,7 +20,7 @@ const defaultOpts = { initialHeight: 200, minHeight: 100, maxHeight: 500 }
  */
 function simulateDrag(
   onDragStart: (e: React.MouseEvent) => void,
-  container: HTMLDivElement,
+  _container: HTMLDivElement,
   startY: number,
   moveY: number,
   endY: number,

@@ -1,39 +1,17 @@
 import { describe, it, expect } from "vitest"
 import { buildGraph } from "../../utils/buildGraph"
 import type { SimpleNode, SimpleEdge } from "../../panels/editors/_shared"
-
-// ─── Helpers ─────────────────────────────────────────────────────
-
-function makeNode(
-  id: string,
-  nodeType: string,
-  overrides?: { type?: string; config?: Record<string, unknown> },
-): SimpleNode {
-  return {
-    id,
-    type: overrides?.type,
-    data: {
-      label: `Node ${id}`,
-      description: "",
-      nodeType,
-      config: overrides?.config,
-    },
-  }
-}
-
-function makeEdge(id: string, source: string, target: string): SimpleEdge {
-  return { id, source, target }
-}
+import { makeSimpleNode, makeSimpleEdge } from "../../test-utils/factories"
 
 // ─── Tests ───────────────────────────────────────────────────────
 
 describe("buildGraph", () => {
   it("builds correct graph shape from nodes and edges", () => {
     const nodes: SimpleNode[] = [
-      makeNode("n1", "dataSource", { type: "custom" }),
-      makeNode("n2", "transform", { type: "custom" }),
+      makeSimpleNode("n1", "dataSource", { type: "custom" }),
+      makeSimpleNode("n2", "transform", { type: "custom" }),
     ]
-    const edges: SimpleEdge[] = [makeEdge("e1", "n1", "n2")]
+    const edges: SimpleEdge[] = [makeSimpleEdge("e1", "n1", "n2")]
 
     const result = buildGraph(nodes, edges)
 
@@ -65,7 +43,7 @@ describe("buildGraph", () => {
 
   it("maps node type from data.nodeType when type is undefined", () => {
     const nodes: SimpleNode[] = [
-      makeNode("n1", "banding"),  // no type override -> n.type is undefined
+      makeSimpleNode("n1", "banding"),  // no type override -> n.type is undefined
     ]
 
     const result = buildGraph(nodes, [])
@@ -76,7 +54,7 @@ describe("buildGraph", () => {
 
   it("prefers n.type over n.data.nodeType when both are present", () => {
     const nodes: SimpleNode[] = [
-      makeNode("n1", "transform", { type: "custom" }),
+      makeSimpleNode("n1", "transform", { type: "custom" }),
     ]
 
     const result = buildGraph(nodes, [])
@@ -140,9 +118,9 @@ describe("buildGraph", () => {
 
   it("always sets position to {x: 0, y: 0}", () => {
     const nodes: SimpleNode[] = [
-      makeNode("n1", "transform", { type: "custom" }),
-      makeNode("n2", "output", { type: "custom" }),
-      makeNode("n3", "banding"),
+      makeSimpleNode("n1", "transform", { type: "custom" }),
+      makeSimpleNode("n2", "output", { type: "custom" }),
+      makeSimpleNode("n3", "banding"),
     ]
 
     const result = buildGraph(nodes, [])

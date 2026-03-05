@@ -12,6 +12,7 @@ import useNodeResultsStore from "../stores/useNodeResultsStore"
 import { nodeData } from "../types/node"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { getLayoutedElements } from "../utils/layout"
+import type { PreviewData } from "../panels/DataPreview"
 
 type UseNodeHandlersParams = {
   graphRef: MutableRefObject<{ nodes: Node[]; edges: Edge[] }>
@@ -20,7 +21,7 @@ type UseNodeHandlersParams = {
   setNodes: (updater: (nds: Node[]) => Node[]) => void
   setEdges: (updater: (eds: Edge[]) => Edge[]) => void
   setSelectedNode: (updater: React.SetStateAction<Node | null>) => void
-  setPreviewData: (updater: React.SetStateAction<{ nodeId?: string } | null>) => void
+  setPreviewData: (updater: React.SetStateAction<PreviewData | null>) => void
   onUpdateNode: (id: string, data: Record<string, unknown>) => void
   fitView: (opts?: { padding?: number }) => void
 }
@@ -41,8 +42,8 @@ export default function useNodeHandlers({
 
   const handleDeleteNode = useCallback((id: string) => {
     const { nodes: n, edges: e } = graphRef.current
-    setNodes(n.filter((node) => node.id !== id))
-    setEdges(e.filter((edge) => edge.source !== id && edge.target !== id))
+    setNodes(() => n.filter((node) => node.id !== id))
+    setEdges(() => e.filter((edge) => edge.source !== id && edge.target !== id))
     setSelectedNode((prev) => (prev?.id === id ? null : prev))
     setPreviewData((prev) => (prev?.nodeId === id ? null : prev))
     clearNode(id)
@@ -105,7 +106,7 @@ export default function useNodeHandlers({
     const { nodes: n, edges: e } = graphRef.current
     if (n.length === 0) return
     const layouted = await getLayoutedElements(n, e)
-    setNodes(layouted)
+    setNodes(() => layouted)
     setTimeout(() => fitView({ padding: 0.8 }), 50)
     addToast("info", "Auto-layout applied")
   }, [graphRef, setNodes, fitView, addToast])

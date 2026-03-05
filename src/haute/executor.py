@@ -50,7 +50,7 @@ _DEFAULT_SCENARIO_MIN = 0.8  # scenario expander lower bound
 _DEFAULT_SCENARIO_MAX = 1.2  # scenario expander upper bound
 _DEFAULT_SCENARIO_STEPS = 21  # number of steps in scenario grid
 _DEFAULT_CHUNK_SIZE = 500_000  # rows per chunk for optimiser apply
-_MAX_PREVIEW_ROWS = 100  # max rows in execute_graph JSON payload
+_MAX_PREVIEW_ROWS = 10_000  # safety cap for execute_graph JSON payload
 
 
 def _compile_preamble(preamble: str) -> dict[str, Any]:

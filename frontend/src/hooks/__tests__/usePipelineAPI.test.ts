@@ -37,13 +37,10 @@ vi.mock("../../utils/makePreviewData", () => ({
 }))
 
 import { loadPipeline, previewNode, savePipeline } from "../../api/client"
+import { makeNode } from "../../test-utils/factories"
 const mockLoad = vi.mocked(loadPipeline)
 const mockPreview = vi.mocked(previewNode)
 const mockSave = vi.mocked(savePipeline)
-
-function makeNode(id: string): Node {
-  return { id, position: { x: 0, y: 0 }, data: { label: `Node ${id}`, nodeType: "transform" } } as Node
-}
 
 function makeParams(overrides: Partial<Parameters<typeof usePipelineAPI>[0]> = {}) {
   return {
@@ -111,7 +108,7 @@ describe("usePipelineAPI", () => {
 
   it("handleSave calls savePipeline and shows success toast", async () => {
     mockLoad.mockResolvedValue({ nodes: [], edges: [] })
-    mockSave.mockResolvedValue({ file: "pricing.py" })
+    mockSave.mockResolvedValue({ file: "pricing.py", pipeline_name: "pricing" })
     const params = makeParams()
     params.graphRef.current = { nodes: [makeNode("n1")], edges: [] }
     const { result } = renderHook(() => usePipelineAPI(params))
@@ -179,6 +176,7 @@ describe("usePipelineAPI", () => {
   it("fetchPreview sets loading preview then calls API", async () => {
     mockLoad.mockResolvedValue({ nodes: [], edges: [] })
     mockPreview.mockResolvedValue({
+      node_id: "n1",
       status: "ok",
       columns: [{ name: "a", dtype: "f64" }],
       preview: [{ a: 1 }],
@@ -199,6 +197,7 @@ describe("usePipelineAPI", () => {
   it("fetchPreview populates nodeStatuses from response", async () => {
     mockLoad.mockResolvedValue({ nodes: [], edges: [] })
     mockPreview.mockResolvedValue({
+      node_id: "n1",
       status: "ok",
       columns: [{ name: "a", dtype: "f64" }],
       preview: [{ a: 1 }],

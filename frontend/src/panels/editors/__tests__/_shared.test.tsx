@@ -16,7 +16,6 @@ const mockGetFileListCache = vi.fn<(key: string) => unknown[] | null>().mockRetu
 const mockSetFileListCache = vi.fn()
 
 vi.mock("../../../stores/useSettingsStore", () => {
-  const actual = { create: vi.fn() }
   const store = (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       getFileListCache: mockGetFileListCache,

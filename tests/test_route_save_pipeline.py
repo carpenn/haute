@@ -95,7 +95,7 @@ class TestValidateSingletons:
         with pytest.raises(HTTPException) as exc_info:
             SavePipelineService._validate_singletons(graph)
         assert exc_info.value.status_code == 400
-        assert "Live Switch" in exc_info.value.detail
+        assert "Source Switch" in exc_info.value.detail
 
     def test_no_singletons_passes(self) -> None:
         """A graph with only transform nodes passes validation."""

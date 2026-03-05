@@ -4,12 +4,13 @@ import type { Node, Edge } from "@xyflow/react"
 import useNodeHandlers from "../useNodeHandlers"
 import useToastStore from "../../stores/useToastStore"
 import useNodeResultsStore from "../../stores/useNodeResultsStore"
+import { makeNode } from "../../test-utils/factories"
 
 vi.mock("../../utils/layout", () => ({
   getLayoutedElements: vi.fn(async (nodes: Node[]) => nodes),
 }))
 
-function makeParams(overrides: Partial<Parameters<typeof useNodeHandlers>[0]> = {}) {
+function makeParams() {
   return {
     graphRef: { current: { nodes: [] as Node[], edges: [] as Edge[] } },
     nodeIdCounter: { current: 10 },
@@ -20,18 +21,7 @@ function makeParams(overrides: Partial<Parameters<typeof useNodeHandlers>[0]> = 
     setPreviewData: vi.fn(),
     onUpdateNode: vi.fn(),
     fitView: vi.fn(),
-    ...overrides,
   }
-}
-
-function makeNode(id: string, overrides: Partial<Node> = {}): Node {
-  return {
-    id,
-    position: { x: 0, y: 0 },
-    type: "transform",
-    data: { label: `Node ${id}`, nodeType: "transform", config: {} },
-    ...overrides,
-  } as Node
 }
 
 describe("useNodeHandlers", () => {
@@ -57,9 +47,11 @@ describe("useNodeHandlers", () => {
     act(() => {
       result.current.handleDeleteNode("n1")
     })
-    // Nodes are set directly (not via updater) in this implementation
-    expect(params.setNodes).toHaveBeenCalledWith([n2])
-    expect(params.setEdges).toHaveBeenCalledWith([])
+    // setNodes/setEdges are called with updater functions
+    const nodesUpdater = params.setNodes.mock.calls[0][0] as () => Node[]
+    const edgesUpdater = params.setEdges.mock.calls[0][0] as () => Edge[]
+    expect(nodesUpdater()).toEqual([n2])
+    expect(edgesUpdater()).toEqual([])
   })
 
   it("handleDeleteNode clears selected node if it was selected", () => {

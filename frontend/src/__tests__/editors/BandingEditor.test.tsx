@@ -20,7 +20,7 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("age_band")).toBeTruthy()
     expect(screen.getByText("region_group")).toBeTruthy()
@@ -34,14 +34,14 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("driver_age")).toBeTruthy()
   })
 
   it("renders factor tab label as 'Factor N' when both column and outputColumn are empty", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("Factor 1")).toBeTruthy()
   })
@@ -49,7 +49,7 @@ describe("BandingEditor", () => {
   it("adding a factor creates new tab and switches to it", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
     )
     // The + button to add a factor
     const buttons = screen.getAllByRole("button")
@@ -78,7 +78,7 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
     )
 
     // Find the X button for the first factor (age_band tab)
@@ -100,7 +100,7 @@ describe("BandingEditor", () => {
       ],
     }
     const { container } = render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     // When there's only 1 factor, the X button should not be rendered on the tab
     const tabButtons = container.querySelectorAll("button")
@@ -115,7 +115,7 @@ describe("BandingEditor", () => {
   it("type toggle between continuous and categorical calls updateFactor", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
     )
     fireEvent.click(screen.getByText("Categorical"))
     expect(onUpdate).toHaveBeenCalledWith("factors", expect.arrayContaining([
@@ -134,6 +134,7 @@ describe("BandingEditor", () => {
         onUpdate={vi.fn()}
         inputSources={[]}
         upstreamColumns={columns}
+        accentColor="#14b8a6"
       />,
     )
     // Should render a select with column options
@@ -161,6 +162,7 @@ describe("BandingEditor", () => {
         onUpdate={onUpdate}
         inputSources={[]}
         upstreamColumns={columns}
+        accentColor="#14b8a6"
       />,
     )
     // Select the "age" column (numeric dtype)
@@ -192,6 +194,7 @@ describe("BandingEditor", () => {
         onUpdate={onUpdate}
         inputSources={[]}
         upstreamColumns={columns}
+        accentColor="#14b8a6"
       />,
     )
     const selects = screen.getAllByRole("combobox")
@@ -210,7 +213,7 @@ describe("BandingEditor", () => {
   it("add rule button adds appropriate empty rule type for continuous", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
     )
     // Click the "+ Add" button
     fireEvent.click(screen.getByText("Add"))
@@ -229,7 +232,7 @@ describe("BandingEditor", () => {
       factors: [{ banding: "categorical", column: "region", outputColumn: "region_group", rules: [] }],
     }
     render(
-      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
     )
     fireEvent.click(screen.getByText("Add"))
     expect(onUpdate).toHaveBeenCalledWith("factors", expect.arrayContaining([
@@ -250,7 +253,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     // Summary shows "column -> outputColumn · 1 rule · continuous"
     const allText = document.body.textContent || ""
@@ -270,10 +273,8 @@ describe("BandingEditor", () => {
       }],
     }
     const { container } = render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
-    // Summary div has the bg-elevated background
-    const summaryDivs = container.querySelectorAll('[class*="rounded-lg"]')
     // The summary block should not be rendered since outputColumn is empty
     const summaryText = container.textContent || ""
     expect(summaryText).not.toContain("1 rule")
@@ -281,21 +282,21 @@ describe("BandingEditor", () => {
 
   it("renders text input for column when no upstreamColumns", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByPlaceholderText("driver_age")).toBeTruthy()
   })
 
   it("renders default value input", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByPlaceholderText("null")).toBeTruthy()
   })
 
   it("renders 'No rules yet' when rules are empty", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("No rules yet")).toBeTruthy()
   })
@@ -310,7 +311,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("Band")).toBeTruthy()
     expect(screen.getByText("Rules (1)")).toBeTruthy()
@@ -326,7 +327,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("Group")).toBeTruthy()
   })
@@ -339,7 +340,7 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
     )
     // Initially first tab is active, should show continuous type highlighted
     const catTab = screen.getByText("region_group").closest("button")!
@@ -353,7 +354,7 @@ describe("BandingEditor", () => {
   it("renders InputSourcesBar when inputs provided", () => {
     const inputSources = [{ varName: "data", sourceLabel: "Data", edgeId: "e1" }]
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={inputSources} />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={inputSources} accentColor="#14b8a6" />,
     )
     expect(screen.getByText("data")).toBeTruthy()
   })

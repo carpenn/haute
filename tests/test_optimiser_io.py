@@ -18,10 +18,10 @@ import pytest
 from haute._optimiser_io import (
     _artifact_cache,
     _mlflow_cache,
-    _resolve_version,
     load_mlflow_optimiser_artifact,
     load_optimiser_artifact,
 )
+from haute._mlflow_utils import resolve_version as _resolve_version
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -174,7 +174,7 @@ class TestLoadMlflowOptimiserArtifactRegistered:
 
         with (
             patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute._optimiser_io._resolve_version", return_value="2"),
+            patch("haute._optimiser_io.resolve_version", return_value="2"),
         ):
             mv = MagicMock()
             mv.run_id = "resolved_run_id"

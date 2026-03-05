@@ -5,6 +5,8 @@ import type { InputSource, OnUpdateConfig } from "./_shared"
 import type { ContinuousRule, CategoricalRule, BandingFactor } from "../../types/banding"
 import { normaliseBandingFactors, inferBandingType } from "./banding/bandingUtils"
 import { BandingRulesGrid } from "./banding/BandingRulesGrid"
+import { withAlpha } from "../../utils/color"
+import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 
 const EMPTY_CONTINUOUS: ContinuousRule = { op1: ">", val1: "", op2: "", val2: "", assignment: "" }
 const EMPTY_CATEGORICAL: CategoricalRule = { value: "", assignment: "" }
@@ -15,12 +17,14 @@ export default function BandingEditor({
   inputSources,
   onDeleteInput,
   upstreamColumns = [],
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns?: { name: string; dtype: string }[]
+  accentColor: string
 }) {
   const factors = normaliseBandingFactors(config)
   const [activeIdx, setActiveIdx] = useState(0)
@@ -72,7 +76,7 @@ export default function BandingEditor({
       <InputSourcesBar inputSources={inputSources} onDeleteInput={onDeleteInput} />
 
       <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium"
-        style={{ background: 'rgba(20,184,166,.1)', border: '1px solid rgba(20,184,166,.3)', color: '#14b8a6' }}>
+        style={{ background: withAlpha(accentColor, 0.1), border: `1px solid ${withAlpha(accentColor, 0.3)}`, color: accentColor }}>
         <SlidersHorizontal size={14} />
         <span>Group values into bands — {factors.length} factor{factors.length !== 1 ? 's' : ''}</span>
       </div>
@@ -89,7 +93,7 @@ export default function BandingEditor({
                 background: i === safeIdx ? 'var(--bg-input)' : 'transparent',
                 border: i === safeIdx ? '1px solid var(--border)' : '1px solid transparent',
                 borderBottom: i === safeIdx ? '1px solid var(--bg-input)' : '1px solid var(--border)',
-                color: i === safeIdx ? '#14b8a6' : 'var(--text-muted)',
+                color: i === safeIdx ? accentColor : 'var(--text-muted)',
               }}
             >
               <span className="font-mono truncate max-w-[100px]">{tabLabel(f, i)}</span>
@@ -109,8 +113,8 @@ export default function BandingEditor({
           <button
             onClick={addFactor}
             className="flex items-center gap-0.5 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
-            style={{ color: '#14b8a6' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(20,184,166,.1)' }}
+            style={{ color: accentColor }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = withAlpha(accentColor, 0.1) }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
           >
             <Plus size={11} />
@@ -129,21 +133,16 @@ export default function BandingEditor({
             </span>
           )}
         </div>
-        <div className="mt-1 flex gap-1.5">
-          {(["continuous", "categorical"] as const).map((bt) => (
-            <button
-              key={bt}
-              onClick={() => updateFactor(safeIdx, { banding: bt, rules: [] })}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: factor.banding === bt ? 'rgba(20,184,166,.1)' : 'var(--bg-input)',
-                border: factor.banding === bt ? '1px solid #14b8a6' : '1px solid var(--border)',
-                color: factor.banding === bt ? '#14b8a6' : 'var(--text-secondary)',
-              }}
-            >
-              {bt.charAt(0).toUpperCase() + bt.slice(1)}
-            </button>
-          ))}
+        <div className="mt-1">
+          <ToggleButtonGroup
+            value={factor.banding}
+            onChange={(bt) => updateFactor(safeIdx, { banding: bt, rules: [] })}
+            options={[
+              { key: "continuous", label: "Continuous" },
+              { key: "categorical", label: "Categorical" },
+            ]}
+            accentColor={accentColor}
+          />
         </div>
       </div>
 
@@ -197,9 +196,9 @@ export default function BandingEditor({
               updateFactor(safeIdx, { rules: [...(factor.rules || []), empty] })
             }}
             className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors"
-            style={{ background: 'rgba(20,184,166,.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,.3)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(20,184,166,.2)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(20,184,166,.1)' }}
+            style={{ background: withAlpha(accentColor, 0.1), color: accentColor, border: `1px solid ${withAlpha(accentColor, 0.3)}` }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = withAlpha(accentColor, 0.2) }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = withAlpha(accentColor, 0.1) }}
           >
             <Plus size={11} /> Add
           </button>
@@ -233,7 +232,7 @@ export default function BandingEditor({
               <div key={i} className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                 <span className="font-mono font-medium" style={{ color: 'var(--text-secondary)' }}>{f.column}</span>
                 {' → '}
-                <span className="font-mono font-medium" style={{ color: '#14b8a6' }}>{f.outputColumn}</span>
+                <span className="font-mono font-medium" style={{ color: accentColor }}>{f.outputColumn}</span>
                 {' · '}{f.rules.length} rule{f.rules.length !== 1 ? 's' : ''}
                 {' · '}{f.banding}
               </div>

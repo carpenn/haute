@@ -6,7 +6,7 @@
  * visibility without pulling in the full dependency tree.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
-import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
 // Mock ReactFlow entirely

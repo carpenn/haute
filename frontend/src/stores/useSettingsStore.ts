@@ -44,7 +44,7 @@ interface SettingsState {
 
 const useSettingsStore = create<SettingsState>()((set, get) => ({
   // Row limit
-  rowLimit: 1000,
+  rowLimit: 100,
   setRowLimit: (limit) => set({ rowLimit: limit }),
 
   // Collapsible sections

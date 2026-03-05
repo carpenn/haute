@@ -20,6 +20,7 @@ from typing import Any
 
 from haute._logging import get_logger
 from haute._lru_cache import LRUCache
+from haute._mlflow_utils import resolve_version
 
 logger = get_logger(component="optimiser_io")
 
@@ -117,7 +118,7 @@ def load_mlflow_optimiser_artifact(
             raise ValueError(
                 "registered_model is required when sourceType is 'registered'"
             )
-        resolved_version = _resolve_version(client, registered_model, version)
+        resolved_version = resolve_version(client, registered_model, version)
         mv = client.get_model_version(registered_model, resolved_version)
         resolved_run_id = mv.run_id or ""
     elif source_type == "run":
@@ -151,16 +152,3 @@ def load_mlflow_optimiser_artifact(
     return artifact
 
 
-def _resolve_version(client: Any, model_name: str, version: str) -> str:
-    """Resolve ``"latest"`` or empty version to a concrete version number."""
-    if version and version != "latest":
-        return version
-
-    safe_name = model_name.replace("'", "\\'")
-    versions = client.search_model_versions(f"name='{safe_name}'")
-    if not versions:
-        raise ValueError(
-            f"No versions found for registered model '{model_name}'."
-        )
-    sorted_versions = sorted(versions, key=lambda v: int(v.version), reverse=True)
-    return sorted_versions[0].version

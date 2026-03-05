@@ -61,6 +61,7 @@ vi.mock("../../api/client", () => ({
 const DEFAULT_PROPS = {
   config: {} as Record<string, unknown>,
   onUpdate: vi.fn(),
+  accentColor: "#3b82f6",
 }
 
 describe("DataSourceEditor", () => {
@@ -68,10 +69,10 @@ describe("DataSourceEditor", () => {
     render(<DataSourceEditor {...DEFAULT_PROPS} />)
     const flatFileBtn = screen.getByText("Flat File").closest("button")!
     // Active button has accent border
-    expect(flatFileBtn.style.border).toContain("var(--accent)")
+    expect(flatFileBtn.style.border).toContain("rgb(59, 130, 246)")
     // Databricks button should not have accent border
     const dbBtn = screen.getByText("Databricks").closest("button")!
-    expect(dbBtn.style.border).not.toContain("var(--accent)")
+    expect(dbBtn.style.border).not.toContain("rgb(59, 130, 246)")
   })
 
   it("shows FileBrowser in flat_file mode", () => {

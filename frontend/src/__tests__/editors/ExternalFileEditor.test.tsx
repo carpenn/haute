@@ -37,6 +37,7 @@ const DEFAULT_PROPS = {
   config: {},
   onUpdate: vi.fn(),
   inputSources: [],
+  accentColor: "#93c5fd",
 }
 
 describe("ExternalFileEditor", () => {
@@ -56,8 +57,8 @@ describe("ExternalFileEditor", () => {
   it("defaults to pickle file type", () => {
     render(<ExternalFileEditor {...DEFAULT_PROPS} />)
     const pickleBtn = screen.getByText("PICKLE").closest("button")!
-    // Active button has pink background tint
-    expect(pickleBtn.style.background).toContain("236")
+    // Active button has accent background tint (jsdom renders #93c5fd tint as rgba(147, 197, 253, 0.1))
+    expect(pickleBtn.style.background).toContain("147")
   })
 
   it("calls onUpdate when clicking JSON button", () => {

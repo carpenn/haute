@@ -1,10 +1,13 @@
 import { Package } from "lucide-react"
 import { configField } from "../../utils/configField"
+import { withAlpha } from "../../utils/color"
 
 export default function SubmodelEditor({
   config,
+  accentColor,
 }: {
   config: Record<string, unknown>
+  accentColor: string
 }) {
   const file = configField(config, "file", "")
   const childNodeIds = configField<string[]>(config, "childNodeIds", [])
@@ -13,9 +16,9 @@ export default function SubmodelEditor({
 
   return (
     <div className="px-4 py-3 space-y-3">
-      <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(249,115,22,.08)', border: '1px solid rgba(249,115,22,.2)' }}>
-        <Package size={14} style={{ color: '#f97316' }} />
-        <span className="text-xs font-medium" style={{ color: '#fb923c' }}>Submodel</span>
+      <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ background: withAlpha(accentColor, 0.08), border: `1px solid ${withAlpha(accentColor, 0.2)}` }}>
+        <Package size={14} style={{ color: accentColor }} />
+        <span className="text-xs font-medium" style={{ color: accentColor }}>Submodel</span>
         <span className="ml-auto text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>{childNodeIds.length} nodes</span>
       </div>
 
@@ -46,7 +49,7 @@ export default function SubmodelEditor({
           <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Outputs</label>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {outputPorts.map((port) => (
-              <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: 'rgba(249,115,22,.1)', color: '#fb923c' }}>
+              <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: withAlpha(accentColor, 0.1), color: accentColor }}>
                 {port}
               </span>
             ))}

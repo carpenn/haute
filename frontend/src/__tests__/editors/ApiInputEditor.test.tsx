@@ -68,6 +68,7 @@ beforeEach(() => {
 const DEFAULT_PROPS = {
   config: {} as Record<string, unknown>,
   onUpdate: vi.fn(),
+  accentColor: "#22c55e",
 }
 
 describe("ApiInputEditor", () => {

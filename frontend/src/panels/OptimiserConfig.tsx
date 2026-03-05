@@ -10,6 +10,7 @@ import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useSettingsStore from "../stores/useSettingsStore"
 import { formatElapsed } from "../utils/formatValue"
 import { configField } from "../utils/configField"
+import { withAlpha } from "../utils/color"
 import { extractBandingLevelsForNode } from "../utils/banding"
 import { buildGraph } from "../utils/buildGraph"
 
@@ -50,6 +51,7 @@ type OptimiserConfigProps = {
   allNodes: SimpleNode[]
   edges: SimpleEdge[]
   submodels?: Record<string, unknown>
+  accentColor: string
 }
 
 const CONSTRAINT_TYPES = [
@@ -59,7 +61,7 @@ const CONSTRAINT_TYPES = [
   { value: "max_abs", label: "Max (absolute)" },
 ]
 
-export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels }: OptimiserConfigProps) {
+export default function OptimiserConfig({ config, onUpdate, allNodes, edges, submodels, accentColor }: OptimiserConfigProps) {
   // ── Store-backed state (survives panel unmount) ──
   const nodeId = config._nodeId as string
   const solveJob = useNodeResultsStore((s) => s.solveJobs[nodeId])
@@ -235,9 +237,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               onClick={() => onUpdate("mode", m)}
               className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
               style={{
-                background: mode === m ? "rgba(249,115,22,.15)" : "var(--chrome-hover)",
-                color: mode === m ? "#f97316" : "var(--text-muted)",
-                border: `1px solid ${mode === m ? "rgba(249,115,22,.3)" : "transparent"}`,
+                background: mode === m ? withAlpha(accentColor, 0.15) : "var(--chrome-hover)",
+                color: mode === m ? accentColor : "var(--text-muted)",
+                border: `1px solid ${mode === m ? withAlpha(accentColor, 0.3) : "transparent"}`,
               }}
             >
               {m === "online" ? "Online" : "Ratebook"}
@@ -330,12 +332,12 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                       onClick={() => handleToggleFactor(name)}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors"
                       style={{
-                        background: selected ? "rgba(249,115,22,.1)" : "var(--bg-surface)",
-                        border: `1px solid ${selected ? "rgba(249,115,22,.3)" : "var(--border)"}`,
+                        background: selected ? withAlpha(accentColor, 0.1) : "var(--bg-surface)",
+                        border: `1px solid ${selected ? withAlpha(accentColor, 0.3) : "var(--border)"}`,
                       }}
                     >
-                      <span className="font-mono" style={{ color: selected ? "#f97316" : "var(--text-primary)" }}>{name}</span>
-                      <span className="text-[10px]" style={{ color: selected ? "rgba(249,115,22,.7)" : "var(--text-muted)" }}>
+                      <span className="font-mono" style={{ color: selected ? accentColor : "var(--text-primary)" }}>{name}</span>
+                      <span className="text-[10px]" style={{ color: selected ? withAlpha(accentColor, 0.7) : "var(--text-muted)" }}>
                         {levels.length} levels
                       </span>
                     </button>
@@ -492,9 +494,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 onClick={() => onUpdate("record_history", !recordHistory)}
                 className="px-2 py-0.5 rounded text-[11px] font-mono"
                 style={{
-                  background: recordHistory ? "rgba(249,115,22,.15)" : "var(--chrome-hover)",
-                  color: recordHistory ? "#f97316" : "var(--text-muted)",
-                  border: `1px solid ${recordHistory ? "rgba(249,115,22,.3)" : "transparent"}`,
+                  background: recordHistory ? withAlpha(accentColor, 0.15) : "var(--chrome-hover)",
+                  color: recordHistory ? accentColor : "var(--text-muted)",
+                  border: `1px solid ${recordHistory ? withAlpha(accentColor, 0.3) : "transparent"}`,
                 }}
               >
                 {recordHistory ? "On" : "Off"}
@@ -537,7 +539,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
             onClick={handleSolve}
             disabled={solving || !canSolve}
             className="ml-auto px-2 py-0.5 rounded text-[11px] font-medium"
-            style={{ background: "rgba(249,115,22,.15)", color: "#f97316" }}
+            style={{ background: withAlpha(accentColor, 0.15), color: accentColor }}
           >
             Re-run
           </button>
@@ -551,7 +553,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
           disabled={solving || !canSolve}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
           style={{
-            background: solving ? "var(--chrome-hover)" : "#f97316",
+            background: solving ? "var(--chrome-hover)" : accentColor,
             color: solving ? "var(--text-muted)" : "#fff",
             opacity: !canSolve ? 0.5 : 1,
           }}
@@ -563,16 +565,16 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
 
       {/* Live Progress */}
       {solveProgress && (
-        <div className="px-3 py-2.5 rounded-lg text-xs space-y-2" style={{ background: "rgba(249,115,22,.06)", border: "1px solid rgba(249,115,22,.2)" }}>
+        <div className="px-3 py-2.5 rounded-lg text-xs space-y-2" style={{ background: withAlpha(accentColor, 0.06), border: `1px solid ${withAlpha(accentColor, 0.2)}` }}>
           <div className="space-y-1">
             <div className="flex justify-between text-[11px]">
-              <span style={{ color: "#f97316" }}>{solveProgress.message || "Solving..."}</span>
+              <span style={{ color: accentColor }}>{solveProgress.message || "Solving..."}</span>
               <span style={{ color: "var(--text-muted)" }}>{formatElapsed(solveProgress.elapsed_seconds)}</span>
             </div>
-            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(249,115,22,.15)" }}>
+            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: withAlpha(accentColor, 0.15) }}>
               <div
                 className="h-full rounded-full transition-all duration-300"
-                style={{ width: `${Math.max(solveProgress.progress * 100, 2)}%`, background: "#f97316" }}
+                style={{ width: `${Math.max(solveProgress.progress * 100, 2)}%`, background: accentColor }}
               />
             </div>
           </div>
@@ -629,9 +631,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               disabled={saving}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
               style={{
-                background: saving ? "var(--chrome-hover)" : "rgba(249,115,22,.15)",
-                color: saving ? "var(--text-muted)" : "#f97316",
-                border: "1px solid rgba(249,115,22,.3)",
+                background: saving ? "var(--chrome-hover)" : withAlpha(accentColor, 0.15),
+                color: saving ? "var(--text-muted)" : accentColor,
+                border: `1px solid ${withAlpha(accentColor, 0.3)}`,
               }}
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}

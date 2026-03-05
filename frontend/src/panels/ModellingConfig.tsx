@@ -42,7 +42,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   // ── Local UI state (cheap, ok to recreate) ──
   const [exporting, setExporting] = useState(false)
   const [exportedScript, setExportedScript] = useState<string | null>(null)
-  const [mlflowResult, setMlflowResult] = useState<{ status: string; error?: string } | null>(null)
+  const [, setMlflowResult] = useState<{ status: string; error?: string } | null>(null)
 
   // ── RAM estimate (fetched once when modelling node selected) ──
   const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)

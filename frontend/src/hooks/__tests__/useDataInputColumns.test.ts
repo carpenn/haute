@@ -46,7 +46,7 @@ describe("useDataInputColumns", () => {
   })
 
   it("fetches columns from API when no cache exists", async () => {
-    mockPreview.mockResolvedValue({ status: "ok", columns: sampleColumns })
+    mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
     const { result } = renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(result.current).toHaveLength(2))
     expect(result.current[0].name).toBe("age")
@@ -86,7 +86,7 @@ describe("useDataInputColumns", () => {
       graphVersion: 5,
     })
     const freshCols = [{ name: "new_col", dtype: "str" }]
-    mockPreview.mockResolvedValue({ status: "ok", columns: freshCols })
+    mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: freshCols })
     const { result } = renderHook(() => useDataInputColumns("ds1", nodes, edges))
     // Shows stale cache first
     expect(result.current[0].name).toBe("old")

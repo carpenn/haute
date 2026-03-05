@@ -3,8 +3,7 @@ import { InputSourcesBar, MlflowStatusBadge, INPUT_STYLE, SELECT_STYLE } from ".
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { useMlflowBrowser } from "../../hooks/useMlflowBrowser"
 import { configField } from "../../utils/configField"
-
-const ACCENT = "#22c55e"
+import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 
 type ArtifactMeta = {
   version: string
@@ -21,11 +20,13 @@ export default function OptimiserApplyEditor({
   onUpdate,
   inputSources,
   onDeleteInput,
+  accentColor,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
+  accentColor: string
 }) {
   const sourceType = configField(config, "sourceType", "file")
   const artifactPath = configField(config, "artifact_path", "")
@@ -81,25 +82,17 @@ export default function OptimiserApplyEditor({
       {/* Source Type Toggle */}
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Artifact Source</label>
-        <div className="mt-1 flex gap-1.5">
-          {[
-            { key: "file", label: "File Path" },
-            { key: "registered", label: "Registered" },
-            { key: "run", label: "Experiment Run" },
-          ].map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => onUpdate("sourceType", opt.key)}
-              className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: sourceType === opt.key ? `${ACCENT}18` : "var(--bg-input)",
-                border: sourceType === opt.key ? `1px solid ${ACCENT}` : "1px solid var(--border)",
-                color: sourceType === opt.key ? ACCENT : "var(--text-secondary)",
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="mt-1">
+          <ToggleButtonGroup
+            value={sourceType}
+            onChange={(v) => onUpdate("sourceType", v)}
+            options={[
+              { key: "file", label: "File Path" },
+              { key: "registered", label: "Registered" },
+              { key: "run", label: "Experiment Run" },
+            ]}
+            accentColor={accentColor}
+          />
         </div>
       </div>
 
@@ -263,18 +256,18 @@ export default function OptimiserApplyEditor({
 
       {/* Artifact metadata display (file mode) */}
       {sourceType === "file" && loadError && (
-        <div className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-elevated)', border: '1px solid #f97316' }}>
-          <div className="text-[11px]" style={{ color: '#f97316' }}>{loadError}</div>
+        <div className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-elevated)', border: `1px solid ${accentColor}` }}>
+          <div className="text-[11px]" style={{ color: accentColor }}>{loadError}</div>
         </div>
       )}
 
-      {sourceType === "file" && meta && <ArtifactMetaPanel meta={meta} />}
+      {sourceType === "file" && meta && <ArtifactMetaPanel meta={meta} accentColor={accentColor} />}
     </div>
   )
 }
 
 
-function ArtifactMetaPanel({ meta }: { meta: ArtifactMeta }) {
+function ArtifactMetaPanel({ meta, accentColor }: { meta: ArtifactMeta; accentColor: string }) {
   return (
     <div className="rounded-lg px-3 py-2.5 space-y-2" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
       <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
@@ -306,7 +299,7 @@ function ArtifactMetaPanel({ meta }: { meta: ArtifactMeta }) {
           {Object.entries(meta.lambdas).map(([k, v]) => (
             <div key={k} className="flex justify-between text-[11px] font-mono px-1">
               <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
-              <span style={{ color: '#22c55e', fontWeight: 600 }}>{typeof v === 'number' ? v.toFixed(4) : String(v)}</span>
+              <span style={{ color: accentColor, fontWeight: 600 }}>{typeof v === 'number' ? v.toFixed(4) : String(v)}</span>
             </div>
           ))}
         </div>

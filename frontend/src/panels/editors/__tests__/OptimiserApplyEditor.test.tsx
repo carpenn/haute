@@ -70,7 +70,8 @@ import OptimiserApplyEditor from "../OptimiserApplyEditor"
 const defaultProps = () => ({
   config: {} as Record<string, unknown>,
   onUpdate: vi.fn(),
-  inputSources: [],
+  inputSources: [] as { varName: string; sourceLabel: string; edgeId: string }[],
+  accentColor: "#fb923c",
 })
 
 function resetMlflow() {
@@ -97,10 +98,10 @@ function resetMlflow() {
 }
 
 // Mock global fetch for artifact metadata loading
-const originalFetch = global.fetch
+const originalFetch = globalThis.fetch
 
 function mockFetchResponse(data: unknown, ok = true, statusText = "OK") {
-  ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+  ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
     ok,
     statusText,
     json: async () => data,
@@ -114,22 +115,22 @@ function mockFetchResponse(data: unknown, ok = true, statusText = "OK") {
 describe("OptimiserApplyEditor", () => {
   beforeEach(() => {
     resetMlflow()
-    global.fetch = vi.fn()
+    globalThis.fetch = vi.fn()
   })
 
   afterEach(() => {
     cleanup()
-    global.fetch = originalFetch
+    globalThis.fetch = originalFetch
   })
 
   // 1. Renders with default file source type
   it("renders with default file source type selected", () => {
     render(<OptimiserApplyEditor {...defaultProps()} />)
     const fileBtn = screen.getByText("File Path")
-    // Active button has the green accent in its border (jsdom converts hex to rgb)
-    expect(fileBtn.style.border).toContain("rgb(34, 197, 94)")
+    // Active button has the accent border (jsdom converts hex #fb923c to rgb)
+    expect(fileBtn.style.border).toContain("rgb(251, 146, 60)")
     const registeredBtn = screen.getByText("Registered")
-    expect(registeredBtn.style.border).not.toContain("rgb(34, 197, 94)")
+    expect(registeredBtn.style.border).not.toContain("rgb(251, 146, 60)")
   })
 
   // 2. Source type toggle among file/registered/run
@@ -237,7 +238,7 @@ describe("OptimiserApplyEditor", () => {
 
   // 8. File mode: shows load error when fetch fails
   it("shows load error when fetch throws", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Network failure"))
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Network failure"))
     const props = defaultProps()
     props.config = { artifact_path: "bad_path.json" }
     render(<OptimiserApplyEditor {...props} />)
@@ -357,7 +358,7 @@ describe("OptimiserApplyEditor", () => {
     const props = defaultProps()
     props.config = { artifact_path: "" }
     render(<OptimiserApplyEditor {...props} />)
-    expect(global.fetch).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(screen.queryByText("Loaded Artifact")).not.toBeInTheDocument()
   })
 

@@ -34,6 +34,7 @@ const DEFAULT_PROPS = {
   nodeId: "sink_1",
   allNodes: [] as { id: string; type?: string; data: { label: string; description: string; nodeType: string; config?: Record<string, unknown> } }[],
   edges: [] as { id: string; source: string; target: string }[],
+  accentColor: "#60a5fa",
 }
 
 describe("SinkEditor", () => {

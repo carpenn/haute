@@ -56,7 +56,7 @@ const dummyGraph = {
 
 beforeEach(() => {
   mockFetch = vi.fn()
-  global.fetch = mockFetch as unknown as typeof fetch
+  globalThis.fetch = mockFetch as unknown as typeof fetch
 })
 
 afterEach(() => {

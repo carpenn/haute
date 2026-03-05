@@ -5,7 +5,7 @@
  * empty input handling, edge passthrough to ELK.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Node, Edge } from "@xyflow/react"
+import { makeNode, makeEdge } from "../../test-utils/factories"
 
 // ── Mock ELK ────────────────────────────────────────────────────
 
@@ -22,16 +22,6 @@ vi.mock("elkjs/lib/elk.bundled.js", () => {
 // Import AFTER the mock is registered
 const { getLayoutedElements } = await import("../../utils/layout")
 
-// ── Helpers ─────────────────────────────────────────────────────
-
-function makeNode(id: string, x = 0, y = 0): Node {
-  return { id, position: { x, y }, data: {} } as Node
-}
-
-function makeEdge(id: string, source: string, target: string): Edge {
-  return { id, source, target } as Edge
-}
-
 beforeEach(() => {
   mockLayout.mockReset()
 })
@@ -40,8 +30,8 @@ beforeEach(() => {
 
 describe("getLayoutedElements", () => {
   it("assigns positions from ELK output to nodes", async () => {
-    const nodes = [makeNode("a", 0, 0), makeNode("b", 0, 0)]
-    const edges = [makeEdge("e1", "a", "b")]
+    const nodes = [makeNode("a"), makeNode("b")]
+    const edges = [makeEdge("a", "b", { id: "e1" })]
 
     mockLayout.mockResolvedValue({
       children: [
@@ -57,7 +47,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("preserves original position for nodes not in ELK output", async () => {
-    const nodes = [makeNode("a", 10, 20), makeNode("b", 30, 40)]
+    const nodes = [makeNode("a", "transform", { position: { x: 10, y: 20 } }), makeNode("b", "transform", { position: { x: 30, y: 40 } })]
 
     mockLayout.mockResolvedValue({
       children: [{ id: "a", x: 100, y: 200 }],
@@ -80,7 +70,7 @@ describe("getLayoutedElements", () => {
 
   it("passes edges to ELK in the correct format", async () => {
     const nodes = [makeNode("a"), makeNode("b"), makeNode("c")]
-    const edges = [makeEdge("e1", "a", "b"), makeEdge("e2", "b", "c")]
+    const edges = [makeEdge("a", "b", { id: "e1" }), makeEdge("b", "c", { id: "e2" })]
 
     mockLayout.mockResolvedValue({ children: [] })
 
@@ -108,7 +98,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("defaults to x=0, y=0 when ELK returns undefined coordinates", async () => {
-    const nodes = [makeNode("a", 99, 99)]
+    const nodes = [makeNode("a", "transform", { position: { x: 99, y: 99 } })]
 
     mockLayout.mockResolvedValue({
       children: [{ id: "a", x: undefined, y: undefined }],
@@ -120,7 +110,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("handles ELK returning null children array", async () => {
-    const nodes = [makeNode("a", 5, 10)]
+    const nodes = [makeNode("a", "transform", { position: { x: 5, y: 10 } })]
 
     mockLayout.mockResolvedValue({ children: null })
 

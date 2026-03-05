@@ -3,7 +3,7 @@ import { render, screen, cleanup } from "@testing-library/react"
 import { ReactFlowProvider } from "@xyflow/react"
 import PipelineNode from "../PipelineNode"
 import type { PipelineNodeData } from "../PipelineNode"
-import { NODE_TYPES, nodeTypeLabels, nodeTypeColors } from "../../utils/nodeTypes"
+import { NODE_TYPES, nodeTypeLabels } from "../../utils/nodeTypes"
 import useSettingsStore from "../../stores/useSettingsStore"
 
 // ---------------------------------------------------------------------------

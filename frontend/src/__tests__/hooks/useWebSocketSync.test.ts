@@ -40,7 +40,7 @@ vi.mock("../../stores/useToastStore.ts", () => {
 vi.mock("../../stores/useUIStore.ts", () => {
   let dirty = false
   let syncBanner: string | null = null
-  const store = {
+  const store: Record<string, unknown> = {
     dirty,
     syncBanner,
     setSyncBanner: vi.fn((banner: string | null) => {
