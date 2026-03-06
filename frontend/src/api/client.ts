@@ -386,10 +386,17 @@ export function buildJsonCache(
   return post("/api/json-cache/build", payload, { timeout: 1_800_000, ...options })
 }
 
+export function cancelJsonCache(
+  path: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ cancelled: boolean; data_path: string }> {
+  return post("/api/json-cache/cancel", { path }, options)
+}
+
 export function getJsonCacheProgress(
   path: string,
   options?: { signal?: AbortSignal },
-): Promise<{ active: boolean; rows?: number; elapsed?: number }> {
+): Promise<{ active: boolean; rows?: number; elapsed?: number; phase?: string }> {
   return request(`/api/json-cache/progress?path=${encodeURIComponent(path)}`, options)
 }
 

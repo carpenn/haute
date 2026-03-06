@@ -286,24 +286,15 @@ def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
     if path.endswith((".json", ".jsonl")):
         def api_source_fn(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
-            from haute._json_flatten import (
-                _json_cache_path,
-                is_large_json,
-                read_json_flat,
-            )
+            from haute._json_flatten import _json_cache_path
 
             cache_path = _json_cache_path(_path)
-            if is_large_json(_path) and not cache_path.exists():
-                from pathlib import Path
-
-                size_mb = round(Path(_path).stat().st_size / (1024 * 1024), 1)
-                raise RuntimeError(
-                    f"Data file ({size_mb} MB) has not been cached yet. "
-                    "Click 'Cache as Parquet' on the API Input node to process it."
-                )
             if cache_path.exists():
                 return pl.scan_parquet(cache_path)
-            return read_json_flat(_path, schema=_schema)
+            raise RuntimeError(
+                "JSON data has not been cached yet. "
+                "Click 'Cache as Parquet' on the API Input node to process it."
+            )
     else:
         def api_source_fn() -> _Frame:
             return read_source(path)

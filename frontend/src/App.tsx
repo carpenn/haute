@@ -40,7 +40,6 @@ import useKeyboardShortcuts from "./hooks/useKeyboardShortcuts"
 import useBackgroundJobs from "./hooks/useBackgroundJobs"
 import useNodeHandlers from "./hooks/useNodeHandlers"
 import useEdgeHandlers from "./hooks/useEdgeHandlers"
-import useToastStore from "./stores/useToastStore"
 import useSettingsStore from "./stores/useSettingsStore"
 import useUIStore from "./stores/useUIStore"
 import useNodeResultsStore from "./stores/useNodeResultsStore"
@@ -89,8 +88,6 @@ function FlowEditor() {
   const { screenToFlowPosition, fitView } = useReactFlow()
 
   // UI state from Zustand store (leaf-subscribed values live in their own components)
-  // Toast store
-  const addToast = useToastStore((s) => s.addToast)
   // Settings store
   const fetchMlflow = useSettingsStore((s) => s.fetchMlflow)
   // UI store (chrome / layout)

@@ -27,7 +27,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
   const [newName, setNewName] = useState("")
 
   // Auto-save: debounce API calls so we don't fire on every keystroke
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const activeModuleRef = useRef(activeModule)
   activeModuleRef.current = activeModule
 

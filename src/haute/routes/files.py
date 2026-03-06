@@ -75,12 +75,35 @@ async def get_schema(path: str) -> SchemaResponse:
         schema = lf.collect_schema()
         columns = [ColumnInfo(name=c, dtype=str(d)) for c, d in schema.items()]
         preview_df = lf.head(5).collect()
-        row_count = lf.select(pl.len()).collect().item()
+
+        # For JSONL files, estimating row count avoids reading the entire file
+        # into memory (pl.len() on scan_ndjson materialises every row).
+        row_count: int | None
+        row_count_estimated = False
+        if path.endswith(".jsonl"):
+            file_size = target.stat().st_size
+            n_preview = len(preview_df)
+            if n_preview > 0:
+                avg_line_bytes = file_size / max(n_preview, 1)
+                # Use serialized preview size as a better per-row estimate
+                sample_bytes = sum(
+                    len(line) + 1  # +1 for newline
+                    for line in preview_df.write_ndjson().splitlines()
+                )
+                if sample_bytes > 0:
+                    avg_line_bytes = sample_bytes / n_preview
+                row_count = max(1, int(file_size / avg_line_bytes))
+            else:
+                row_count = 0
+            row_count_estimated = row_count is not None and row_count > 0
+        else:
+            row_count = lf.select(pl.len()).collect().item()
 
         return SchemaResponse(
             path=path,
             columns=columns,
             row_count=row_count,
+            row_count_estimated=row_count_estimated,
             column_count=len(columns),
             preview=preview_df.to_dicts(),
         )

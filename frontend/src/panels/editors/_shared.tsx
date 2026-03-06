@@ -43,7 +43,8 @@ export type InputSource = {
 export type SchemaInfo = {
   path: string
   columns: ColumnInfo[]
-  row_count: number
+  row_count: number | null
+  row_count_estimated?: boolean
   column_count: number
   preview: Record<string, unknown>[]
 } | null
@@ -228,7 +229,7 @@ export function SchemaPreview({ schema }: { schema: SchemaInfo }) {
           <Table2 size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Schema</span>
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {schema.column_count ?? 0} cols / {(schema.row_count ?? 0).toLocaleString()} rows
+            {schema.column_count ?? 0} cols / {schema.row_count != null ? `${schema.row_count_estimated ? "~" : ""}${schema.row_count.toLocaleString()} rows` : "? rows"}
           </span>
         </div>
         <button

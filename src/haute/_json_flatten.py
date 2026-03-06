@@ -17,12 +17,13 @@ Array indices are **1-based** (e.g. ``additional_drivers.1.first_name``).
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
+
+import orjson
 
 from haute._logging import get_logger
 
@@ -38,14 +39,41 @@ logger = get_logger(component="json_flatten")
 
 _LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 _SCHEMA_SAMPLE_SIZE = 10_000  # rows sampled for streaming schema inference
-_FLATTEN_CHUNK_SIZE = 50_000  # rows per parquet row-group
+_FLATTEN_CHUNK_SIZE = 50_000  # maximum rows per parquet row-group
+_TARGET_CHUNK_BYTES = 256 * 1024 * 1024  # 256 MB target memory per chunk
+_MIN_CHUNK_ROWS = 1_000
+_BYTES_PER_CELL = 100  # rough estimate: avg bytes per cell in memory
+_RAW_CHUNK_TARGET_BYTES = 128 * 1024 * 1024  # 128 MB raw JSON per chunk (step 1)
 
 # Thread-safe progress tracking for active cache builds, keyed by data_path.
 _flatten_progress: dict[str, dict[str, object]] = {}
 _flatten_lock = threading.Lock()
 
+# Cancellation tokens: one Event per active build, keyed by data_path.
+_cancel_events: dict[str, threading.Event] = {}
+
 
 # -- Test helpers for flatten progress state ---------------------------------
+
+class JsonCacheCancelledError(Exception):
+    """Raised when a JSON cache build is cancelled by the user."""
+
+
+def cancel_json_cache(data_path: str) -> bool:
+    """Signal cancellation for an active build. Returns True if a build was active."""
+    with _flatten_lock:
+        event = _cancel_events.get(data_path)
+        if event is not None:
+            event.set()
+            return True
+        return False
+
+
+def _check_cancelled(event: threading.Event | None, data_path: str) -> None:
+    """Raise JsonCacheCancelledError if the event is set."""
+    if event is not None and event.is_set():
+        raise JsonCacheCancelledError(f"Cache build cancelled for {data_path}")
+
 
 def _set_flatten_progress(data_path: str, data: dict[str, object]) -> None:
     """Set flatten progress for *data_path* (test helper)."""
@@ -57,6 +85,43 @@ def _clear_flatten_progress() -> None:
     """Clear all flatten progress entries (test helper)."""
     with _flatten_lock:
         _flatten_progress.clear()
+
+
+def _update_progress(
+    key: str | None, t0: float | None, rows: int, phase: str = "",
+) -> None:
+    """Thread-safe update of the flatten progress dict for *key*."""
+    if key is None or t0 is None:
+        return
+    entry: dict[str, object] = {
+        "rows": rows,
+        "elapsed": round(time.monotonic() - t0, 1),
+    }
+    if phase:
+        entry["phase"] = phase
+    with _flatten_lock:
+        _flatten_progress[key] = entry
+
+
+def _clear_cancel_events() -> None:
+    """Clear all cancel events (test helper)."""
+    with _flatten_lock:
+        _cancel_events.clear()
+
+def _adaptive_chunk_size(flatten_schema: dict[str, Any]) -> int:
+    """Choose chunk size based on schema width to bound memory per chunk.
+
+    Insurance JSON can flatten to 500–2000+ columns.  With a fixed 50k-row
+    chunk, a 1000-column schema holds ~5 GB in memory per chunk.  This
+    function targets ~256 MB per chunk by scaling rows inversely with
+    column count.
+    """
+    n_cols = len(schema_columns(flatten_schema))
+    if n_cols == 0:
+        return _FLATTEN_CHUNK_SIZE
+    rows = _TARGET_CHUNK_BYTES // (n_cols * _BYTES_PER_CELL)
+    return max(_MIN_CHUNK_ROWS, min(_FLATTEN_CHUNK_SIZE, rows))
+
 
 # ---------------------------------------------------------------------------
 # Type inference helpers
@@ -250,19 +315,19 @@ def _iter_json_records(path: Path) -> Iterator[dict[str, Any]]:
     processing can still be chunked.
     """
     if path.suffix == ".jsonl":
-        with open(path, encoding="utf-8") as fh:
+        with open(path, "rb") as fh:
             for line in fh:
                 stripped = line.strip()
                 if not stripped:
                     continue
                 try:
-                    obj = json.loads(stripped)
-                except json.JSONDecodeError:
+                    obj = orjson.loads(stripped)
+                except orjson.JSONDecodeError:
                     continue
                 if isinstance(obj, dict):
                     yield obj
     else:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = orjson.loads(path.read_bytes())
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -433,53 +498,73 @@ def _flatten_and_write_streaming(
     flatten_schema: dict[str, Any],
     cache_path: Path,
     *,
-    chunk_size: int = _FLATTEN_CHUNK_SIZE,
+    chunk_size: int | None = None,
     progress_key: str | None = None,
     t0: float | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> int:
-    """Stream JSON records through flatten → PyArrow ParquetWriter in chunks.
+    """Stream JSON records through flatten → PyArrow ParquetWriter.
 
-    This is the **fallback** path used when the Polars-native path fails
-    (e.g. malformed JSONL, schema inconsistencies).  Single-threaded but
-    memory-bounded: only ``chunk_size`` rows are held at a time.
+    Uses **column-oriented accumulation**: each record is flattened and its
+    values are scattered into per-column lists immediately, so only the
+    individual values survive — no list of row-dicts piling up.
+
+    Peak memory per chunk ≈ ``n_cols × chunk_size × value_size``.
+    Chunk size adapts to the schema width via :func:`_adaptive_chunk_size`.
 
     Returns the total number of rows written.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
 
+    if chunk_size is None:
+        chunk_size = _adaptive_chunk_size(flatten_schema)
+
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = cache_path.with_suffix(".parquet.tmp")
     arrow_schema = _arrow_schema_from_flatten(flatten_schema)
+    col_names = [f.name for f in arrow_schema]
+    n_cols = len(arrow_schema)
 
     writer: pq.ParquetWriter | None = None
     total_rows = 0
+    # Column-oriented accumulation: one list per column
+    columns: list[list[Any]] = [[] for _ in range(n_cols)]
+    rows_in_chunk = 0
 
-    def _update_progress() -> None:
-        if progress_key is not None and t0 is not None:
-            with _flatten_lock:
-                _flatten_progress[progress_key] = {
-                    "rows": total_rows,
-                    "elapsed": round(time.monotonic() - t0, 1),
-                }
-
-    def _write_rows(rows: list[dict[str, Any]]) -> None:
-        nonlocal writer, total_rows
-        if not rows:
+    def _flush() -> None:
+        nonlocal writer, total_rows, columns, rows_in_chunk
+        if rows_in_chunk == 0:
             return
-        batch = _rows_to_batch(rows, arrow_schema)
+        arrays = [
+            _coerce_to_arrow(columns[i], arrow_schema.field(i).type)
+            for i in range(n_cols)
+        ]
+        batch = pa.record_batch(arrays, schema=arrow_schema)
+        del arrays
         if writer is None:
             writer = pq.ParquetWriter(
                 str(tmp_path), arrow_schema, compression="zstd",
             )
         writer.write_batch(batch)
-        total_rows += len(rows)
-        _update_progress()
+        del batch
+        total_rows += rows_in_chunk
+        # Reset columns for next chunk
+        columns = [[] for _ in range(n_cols)]
+        rows_in_chunk = 0
+        _update_progress(progress_key, t0, total_rows)
 
     try:
-        for chunk_records in _chunked(records_iter, chunk_size):
-            rows = [flatten(d, flatten_schema) for d in chunk_records]
-            _write_rows(rows)
+        for record in records_iter:
+            flat = flatten(record, flatten_schema)
+            for i, name in enumerate(col_names):
+                columns[i].append(flat.get(name))
+            rows_in_chunk += 1
+            if rows_in_chunk >= chunk_size:
+                _flush()
+                _check_cancelled(cancel_event, progress_key or str(cache_path))
+
+        _flush()  # remaining rows
 
         if writer is not None:
             writer.close()
@@ -508,181 +593,421 @@ def _flatten_and_write_streaming(
         raise
 
 
+
 # ---------------------------------------------------------------------------
-# Polars-native flatten → parquet (primary path)
+# Polars-native flatten: expression-based (fast path)
 # ---------------------------------------------------------------------------
 
-_NDJSON_SCHEMA_SAMPLE = 1_000  # rows Polars samples for NDJSON schema inference
 
-
-def _struct_field_dtype(dtype: Any, name: str) -> Any:
-    """Return the dtype of *name* within a Polars ``Struct``, or ``None``.
-
-    Works across Polars versions by duck-typing on the ``fields`` attribute.
-    """
-    fields = getattr(dtype, "fields", None)
-    if fields is None:
-        return None
-    for f in fields:
-        if f.name == name:
-            return f.dtype
-    return None
-
-
-def _build_polars_exprs(
-    flatten_schema: dict[str, Any],
-    lf_schema: dict[str, Any],
+def _build_flatten_exprs(
+    schema: dict[str, Any],
+    *,
+    _base: pl.Expr | None = None,
+    _prefix: str = "",
 ) -> list[pl.Expr]:
-    """Translate a flatten schema into Polars ``select()`` expressions.
+    """Build Polars expressions that replicate :func:`flatten` via native ops.
 
-    Walks the flatten schema tree and builds one expression per leaf column.
-    For each leaf, the expression chains ``.struct.field()`` and
-    ``.list.get()`` calls to navigate from the top-level Polars column down
-    to the target value.  Missing columns or struct fields produce
-    ``pl.lit(None)`` so the resulting DataFrame always has the full column
-    set regardless of data completeness.
-
-    Parameters
-    ----------
-    flatten_schema:
-        The flatten schema (same format as :func:`infer_schema`).
-    lf_schema:
-        Mapping of ``{column_name: polars_dtype}`` from the LazyFrame's
-        ``collect_schema()``.
-
-    Returns
-    -------
-    list[pl.Expr]
-        One aliased expression per leaf column in schema traversal order.
+    Walks the flatten schema and produces ``struct.field`` / ``list.get``
+    expression chains.  The result is a flat list of aliased expressions
+    that can be passed to ``lf.select(exprs)`` to flatten nested
+    structs and lists into dot-separated, 1-based-index column names.
     """
     import polars as pl
 
     exprs: list[pl.Expr] = []
+    for key, spec in schema.items():
+        full_key = f"{_prefix}.{key}" if _prefix else key
+        expr = _base.struct.field(key) if _base is not None else pl.col(key)
 
-    def _walk(
-        spec: dict[str, Any] | str,
-        alias: str,
-        expr: pl.Expr | None,
-        dtype: Any,
-    ) -> None:
-        """Recursively descend the schema tree, emitting leaf expressions."""
         if isinstance(spec, str):
-            # Leaf — emit expression or null literal
-            exprs.append(
-                expr.alias(alias) if expr is not None else pl.lit(None).alias(alias),
-            )
-
+            exprs.append(expr.alias(full_key))
         elif "$max" in spec:
-            # Array — iterate up to $max elements
             max_items: int = spec["$max"]
             items_schema = spec.get("$items", {})
-            if not max_items or not items_schema:
-                return
-            inner = getattr(dtype, "inner", None) if dtype is not None else None
+            if max_items == 0 or not items_schema:
+                continue
             for i in range(max_items):
-                elem_expr = (
-                    expr.list.get(i, null_on_oob=True) if expr is not None else None
-                )
-                _walk(items_schema, f"{alias}.{i + 1}", elem_expr, inner)
-
-        else:
-            # Object — recurse into each field
-            for key, child_spec in spec.items():
-                child_alias = f"{alias}.{key}" if alias else key
-                child_dtype = _struct_field_dtype(dtype, key)
-                if expr is not None and child_dtype is not None:
-                    child_expr = expr.struct.field(key)
+                idx_key = f"{full_key}.{i + 1}"
+                elem = expr.list.get(i, null_on_oob=True)
+                if isinstance(items_schema, str):
+                    exprs.append(elem.alias(idx_key))
                 else:
-                    child_expr = None
-                    child_dtype = None
-                _walk(child_spec, child_alias, child_expr, child_dtype)
-
-    for key, spec in flatten_schema.items():
-        col_dtype = lf_schema.get(key)
-        col_expr = pl.col(key) if col_dtype is not None else None
-        _walk(spec, key, col_expr, col_dtype)
-
+                    exprs.extend(
+                        _build_flatten_exprs(
+                            items_schema, _base=elem, _prefix=idx_key,
+                        )
+                    )
+        else:
+            exprs.extend(
+                _build_flatten_exprs(spec, _base=expr, _prefix=full_key)
+            )
     return exprs
 
 
-def _flatten_with_polars(
-    data_path: Path,
-    flatten_schema: dict[str, Any],
-    cache_path: Path,
+def _iter_line_chunks(path: Path, chunk_lines: int) -> Iterator[bytes]:
+    """Yield byte buffers of up to *chunk_lines* lines from a file.
+
+    Reads one line at a time (streaming) so only the current chunk is
+    held in memory.
+    """
+    with open(path, "rb") as fh:
+        buf: list[bytes] = []
+        for line in fh:
+            buf.append(line)
+            if len(buf) >= chunk_lines:
+                chunk = b"".join(buf)
+                buf = []  # free line refs before yielding
+                yield chunk
+        if buf:
+            chunk = b"".join(buf)
+            buf = []
+            yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Two-step streaming: JSONL → raw Parquet → flattened Parquet
+#
+# Step 1 (_jsonl_to_raw_parquet): parse JSONL in chunks via Polars/simd-json,
+#   write nested structs/lists to an intermediate Parquet file.  All memory
+#   lives in Arrow buffers (outside Python's heap) and is freed between chunks.
+#
+# Step 2 (_flatten_raw_parquet): read the intermediate Parquet one row group
+#   at a time, flatten via Polars expressions (or Python fallback), and write
+#   the final flat Parquet.
+#
+# This avoids the pymalloc fragmentation that occurs when millions of small
+# Python dicts are created and freed during a single-step Python flatten.
+# ---------------------------------------------------------------------------
+
+
+def _release_memory() -> None:
+    """Force the OS to reclaim freed pages.
+
+    Python and glibc both hold onto freed memory for reuse.  After
+    processing a large chunk we want that memory back *now* so RSS
+    stays flat across chunks.
+
+    Platform strategies:
+    - Linux: ``malloc_trim(0)`` via glibc forces arena release.
+    - Windows: ``_heapmin()`` via msvcrt compacts the CRT heap.
+    - macOS: no direct API — ``gc.collect()`` alone is the best we can do.
+    """
+    import ctypes
+    import gc
+    import sys
+
+    gc.collect()
+
+    platform = sys.platform
+    if platform == "linux":
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            logger.debug("malloc_trim_unavailable", platform=platform)
+    elif platform == "win32":
+        try:
+            ctypes.cdll.msvcrt._heapmin()
+        except (OSError, AttributeError):
+            logger.debug("heapmin_unavailable", platform=platform)
+    else:
+        # macOS / other — gc.collect() above is the best available option
+        logger.debug("no_native_heap_compaction", platform=platform)
+
+
+def _iter_byte_chunks(path: Path, buffer_size: int) -> Iterator[bytes]:
+    """Yield complete-line byte buffers of approximately *buffer_size* bytes.
+
+    Unlike :func:`_iter_line_chunks` (which creates one Python ``bytes``
+    per line), this reads large blocks via ``file.read()``.  Blocks above
+    ~512 KB are backed by ``mmap`` and returned to the OS on ``del``,
+    avoiding pymalloc arena fragmentation on multi-million-row files.
+    """
+    with open(path, "rb") as fh:
+        remainder = b""
+        while True:
+            block = fh.read(buffer_size)
+            if not block:
+                if remainder:
+                    yield remainder
+                break
+            block = remainder + block
+            last_nl = block.rfind(b"\n")
+            if last_nl == -1:
+                remainder = block
+                continue
+            yield block[: last_nl + 1]
+            remainder = block[last_nl + 1 :]
+
+
+def _jsonl_to_raw_parquet(
+    path: Path,
+    dest: Path,
     *,
     progress_key: str | None = None,
     t0: float | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> int:
-    """Flatten JSON/JSONL to parquet using Polars-native operations.
+    """Step 1: Stream JSONL → raw (nested) Parquet via Polars chunks.
 
-    Pipeline: ``scan_ndjson`` (Rust multi-threaded reader) →
-    expression-based flatten (``.struct.field()``, ``.list.get()``) →
-    ``sink_parquet`` (streaming write).
+    All heavy memory (simd-json parse, Arrow buffers) lives outside
+    Python's heap and is freed between chunks.
 
-    **No Python-level data processing loop** — all heavy lifting happens
-    in Polars' Rust core, which parallelises automatically across CPU cores.
-
-    Falls back to ``collect(engine="streaming") → write_parquet`` if
-    ``sink_parquet`` doesn't support the expression plan.
-
-    Returns the total number of rows written.
-    Raises on failure (caller should fall back to streaming Python path).
+    Returns total rows written.
     """
+    import io
+
+    import polars as pl
+    import pyarrow.parquet as pq
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(dest) + ".tmp")
+
+    # Infer a consistent schema from a large sample so all chunks
+    # parse with identical types (avoids ParquetWriter schema mismatches).
+    ndjson_schema = pl.scan_ndjson(
+        path, infer_schema_length=_SCHEMA_SAMPLE_SIZE,
+    ).collect_schema()
+
+    writer: pq.ParquetWriter | None = None
+    total_rows = 0
+
+    try:
+        for chunk_bytes in _iter_byte_chunks(path, _RAW_CHUNK_TARGET_BYTES):
+            _check_cancelled(cancel_event, progress_key or str(dest))
+            df = pl.read_ndjson(io.BytesIO(chunk_bytes), schema=ndjson_schema)
+            del chunk_bytes
+            at = df.to_arrow()
+            n = len(df)
+            del df
+
+            if writer is None:
+                writer = pq.ParquetWriter(str(tmp), at.schema, compression="zstd")
+            writer.write_table(at)
+            del at
+            _release_memory()
+
+            total_rows += n
+            _update_progress(progress_key, t0, total_rows, phase="converting")
+
+        if writer is not None:
+            writer.close()
+            writer = None
+        else:
+            import pyarrow as pa
+
+            pq.write_table(pa.table({}), str(tmp), compression="zstd")
+        tmp.rename(dest)
+        return total_rows
+
+    except BaseException:
+        if writer is not None:
+            writer.close()
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _flatten_raw_parquet(
+    raw_path: Path,
+    flatten_schema: dict[str, Any],
+    dest: Path,
+    *,
+    progress_key: str | None = None,
+    t0: float | None = None,
+    cancel_event: threading.Event | None = None,
+) -> int:
+    """Step 2: Stream raw Parquet → flattened Parquet, one row group at a time.
+
+    Tries Polars expression-based flatten first (fast, Arrow memory).
+    Falls back to Python ``flatten()`` per row group if expressions fail
+    (e.g. deeply nested mixed-type schemas).
+
+    Returns total rows written.
+    """
+    import polars as pl
+    import pyarrow.parquet as pq
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(dest) + ".tmp")
+
+    exprs = _build_flatten_exprs(flatten_schema)
+    pf = pq.ParquetFile(str(raw_path))
+    n_groups = pf.metadata.num_row_groups
+
+    if n_groups == 0 or not exprs:
+        cols = schema_columns(flatten_schema)
+        empty = pl.DataFrame({c: pl.Series([], dtype=pl.Utf8) for c in cols})
+        empty.write_parquet(str(tmp), compression="zstd")
+        tmp.rename(dest)
+        return 0
+
+    writer: pq.ParquetWriter | None = None
+    total_rows = 0
+    use_polars = True
+
+    try:
+        # Probe first row group to decide Polars vs Python fallback
+        table0 = pf.read_row_group(0)
+        df0 = pl.from_arrow(table0)
+        del table0
+        try:
+            flat0 = df0.select(exprs)
+        except Exception:
+            logger.info("polars_flatten_fallback", path=str(raw_path))
+            use_polars = False
+            rows = df0.to_dicts()
+            flat_rows = [flatten(r, flatten_schema) for r in rows]
+            flat0 = pl.from_dicts(flat_rows) if flat_rows else pl.DataFrame()
+            del flat_rows, rows
+        del df0
+
+        at = flat0.to_arrow()
+        total_rows = len(flat0)
+        del flat0
+        writer = pq.ParquetWriter(str(tmp), at.schema, compression="zstd")
+        writer.write_table(at)
+        del at
+        _release_memory()
+
+        # Remaining row groups
+        for i in range(1, n_groups):
+            _check_cancelled(cancel_event, progress_key or str(dest))
+
+            table = pf.read_row_group(i)
+            df = pl.from_arrow(table)
+            del table
+
+            if use_polars:
+                flat = df.select(exprs)
+                del df
+            else:
+                rows = df.to_dicts()
+                del df
+                flat_rows = [flatten(r, flatten_schema) for r in rows]
+                flat = pl.from_dicts(flat_rows) if flat_rows else pl.DataFrame()
+                del flat_rows, rows
+
+            at = flat.to_arrow()
+            total_rows += len(flat)
+            del flat
+            writer.write_table(at)
+            del at
+            _release_memory()
+
+            _update_progress(progress_key, t0, total_rows, phase="flattening")
+
+        writer.close()
+        writer = None
+        tmp.rename(dest)
+        return total_rows
+
+    except BaseException:
+        if writer is not None:
+            writer.close()
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _polars_flatten_to_parquet(
+    path: Path,
+    flatten_schema: dict[str, Any],
+    cache_path: Path,
+    *,
+    chunk_lines: int | None = None,
+    progress_key: str | None = None,
+    t0: float | None = None,
+    cancel_event: threading.Event | None = None,
+) -> int:
+    """Fast path: Polars-native JSON parsing + expression-based flatten.
+
+    For ``.jsonl`` files, reads lines in adaptive chunks (scaled to schema
+    width — see :func:`_adaptive_chunk_size`), parses each chunk with
+    ``pl.read_ndjson`` (simd-json, multi-threaded), flattens via Polars
+    expressions, and writes incrementally through a PyArrow
+    ``ParquetWriter``.  Memory usage is bounded to one chunk at a time.
+
+    For ``.json`` files, uses ``pl.read_json`` (eager — JSON format requires
+    full-file parsing) followed by ``write_parquet``.
+
+    Raises on any error so the caller can fall back to
+    :func:`_flatten_and_write_streaming`.
+    """
+    import io
+
     import polars as pl
     import pyarrow.parquet as pq
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = cache_path.with_suffix(".parquet.tmp")
 
-    # --- Read with Polars ---------------------------------------------------
-    if data_path.suffix == ".jsonl":
-        lf = pl.scan_ndjson(data_path, infer_schema_length=_NDJSON_SCHEMA_SAMPLE)
-    else:
-        lf = pl.read_json(data_path).lazy()
-
-    # --- Build flatten expressions ------------------------------------------
-    schema_map = dict(lf.collect_schema())
-    exprs = _build_polars_exprs(flatten_schema, schema_map)
-
+    exprs = _build_flatten_exprs(flatten_schema)
     if not exprs:
-        # Empty flatten schema — write an empty parquet file
-        pl.DataFrame().write_parquet(str(tmp_path), compression="zstd")
+        pl.DataFrame().write_parquet(tmp_path, compression="zstd")
         tmp_path.rename(cache_path)
         return 0
 
-    result_lf = lf.select(exprs)
+    if chunk_lines is None:
+        chunk_lines = _adaptive_chunk_size(flatten_schema)
 
-    # --- Write to parquet ---------------------------------------------------
     try:
-        result_lf.sink_parquet(str(tmp_path), compression="zstd")
-    except Exception:
-        # Streaming sink may not support all expressions — fall back to
-        # collect with streaming engine + eager write (same pattern as
-        # executor.py sink output).
-        logger.info("polars_sink_fallback", path=str(data_path))
-        df = result_lf.collect(engine="streaming")
-        df.write_parquet(str(tmp_path), compression="zstd")
+        if path.suffix == ".jsonl":
+            writer: pq.ParquetWriter | None = None
+            total_rows = 0
 
-    tmp_path.rename(cache_path)
+            for chunk_bytes in _iter_line_chunks(path, chunk_lines):
+                df = pl.read_ndjson(io.BytesIO(chunk_bytes))
+                del chunk_bytes  # free raw JSON bytes
+                flat = df.select(exprs)
+                del df  # free nested DataFrame
+                arrow_table = flat.to_arrow()
+                chunk_len = len(flat)
+                del flat  # free flattened DataFrame
 
-    # --- Report result ------------------------------------------------------
-    meta = pq.read_metadata(str(cache_path))
-    total_rows = meta.num_rows
+                if writer is None:
+                    writer = pq.ParquetWriter(
+                        str(tmp_path), arrow_table.schema,
+                        compression="zstd",
+                    )
+                writer.write_table(arrow_table)
+                del arrow_table  # free Arrow table
 
-    if progress_key is not None and t0 is not None:
-        with _flatten_lock:
-            _flatten_progress[progress_key] = {
-                "rows": total_rows,
-                "elapsed": round(time.monotonic() - t0, 1),
-            }
+                total_rows += chunk_len
+                _update_progress(progress_key, t0, total_rows)
+                _check_cancelled(cancel_event, progress_key or str(cache_path))
 
-    logger.info(
-        "json_cache_written_polars",
-        path=str(cache_path),
-        rows=total_rows,
-        size_bytes=cache_path.stat().st_size,
-    )
-    return total_rows
+            if writer is not None:
+                writer.close()
+                writer = None
+            else:
+                # Empty file — write empty parquet with correct columns
+                cols = schema_columns(flatten_schema)
+                empty = pl.DataFrame(
+                    {c: pl.Series([], dtype=pl.Utf8) for c in cols}
+                )
+                empty.write_parquet(str(tmp_path), compression="zstd")
+        else:
+            # .json: must be fully loaded (JSON format constraint)
+            df = pl.read_json(path)
+            flat = df.select(exprs)
+            flat.write_parquet(tmp_path, compression="zstd")
+            total_rows = len(flat)
+
+            _update_progress(progress_key, t0, total_rows)
+
+        tmp_path.rename(cache_path)
+
+        logger.info(
+            "json_cache_written_polars",
+            path=str(cache_path),
+            rows=total_rows,
+            size_bytes=cache_path.stat().st_size,
+        )
+        return total_rows
+
+    except BaseException:
+        if path.suffix == ".jsonl" and writer is not None:
+            writer.close()
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -701,20 +1026,20 @@ def load_samples(path: str | Path) -> list[dict[str, Any]]:
        records without holding the full file in memory.
     """
     p = Path(path)
-    text = p.read_text(encoding="utf-8")
+    raw = p.read_bytes()
 
     if p.suffix == ".jsonl":
         samples: list[dict[str, Any]] = []
-        for line in text.splitlines():
+        for line in raw.splitlines():
             stripped = line.strip()
             if stripped:
-                obj = json.loads(stripped)
+                obj = orjson.loads(stripped)
                 if isinstance(obj, dict):
                     samples.append(obj)
         logger.info("samples_loaded", path=str(p), count=len(samples))
         return samples
 
-    data = json.loads(text)
+    data = orjson.loads(raw)
     if isinstance(data, list):
         result = [d for d in data if isinstance(d, dict)]
     elif isinstance(data, dict):
@@ -812,7 +1137,7 @@ def _resolve_flatten_schema(
     if config_path is not None:
         cp = Path(config_path)
         if cp.exists():
-            cfg = json.loads(cp.read_text(encoding="utf-8"))
+            cfg = orjson.loads(cp.read_bytes())
             from_config = cfg.get("flattenSchema")
             if from_config is not None:
                 return from_config
@@ -838,9 +1163,9 @@ def read_json_flat(
     — truly lazy with predicate pushdown.  The cache auto-invalidates when
     the source data file or config file is modified.
 
-    Primary path uses Polars-native ``scan_ndjson`` + expression-based
-    flatten + ``sink_parquet`` — all in Rust, multi-threaded.  Falls back to
-    Python streaming if the Polars path fails.
+    Streams records through PyArrow ``ParquetWriter`` in chunks of
+    ``_FLATTEN_CHUNK_SIZE`` rows, so memory usage is bounded regardless of
+    file size.
     """
     import polars as pl
 
@@ -856,12 +1181,7 @@ def read_json_flat(
         return pl.scan_parquet(cache_path)
 
     resolved = _resolve_flatten_schema(p, schema, config_path)
-
-    try:
-        _flatten_with_polars(p, resolved, cache_path)
-    except Exception:
-        logger.info("polars_flatten_fallback", path=str(data_path))
-        _flatten_and_write_streaming(_iter_json_records(p), resolved, cache_path)
+    _flatten_and_write_streaming(_iter_json_records(p), resolved, cache_path)
 
     return pl.scan_parquet(cache_path)
 
@@ -936,41 +1256,56 @@ def build_json_cache(
     """Build the parquet cache for a JSON/JSONL file with progress tracking.
 
     This is the explicit entry point for the "Cache as Parquet" button.
-    Mirrors :func:`_databricks_io.fetch_and_cache`.
 
-    Primary path uses Polars-native ``scan_ndjson`` + expression-based
-    flatten + ``sink_parquet`` — all heavy lifting in Rust, automatically
-    parallelised across CPU cores.  Falls back to Python streaming
-    (single-threaded, chunked PyArrow writes) if the Polars path fails.
+    For ``.jsonl`` files, uses a two-step streaming approach to avoid
+    Python memory fragmentation:
+
+    1. JSONL → raw Parquet  (Polars/Arrow memory, freed between chunks)
+    2. raw Parquet → flat Parquet  (row-group streaming)
+
+    For ``.json`` files, falls back to the Python streaming path (JSON
+    format requires eager parsing anyway, and files are typically small).
     """
     p = Path(data_path)
     data_path_str = str(data_path)
     cache_path = _json_cache_path(data_path)
 
+    event = threading.Event()
     t0 = time.monotonic()
     with _flatten_lock:
         _flatten_progress[data_path_str] = {"rows": 0, "elapsed": 0.0}
+        _cancel_events[data_path_str] = event
 
     try:
         resolved = _resolve_flatten_schema(p, schema, config_path)
-        try:
-            _flatten_with_polars(
-                p, resolved, cache_path,
-                progress_key=data_path_str,
-                t0=t0,
-            )
-        except Exception:
-            logger.info("polars_flatten_fallback", path=str(data_path))
+
+        if p.suffix == ".jsonl":
+            raw_path = cache_path.with_suffix(".raw.parquet")
+            try:
+                _jsonl_to_raw_parquet(
+                    p, raw_path,
+                    progress_key=data_path_str, t0=t0, cancel_event=event,
+                )
+                _flatten_raw_parquet(
+                    raw_path, resolved, cache_path,
+                    progress_key=data_path_str, t0=t0, cancel_event=event,
+                )
+            finally:
+                raw_path.unlink(missing_ok=True)
+        else:
+            # .json: must be fully loaded (JSON format constraint)
             _flatten_and_write_streaming(
                 _iter_json_records(p),
                 resolved,
                 cache_path,
                 progress_key=data_path_str,
                 t0=t0,
+                cancel_event=event,
             )
     finally:
         with _flatten_lock:
             _flatten_progress.pop(data_path_str, None)
+            _cancel_events.pop(data_path_str, None)
 
     elapsed = time.monotonic() - t0
 

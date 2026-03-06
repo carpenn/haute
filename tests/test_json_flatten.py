@@ -12,26 +12,31 @@ import pytest
 from haute._json_flatten import (
     _FLATTEN_CHUNK_SIZE,
     _LARGE_FILE_THRESHOLD,
-    _SCHEMA_SAMPLE_SIZE,
+    _MIN_CHUNK_ROWS,
+    JsonCacheCancelledError,
+    _adaptive_chunk_size,
     _arrow_schema_from_flatten,
-    _build_polars_exprs,
+    _build_flatten_exprs,
+    _cancel_events,
     _chunked,
+    _clear_cancel_events,
     _clear_flatten_progress,
     _coerce_to_arrow,
     _flatten_and_write,
     _flatten_and_write_streaming,
-    _flatten_with_polars,
     _infer_schema_streaming,
     _infer_type,
     _is_cache_valid,
     _iter_json_records,
+    _iter_line_chunks,
     _json_cache_path,
+    _polars_flatten_to_parquet,
     _rows_to_batch,
     _schema_leaf_types,
     _set_flatten_progress,
-    _struct_field_dtype,
     _wider_type,
     build_json_cache,
+    cancel_json_cache,
     clear_json_cache,
     flatten,
     flatten_progress,
@@ -43,7 +48,6 @@ from haute._json_flatten import (
     read_json_flat,
     schema_columns,
 )
-
 
 # ---------------------------------------------------------------------------
 # Type inference helpers
@@ -566,9 +570,6 @@ class TestJsonCache:
 
     def test_flatten_and_write_is_atomic(self, tmp_path):
         """Tmp file is cleaned up on failure."""
-        cache = tmp_path / "test.parquet"
-        tmp = cache.with_suffix(".parquet.tmp")
-
         # Force an error by passing a schema that causes parquet write to fail
         # (write to a path that is a directory, not a file)
         bad_cache = tmp_path / "dir_not_file.parquet"
@@ -779,6 +780,129 @@ class TestBuildJsonCache:
         assert result["column_count"] == 1
         assert "name" in result["columns"]
         assert "extra" not in result["columns"]
+
+    def test_cancel_stops_build(self, tmp_path, monkeypatch):
+        """Cancelling a build raises JsonCacheCancelledError and cleans up."""
+        import threading
+
+        from haute._json_flatten import _iter_byte_chunks
+
+        monkeypatch.chdir(tmp_path)
+        # Create a file with enough rows to span multiple chunks
+        data_file = tmp_path / "data.jsonl"
+        lines = [json.dumps({"a": i, "b": f"val_{i}"}) for i in range(200)]
+        data_file.write_text("\n".join(lines) + "\n")
+
+        # Use tiny byte chunks so cancel checks fire frequently
+        monkeypatch.setattr("haute._json_flatten._RAW_CHUNK_TARGET_BYTES", 50)
+
+        data_str = str(data_file)
+        started = threading.Event()
+
+        def cancel_after_start():
+            started.wait(timeout=5)
+            cancel_json_cache(data_str)
+
+        t = threading.Thread(target=cancel_after_start)
+        t.start()
+
+        # Patch _iter_byte_chunks to signal when step 1 starts iterating
+        def signalling_iter(*args, **kwargs):
+            started.set()
+            yield from _iter_byte_chunks(*args, **kwargs)
+
+        monkeypatch.setattr("haute._json_flatten._iter_byte_chunks", signalling_iter)
+
+        with pytest.raises(JsonCacheCancelledError):
+            build_json_cache(data_str)
+
+        t.join(timeout=5)
+
+        # Progress and cancel event should be cleaned up
+        assert flatten_progress(data_str) is None
+        assert data_str not in _cancel_events
+
+    def test_cancel_no_active_build_returns_false(self):
+        """cancel_json_cache returns False when no build is active."""
+        assert cancel_json_cache("nonexistent.jsonl") is False
+
+    def test_cancel_active_build_returns_true(self):
+        """cancel_json_cache returns True and sets the event when a build is active."""
+        import threading
+
+        event = threading.Event()
+        _cancel_events["test.jsonl"] = event
+        try:
+            assert cancel_json_cache("test.jsonl") is True
+            assert event.is_set()
+        finally:
+            _clear_cancel_events()
+
+
+# ---------------------------------------------------------------------------
+# _release_memory cross-platform
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseMemory:
+    """Verify _release_memory dispatches correctly per platform."""
+
+    def test_linux_calls_malloc_trim(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from haute import _json_flatten as mod
+
+        mock_cdll = MagicMock()
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("ctypes.CDLL", mock_cdll)
+        mod._release_memory()
+        mock_cdll.assert_called_once_with("libc.so.6")
+        mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
+
+    def test_windows_calls_heapmin(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from haute import _json_flatten as mod
+
+        mock_msvcrt = MagicMock()
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("ctypes.cdll", MagicMock(msvcrt=mock_msvcrt))
+        mod._release_memory()
+        mock_msvcrt._heapmin.assert_called_once()
+
+    def test_macos_only_gc_collects(self, monkeypatch):
+        from unittest.mock import patch
+
+        from haute import _json_flatten as mod
+
+        monkeypatch.setattr("sys.platform", "darwin")
+        with patch("gc.collect") as mock_gc:
+            mod._release_memory()
+            mock_gc.assert_called_once()
+
+    def test_linux_graceful_when_malloc_trim_unavailable(self, monkeypatch):
+        """If libc.so.6 can't be loaded, log and continue."""
+        from unittest.mock import MagicMock
+
+        from haute import _json_flatten as mod
+
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("ctypes.CDLL", MagicMock(side_effect=OSError("not found")))
+        # Should not raise
+        mod._release_memory()
+
+    def test_windows_graceful_when_heapmin_unavailable(self, monkeypatch):
+        """If msvcrt._heapmin fails, log and continue."""
+        from unittest.mock import MagicMock, PropertyMock
+
+        from haute import _json_flatten as mod
+
+        mock_cdll = MagicMock()
+        type(mock_cdll).msvcrt = PropertyMock(side_effect=AttributeError("no msvcrt"))
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("ctypes.cdll", mock_cdll)
+        # Should not raise
+        mod._release_memory()
 
 
 # ---------------------------------------------------------------------------
@@ -1042,8 +1166,6 @@ class TestFlattenAndWriteStreaming:
 
 class TestRowsToBatch:
     def test_builds_valid_batch(self):
-        import pyarrow as pa
-
         schema = {"x": "int", "y": "str"}
         arrow_schema = _arrow_schema_from_flatten(schema)
         rows = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}]
@@ -1053,235 +1175,291 @@ class TestRowsToBatch:
 
 
 # ---------------------------------------------------------------------------
-# Polars-native flatten
+# Polars-native fast path
 # ---------------------------------------------------------------------------
 
 
-class TestStructFieldDtype:
-    def test_returns_field_dtype(self):
-        dtype = pl.Struct({"city": pl.Utf8, "zip": pl.Int64})
-        assert _struct_field_dtype(dtype, "city") == pl.Utf8
-        assert _struct_field_dtype(dtype, "zip") == pl.Int64
-
-    def test_returns_none_for_missing_field(self):
-        dtype = pl.Struct({"city": pl.Utf8})
-        assert _struct_field_dtype(dtype, "missing") is None
-
-    def test_returns_none_for_non_struct(self):
-        assert _struct_field_dtype(pl.Int64, "anything") is None
-        assert _struct_field_dtype(None, "anything") is None
-
-
-class TestBuildPolarsExprs:
+class TestBuildFlattenExprs:
     def test_flat_schema(self):
-        """Simple top-level scalar columns."""
-        schema = {"x": "int", "y": "str"}
-        lf_schema = {"x": pl.Int64, "y": pl.Utf8}
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 2
-
-        df = pl.DataFrame({"x": [1, 2], "y": ["a", "b"]}).select(exprs)
-        assert df.columns == ["x", "y"]
-        assert df["x"].to_list() == [1, 2]
+        schema = {"name": "str", "age": "int"}
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({"name": ["Alice"], "age": [30]})
+        result = df.select(exprs)
+        assert result.columns == ["name", "age"]
+        assert result["name"][0] == "Alice"
+        assert result["age"][0] == 30
 
     def test_nested_object(self):
-        """Struct column → struct.field() expressions."""
-        schema = {"addr": {"city": "str", "zip": "str"}}
-        lf_schema = {"addr": pl.Struct({"city": pl.Utf8, "zip": pl.Utf8})}
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 2
-
-        df = pl.DataFrame({"addr": [{"city": "London", "zip": "SW1"}]}).select(exprs)
-        assert df.columns == ["addr.city", "addr.zip"]
-        assert df["addr.city"][0] == "London"
-
-    def test_array_of_scalars(self):
-        """List column → list.get() expressions."""
-        schema = {"tags": {"$max": 2, "$items": "str"}}
-        lf_schema = {"tags": pl.List(pl.Utf8)}
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 2
-
-        df = pl.DataFrame({"tags": [["a", "b", "c"]]}).select(exprs)
-        assert df.columns == ["tags.1", "tags.2"]
-        assert df["tags.1"][0] == "a"
-        assert df["tags.2"][0] == "b"
+        schema = {"address": {"city": "str", "postcode": "str"}}
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({
+            "address": [{"city": "London", "postcode": "SW1"}],
+        })
+        result = df.select(exprs)
+        assert result.columns == ["address.city", "address.postcode"]
+        assert result["address.city"][0] == "London"
+        assert result["address.postcode"][0] == "SW1"
 
     def test_array_of_objects(self):
-        """List(Struct) → list.get().struct.field() expressions."""
-        schema = {"items": {"$max": 2, "$items": {"name": "str"}}}
-        lf_schema = {"items": pl.List(pl.Struct({"name": pl.Utf8}))}
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 2
-
+        schema = {"drivers": {"$max": 2, "$items": {"name": "str"}}}
+        exprs = _build_flatten_exprs(schema)
         df = pl.DataFrame({
-            "items": [[{"name": "Alice"}]],
-        }).select(exprs)
-        assert df.columns == ["items.1.name", "items.2.name"]
-        assert df["items.1.name"][0] == "Alice"
-        assert df["items.2.name"][0] is None  # OOB → null
+            "drivers": [[{"name": "Alice"}]],
+        })
+        result = df.select(exprs)
+        assert result.columns == ["drivers.1.name", "drivers.2.name"]
+        assert result["drivers.1.name"][0] == "Alice"
+        assert result["drivers.2.name"][0] is None
 
-    def test_missing_top_level_column(self):
-        """Schema field not in data → all leaves become pl.lit(None)."""
-        schema = {"x": "int", "missing": {"a": "str", "b": "str"}}
-        lf_schema = {"x": pl.Int64}  # "missing" not in data
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 3
-
-        df = pl.DataFrame({"x": [1]}).select(exprs)
-        assert df.columns == ["x", "missing.a", "missing.b"]
-        assert df["missing.a"][0] is None
-        assert df["missing.b"][0] is None
-
-    def test_missing_struct_field(self):
-        """Struct field in schema but not in Polars dtype → null."""
-        schema = {"obj": {"known": "str", "unknown": "str"}}
-        lf_schema = {"obj": pl.Struct({"known": pl.Utf8})}
-        exprs = _build_polars_exprs(schema, lf_schema)
-        assert len(exprs) == 2
-
-        df = pl.DataFrame({"obj": [{"known": "yes"}]}).select(exprs)
-        assert df["obj.known"][0] == "yes"
-        assert df["obj.unknown"][0] is None
+    def test_array_of_scalars(self):
+        schema = {"tags": {"$max": 3, "$items": "str"}}
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({"tags": [["a", "b"]]})
+        result = df.select(exprs)
+        assert result.columns == ["tags.1", "tags.2", "tags.3"]
+        assert result["tags.1"][0] == "a"
+        assert result["tags.2"][0] == "b"
+        assert result["tags.3"][0] is None
 
     def test_empty_schema(self):
-        """Empty flatten schema → no expressions."""
-        assert _build_polars_exprs({}, {"x": pl.Int64}) == []
+        assert _build_flatten_exprs({}) == []
 
-    def test_empty_array_skipped(self):
-        """$max=0 → no expressions for that branch."""
-        schema = {"tags": {"$max": 0, "$items": "str"}}
-        assert _build_polars_exprs(schema, {"tags": pl.List(pl.Utf8)}) == []
+    def test_max_zero_skipped(self):
+        schema = {"items": {"$max": 0, "$items": {}}}
+        assert _build_flatten_exprs(schema) == []
 
-
-class TestFlattenWithPolars:
-    def test_flattens_jsonl(self, tmp_path):
-        """Basic end-to-end: JSONL → Polars flatten → parquet."""
-        data = tmp_path / "data.jsonl"
-        data.write_text('{"x": 1, "y": "a"}\n{"x": 2, "y": "b"}\n')
-        schema = {"x": "int", "y": "str"}
-        cache = tmp_path / "out.parquet"
-
-        total = _flatten_with_polars(data, schema, cache)
-
-        assert total == 2
-        assert cache.exists()
-        df = pl.read_parquet(cache)
-        assert set(df.columns) == {"x", "y"}
-        assert len(df) == 2
-
-    def test_flattens_nested_jsonl(self, tmp_path):
-        """Nested objects and arrays are flattened correctly."""
-        records = [
-            {"name": "Alice", "addr": {"city": "London"}, "tags": ["a", "b"]},
-            {"name": "Bob", "addr": {"city": "Paris"}, "tags": ["c"]},
-        ]
-        data = tmp_path / "nested.jsonl"
-        data.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    def test_columns_match_schema_columns(self):
         schema = {
-            "name": "str",
-            "addr": {"city": "str"},
-            "tags": {"$max": 2, "$items": "str"},
+            "a": "str",
+            "b": {"c": "int"},
+            "d": {"$max": 2, "$items": {"e": "str"}},
         }
-        cache = tmp_path / "nested.parquet"
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({
+            "a": ["x"],
+            "b": [{"c": 1}],
+            "d": [[{"e": "y"}, {"e": "z"}]],
+        })
+        result = df.select(exprs)
+        assert result.columns == schema_columns(schema)
 
-        total = _flatten_with_polars(data, schema, cache)
+    def test_deeply_nested(self):
+        schema = {"a": {"b": {"c": "int"}}}
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({"a": [{"b": {"c": 42}}]})
+        result = df.select(exprs)
+        assert result["a.b.c"][0] == 42
 
-        assert total == 2
-        df = pl.read_parquet(cache)
-        assert set(df.columns) == {"name", "addr.city", "tags.1", "tags.2"}
-        assert df["addr.city"].to_list() == ["London", "Paris"]
-        assert df["tags.1"].to_list() == ["a", "c"]
-        assert df["tags.2"][0] == "b"
-        assert df["tags.2"][1] is None  # OOB
+    def test_nested_arrays(self):
+        schema = {
+            "drivers": {
+                "$max": 2,
+                "$items": {
+                    "name": "str",
+                    "claims": {"$max": 1, "$items": {"amount": "int"}},
+                },
+            },
+        }
+        exprs = _build_flatten_exprs(schema)
+        df = pl.DataFrame({
+            "drivers": [[
+                {"name": "Alice", "claims": [{"amount": 500}]},
+            ]],
+        })
+        result = df.select(exprs)
+        assert result["drivers.1.name"][0] == "Alice"
+        assert result["drivers.1.claims.1.amount"][0] == 500
+        assert result["drivers.2.name"][0] is None
+        assert result["drivers.2.claims.1.amount"][0] is None
 
-    def test_flattens_json_array(self, tmp_path):
-        """Regular .json file (array of objects) works too."""
-        data = tmp_path / "data.json"
-        data.write_text(json.dumps([{"a": 1}, {"a": 2}]))
-        schema = {"a": "int"}
-        cache = tmp_path / "json.parquet"
 
-        total = _flatten_with_polars(data, schema, cache)
+class TestAdaptiveChunkSize:
+    def test_narrow_schema_uses_max(self):
+        schema = {"a": "str", "b": "int"}  # 2 columns
+        assert _adaptive_chunk_size(schema) == _FLATTEN_CHUNK_SIZE
 
-        assert total == 2
-        df = pl.read_parquet(cache)
-        assert df["a"].to_list() == [1, 2]
+    def test_wide_schema_reduces_chunks(self):
+        # 1000 columns → 256MB / (1000 × 100) = 2621 rows
+        schema = {f"col_{i}": "str" for i in range(1000)}
+        size = _adaptive_chunk_size(schema)
+        assert size < _FLATTEN_CHUNK_SIZE
+        assert size >= _MIN_CHUNK_ROWS
 
-    def test_missing_columns_become_null(self, tmp_path):
-        """Schema fields not in data → null columns in output."""
-        data = tmp_path / "data.jsonl"
-        data.write_text('{"x": 1}\n{"x": 2}\n')
-        schema = {"x": "int", "missing": "str"}
-        cache = tmp_path / "missing.parquet"
+    def test_very_wide_schema_hits_minimum(self):
+        # 50000 columns → 256MB / (50000 × 100) = 53 → clamped to 1000
+        schema = {f"col_{i}": "str" for i in range(50000)}
+        assert _adaptive_chunk_size(schema) == _MIN_CHUNK_ROWS
 
-        total = _flatten_with_polars(data, schema, cache)
+    def test_empty_schema_uses_max(self):
+        assert _adaptive_chunk_size({}) == _FLATTEN_CHUNK_SIZE
 
-        assert total == 2
-        df = pl.read_parquet(cache)
-        assert "missing" in df.columns
-        assert df["missing"].to_list() == [None, None]
 
-    def test_empty_file_writes_empty_parquet(self, tmp_path):
-        """Empty JSONL → empty parquet with correct columns."""
-        data = tmp_path / "empty.jsonl"
-        data.write_text("")
+class TestIterLineChunks:
+    def test_exact_chunks(self, tmp_path):
+        p = tmp_path / "data.jsonl"
+        p.write_text("a\nb\nc\nd\n")
+        chunks = [c for c in _iter_line_chunks(p, 2)]
+        assert len(chunks) == 2
+        assert chunks[0] == b"a\nb\n"
+        assert chunks[1] == b"c\nd\n"
+
+    def test_remainder_chunk(self, tmp_path):
+        p = tmp_path / "data.jsonl"
+        p.write_text("a\nb\nc\n")
+        chunks = [c for c in _iter_line_chunks(p, 2)]
+        assert len(chunks) == 2
+        assert chunks[1] == b"c\n"
+
+    def test_empty_file(self, tmp_path):
+        p = tmp_path / "empty.jsonl"
+        p.write_text("")
+        assert list(_iter_line_chunks(p, 10)) == []
+
+    def test_single_line(self, tmp_path):
+        p = tmp_path / "one.jsonl"
+        p.write_text("hello\n")
+        chunks = list(_iter_line_chunks(p, 100))
+        assert len(chunks) == 1
+        assert chunks[0] == b"hello\n"
+
+
+class TestPolarsFlattenToParquet:
+    def test_jsonl_produces_correct_parquet(self, tmp_path):
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text(
+            '{"name": "Alice", "age": 30}\n'
+            '{"name": "Bob", "age": 25}\n'
+        )
+        schema = {"name": "str", "age": "int"}
+        cache_path = tmp_path / "cache.parquet"
+
+        count = _polars_flatten_to_parquet(data_file, schema, cache_path)
+
+        assert count == 2
+        df = pl.read_parquet(cache_path)
+        assert df.shape == (2, 2)
+        assert df["name"].to_list() == ["Alice", "Bob"]
+
+    def test_jsonl_nested(self, tmp_path):
+        data_file = tmp_path / "nested.jsonl"
+        data_file.write_text(
+            '{"addr": {"city": "London"}, "tags": ["a", "b"]}\n'
+        )
+        schema = {
+            "addr": {"city": "str"},
+            "tags": {"$max": 3, "$items": "str"},
+        }
+        cache_path = tmp_path / "cache.parquet"
+
+        count = _polars_flatten_to_parquet(data_file, schema, cache_path)
+
+        assert count == 1
+        df = pl.read_parquet(cache_path)
+        assert "addr.city" in df.columns
+        assert "tags.1" in df.columns
+        assert "tags.3" in df.columns
+        assert df["addr.city"][0] == "London"
+        assert df["tags.1"][0] == "a"
+        assert df["tags.3"][0] is None
+
+    def test_json_array_format(self, tmp_path):
+        data_file = tmp_path / "data.json"
+        data_file.write_text(json.dumps([{"x": 1}, {"x": 2}]))
         schema = {"x": "int"}
-        cache = tmp_path / "empty.parquet"
+        cache_path = tmp_path / "cache.parquet"
 
-        # Empty JSONL will cause scan_ndjson to fail → should propagate exception
-        # (caller falls back to streaming path)
-        with pytest.raises(Exception):
-            _flatten_with_polars(data, schema, cache)
+        count = _polars_flatten_to_parquet(data_file, schema, cache_path)
 
-    def test_atomic_cleanup_on_failure(self, tmp_path):
-        """Temp file should not leak on failure."""
-        data = tmp_path / "bad.jsonl"
-        data.write_text("")  # Empty — will fail
+        assert count == 2
+        df = pl.read_parquet(cache_path)
+        assert df["x"].to_list() == [1, 2]
+
+    def test_empty_schema_writes_empty_parquet(self, tmp_path):
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1}\n')
+        cache_path = tmp_path / "cache.parquet"
+
+        count = _polars_flatten_to_parquet(data_file, {}, cache_path)
+
+        assert count == 0
+        assert cache_path.exists()
+
+    def test_progress_tracking(self, tmp_path):
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1}\n{"x": 2}\n')
         schema = {"x": "int"}
-        cache = tmp_path / "fail.parquet"
-        tmp = cache.with_suffix(".parquet.tmp")
+        cache_path = tmp_path / "cache.parquet"
 
-        with pytest.raises(Exception):
-            _flatten_with_polars(data, schema, cache)
-
-        assert not cache.exists()
-        # tmp may or may not exist depending on where the failure occurred
-
-    def test_polars_matches_streaming_result(self, tmp_path):
-        """Polars and streaming paths should produce equivalent data."""
-        records = [
-            {"name": "Alice", "age": 30, "addr": {"city": "London"}},
-            {"name": "Bob", "age": 25, "addr": {"city": "Paris"}},
-        ]
-        data = tmp_path / "data.jsonl"
-        data.write_text("\n".join(json.dumps(r) for r in records) + "\n")
-        schema = {"name": "str", "age": "int", "addr": {"city": "str"}}
-
-        polars_cache = tmp_path / "polars.parquet"
-        _flatten_with_polars(data, schema, polars_cache)
-
-        streaming_cache = tmp_path / "streaming.parquet"
-        from haute._json_flatten import _iter_json_records
-        _flatten_and_write_streaming(
-            _iter_json_records(data), schema, streaming_cache,
+        _polars_flatten_to_parquet(
+            data_file, schema, cache_path,
+            progress_key="test_polars_key", t0=time.monotonic(),
         )
 
-        df_polars = pl.read_parquet(polars_cache)
-        df_streaming = pl.read_parquet(streaming_cache)
+        progress = flatten_progress("test_polars_key")
+        assert progress is not None
+        assert progress["rows"] == 2
+        _clear_flatten_progress()
 
-        # Same columns (order may differ)
-        assert set(df_polars.columns) == set(df_streaming.columns)
-        # Same row count
-        assert len(df_polars) == len(df_streaming)
-        # Same data (compare as dicts to handle column order + type differences)
-        polars_dicts = df_polars.select(sorted(df_polars.columns)).to_dicts()
-        streaming_dicts = df_streaming.select(sorted(df_streaming.columns)).to_dicts()
-        for p_row, s_row in zip(polars_dicts, streaming_dicts):
-            for key in p_row:
-                pv, sv = p_row[key], s_row[key]
-                # Allow int vs float comparison (Polars may keep int, streaming uses float64)
-                if isinstance(pv, (int, float)) and isinstance(sv, (int, float)):
-                    assert float(pv) == float(sv), f"Mismatch on {key}: {pv} vs {sv}"
-                else:
-                    assert pv == sv, f"Mismatch on {key}: {pv} vs {sv}"
+    def test_chunked_jsonl_multiple_chunks(self, tmp_path):
+        """Multiple chunks produce the same result as a single chunk."""
+        data_file = tmp_path / "data.jsonl"
+        lines = [json.dumps({"x": i, "y": f"val_{i}"}) for i in range(10)]
+        data_file.write_text("\n".join(lines) + "\n")
+        schema = {"x": "int", "y": "str"}
+        cache_path = tmp_path / "cache.parquet"
+
+        count = _polars_flatten_to_parquet(
+            data_file, schema, cache_path, chunk_lines=3,
+        )
+
+        assert count == 10
+        df = pl.read_parquet(cache_path)
+        assert len(df) == 10
+        assert df["x"].to_list() == list(range(10))
+
+    def test_empty_jsonl_writes_empty_parquet(self, tmp_path):
+        data_file = tmp_path / "empty.jsonl"
+        data_file.write_text("")
+        schema = {"x": "int", "y": "str"}
+        cache_path = tmp_path / "cache.parquet"
+
+        count = _polars_flatten_to_parquet(data_file, schema, cache_path)
+
+        assert count == 0
+        assert cache_path.exists()
+        df = pl.read_parquet(cache_path)
+        assert len(df) == 0
+        assert set(df.columns) == {"x", "y"}
+
+    def test_atomic_cleanup_on_failure(self, tmp_path):
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1}\n')
+        # Schema references a field that doesn't exist → Polars error
+        schema = {"nonexistent": "str"}
+        cache_path = tmp_path / "cache.parquet"
+
+        with pytest.raises(Exception):
+            _polars_flatten_to_parquet(data_file, schema, cache_path)
+
+        assert not cache_path.exists()
+        assert not cache_path.with_suffix(".parquet.tmp").exists()
+
+    def test_build_json_cache_uses_streaming(self, tmp_path, monkeypatch):
+        """build_json_cache uses the column-oriented streaming path."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"a": 1}\n{"a": 2}\n')
+
+        result = build_json_cache(str(data_file))
+        assert result["row_count"] == 2
+
+    def test_read_json_flat_uses_streaming(self, tmp_path, monkeypatch):
+        """read_json_flat uses the column-oriented streaming path."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.json"
+        data_file.write_text(json.dumps([{"x": 1}, {"x": 2}]))
+
+        lf = read_json_flat(str(data_file))
+        assert lf.collect()["x"].to_list() == [1, 2]
+
+

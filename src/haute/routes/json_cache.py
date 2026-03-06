@@ -8,6 +8,7 @@ from haute._logging import get_logger
 from haute.schemas import (
     JsonCacheBuildRequest,
     JsonCacheBuildResponse,
+    JsonCacheCancelResponse,
     JsonCacheProgressResponse,
     JsonCacheStatusResponse,
 )
@@ -26,6 +27,7 @@ async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildRespons
     try:
         import asyncio
 
+        from haute._json_flatten import JsonCacheCancelledError
         from haute._json_flatten import build_json_cache as _build
 
         result = await asyncio.wait_for(
@@ -42,10 +44,21 @@ async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildRespons
             status_code=504,
             detail=f"JSON cache build timed out ({_BUILD_TIMEOUT / 60:.0f} min limit)",
         )
+    except JsonCacheCancelledError:
+        raise HTTPException(status_code=499, detail="Cache build cancelled")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cancel", response_model=JsonCacheCancelResponse)
+async def cancel_json_cache_build(body: JsonCacheBuildRequest) -> JsonCacheCancelResponse:
+    """Cancel an in-progress JSON cache build."""
+    from haute._json_flatten import cancel_json_cache
+
+    cancelled = cancel_json_cache(body.path)
+    return JsonCacheCancelResponse(cancelled=cancelled, data_path=body.path)
 
 
 @router.get("/progress", response_model=JsonCacheProgressResponse)

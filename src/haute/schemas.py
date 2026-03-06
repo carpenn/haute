@@ -202,7 +202,8 @@ class BrowseFilesResponse(BaseModel):
 class SchemaResponse(BaseModel):
     path: str
     columns: list[ColumnInfo]
-    row_count: int
+    row_count: int | None = None
+    row_count_estimated: bool = False
     column_count: int
     preview: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -322,10 +323,16 @@ class JsonCacheBuildResponse(BaseModel):
     cache_seconds: float
 
 
+class JsonCacheCancelResponse(BaseModel):
+    cancelled: bool
+    data_path: str
+
+
 class JsonCacheProgressResponse(BaseModel):
     active: bool
     rows: int = 0
     elapsed: float = 0.0
+    phase: str = ""
 
 
 class JsonCacheStatusResponse(BaseModel):

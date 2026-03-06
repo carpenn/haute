@@ -7,6 +7,7 @@ import { withAlpha } from "../../utils/color"
 import { CacheFetchButton } from "../../components/CacheFetchButton"
 import {
   buildJsonCache,
+  cancelJsonCache,
   getJsonCacheProgress,
   getJsonCacheStatus,
   deleteJsonCache,
@@ -36,6 +37,7 @@ function JsonCacheButton({ dataPath }: { dataPath: string }) {
       }
       getProgress={(key) => getJsonCacheProgress(key)}
       deleteCache={(key) => deleteJsonCache(key) as Promise<JsonCacheStatus>}
+      cancelFetch={(key) => cancelJsonCache(key)}
       timestampField="cached_at"
       labels={{
         fetchLabel: "Cache as Parquet",

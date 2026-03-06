@@ -990,8 +990,8 @@ class TestApiInputLargeFileGating:
         df = result.collect()
         assert df["x"].to_list() == [1, 2, 3]
 
-    def test_small_file_auto_processes(self, tmp_path, monkeypatch):
-        """Small JSONL files should auto-process without requiring explicit caching."""
+    def test_uncached_file_raises(self, tmp_path, monkeypatch):
+        """Any uncached JSONL file should raise, regardless of size."""
         monkeypatch.chdir(tmp_path)
 
         data_file = tmp_path / "small.jsonl"
@@ -999,9 +999,8 @@ class TestApiInputLargeFileGating:
 
         node = _api_input_node("api", str(data_file))
         _, fn, _ = _build_node_fn(node)
-        result = fn()
-        df = result.collect()
-        assert df["x"].to_list() == [10, 20]
+        with pytest.raises(RuntimeError, match="not been cached"):
+            fn()
 
 
 # ---------------------------------------------------------------------------

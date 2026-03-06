@@ -223,3 +223,46 @@ class TestDeleteJsonCache:
     def test_delete_missing_path_returns_422(self, client: TestClient) -> None:
         resp = client.delete("/api/json-cache")
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /api/json-cache/cancel
+# ---------------------------------------------------------------------------
+
+
+class TestCancelJsonCache:
+    def test_cancel_active_build(self, client: TestClient) -> None:
+        """Cancelling an active build returns cancelled=True."""
+        with patch("haute._json_flatten.cancel_json_cache", return_value=True):
+            resp = client.post("/api/json-cache/cancel", json={"path": "data.jsonl"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cancelled"] is True
+        assert data["data_path"] == "data.jsonl"
+
+    def test_cancel_no_active_build(self, client: TestClient) -> None:
+        """Cancelling when no build is active returns cancelled=False."""
+        with patch("haute._json_flatten.cancel_json_cache", return_value=False):
+            resp = client.post("/api/json-cache/cancel", json={"path": "data.jsonl"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cancelled"] is False
+
+    def test_cancel_missing_path_returns_422(self, client: TestClient) -> None:
+        resp = client.post("/api/json-cache/cancel", json={})
+        assert resp.status_code == 422
+
+    def test_build_cancelled_returns_499(self, client: TestClient) -> None:
+        """A build that gets cancelled returns 499."""
+        from haute._json_flatten import JsonCacheCancelledError
+
+        with patch(
+            "haute._json_flatten.build_json_cache",
+            side_effect=JsonCacheCancelledError("cancelled"),
+        ):
+            resp = client.post("/api/json-cache/build", json={"path": "data.jsonl"})
+
+        assert resp.status_code == 499
+        assert "cancelled" in resp.json()["detail"].lower()

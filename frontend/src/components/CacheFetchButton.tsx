@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Loader2, HardDriveDownload, Trash2 } from "lucide-react"
+import { Loader2, HardDriveDownload, Trash2, XCircle } from "lucide-react"
 import { ApiError } from "../api/client"
 import { formatBytes } from "../utils/formatBytes"
 import { formatTime } from "../utils/formatTime"
@@ -14,7 +14,7 @@ export type BaseCacheStatus = {
   size_bytes: number
 }
 
-type ProgressPayload = { active: boolean; rows?: number; elapsed?: number }
+type ProgressPayload = { active: boolean; rows?: number; elapsed?: number; phase?: string }
 
 export type CacheFetchButtonProps<TStatus extends BaseCacheStatus> = {
   /** The key that identifies the resource (path, table name, etc.). */
@@ -28,6 +28,8 @@ export type CacheFetchButtonProps<TStatus extends BaseCacheStatus> = {
   getProgress: (key: string) => Promise<ProgressPayload>
   /** API: delete the cached data. */
   deleteCache: (key: string) => Promise<TStatus>
+  /** API: cancel an in-progress build. Optional — when absent, no cancel button shown. */
+  cancelFetch?: (key: string) => Promise<unknown>
 
   /** Field on TStatus that holds the "cached at" unix timestamp. */
   timestampField: keyof TStatus
@@ -56,13 +58,14 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
   startFetch,
   getProgress,
   deleteCache: deleteCacheFn,
+  cancelFetch: cancelFetchFn,
   timestampField,
   labels,
   onCacheReady,
 }: CacheFetchButtonProps<TStatus>) {
   const [cache, setCache] = useState<TStatus | null>(null)
   const [building, setBuilding] = useState(false)
-  const [progress, setProgress] = useState<{ rows: number; elapsed: number } | null>(null)
+  const [progress, setProgress] = useState<{ rows: number; elapsed: number; phase: string } | null>(null)
   const [error, setError] = useState("")
 
   // Load initial status
@@ -73,7 +76,7 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
         setCache(data)
         if (data.cached) onCacheReady?.(data)
       })
-      .catch(() => setCache(null))
+      .catch((e) => { console.warn("cache status fetch failed", e); setCache(null) })
   }, [resourceKey])
 
   // Poll progress while building
@@ -82,9 +85,9 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
     const id = setInterval(() => {
       getProgress(resourceKey)
         .then((data) => {
-          if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0 })
+          if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0, phase: data.phase || "" })
         })
-        .catch(() => { /* polling retry on next interval */ })
+        .catch((e) => { console.warn("progress poll failed", e) })
     }, 1000)
     return () => { clearInterval(id); setProgress(null) }
   }, [building, resourceKey])
@@ -100,9 +103,20 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
         onCacheReady?.(data)
       })
       .catch((e: Error) => {
-        setError(e instanceof ApiError ? e.detail || e.message : e.message)
+        const msg = e instanceof ApiError ? e.detail || e.message : e.message
+        // Don't show cancellation as an error
+        if (msg === "Cache build cancelled") {
+          setError("")
+        } else {
+          setError(msg)
+        }
         setBuilding(false)
       })
+  }
+
+  const doCancel = () => {
+    if (!resourceKey || !cancelFetchFn) return
+    cancelFetchFn(resourceKey).catch((e) => { console.warn("cancel request failed", e) })
   }
 
   const doDelete = () => {
@@ -116,17 +130,21 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
   return (
     <div>
       <button
-        onClick={doFetch}
-        disabled={!resourceKey || building}
+        onClick={building && cancelFetchFn ? doCancel : doFetch}
+        disabled={!resourceKey || (building && !cancelFetchFn)}
         className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
         style={{
-          background: cache?.cached ? 'rgba(34,197,94,.1)' : 'var(--accent-soft)',
-          border: cache?.cached ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--accent)',
-          color: cache?.cached ? '#22c55e' : 'var(--accent)',
+          background: building && cancelFetchFn ? 'rgba(239,68,68,.1)' : cache?.cached ? 'rgba(34,197,94,.1)' : 'var(--accent-soft)',
+          border: building && cancelFetchFn ? '1px solid rgba(239,68,68,.3)' : cache?.cached ? '1px solid rgba(34,197,94,.3)' : '1px solid var(--accent)',
+          color: building && cancelFetchFn ? '#ef4444' : cache?.cached ? '#22c55e' : 'var(--accent)',
         }}
       >
         {building ? (
-          <><Loader2 size={14} className="animate-spin" /> {progress ? `${progress.rows.toLocaleString()} rows \u00b7 ${progress.elapsed}s` : labels.pendingLabel}</>
+          cancelFetchFn ? (
+            <><XCircle size={14} /> Cancel {progress ? `(${progress.phase ? `${progress.phase}… ` : ""}${progress.rows.toLocaleString()} rows \u00b7 ${progress.elapsed}s)` : ""}</>
+          ) : (
+            <><Loader2 size={14} className="animate-spin" /> {progress ? `${progress.phase ? `${progress.phase}… ` : ""}${progress.rows.toLocaleString()} rows \u00b7 ${progress.elapsed}s` : labels.pendingLabel}</>
+          )
         ) : cache?.cached ? (
           <><HardDriveDownload size={14} /> {labels.refreshLabel}</>
         ) : (
