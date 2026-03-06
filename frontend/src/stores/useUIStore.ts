@@ -1,6 +1,6 @@
 /**
  * Zustand store for chrome / layout UI state — panel toggles, modals,
- * grid settings, sync banner, dirty flag, and node panel width.
+ * sync banner, dirty flag, and node panel width.
  *
  * Toast notifications live in useToastStore.
  * Application settings (MLflow, scenarios, caches) live in useSettingsStore.
@@ -11,16 +11,16 @@ interface UIState {
   // Modals / panels
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
-  settingsOpen: boolean
-  setSettingsOpen: (open: boolean) => void
+  utilityOpen: boolean
+  setUtilityOpen: (open: boolean) => void
+  importsOpen: boolean
+  setImportsOpen: (open: boolean) => void
+  gitOpen: boolean
+  setGitOpen: (open: boolean) => void
   shortcutsOpen: boolean
   setShortcutsOpen: (open: boolean | ((prev: boolean) => boolean)) => void
   submodelDialog: { nodeIds: string[] } | null
   setSubmodelDialog: (dialog: { nodeIds: string[] } | null) => void
-
-  // Grid / layout
-  snapToGrid: boolean
-  toggleSnapToGrid: () => void
 
   // Sync banner
   syncBanner: string | null
@@ -39,8 +39,12 @@ const useUIStore = create<UIState>()((set) => ({
   // Modals / panels
   paletteOpen: true,
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  settingsOpen: false,
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  utilityOpen: false,
+  setUtilityOpen: (open) => set({ utilityOpen: open, importsOpen: false, gitOpen: false }),
+  importsOpen: false,
+  setImportsOpen: (open) => set({ importsOpen: open, utilityOpen: false, gitOpen: false }),
+  gitOpen: false,
+  setGitOpen: (open) => set({ gitOpen: open, utilityOpen: false, importsOpen: false }),
   shortcutsOpen: false,
   setShortcutsOpen: (open) => {
     if (typeof open === "function") {
@@ -51,10 +55,6 @@ const useUIStore = create<UIState>()((set) => ({
   },
   submodelDialog: null,
   setSubmodelDialog: (dialog) => set({ submodelDialog: dialog }),
-
-  // Grid
-  snapToGrid: false,
-  toggleSnapToGrid: () => set((s) => ({ snapToGrid: !s.snapToGrid })),
 
   // Sync banner
   syncBanner: null,

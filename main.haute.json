@@ -36,5 +36,6 @@
   "scenarios": [
     "live",
     "nb_batch"
-  ]
+  ],
+  "active_scenario": "nb_batch"
 }

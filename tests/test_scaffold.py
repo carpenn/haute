@@ -652,24 +652,24 @@ class TestStarterFiles:
         assert "import haute" in result
         assert "import polars" in result
 
-    def test_pipeline_imports_from_helpers(self) -> None:
+    def test_pipeline_imports_from_utility(self) -> None:
         result = starter_pipeline("my_project")
-        assert "from helpers.features import" in result
+        assert "from utility.features import" in result
         assert "to_date" in result
         assert "years_between" in result
         assert "cols_matching" in result
         # Import must appear before the pipeline declaration
-        import_line = result.index("from helpers.features import")
+        import_line = result.index("from utility.features import")
         pipeline_decl = result.index("haute.Pipeline(")
         assert import_line < pipeline_decl
 
-    def test_starter_helpers_features(self) -> None:
-        from haute._scaffold import starter_helpers_features, starter_helpers_init
+    def test_starter_utility_features(self) -> None:
+        from haute._scaffold import starter_utility_features, starter_utility_init
 
-        init_result = starter_helpers_init()
-        assert "helpers" in init_result.lower()
+        init_result = starter_utility_init()
+        assert "utilit" in init_result.lower()
 
-        features_result = starter_helpers_features()
+        features_result = starter_utility_features()
         assert "def to_date(col_name: str)" in features_result
         assert "def years_between(earlier: pl.Expr, later: pl.Expr)" in features_result
         assert "def cols_matching(all_cols: list[str], pattern_fn)" in features_result

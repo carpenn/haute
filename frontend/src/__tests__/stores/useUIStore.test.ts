@@ -14,10 +14,8 @@ import useUIStore from "../../stores/useUIStore.ts"
 function resetStore() {
   useUIStore.setState({
     paletteOpen: true,
-    settingsOpen: false,
     shortcutsOpen: false,
     submodelDialog: null,
-    snapToGrid: false,
     syncBanner: null,
     dirty: false,
     nodePanelWidth: 900,
@@ -43,13 +41,6 @@ describe("useUIStore", () => {
     })
   })
 
-  describe("setSettingsOpen", () => {
-    it("toggles settings state", () => {
-      useUIStore.getState().setSettingsOpen(true)
-      expect(useUIStore.getState().settingsOpen).toBe(true)
-    })
-  })
-
   describe("setShortcutsOpen", () => {
     it("accepts a boolean", () => {
       useUIStore.getState().setShortcutsOpen(true)
@@ -69,23 +60,6 @@ describe("useUIStore", () => {
       expect(useUIStore.getState().submodelDialog).toEqual({ nodeIds: ["a", "b"] })
       useUIStore.getState().setSubmodelDialog(null)
       expect(useUIStore.getState().submodelDialog).toBeNull()
-    })
-  })
-
-  // ────────────────────────────────────────────────────────────────
-  // Grid
-  // ────────────────────────────────────────────────────────────────
-
-  describe("toggleSnapToGrid", () => {
-    it("toggles from false to true", () => {
-      useUIStore.getState().toggleSnapToGrid()
-      expect(useUIStore.getState().snapToGrid).toBe(true)
-    })
-
-    it("toggles back to false", () => {
-      useUIStore.getState().toggleSnapToGrid()
-      useUIStore.getState().toggleSnapToGrid()
-      expect(useUIStore.getState().snapToGrid).toBe(false)
     })
   })
 

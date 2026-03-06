@@ -101,11 +101,11 @@ def init(target: str, ci: str) -> None:
         gitlab_ci_yml,
         haute_toml,
         pre_commit_hook,
-        starter_helpers_features,
-        starter_helpers_init,
         starter_pipeline,
         starter_test,
         starter_test_quote,
+        starter_utility_features,
+        starter_utility_init,
     )
 
     # Solo mode is configured in haute.toml, not via a CLI flag.
@@ -134,11 +134,11 @@ def init(target: str, ci: str) -> None:
     (project_dir / "data").mkdir(exist_ok=True)
     (project_dir / "prompts").mkdir(exist_ok=True)
 
-    # -- helpers/ - project-level helper functions -----------------------------
-    helpers_dir = project_dir / "helpers"
-    helpers_dir.mkdir(exist_ok=True)
-    (helpers_dir / "__init__.py").write_text(starter_helpers_init(), encoding="utf-8")
-    (helpers_dir / "features.py").write_text(starter_helpers_features(), encoding="utf-8")
+    # -- utility/ - project-level utility functions -----------------------------
+    utility_dir = project_dir / "utility"
+    utility_dir.mkdir(exist_ok=True)
+    (utility_dir / "__init__.py").write_text(starter_utility_init(), encoding="utf-8")
+    (utility_dir / "features.py").write_text(starter_utility_features(), encoding="utf-8")
 
     # -- main.py - starter pipeline --------------------------------------------
     (project_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
@@ -233,7 +233,7 @@ def init(target: str, ci: str) -> None:
     click.echo("  haute.toml            - project, deploy, safety & CI config")
     click.echo(f"  .env.example         - {target} credentials template")
     click.echo("  main.py              - starter pipeline")
-    click.echo("  helpers/             - project-level helper functions")
+    click.echo("  utility/             - project-level utility functions")
     click.echo("  data/                - put your data files here")
     click.echo("  prompts/             - reusable AI prompts for pipeline tasks")
     click.echo("  tests/               - starter test + example quote payloads")

@@ -340,6 +340,44 @@ class JsonCacheStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# /api/utility
+# ---------------------------------------------------------------------------
+
+
+class UtilityFileItem(BaseModel):
+    name: str
+    module: str  # e.g. "features" (stem, no .py)
+
+
+class UtilityListResponse(BaseModel):
+    files: list[UtilityFileItem]
+
+
+class UtilityReadResponse(BaseModel):
+    name: str
+    module: str
+    content: str
+
+
+class UtilityWriteRequest(BaseModel):
+    content: str
+
+
+class UtilityCreateRequest(BaseModel):
+    name: str  # filename without .py extension
+    content: str = ""
+
+
+class UtilityWriteResponse(BaseModel):
+    status: str = "ok"
+    name: str = ""
+    module: str = ""
+    import_line: str = ""  # e.g. "from utility.features import *"
+    error: str | None = None
+    error_line: int | None = None
+
+
+# ---------------------------------------------------------------------------
 # /api/submodel/*
 # ---------------------------------------------------------------------------
 
@@ -592,3 +630,95 @@ class OptimiserMlflowLogResponse(BaseModel):
     run_url: str | None = None
     tracking_uri: str = ""
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# /api/git/*
+# ---------------------------------------------------------------------------
+
+
+class GitStatusResponse(BaseModel):
+    branch: str
+    is_main: bool
+    is_read_only: bool
+    changed_files: list[str] = Field(default_factory=list)
+    main_ahead: bool = False
+    main_ahead_by: int = 0
+    main_last_updated: str | None = None
+
+
+class GitBranchItem(BaseModel):
+    name: str
+    is_yours: bool
+    is_current: bool
+    is_archived: bool
+    last_commit_time: str = ""
+    commit_count: int = 0
+
+
+class GitBranchListResponse(BaseModel):
+    current: str
+    branches: list[GitBranchItem] = Field(default_factory=list)
+
+
+class GitCreateBranchRequest(BaseModel):
+    description: str
+
+
+class GitCreateBranchResponse(BaseModel):
+    branch: str
+
+
+class GitSwitchBranchRequest(BaseModel):
+    branch: str
+
+
+class GitSaveResponse(BaseModel):
+    commit_sha: str
+    message: str
+    timestamp: str
+
+
+class GitSubmitResponse(BaseModel):
+    compare_url: str | None = None
+    branch: str
+
+
+class GitHistoryEntry(BaseModel):
+    sha: str
+    short_sha: str
+    message: str
+    timestamp: str
+    files_changed: list[str] = Field(default_factory=list)
+
+
+class GitHistoryResponse(BaseModel):
+    entries: list[GitHistoryEntry] = Field(default_factory=list)
+
+
+class GitRevertRequest(BaseModel):
+    sha: str
+
+
+class GitRevertResponse(BaseModel):
+    backup_tag: str
+    reverted_to: str
+
+
+class GitPullResponse(BaseModel):
+    success: bool
+    conflict: bool = False
+    conflict_message: str | None = None
+    commits_pulled: int = 0
+
+
+class GitArchiveRequest(BaseModel):
+    branch: str
+
+
+class GitArchiveResponse(BaseModel):
+    archived_as: str
+
+
+class GitDeleteBranchRequest(BaseModel):
+    branch: str

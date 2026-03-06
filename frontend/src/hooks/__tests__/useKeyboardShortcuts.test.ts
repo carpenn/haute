@@ -33,7 +33,7 @@ describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     // Reset store state between tests
     useUIStore.setState({
-      shortcutsOpen: false, submodelDialog: null, snapToGrid: false,
+      shortcutsOpen: false, submodelDialog: null,
     })
     useToastStore.setState({
       toasts: [], _toastCounter: 0,
@@ -138,13 +138,6 @@ describe("useKeyboardShortcuts", () => {
     params.graphRef.current.edges = []
     fireKey("Delete")
     expect(params.setNodes).not.toHaveBeenCalled()
-  })
-
-  it("G (no mod) toggles snap-to-grid and toasts", () => {
-    fireKey("g")
-    expect(useUIStore.getState().snapToGrid).toBe(true)
-    const toasts = useToastStore.getState().toasts
-    expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Snap to grid ON" })
   })
 
   it("Ctrl+G with 2+ selected opens submodel dialog", () => {

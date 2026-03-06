@@ -4,10 +4,8 @@ import useUIStore from "../useUIStore"
 function reset() {
   useUIStore.setState({
     paletteOpen: true,
-    settingsOpen: false,
     shortcutsOpen: false,
     submodelDialog: null,
-    snapToGrid: false,
     syncBanner: null,
     dirty: false,
     nodePanelWidth: 900,
@@ -26,13 +24,6 @@ describe("useUIStore", () => {
       expect(useUIStore.getState().paletteOpen).toBe(true)
       useUIStore.getState().setPaletteOpen(false)
       expect(useUIStore.getState().paletteOpen).toBe(false)
-    })
-  })
-
-  describe("setSettingsOpen", () => {
-    it("toggles settings state", () => {
-      useUIStore.getState().setSettingsOpen(true)
-      expect(useUIStore.getState().settingsOpen).toBe(true)
     })
   })
 
@@ -55,23 +46,6 @@ describe("useUIStore", () => {
       expect(useUIStore.getState().submodelDialog).toEqual({ nodeIds: ["a", "b"] })
       useUIStore.getState().setSubmodelDialog(null)
       expect(useUIStore.getState().submodelDialog).toBeNull()
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // Grid
-  // -----------------------------------------------------------------------
-
-  describe("toggleSnapToGrid", () => {
-    it("toggles from false to true", () => {
-      useUIStore.getState().toggleSnapToGrid()
-      expect(useUIStore.getState().snapToGrid).toBe(true)
-    })
-
-    it("toggles back to false", () => {
-      useUIStore.getState().toggleSnapToGrid()
-      useUIStore.getState().toggleSnapToGrid()
-      expect(useUIStore.getState().snapToGrid).toBe(false)
     })
   })
 
@@ -106,6 +80,38 @@ describe("useUIStore", () => {
       useUIStore.getState().setDirty(true)
       useUIStore.getState().setDirty(false)
       expect(useUIStore.getState().dirty).toBe(false)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // Git panel mutual exclusion
+  // -----------------------------------------------------------------------
+
+  describe("setGitOpen", () => {
+    it("opens git panel", () => {
+      useUIStore.getState().setGitOpen(true)
+      expect(useUIStore.getState().gitOpen).toBe(true)
+    })
+
+    it("closes utility and imports when opening git", () => {
+      useUIStore.getState().setUtilityOpen(true)
+      useUIStore.getState().setImportsOpen(true)
+      useUIStore.getState().setGitOpen(true)
+      expect(useUIStore.getState().gitOpen).toBe(true)
+      expect(useUIStore.getState().utilityOpen).toBe(false)
+      expect(useUIStore.getState().importsOpen).toBe(false)
+    })
+
+    it("setting utility closes git", () => {
+      useUIStore.getState().setGitOpen(true)
+      useUIStore.getState().setUtilityOpen(true)
+      expect(useUIStore.getState().gitOpen).toBe(false)
+    })
+
+    it("setting imports closes git", () => {
+      useUIStore.getState().setGitOpen(true)
+      useUIStore.getState().setImportsOpen(true)
+      expect(useUIStore.getState().gitOpen).toBe(false)
     })
   })
 

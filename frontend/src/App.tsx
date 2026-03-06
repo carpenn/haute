@@ -26,8 +26,10 @@ import ContextMenu from "./components/ContextMenu"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import BreadcrumbBar from "./components/BreadcrumbBar"
 import Toolbar from "./components/Toolbar"
-import SettingsModal from "./components/SettingsModal"
 import SubmodelDialog from "./components/SubmodelDialog"
+import UtilityPanel from "./panels/UtilityPanel"
+import ImportsPanel from "./panels/ImportsPanel"
+import GitPanel from "./panels/GitPanel"
 
 import useUndoRedo from "./hooks/useUndoRedo"
 import useWebSocketSync from "./hooks/useWebSocketSync"
@@ -94,14 +96,16 @@ function FlowEditor() {
   // UI store (chrome / layout)
   const paletteOpen = useUIStore((s) => s.paletteOpen)
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen)
-  const settingsOpen = useUIStore((s) => s.settingsOpen)
-  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen)
+  const utilityOpen = useUIStore((s) => s.utilityOpen)
+  const setUtilityOpen = useUIStore((s) => s.setUtilityOpen)
+  const importsOpen = useUIStore((s) => s.importsOpen)
+  const setImportsOpen = useUIStore((s) => s.setImportsOpen)
+  const gitOpen = useUIStore((s) => s.gitOpen)
+  const setGitOpen = useUIStore((s) => s.setGitOpen)
   const shortcutsOpen = useUIStore((s) => s.shortcutsOpen)
   const setShortcutsOpen = useUIStore((s) => s.setShortcutsOpen)
   const submodelDialog = useUIStore((s) => s.submodelDialog)
   const setSubmodelDialog = useUIStore((s) => s.setSubmodelDialog)
-  const snapToGrid = useUIStore((s) => s.snapToGrid)
-  const toggleSnapToGrid = useUIStore((s) => s.toggleSnapToGrid)
   const syncBanner = useUIStore((s) => s.syncBanner)
   const setSyncBanner = useUIStore((s) => s.setSyncBanner)
   const dirty = useUIStore((s) => s.dirty)
@@ -253,24 +257,19 @@ function FlowEditor() {
     <div className="h-full w-full flex flex-col" style={{ background: 'var(--bg-base)' }}>
       <Toolbar
         nodeCount={nodes.length}
-        edgeCount={edges.length}
         dirty={dirty}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
-        snapToGrid={snapToGrid}
-        onToggleSnapToGrid={() => {
-          toggleSnapToGrid()
-          addToast("info", useUIStore.getState().snapToGrid ? "Snap to grid ON" : "Snap to grid OFF")
-        }}
         onShowShortcuts={() => setShortcutsOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenUtility={() => { setUtilityOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
+        onOpenImports={() => { setImportsOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
+        onOpenGit={() => { setGitOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
         onCentre={() => fitView({ padding: 0.8 })}
         onAutoLayout={handleAutoLayout}
         onSave={handleSave}
         wsStatus={wsStatus}
-        lastRunMs={previewData?.timing_ms}
         timings={previewData?.timings}
         memory={previewData?.memory}
       />
@@ -314,14 +313,14 @@ function FlowEditor() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
-                onNodeClick={onNodeClick}
+                onNodeClick={(event, node) => { setUtilityOpen(false); setImportsOpen(false); setGitOpen(false); onNodeClick(event, node) }}
                 onNodeContextMenu={onNodeContextMenu}
                 onNodeDoubleClick={(_event, node) => {
                   if (nodeData(node).nodeType === NODE_TYPES.SUBMODEL) {
                     handleDrillIntoSubmodel(node.id)
                   }
                 }}
-                onPaneClick={() => { setContextMenu(null); clearTrace(); setSelectedNode(null); lastSelectedNodeRef.current = null }}
+                onPaneClick={() => { setContextMenu(null); clearTrace(); setSelectedNode(null); lastSelectedNodeRef.current = null; setUtilityOpen(false); setImportsOpen(false); setGitOpen(false) }}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 nodeTypes={nodeTypes}
@@ -330,8 +329,6 @@ function FlowEditor() {
                 selectNodesOnDrag
                 selectionMode={SelectionMode.Partial}
                 selectionKeyCode={null}
-                snapToGrid={snapToGrid}
-                snapGrid={[20, 20]}
                 fitView
                 fitViewOptions={{ padding: 0.8 }}
                 proOptions={{ hideAttribution: true }}
@@ -342,7 +339,7 @@ function FlowEditor() {
                   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.15)' },
                 }}
               >
-                <Background variant={BackgroundVariant.Dots} gap={snapToGrid ? 20 : 24} size={1} color={snapToGrid ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.06)"} />
+                <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="rgba(255,255,255,.06)" />
               </ReactFlow>
             </div>
           </ErrorBoundary>
@@ -376,7 +373,32 @@ function FlowEditor() {
 
         <aside aria-label="Node properties">
           <ErrorBoundary name="NodePanel">
-            {traceResult ? (
+            {gitOpen ? (
+              <GitPanel onClose={() => setGitOpen(false)} />
+            ) : utilityOpen ? (
+              <UtilityPanel
+                onClose={() => setUtilityOpen(false)}
+                onImportAdded={(importLine) => {
+                  const current = preambleRef.current
+                  if (!current.includes(importLine)) {
+                    const updated = current ? `${current}\n${importLine}` : importLine
+                    setPreamble(updated)
+                    preambleRef.current = updated
+                    setDirty(true)
+                  }
+                }}
+              />
+            ) : importsOpen ? (
+              <ImportsPanel
+                preamble={preamble}
+                onPreambleChange={(value) => {
+                  setPreamble(value)
+                  preambleRef.current = value
+                  setDirty(true)
+                }}
+                onClose={() => setImportsOpen(false)}
+              />
+            ) : traceResult ? (
               <TracePanel trace={traceResult} onClose={clearTrace} />
             ) : (
               <NodePanel
@@ -414,18 +436,6 @@ function FlowEditor() {
           onCreateInstance={handleCreateInstance}
           isSubmodel={contextMenu.isSubmodel}
           onDissolveSubmodel={handleDissolveSubmodel}
-        />
-      )}
-
-      {settingsOpen && (
-        <SettingsModal
-          preamble={preamble}
-          onPreambleChange={(value) => {
-            setPreamble(value)
-            preambleRef.current = value
-            setDirty(true)
-          }}
-          onClose={() => setSettingsOpen(false)}
         />
       )}
 

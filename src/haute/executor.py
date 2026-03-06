@@ -53,6 +53,14 @@ _DEFAULT_CHUNK_SIZE = 500_000  # rows per chunk for optimiser apply
 _MAX_PREVIEW_ROWS = 10_000  # safety cap for execute_graph JSON payload
 
 
+class PreambleError(Exception):
+    """Raised when the preamble (imports / utility code) fails to compile."""
+
+    def __init__(self, message: str, source_line: int | None = None):
+        super().__init__(message)
+        self.source_line = source_line
+
+
 def _compile_preamble(preamble: str) -> dict[str, Any]:
     """Compile user-defined preamble code into a namespace dict.
 
@@ -63,23 +71,70 @@ def _compile_preamble(preamble: str) -> dict[str, Any]:
 
     Uses a single dict for globals/locals so preamble functions can call
     each other (they share the same ``__globals__``).
+
+    Raises ``PreambleError`` with a human-readable message and optional
+    source line number when the preamble fails to execute (e.g. a utility
+    module has a NameError).
     """
     if not preamble or not preamble.strip():
         return {}
-    # Preamble may contain imports (e.g. from helpers.features import …)
+    # Preamble may contain imports (e.g. from utility.features import …)
     # which are legitimate, but still validate against other dangerous
     # patterns (dunder access, eval, exec, etc.).
     validate_user_code(preamble, allow_imports=True)
-    # Ensure project root is importable so `from helpers.xxx import …` works
+    # Ensure project root is importable so `from utility.xxx import …` works
     # even when the server process was spawned by uvicorn reload.
     import os  # noqa: E401
     import sys
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
+    # Evict cached utility modules so edits in the GUI are picked up
+    # on every run instead of serving stale bytecode from sys.modules.
+    for mod_name in [k for k in sys.modules if k == "utility" or k.startswith("utility.")]:
+        del sys.modules[mod_name]
+
     ns = safe_globals(pl=pl, allow_imports=True)
     base_keys = set(ns.keys())
-    exec(preamble, ns)  # noqa: S102  — single dict = shared globals
+    try:
+        exec(preamble, ns)  # noqa: S102  — single dict = shared globals
+    except Exception as exc:
+        # Extract the most useful line number and source file from
+        # the traceback or exception attributes.
+        import traceback as _tb
+        from pathlib import Path as _Path
+
+        source_line: int | None = None
+        source_file: str | None = None
+
+        # SyntaxError carries .filename and .lineno directly
+        if isinstance(exc, SyntaxError) and exc.filename:
+            source_file = exc.filename
+            source_line = exc.lineno
+
+        # For runtime errors, walk the traceback to find the utility frame
+        if source_file is None and exc.__traceback__:
+            for frame in reversed(_tb.extract_tb(exc.__traceback__)):
+                if "utility" in frame.filename:
+                    source_line = frame.lineno
+                    source_file = frame.filename
+                    break
+                if frame.filename == "<string>":
+                    source_line = frame.lineno
+                    break
+
+        msg = f"Import/preamble error: {exc}"
+        if source_file and source_file != "<string>":
+            try:
+                rel = _Path(source_file).relative_to(_Path.cwd())
+            except ValueError:
+                rel = source_file
+            msg = f"Error in {rel} line {source_line}: {exc}"
+        elif source_line:
+            msg = f"Preamble line {source_line}: {exc}"
+
+        raise PreambleError(msg, source_line=source_line) from exc
+
     return {k: v for k, v in ns.items() if k not in base_keys}
 
 
@@ -993,7 +1048,20 @@ def _eager_execute(
     node_id → output DataFrame size in bytes, and error_lines maps
     node_id → 1-based line number in user code for the error.
     """
-    preamble_ns = _compile_preamble(graph.preamble or "")
+    try:
+        preamble_ns = _compile_preamble(graph.preamble or "")
+    except PreambleError as exc:
+        # Preamble failed — mark every node in the graph as errored so the
+        # frontend shows the problem on every node rather than a raw 500.
+        order = [n.id for n in graph.nodes]
+        err_msg = str(exc)
+        errors = {nid: err_msg for nid in order}
+        empty: dict[str, pl.DataFrame | None] = {nid: None for nid in order}
+        no_timing: dict[str, float] = {}
+        no_mem: dict[str, int] = {}
+        no_lines: dict[str, int] = {}
+        return empty, order, errors, no_timing, no_mem, no_lines
+
     result = _execute_eager_core(
         graph,
         _build_node_fn,

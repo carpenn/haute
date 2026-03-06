@@ -1,0 +1,710 @@
+"""Git operations layer with guardrails for non-technical users.
+
+All git CLI interactions go through this module.  Routes never call
+``subprocess`` directly — this gives us a single place for:
+
+- **Guardrails** — refuse operations on protected branches
+- **Error handling** — translate git errors to user-friendly messages
+- **Backup safety nets** — tag before destructive operations (revert)
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from haute._logging import get_logger
+
+logger = get_logger(component="git")
+
+PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
+
+# Branch names created by haute follow: pricing/<user>/<slug>
+_BRANCH_PREFIX = "pricing"
+_ARCHIVE_PREFIX = "archive"
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class GitError(Exception):
+    """User-facing git operation error."""
+
+
+class GitGuardrailError(GitError):
+    """Blocked by a safety guardrail (e.g. writing to main)."""
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GitStatus:
+    branch: str
+    is_main: bool
+    is_read_only: bool
+    changed_files: list[str]
+    main_ahead: bool
+    main_ahead_by: int
+    main_last_updated: str | None
+
+
+@dataclass
+class BranchInfo:
+    name: str
+    is_yours: bool
+    is_current: bool
+    is_archived: bool
+    last_commit_time: str
+    commit_count: int
+
+
+@dataclass
+class BranchListResult:
+    current: str
+    branches: list[BranchInfo]
+
+
+@dataclass
+class SaveResult:
+    commit_sha: str
+    message: str
+    timestamp: str
+
+
+@dataclass
+class HistoryEntry:
+    sha: str
+    short_sha: str
+    message: str
+    timestamp: str
+    files_changed: list[str]
+
+
+@dataclass
+class RevertResult:
+    backup_tag: str
+    reverted_to: str
+
+
+@dataclass
+class PullResult:
+    success: bool
+    conflict: bool
+    conflict_message: str | None
+    commits_pulled: int
+
+
+@dataclass
+class SubmitResult:
+    compare_url: str | None
+    branch: str
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _run_git(*args: str, check: bool = True, cwd: Path | None = None) -> str:
+    """Run a git command and return stdout.  Raises ``GitError`` on failure."""
+    cmd = ["git"] + list(args)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=cwd or Path.cwd(),
+    )
+    if check and result.returncode != 0:
+        stderr = result.stderr.strip()
+        logger.warning("git_command_failed", cmd=cmd, stderr=stderr)
+        raise GitError(stderr or f"git {args[0]} failed")
+    return result.stdout.strip()
+
+
+def _run_git_ok(*args: str, cwd: Path | None = None) -> tuple[bool, str]:
+    """Run a git command and return (success, stdout).  Never raises."""
+    cmd = ["git"] + list(args)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=cwd or Path.cwd(),
+    )
+    return result.returncode == 0, result.stdout.strip()
+
+
+def _is_git_repo(cwd: Path | None = None) -> bool:
+    ok, _ = _run_git_ok("rev-parse", "--is-inside-work-tree", cwd=cwd)
+    return ok
+
+
+def _get_current_branch(cwd: Path | None = None) -> str:
+    """Return the current branch name, or 'HEAD' if detached."""
+    ok, branch = _run_git_ok("symbolic-ref", "--short", "HEAD", cwd=cwd)
+    return branch if ok else "HEAD"
+
+
+def _get_default_branch(cwd: Path | None = None) -> str:
+    """Detect the default branch (main or master)."""
+    ok, ref = _run_git_ok(
+        "symbolic-ref", "refs/remotes/origin/HEAD", "--short", cwd=cwd,
+    )
+    if ok and "/" in ref:
+        return ref.split("/", 1)[1]
+    # Fallback: check if 'main' or 'master' exist locally
+    ok_main, _ = _run_git_ok("rev-parse", "--verify", "main", cwd=cwd)
+    if ok_main:
+        return "main"
+    ok_master, _ = _run_git_ok("rev-parse", "--verify", "master", cwd=cwd)
+    if ok_master:
+        return "master"
+    return "main"
+
+
+def _get_user_slug(cwd: Path | None = None) -> str:
+    """Get a slugified version of the git user name."""
+    ok, name = _run_git_ok("config", "user.name", cwd=cwd)
+    if ok and name:
+        return _slugify(name)
+    # Fallback to OS username
+    return _slugify(os.getlogin())
+
+
+def _slugify(text: str) -> str:
+    """Convert text to a git-safe branch name component."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    return slug or "user"
+
+
+def _is_protected(branch: str) -> bool:
+    return branch in PROTECTED_BRANCHES
+
+
+def _assert_not_protected(branch: str) -> None:
+    if _is_protected(branch):
+        raise GitGuardrailError(
+            f"Cannot modify protected branch '{branch}'. "
+            "Create a new branch to make changes."
+        )
+
+
+def _assert_git_repo(cwd: Path | None = None) -> None:
+    if not _is_git_repo(cwd):
+        raise GitError("Not a git repository. Run 'git init' first.")
+
+
+def _is_own_branch(branch: str, user_slug: str) -> bool:
+    """Check if a branch belongs to the given user."""
+    return branch.startswith(f"{_BRANCH_PREFIX}/{user_slug}/")
+
+
+def _has_remote(cwd: Path | None = None) -> bool:
+    ok, remotes = _run_git_ok("remote", cwd=cwd)
+    return ok and bool(remotes.strip())
+
+
+def _get_remote_url(cwd: Path | None = None) -> str | None:
+    """Get the origin remote URL."""
+    ok, url = _run_git_ok("remote", "get-url", "origin", cwd=cwd)
+    return url if ok else None
+
+
+def _build_compare_url(branch: str, default_branch: str, cwd: Path | None = None) -> str | None:
+    """Build a PR/MR comparison URL from the remote origin URL."""
+    raw_url = _get_remote_url(cwd)
+    if not raw_url:
+        return None
+
+    # Normalise SSH → HTTPS
+    # git@github.com:org/repo.git → https://github.com/org/repo
+    # https://github.com/org/repo.git → https://github.com/org/repo
+    url = raw_url
+    if url.startswith("git@"):
+        url = url.replace(":", "/", 1).replace("git@", "https://", 1)
+    url = re.sub(r"\.git$", "", url)
+
+    encoded_branch = branch.replace("/", "%2F") if "gitlab" in url else branch
+
+    if "github" in url:
+        return f"{url}/compare/{default_branch}...{branch}"
+    elif "gitlab" in url:
+        return f"{url}/-/merge_requests/new?merge_request[source_branch]={encoded_branch}"
+    elif "dev.azure.com" in url or "visualstudio.com" in url:
+        return f"{url}/pullrequestcreate?sourceRef={branch}&targetRef={default_branch}"
+    elif "bitbucket" in url:
+        return f"{url}/pull-requests/new?source={branch}&dest={default_branch}"
+
+    # Unknown host — return a generic URL
+    return None
+
+
+def _generate_commit_message(changed_files: list[str]) -> str:
+    """Generate a human-readable commit message from changed file paths."""
+    if not changed_files:
+        return "Save progress"
+
+    # Extract meaningful names
+    names: list[str] = []
+    for f in changed_files:
+        p = Path(f)
+        if p.suffix == ".py" and p.stem != "__init__":
+            names.append(p.stem)
+        elif p.suffix == ".json" and "config" in str(p):
+            names.append(f"config/{p.stem}")
+        elif p.name.endswith(".haute.json"):
+            continue  # Skip sidecar files from the message
+        else:
+            names.append(p.name)
+
+    if not names:
+        return "Save progress"
+    if len(names) == 1:
+        return f"Updated {names[0]}"
+    if len(names) <= 3:
+        return f"Updated {', '.join(names)}"
+    return f"Updated {len(names)} files"
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def ensure_repo(cwd: Path | None = None) -> None:
+    """Assert we're in a git repo."""
+    _assert_git_repo(cwd)
+
+
+def get_status(cwd: Path | None = None) -> GitStatus:
+    """Get the current git status for the panel."""
+    _assert_git_repo(cwd)
+
+    branch = _get_current_branch(cwd)
+    default = _get_default_branch(cwd)
+    user_slug = _get_user_slug(cwd)
+    is_main = _is_protected(branch)
+
+    # Read-only if on protected branch OR on someone else's branch
+    is_read_only = is_main or (
+        not _is_own_branch(branch, user_slug) and branch != "HEAD"
+    )
+
+    # Changed files (both staged and unstaged)
+    ok, diff_output = _run_git_ok("status", "--porcelain", cwd=cwd)
+    changed_files: list[str] = []
+    if ok and diff_output:
+        for line in diff_output.splitlines():
+            # Porcelain format: "XY filename" — skip the 2-char status + space
+            if len(line) > 3:
+                changed_files.append(line[3:].strip().strip('"'))
+
+    # How far ahead is the default branch?
+    main_ahead_by = 0
+    main_last_updated: str | None = None
+    if _has_remote(cwd) and not is_main:
+        # Fetch silently to get latest remote state
+        _run_git_ok("fetch", "origin", default, "--quiet", cwd=cwd)
+        ok_count, count_str = _run_git_ok(
+            "rev-list", "--count", f"HEAD..origin/{default}", cwd=cwd,
+        )
+        if ok_count and count_str.isdigit():
+            main_ahead_by = int(count_str)
+
+        if main_ahead_by > 0:
+            ok_time, timestamp = _run_git_ok(
+                "log", "-1", "--format=%aI", f"origin/{default}", cwd=cwd,
+            )
+            if ok_time:
+                main_last_updated = timestamp
+
+    return GitStatus(
+        branch=branch,
+        is_main=is_main,
+        is_read_only=is_read_only,
+        changed_files=changed_files,
+        main_ahead=main_ahead_by > 0,
+        main_ahead_by=main_ahead_by,
+        main_last_updated=main_last_updated,
+    )
+
+
+def create_branch(description: str, cwd: Path | None = None) -> str:
+    """Create a new branch from the latest default branch."""
+    _assert_git_repo(cwd)
+
+    if not description.strip():
+        raise GitError("Branch description cannot be empty.")
+
+    slug = _slugify(description)
+    if not slug:
+        raise GitError("Branch description cannot be empty.")
+
+    user_slug = _get_user_slug(cwd)
+    branch_name = f"{_BRANCH_PREFIX}/{user_slug}/{slug}"
+
+    # Check it doesn't already exist
+    ok, _ = _run_git_ok("rev-parse", "--verify", branch_name, cwd=cwd)
+    if ok:
+        raise GitError(
+            f"Branch '{branch_name}' already exists. "
+            "Choose a different description or switch to the existing branch."
+        )
+
+    # Create from current HEAD and switch to it
+    _run_git("checkout", "-b", branch_name, cwd=cwd)
+    logger.info("branch_created", branch=branch_name)
+    return branch_name
+
+
+def list_branches(cwd: Path | None = None) -> BranchListResult:
+    """List all branches, with the user's branches first."""
+    _assert_git_repo(cwd)
+
+    current = _get_current_branch(cwd)
+    default = _get_default_branch(cwd)
+    user_slug = _get_user_slug(cwd)
+
+    # Get all local branches with metadata
+    # Format: refname:short | committerdate:iso | ahead count
+    ok, raw = _run_git_ok(
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname:short)\t%(committerdate:iso-strict)",
+        "refs/heads/",
+        cwd=cwd,
+    )
+
+    branches: list[BranchInfo] = []
+    if ok and raw:
+        for line in raw.splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) < 2:
+                continue
+            name, commit_time = parts
+
+            # Count commits ahead of default branch
+            commit_count = 0
+            ok_count, count_str = _run_git_ok(
+                "rev-list", "--count", f"{default}..{name}", cwd=cwd,
+            )
+            if ok_count and count_str.isdigit():
+                commit_count = int(count_str)
+
+            branches.append(BranchInfo(
+                name=name,
+                is_yours=_is_own_branch(name, user_slug),
+                is_current=name == current,
+                is_archived=name.startswith(f"{_ARCHIVE_PREFIX}/"),
+                last_commit_time=commit_time,
+                commit_count=commit_count,
+            ))
+
+    # Sort: yours first, then others, archived last
+    def sort_key(b: BranchInfo) -> tuple[int, str]:
+        if b.is_archived:
+            return (2, b.name)
+        if b.is_yours:
+            return (0, b.name)
+        return (1, b.name)
+
+    branches.sort(key=sort_key)
+
+    return BranchListResult(current=current, branches=branches)
+
+
+def switch_branch(branch: str, cwd: Path | None = None) -> None:
+    """Switch to a branch, auto-committing any pending changes first."""
+    _assert_git_repo(cwd)
+
+    current = _get_current_branch(cwd)
+    if branch == current:
+        return
+
+    # Auto-commit any pending changes before switching
+    ok, status = _run_git_ok("status", "--porcelain", cwd=cwd)
+    if ok and status.strip():
+        _auto_commit(cwd)
+
+    _run_git("checkout", branch, cwd=cwd)
+    logger.info("branch_switched", from_branch=current, to_branch=branch)
+
+
+def save_progress(cwd: Path | None = None) -> SaveResult:
+    """Stage all changes, commit, and push.  Returns commit info."""
+    _assert_git_repo(cwd)
+
+    branch = _get_current_branch(cwd)
+    _assert_not_protected(branch)
+
+    # Stage all changes
+    _run_git("add", "-A", cwd=cwd)
+
+    # Check if there's actually anything to commit
+    ok, status = _run_git_ok("diff", "--cached", "--name-only", cwd=cwd)
+    if not ok or not status.strip():
+        raise GitError("No changes to save.")
+
+    changed = status.strip().splitlines()
+    message = _generate_commit_message(changed)
+
+    _run_git("commit", "-m", message, cwd=cwd)
+
+    # Get commit info
+    sha = _run_git("rev-parse", "HEAD", cwd=cwd)
+    timestamp = _run_git("log", "-1", "--format=%aI", cwd=cwd)
+
+    # Push if remote exists
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", branch, "--set-upstream", cwd=cwd)
+
+    logger.info("changes_saved", sha=sha[:8], message=message)
+    return SaveResult(commit_sha=sha, message=message, timestamp=timestamp)
+
+
+def _auto_commit(cwd: Path | None = None) -> None:
+    """Internal: stage and commit all changes (used before branch switch)."""
+    branch = _get_current_branch(cwd)
+    if _is_protected(branch):
+        return  # Don't auto-commit on protected branches
+
+    _run_git("add", "-A", cwd=cwd)
+    ok, status = _run_git_ok("diff", "--cached", "--name-only", cwd=cwd)
+    if not ok or not status.strip():
+        return  # Nothing to commit
+
+    changed = status.strip().splitlines()
+    message = _generate_commit_message(changed)
+    _run_git("commit", "-m", message, cwd=cwd)
+
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", branch, "--set-upstream", cwd=cwd)
+
+
+def get_history(limit: int = 20, cwd: Path | None = None) -> list[HistoryEntry]:
+    """Get commit history for the current branch."""
+    _assert_git_repo(cwd)
+
+    default = _get_default_branch(cwd)
+    branch = _get_current_branch(cwd)
+
+    # Show commits on this branch since it diverged from default
+    # If on default, show the last N commits
+    if _is_protected(branch):
+        range_spec = f"-{limit}"
+    else:
+        range_spec = f"{default}..{branch}"
+
+    ok, raw = _run_git_ok(
+        "log", range_spec, f"--max-count={limit}",
+        "--format=%H\t%h\t%s\t%aI",
+        cwd=cwd,
+    )
+
+    entries: list[HistoryEntry] = []
+    if ok and raw:
+        for line in raw.splitlines():
+            parts = line.split("\t", 3)
+            if len(parts) < 4:
+                continue
+            sha, short_sha, message, timestamp = parts
+
+            # Get files changed in this commit
+            ok_files, files_raw = _run_git_ok(
+                "diff-tree", "--no-commit-id", "--name-only", "-r", sha,
+                cwd=cwd,
+            )
+            files_changed = files_raw.splitlines() if ok_files and files_raw else []
+
+            entries.append(HistoryEntry(
+                sha=sha,
+                short_sha=short_sha,
+                message=message,
+                timestamp=timestamp,
+                files_changed=files_changed,
+            ))
+
+    return entries
+
+
+def revert_to(sha: str, cwd: Path | None = None) -> RevertResult:
+    """Reset the current branch to a specific commit (with backup tag)."""
+    _assert_git_repo(cwd)
+
+    branch = _get_current_branch(cwd)
+    _assert_not_protected(branch)
+
+    # Validate the target SHA exists
+    ok, _ = _run_git_ok("cat-file", "-t", sha, cwd=cwd)
+    if not ok:
+        raise GitError(f"Commit '{sha}' not found.")
+
+    # Create a backup tag before resetting
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    branch_slug = branch.replace("/", "-")
+    backup_tag = f"backup/{branch_slug}/{now}"
+    _run_git("tag", backup_tag, "HEAD", cwd=cwd)
+
+    # Reset to the target commit
+    _run_git("reset", "--hard", sha, cwd=cwd)
+
+    # Force-push to sync the remote (safe: this is a personal branch)
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", branch, "--force-with-lease", cwd=cwd)
+
+    short_sha = sha[:7]
+    logger.info("reverted", to=short_sha, backup=backup_tag)
+    return RevertResult(backup_tag=backup_tag, reverted_to=short_sha)
+
+
+def pull_latest(cwd: Path | None = None) -> PullResult:
+    """Pull latest default branch into the current branch."""
+    _assert_git_repo(cwd)
+
+    branch = _get_current_branch(cwd)
+    _assert_not_protected(branch)
+    default = _get_default_branch(cwd)
+
+    if not _has_remote(cwd):
+        raise GitError("No remote configured. Cannot pull latest changes.")
+
+    # Auto-commit pending changes first
+    ok, status = _run_git_ok("status", "--porcelain", cwd=cwd)
+    if ok and status.strip():
+        _auto_commit(cwd)
+
+    # Fetch latest
+    _run_git("fetch", "origin", default, cwd=cwd)
+
+    # Count how many commits we're pulling
+    ok_count, count_str = _run_git_ok(
+        "rev-list", "--count", f"HEAD..origin/{default}", cwd=cwd,
+    )
+    commits_to_pull = int(count_str) if ok_count and count_str.isdigit() else 0
+
+    if commits_to_pull == 0:
+        return PullResult(
+            success=True, conflict=False,
+            conflict_message=None, commits_pulled=0,
+        )
+
+    # Attempt merge
+    ok_merge, merge_output = _run_git_ok(
+        "merge", f"origin/{default}", "--no-edit", cwd=cwd,
+    )
+
+    if not ok_merge:
+        # Conflict detected — abort the merge
+        _run_git_ok("merge", "--abort", cwd=cwd)
+        logger.warning("merge_conflict", branch=branch)
+        return PullResult(
+            success=False,
+            conflict=True,
+            conflict_message=(
+                "Your changes overlap with recent updates to "
+                f"'{default}'. Ask an engineer for help resolving "
+                "this conflict."
+            ),
+            commits_pulled=0,
+        )
+
+    # Push the merge to remote
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", branch, cwd=cwd)
+
+    logger.info("pull_complete", commits=commits_to_pull)
+    return PullResult(
+        success=True, conflict=False,
+        conflict_message=None, commits_pulled=commits_to_pull,
+    )
+
+
+def submit_for_review(cwd: Path | None = None) -> SubmitResult:
+    """Push branch and return a comparison URL for PR creation."""
+    _assert_git_repo(cwd)
+
+    branch = _get_current_branch(cwd)
+    _assert_not_protected(branch)
+
+    # Auto-commit any pending changes
+    ok, status = _run_git_ok("status", "--porcelain", cwd=cwd)
+    if ok and status.strip():
+        _auto_commit(cwd)
+
+    # Push
+    if _has_remote(cwd):
+        _run_git("push", "origin", branch, "--set-upstream", cwd=cwd)
+
+    default = _get_default_branch(cwd)
+    compare_url = _build_compare_url(branch, default, cwd)
+
+    logger.info("submitted_for_review", branch=branch, url=compare_url)
+    return SubmitResult(compare_url=compare_url, branch=branch)
+
+
+def archive_branch(branch: str, cwd: Path | None = None) -> str:
+    """Rename a branch to archive/<name>."""
+    _assert_git_repo(cwd)
+    _assert_not_protected(branch)
+
+    if branch.startswith(f"{_ARCHIVE_PREFIX}/"):
+        raise GitError(f"Branch '{branch}' is already archived.")
+
+    current = _get_current_branch(cwd)
+    default = _get_default_branch(cwd)
+
+    # Strip prefix to get a clean archive name
+    # "pricing/ralph/update-factors" → "archive/update-factors"
+    parts = branch.split("/")
+    # Take the last part as the descriptive name
+    archive_name = f"{_ARCHIVE_PREFIX}/{parts[-1]}" if parts else f"{_ARCHIVE_PREFIX}/{branch}"
+
+    # Ensure unique archive name
+    ok, _ = _run_git_ok("rev-parse", "--verify", archive_name, cwd=cwd)
+    if ok:
+        # Add timestamp to make unique
+        now = datetime.now(timezone.utc).strftime("%Y%m%d")
+        archive_name = f"{archive_name}-{now}"
+
+    # Can't rename the current branch while on it — switch away first
+    if branch == current:
+        _run_git("checkout", default, cwd=cwd)
+
+    _run_git("branch", "-m", branch, archive_name, cwd=cwd)
+
+    # Push renamed branch and delete old remote ref
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", archive_name, cwd=cwd)
+        _run_git_ok("push", "origin", "--delete", branch, cwd=cwd)
+
+    logger.info("branch_archived", from_branch=branch, to=archive_name)
+    return archive_name
+
+
+def delete_branch(branch: str, cwd: Path | None = None) -> None:
+    """Permanently delete a branch (local + remote)."""
+    _assert_git_repo(cwd)
+    _assert_not_protected(branch)
+
+    current = _get_current_branch(cwd)
+    default = _get_default_branch(cwd)
+
+    if branch == current:
+        _run_git("checkout", default, cwd=cwd)
+
+    _run_git("branch", "-D", branch, cwd=cwd)
+
+    if _has_remote(cwd):
+        _run_git_ok("push", "origin", "--delete", branch, cwd=cwd)
+
+    logger.info("branch_deleted", branch=branch)

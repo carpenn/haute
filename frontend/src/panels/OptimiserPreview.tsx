@@ -116,9 +116,9 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
       <div
         onMouseDown={onDragStart}
         className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-10 transition-colors"
-        style={{ background: "transparent" }}
-        onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-soft)" }}
-        onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}
+        style={{ background: "var(--chrome-border)" }}
+        onMouseEnter={e => { e.currentTarget.style.background = "var(--accent)" }}
+        onMouseLeave={e => { e.currentTarget.style.background = "var(--chrome-border)" }}
       />
 
       {/* Header */}

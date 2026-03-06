@@ -914,23 +914,23 @@ def starter_pipeline(name: str) -> str:
 import polars as pl
 import haute
 
-from helpers.features import to_date, years_between, cols_matching
+from utility.features import to_date, years_between, cols_matching
 
 pipeline = haute.Pipeline("{name}", description="")
 '''
 
 
-def starter_helpers_init() -> str:
-    """Generate ``helpers/__init__.py``."""
-    return '"""Project-level helpers \u2014 reusable utilities for pipeline nodes."""\n'
+def starter_utility_init() -> str:
+    """Generate ``utility/__init__.py``."""
+    return '"""Project-level utilities \u2014 reusable functions for pipeline nodes."""\n'
 
 
-def starter_helpers_features() -> str:
-    """Generate ``helpers/features.py`` with common Polars utilities."""
+def starter_utility_features() -> str:
+    """Generate ``utility/features.py`` with common Polars utilities."""
     return '''\
-"""Feature engineering helpers for pipeline nodes.
+"""Feature engineering utilities for pipeline nodes.
 
-Add project-specific helper functions, constants, and column mappings here.
+Add project-specific utility functions, constants, and column mappings here.
 These are imported into main.py so your pipeline nodes stay clean and readable.
 """
 

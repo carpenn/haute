@@ -32,7 +32,6 @@ describe("KeyboardShortcuts", () => {
       "Save pipeline",
       "Fit view",
       "Delete selected",
-      "Toggle snap-to-grid",
       "Show this help",
     ]
 

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import polars as pl
 import pytest
 
-from haute.executor import _build_node_fn, _compile_preamble, _exec_user_code, execute_graph, execute_sink
+from haute.executor import (
+    PreambleError,
+    _build_node_fn,
+    _compile_preamble,
+    _exec_user_code,
+    execute_graph,
+    execute_sink,
+)
 from tests.conftest import (
     make_edge as _edge,
     make_graph as _g,
@@ -138,6 +144,62 @@ class TestCompilePreamble:
         ns = _compile_preamble("def make_lit():\n    return pl.lit(42)\n")
         expr = ns["make_lit"]()
         assert isinstance(expr, pl.Expr)
+
+    def test_utility_modules_evicted_between_calls(self, tmp_path, monkeypatch):
+        """Ensure utility modules are re-imported fresh each call, not cached."""
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text("VALUE = 1\n")
+
+        ns1 = _compile_preamble("from utility.helpers import *\n")
+        assert ns1["VALUE"] == 1
+
+        # Simulate a GUI edit that changes the file on disk
+        (util_dir / "helpers.py").write_text("VALUE = 42\n")
+
+        ns2 = _compile_preamble("from utility.helpers import *\n")
+        assert ns2["VALUE"] == 42, "utility module was served from stale cache"
+
+    def test_raises_preamble_error_on_name_error(self, tmp_path, monkeypatch):
+        """Broken utility code should raise PreambleError, not crash the server."""
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text("x = 1\nf\n")
+
+        with pytest.raises(PreambleError, match="name 'f' is not defined"):
+            _compile_preamble("from utility.helpers import *\n")
+
+    def test_raises_preamble_error_on_syntax_error(self, tmp_path, monkeypatch):
+        """Utility file with syntax error should raise PreambleError."""
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text("def foo(\n")
+
+        with pytest.raises(PreambleError, match="Error in utility"):
+            _compile_preamble("from utility.helpers import *\n")
+
+    def test_preamble_error_includes_utility_file_path(self, tmp_path, monkeypatch):
+        """Error message should reference the utility file, not just '<string>'."""
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text("x = 1\nundefined_var\n")
+
+        with pytest.raises(PreambleError) as exc_info:
+            _compile_preamble("from utility.helpers import *\n")
+        assert "utility" in str(exc_info.value)
+        assert "helpers" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1197,3 +1259,31 @@ class TestExecuteGraphErrorPaths:
         results = execute_graph(graph)
         assert results["src"].status == "ok"
         assert results["t"].status == "ok"
+
+    def test_broken_utility_import_errors_all_nodes(self, tmp_path, monkeypatch):
+        """A broken utility module should mark all nodes as errored, not 500."""
+        monkeypatch.chdir(tmp_path)
+
+        # Create a utility module with a NameError
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "bad.py").write_text("x = 1\nundefined_var\n")
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t"),
+            ],
+            "edges": [_edge("src", "t")],
+            "preamble": "from utility.bad import *\n",
+        })
+        results = execute_graph(graph)
+        # Every node should show the preamble error, not a 500
+        assert results["src"].status == "error"
+        assert results["t"].status == "error"
+        assert "undefined_var" in results["src"].error
+        assert "utility" in results["src"].error

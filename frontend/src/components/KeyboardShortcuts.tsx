@@ -12,7 +12,6 @@ const shortcuts = [
   { keys: `${mod}+S`, label: "Save pipeline" },
   { keys: `${mod}+1`, label: "Fit view" },
   { keys: "Delete / Backspace", label: "Delete selected" },
-  { keys: "G", label: "Toggle snap-to-grid" },
   { keys: "?", label: "Show this help" },
 ]
 

@@ -42,6 +42,8 @@ from haute.routes.modelling import router as modelling_router
 from haute.routes.optimiser import router as optimiser_router
 from haute.routes.pipeline import router as pipeline_router
 from haute.routes.submodel import router as submodel_router
+from haute.routes.git import router as git_router
+from haute.routes.utility import router as utility_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 logger = get_logger(component="server")
@@ -143,6 +145,8 @@ app.include_router(submodel_router)
 app.include_router(modelling_router)
 app.include_router(optimiser_router)
 app.include_router(mlflow_router)
+app.include_router(utility_router)
+app.include_router(git_router)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +227,10 @@ async def _file_watcher() -> None:
                 config_changed = True
                 continue
             if p.suffix != ".py" or p.name.startswith("__"):
+                continue
+            # Skip utility/ directory — utility scripts don't affect graph structure
+            utility_dir = cwd / "utility"
+            if utility_dir.is_dir() and p.is_relative_to(utility_dir):
                 continue
             if p.parent == modules_dir:
                 module_stems.append(p.stem)

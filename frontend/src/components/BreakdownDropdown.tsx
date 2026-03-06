@@ -32,26 +32,27 @@ export default function BreakdownDropdown({
     return { sorted, maxValue, total }
   }, [items])
 
-  if (!data) return null
+  const hasData = data !== null
 
   return (
     <div ref={ref} className="relative flex items-center gap-1">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { if (hasData) setOpen((v) => !v) }}
         className="flex items-center gap-1 px-1 py-0.5 rounded transition-colors"
         style={{
           color: open ? 'var(--accent)' : 'var(--text-muted)',
           background: open ? 'var(--accent-soft)' : 'transparent',
-          cursor: 'pointer',
+          cursor: hasData ? 'pointer' : 'default',
+          opacity: hasData ? 1 : 0.35,
         }}
-        onMouseEnter={(e) => { if (!open) e.currentTarget.style.color = 'var(--text-secondary)' }}
+        onMouseEnter={(e) => { if (!open && hasData) e.currentTarget.style.color = 'var(--text-secondary)' }}
         onMouseLeave={(e) => { if (!open) e.currentTarget.style.color = 'var(--text-muted)' }}
-        title={`Toggle ${title.toLowerCase()} breakdown`}
+        title={hasData ? `Toggle ${title.toLowerCase()} breakdown` : title}
       >
         <Icon size={12} />
-        <span className="text-[11px] font-mono">{formatValue(data.total)}</span>
+        <span className="text-[11px] font-mono">{formatValue(data?.total ?? 0)}</span>
       </button>
-      {open && (
+      {open && data && (
         <div
           className="absolute top-full left-0 mt-1 rounded-lg shadow-2xl z-50 w-[320px] overflow-hidden"
           style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}

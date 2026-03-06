@@ -1,7 +1,7 @@
 /**
  * Tests for BreakdownDropdown component.
  *
- * Tests: null rendering for empty items, total display, toggle open/close,
+ * Tests: faint empty state, total display, toggle open/close,
  * sorted item display, and total text in the dropdown panel.
  */
 import { describe, it, expect, afterEach } from "vitest"
@@ -38,9 +38,17 @@ function renderDropdown(items: BreakdownItem[] = sampleItems) {
 // ── Tests ────────────────────────────────────────────────────────
 
 describe("BreakdownDropdown", () => {
-  it("returns null for empty items", () => {
-    const { container } = renderDropdown([])
-    expect(container.innerHTML).toBe("")
+  it("renders faint zeroed state for empty items", () => {
+    renderDropdown([])
+    const button = screen.getByRole("button")
+    expect(button.style.opacity).toBe("0.35")
+    expect(screen.getByText("0.0ms")).toBeTruthy()
+  })
+
+  it("does not open dropdown when empty items are clicked", () => {
+    renderDropdown([])
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.queryByText("Latency")).toBeNull()
   })
 
   it("renders the total value using formatValue", () => {

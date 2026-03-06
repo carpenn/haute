@@ -174,8 +174,14 @@ vi.mock("../components/BreadcrumbBar", () => ({
 vi.mock("../components/Toolbar", () => ({
   default: (props: any) => (
     <div data-testid="toolbar">
-      <button data-testid="settings-btn" onClick={props.onOpenSettings}>
-        Settings
+      <button data-testid="utility-btn" onClick={props.onOpenUtility}>
+        Utility
+      </button>
+      <button data-testid="imports-btn" onClick={props.onOpenImports}>
+        Imports
+      </button>
+      <button data-testid="git-btn" onClick={props.onOpenGit}>
+        Git
       </button>
       <button data-testid="shortcuts-btn" onClick={props.onShowShortcuts}>
         Shortcuts
@@ -184,9 +190,25 @@ vi.mock("../components/Toolbar", () => ({
   ),
 }))
 
-vi.mock("../components/SettingsModal", () => ({
+vi.mock("../panels/UtilityPanel", () => ({
   default: ({ onClose }: { onClose: () => void }) => (
-    <div data-testid="settings-modal">
+    <div data-testid="utility-panel">
+      <button onClick={onClose}>Close</button>
+    </div>
+  ),
+}))
+
+vi.mock("../panels/ImportsPanel", () => ({
+  default: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="imports-panel">
+      <button onClick={onClose}>Close</button>
+    </div>
+  ),
+}))
+
+vi.mock("../panels/GitPanel", () => ({
+  default: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="git-panel">
       <button onClick={onClose}>Close</button>
     </div>
   ),
@@ -225,10 +247,8 @@ beforeEach(() => {
   // Reset UI store to known defaults
   useUIStore.setState({
     paletteOpen: true,
-    settingsOpen: false,
     shortcutsOpen: false,
     submodelDialog: null,
-    snapToGrid: false,
     syncBanner: null,
     dirty: false,
   })
@@ -318,15 +338,44 @@ describe("App", () => {
 
   // ── Modals ──────────────────────────────────────────────────────
 
-  it("SettingsModal not shown by default", () => {
+  it("UtilityPanel not shown by default", () => {
     render(<App />)
-    expect(screen.queryByTestId("settings-modal")).toBeNull()
+    expect(screen.queryByTestId("utility-panel")).toBeNull()
   })
 
-  it("clicking settings button in Toolbar opens SettingsModal", () => {
+  it("clicking utility button opens UtilityPanel", () => {
     render(<App />)
-    fireEvent.click(screen.getByTestId("settings-btn"))
-    expect(screen.getByTestId("settings-modal")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("utility-btn"))
+    expect(screen.getByTestId("utility-panel")).toBeTruthy()
+  })
+
+  it("ImportsPanel not shown by default", () => {
+    render(<App />)
+    expect(screen.queryByTestId("imports-panel")).toBeNull()
+  })
+
+  it("clicking imports button opens ImportsPanel", () => {
+    render(<App />)
+    fireEvent.click(screen.getByTestId("imports-btn"))
+    expect(screen.getByTestId("imports-panel")).toBeTruthy()
+  })
+
+  it("GitPanel not shown by default", () => {
+    render(<App />)
+    expect(screen.queryByTestId("git-panel")).toBeNull()
+  })
+
+  it("clicking git button opens GitPanel", () => {
+    render(<App />)
+    fireEvent.click(screen.getByTestId("git-btn"))
+    expect(screen.getByTestId("git-panel")).toBeTruthy()
+  })
+
+  it("GitPanel takes priority over UtilityPanel", () => {
+    useUIStore.setState({ gitOpen: true, utilityOpen: true })
+    render(<App />)
+    expect(screen.getByTestId("git-panel")).toBeTruthy()
+    expect(screen.queryByTestId("utility-panel")).toBeNull()
   })
 
   it("KeyboardShortcuts not shown by default", () => {

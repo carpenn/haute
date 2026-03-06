@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
 import { NODE_TYPES, NODE_TYPE_META } from "../utils/nodeTypes"
 import type { NodeTypeValue } from "../utils/nodeTypes"
@@ -22,7 +22,7 @@ import {
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
-import useUIStore from "../stores/useUIStore"
+import PanelShell from "./PanelShell"
 
 // Re-export types (preserve public API for App.tsx)
 export type { SimpleNode, SimpleEdge } from "./editors"
@@ -54,12 +54,6 @@ const REFRESHABLE_TYPES = new Set<string>([
   NODE_TYPES.MODEL_SCORE,
   NODE_TYPES.OPTIMISER_APPLY,
 ])
-
-// ─── Panel sizing ─────────────────────────────────────────────────
-
-const MIN_PANEL_W = 320
-const MAX_PANEL_W = 900
-const DEFAULT_PANEL_W = 400
 
 // ─── Instance sub-panel (kept inline — it references multiple node-level concerns) ──
 
@@ -230,49 +224,6 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 // ─── NodePanel ────────────────────────────────────────────────────
 
 export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed, errorLine }: NodePanelProps) {
-  const panelWidth = useUIStore((s) => s.nodePanelWidth)
-  const setNodePanelWidth = useUIStore((s) => s.setNodePanelWidth)
-  const isDragging = useRef(false)
-  const startX = useRef(0)
-  const startW = useRef(DEFAULT_PANEL_W)
-  const widthRef = useRef(panelWidth)
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return
-      const delta = startX.current - e.clientX
-      const newW = Math.min(MAX_PANEL_W, Math.max(MIN_PANEL_W, startW.current + delta))
-      widthRef.current = newW
-      if (panelRef.current) {
-        panelRef.current.style.width = `${newW}px`
-      }
-    }
-    const onMouseUp = () => {
-      if (isDragging.current) {
-        isDragging.current = false
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-        setNodePanelWidth(widthRef.current)
-      }
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-  }, [setNodePanelWidth])
-
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    isDragging.current = true
-    startX.current = e.clientX
-    startW.current = panelWidth
-    widthRef.current = panelWidth
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-  }, [panelWidth])
-
   const config = (node?.data.config || {}) as Record<string, unknown>
 
   const handleConfigUpdate = useCallback((keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
@@ -447,16 +398,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
   }
 
   return (
-    <div ref={panelRef} key={node.id} className="h-full shrink-0 flex flex-row animate-slide-in" style={{ width: panelWidth, background: 'var(--bg-panel)', opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
-      {/* Drag handle */}
-      <div
-        onMouseDown={onDragStart}
-        className="shrink-0 h-full w-2 cursor-col-resize transition-colors"
-        style={{ background: 'var(--chrome-border)' }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent)' }}
-        onMouseLeave={(e) => { if (!isDragging.current) e.currentTarget.style.background = 'var(--chrome-border)' }}
-      />
-      <div className="flex-1 min-w-0 h-full overflow-y-auto flex flex-col">
+    <PanelShell style={{ opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <input
           type="text"
@@ -494,7 +436,6 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
       </div>
 
       {renderEditor()}
-      </div>
-    </div>
+    </PanelShell>
   )
 }

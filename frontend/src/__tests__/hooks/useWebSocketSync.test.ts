@@ -53,7 +53,6 @@ vi.mock("../../stores/useUIStore.ts", () => {
     }),
     // Other fields the hook destructures
     setPaletteOpen: vi.fn(),
-    setSettingsOpen: vi.fn(),
     setShortcutsOpen: vi.fn(),
   }
   const useUIStore = Object.assign(() => store, {

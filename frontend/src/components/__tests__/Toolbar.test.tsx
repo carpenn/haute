@@ -6,16 +6,15 @@ import useSettingsStore from "../../stores/useSettingsStore"
 function makeProps(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
   return {
     nodeCount: 5,
-    edgeCount: 3,
     dirty: false,
     canUndo: true,
     canRedo: false,
     onUndo: vi.fn(),
     onRedo: vi.fn(),
-    snapToGrid: false,
-    onToggleSnapToGrid: vi.fn(),
     onShowShortcuts: vi.fn(),
-    onOpenSettings: vi.fn(),
+    onOpenUtility: vi.fn(),
+    onOpenImports: vi.fn(),
+    onOpenGit: vi.fn(),
     onCentre: vi.fn(),
     onAutoLayout: vi.fn(),
     onSave: vi.fn(),
@@ -34,11 +33,6 @@ describe("Toolbar", () => {
   })
 
   afterEach(cleanup)
-
-  it("renders node and edge counts", () => {
-    render(<Toolbar {...makeProps()} />)
-    expect(screen.getByText("5 nodes · 3 edges")).toBeInTheDocument()
-  })
 
   it("renders Haute brand name", () => {
     render(<Toolbar {...makeProps()} />)
@@ -78,11 +72,18 @@ describe("Toolbar", () => {
     expect(props.onCentre).toHaveBeenCalledOnce()
   })
 
-  it("clicking Imports calls onOpenSettings", () => {
+  it("clicking Imports calls onOpenImports", () => {
     const props = makeProps()
     render(<Toolbar {...props} />)
     fireEvent.click(screen.getByText("Imports"))
-    expect(props.onOpenSettings).toHaveBeenCalledOnce()
+    expect(props.onOpenImports).toHaveBeenCalledOnce()
+  })
+
+  it("clicking Utility calls onOpenUtility", () => {
+    const props = makeProps()
+    render(<Toolbar {...props} />)
+    fireEvent.click(screen.getByText("Utility"))
+    expect(props.onOpenUtility).toHaveBeenCalledOnce()
   })
 
   it("undo button calls onUndo", () => {
@@ -131,26 +132,6 @@ describe("Toolbar", () => {
     render(<Toolbar {...makeProps()} />)
     const input = screen.getByRole("spinbutton") as HTMLInputElement
     expect(input.value).toBe("2000")
-  })
-
-  it("snap-to-grid button calls onToggleSnapToGrid", () => {
-    const props = makeProps()
-    render(<Toolbar {...props} />)
-    const snapBtn = screen.getByTitle("Toggle snap-to-grid (G)")
-    fireEvent.click(snapBtn)
-    expect(props.onToggleSnapToGrid).toHaveBeenCalledOnce()
-  })
-
-  it("snap-to-grid button shows accent color when active", () => {
-    render(<Toolbar {...makeProps({ snapToGrid: true })} />)
-    const snapBtn = screen.getByTitle("Toggle snap-to-grid (G)")
-    expect(snapBtn.style.color).toBe("var(--accent)")
-  })
-
-  it("snap-to-grid button shows secondary color when inactive", () => {
-    render(<Toolbar {...makeProps({ snapToGrid: false })} />)
-    const snapBtn = screen.getByTitle("Toggle snap-to-grid (G)")
-    expect(snapBtn.style.color).toBe("var(--text-secondary)")
   })
 
   it("keyboard shortcuts button calls onShowShortcuts", () => {

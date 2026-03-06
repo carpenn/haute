@@ -109,9 +109,9 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
       <div
         onMouseDown={onDragStart}
         className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize z-10 transition-colors"
-        style={{ background: 'transparent' }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+        style={{ background: 'var(--chrome-border)' }}
+        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--accent)'}
+        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--chrome-border)'}
       />
       {/* Header bar */}
       <div className="h-9 flex items-center px-4 shrink-0 gap-2" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>

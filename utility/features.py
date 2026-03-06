@@ -9,9 +9,7 @@ Provides utilities for:
 
 import polars as pl
 
-
 # ── Generic Polars helpers ────────────────────────────────────────────
-
 
 def to_date(col_name: str) -> pl.Expr:
     """Parse a string column to a date."""

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react"
-import { Settings, Undo2, Redo2, Grid3X3, Keyboard, Timer, HardDrive, ChevronDown, Plus, Trash2 } from "lucide-react"
+import { Undo2, Redo2, Keyboard, Timer, HardDrive, ChevronDown, Plus, Trash2, FileCode2, Package, GitFork } from "lucide-react"
 import type { WsStatus } from "../hooks/useWebSocketSync"
 import type { NodeTiming, NodeMemory } from "../api/types"
 import BreakdownDropdown, { type BreakdownItem } from "./BreakdownDropdown"
@@ -25,33 +25,31 @@ const WS_STATUS_CONFIG: Record<WsStatus, { color: string; title: string }> = {
 
 interface ToolbarProps {
   nodeCount: number
-  edgeCount: number
   dirty: boolean
   canUndo: boolean
   canRedo: boolean
   onUndo: () => void
   onRedo: () => void
-  snapToGrid: boolean
-  onToggleSnapToGrid: () => void
   onShowShortcuts: () => void
-  onOpenSettings: () => void
+  onOpenUtility: () => void
+  onOpenImports: () => void
+  onOpenGit: () => void
   onCentre: () => void
   onAutoLayout: () => void
   onSave: () => void
   wsStatus: WsStatus
-  lastRunMs?: number | null
   timings?: NodeTiming[]
   memory?: NodeMemory[]
 }
 
 export default function Toolbar({
-  nodeCount, edgeCount, dirty,
+  nodeCount, dirty,
   canUndo, canRedo, onUndo, onRedo,
-  snapToGrid, onToggleSnapToGrid,
   onShowShortcuts,
-  onOpenSettings, onCentre, onAutoLayout,
+  onOpenUtility, onOpenImports, onOpenGit,
+  onCentre, onAutoLayout,
   onSave,
-  wsStatus, lastRunMs, timings, memory,
+  wsStatus, timings, memory,
 }: ToolbarProps) {
   const rowLimit = useSettingsStore((s) => s.rowLimit)
   const setRowLimit = useSettingsStore((s) => s.setRowLimit)
@@ -199,28 +197,39 @@ export default function Toolbar({
           style={{ background: 'var(--chrome-hover)', border: '1px solid var(--chrome-border)', color: 'var(--text-primary)' }}
         />
       </div>
+      {/* Undo / Redo */}
       <button
-        onClick={onOpenSettings}
-        className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1 ml-3"
+        onClick={onUndo}
+        disabled={!canUndo}
+        className="p-1.5 rounded-md transition-colors disabled:opacity-20 ml-3"
         style={{ color: 'var(--text-secondary)' }}
         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-        title="Pipeline settings (imports, helpers)"
+        title="Undo (Ctrl+Z)"
       >
-        <Settings size={13} />
-        Imports
+        <Undo2 size={14} aria-hidden="true" />
+      </button>
+      <button
+        onClick={onRedo}
+        disabled={!canRedo}
+        aria-label="Redo"
+        className="p-1.5 rounded-md transition-colors disabled:opacity-20"
+        style={{ color: 'var(--text-secondary)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+        title="Redo (Ctrl+Shift+Z)"
+      >
+        <Redo2 size={14} aria-hidden="true" />
       </button>
       {/* Timing + memory breakdowns */}
-      {lastRunMs != null && lastRunMs > 0 && (
-        <div className="ml-3">
-          <BreakdownDropdown
-            icon={Timer}
-            title="Pipeline Timing"
-            items={timingItems}
-            formatValue={formatTiming}
-          />
-        </div>
-      )}
+      <div className="ml-3">
+        <BreakdownDropdown
+          icon={Timer}
+          title="Pipeline Timing"
+          items={timingItems}
+          formatValue={formatTiming}
+        />
+      </div>
       <BreakdownDropdown
         icon={HardDrive}
         title="Pipeline Memory"
@@ -229,44 +238,27 @@ export default function Toolbar({
         valueWidth="w-14"
       />
       <div className="ml-auto flex items-center gap-1.5">
-        <span className="text-[12px] mr-2" style={{ color: 'var(--text-muted)' }}>
-          {nodeCount} nodes · {edgeCount} edges
-        </span>
-        {/* Undo / Redo */}
         <button
-          onClick={onUndo}
-          disabled={!canUndo}
-          className="p-1.5 rounded-md transition-colors disabled:opacity-20"
+          onClick={onOpenUtility}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
           style={{ color: 'var(--text-secondary)' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-          title="Undo (Ctrl+Z)"
+          title="Utility scripts — reusable functions"
         >
-          <Undo2 size={14} aria-hidden="true" />
+          <FileCode2 size={13} />
+          Utility
         </button>
         <button
-          onClick={onRedo}
-          disabled={!canRedo}
-          aria-label="Redo"
-          className="p-1.5 rounded-md transition-colors disabled:opacity-20"
+          onClick={onOpenImports}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
           style={{ color: 'var(--text-secondary)' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-          title="Redo (Ctrl+Shift+Z)"
+          title="Pipeline imports — utility and library imports"
         >
-          <Redo2 size={14} aria-hidden="true" />
-        </button>
-        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
-        {/* Snap to grid */}
-        <button
-          onClick={onToggleSnapToGrid}
-          className="p-1.5 rounded-md transition-colors"
-          style={{ color: snapToGrid ? 'var(--accent)' : 'var(--text-secondary)', background: snapToGrid ? 'var(--accent-soft)' : 'transparent' }}
-          onMouseEnter={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
-          onMouseLeave={(e) => { if (!snapToGrid) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
-          title="Toggle snap-to-grid (G)"
-        >
-          <Grid3X3 size={14} aria-hidden="true" />
+          <Package size={13} />
+          Imports
         </button>
         {/* Keyboard shortcuts */}
         <button
@@ -312,6 +304,17 @@ export default function Toolbar({
           title="Ctrl+S"
         >
           Save
+        </button>
+        <button
+          onClick={onOpenGit}
+          className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors flex items-center gap-1"
+          style={{ background: '#22c55e' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#4ade80'}
+          onMouseLeave={(e) => e.currentTarget.style.background = '#22c55e'}
+          title="Git — branch management and version control"
+        >
+          <GitFork size={13} />
+          Git
         </button>
       </div>
     </header>

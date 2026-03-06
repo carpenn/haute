@@ -24,7 +24,7 @@ export default function useKeyboardShortcuts({
   setSelectedNode, setPreviewData, clearTrace,
 }: KeyboardShortcutsParams) {
   const { addToast } = useToastStore()
-  const { setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid } = useUIStore()
+  const { setShortcutsOpen, setSubmodelDialog } = useUIStore()
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
@@ -141,13 +141,6 @@ export default function useKeyboardShortcuts({
         return
       }
 
-      // G → toggle snap-to-grid (unless typing)
-      if (e.key === "g" && !isTyping && !mod) {
-        toggleSnapToGrid()
-        addToast("info", useUIStore.getState().snapToGrid ? "Snap to grid ON" : "Snap to grid OFF")
-        return
-      }
-
       // Delete / Backspace → remove selected nodes and/or edges (unless typing)
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping) {
         const { nodes: currentNodes, edges: currentEdges } = graphRef.current
@@ -170,6 +163,6 @@ export default function useKeyboardShortcuts({
     handleSave, setNodes, setEdges, undo, redo, fitView,
     graphRef, clipboard, nodeIdCounter,
     setSelectedNode, setPreviewData, clearTrace,
-    addToast, setShortcutsOpen, setSubmodelDialog, toggleSnapToGrid,
+    addToast, setShortcutsOpen, setSubmodelDialog,
   ])
 }

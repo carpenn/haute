@@ -444,6 +444,65 @@ export function getModelVersions(
 // File browsing
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Utility endpoints
+// ---------------------------------------------------------------------------
+
+export type UtilityFile = { name: string; module: string }
+
+export type UtilityWriteResult = {
+  status: string
+  name: string
+  module: string
+  import_line: string
+  error?: string | null
+  error_line?: number | null
+}
+
+export function listUtilityFiles(
+  options?: { signal?: AbortSignal },
+): Promise<{ files: UtilityFile[] }> {
+  return request("/api/utility", options)
+}
+
+export function readUtilityFile(
+  module: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ name: string; module: string; content: string }> {
+  return request(`/api/utility/${encodeURIComponent(module)}`, options)
+}
+
+export function createUtilityFile(
+  payload: { name: string; content?: string },
+  options?: { signal?: AbortSignal },
+): Promise<UtilityWriteResult> {
+  return post("/api/utility", payload, options)
+}
+
+export function updateUtilityFile(
+  module: string,
+  content: string,
+  options?: { signal?: AbortSignal },
+): Promise<UtilityWriteResult> {
+  return request(`/api/utility/${encodeURIComponent(module)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+    ...options,
+  })
+}
+
+export function deleteUtilityFile(
+  module: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; module: string }> {
+  return del(`/api/utility/${encodeURIComponent(module)}`, options)
+}
+
+// ---------------------------------------------------------------------------
+// File browsing
+// ---------------------------------------------------------------------------
+
 export function listFiles(
   dir: string,
   extensions?: string,
@@ -452,4 +511,113 @@ export function listFiles(
   const params = new URLSearchParams({ dir })
   if (extensions) params.set("extensions", extensions)
   return request(`/api/files?${params.toString()}`, options)
+}
+
+// ---------------------------------------------------------------------------
+// Git endpoints
+// ---------------------------------------------------------------------------
+
+export type GitStatus = {
+  branch: string
+  is_main: boolean
+  is_read_only: boolean
+  changed_files: string[]
+  main_ahead: boolean
+  main_ahead_by: number
+  main_last_updated: string | null
+}
+
+export type GitBranch = {
+  name: string
+  is_yours: boolean
+  is_current: boolean
+  is_archived: boolean
+  last_commit_time: string
+  commit_count: number
+}
+
+export type GitHistoryEntry = {
+  sha: string
+  short_sha: string
+  message: string
+  timestamp: string
+  files_changed: string[]
+}
+
+export function getGitStatus(
+  options?: { signal?: AbortSignal },
+): Promise<GitStatus> {
+  return request("/api/git/status", options)
+}
+
+export function listGitBranches(
+  options?: { signal?: AbortSignal },
+): Promise<{ current: string; branches: GitBranch[] }> {
+  return request("/api/git/branches", options)
+}
+
+export function createGitBranch(
+  description: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ branch: string }> {
+  return post("/api/git/branches", { description }, options)
+}
+
+export function switchGitBranch(
+  branch: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; branch: string }> {
+  return post("/api/git/switch", { branch }, options)
+}
+
+export function gitSave(
+  options?: { signal?: AbortSignal },
+): Promise<{ commit_sha: string; message: string; timestamp: string }> {
+  return post("/api/git/save", {}, options)
+}
+
+export function gitSubmit(
+  options?: { signal?: AbortSignal },
+): Promise<{ compare_url: string | null; branch: string }> {
+  return post("/api/git/submit", {}, options)
+}
+
+export function getGitHistory(
+  limit?: number,
+  options?: { signal?: AbortSignal },
+): Promise<{ entries: GitHistoryEntry[] }> {
+  const params = limit ? `?limit=${limit}` : ""
+  return request(`/api/git/history${params}`, options)
+}
+
+export function gitRevert(
+  sha: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ backup_tag: string; reverted_to: string }> {
+  return post("/api/git/revert", { sha }, options)
+}
+
+export function gitPull(
+  options?: { signal?: AbortSignal },
+): Promise<{ success: boolean; conflict: boolean; conflict_message: string | null; commits_pulled: number }> {
+  return post("/api/git/pull", {}, options)
+}
+
+export function gitArchiveBranch(
+  branch: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ archived_as: string }> {
+  return post("/api/git/archive", { branch }, options)
+}
+
+export function gitDeleteBranch(
+  branch: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ status: string; branch: string }> {
+  return request("/api/git/branches", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ branch }),
+    ...options,
+  })
 }

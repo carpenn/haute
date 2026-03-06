@@ -108,7 +108,7 @@ def safe_globals(*, allow_imports: bool = False, **extra: Any) -> dict[str, Any]
     ``breakpoint``, ``globals``, ``locals``, and ``input``.
 
     *allow_imports* restores ``__import__`` — used for preamble code
-    that legitimately imports from project helpers.
+    that legitimately imports from project utilities.
     """
     ns = dict(_SAFE_BUILTINS)
     if allow_imports:
@@ -249,7 +249,7 @@ def validate_user_code(code: str, *, allow_imports: bool = False) -> None:
     restricted builtins.
 
     *allow_imports* permits ``import`` / ``from … import`` statements,
-    used for preamble code which legitimately imports from helpers.
+    used for preamble code which legitimately imports from utility modules.
 
     Results for safe code are cached by code string so repeated
     executions of the same node (preview, trace) skip the AST parse.

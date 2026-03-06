@@ -3,6 +3,7 @@ import { X, ChevronDown, ChevronRight, Clock, Layers, Scan } from "lucide-react"
 import type { TraceResult, TraceStep } from "../types/trace"
 import { nodeTypeLabels, nodeTypeColors } from "../utils/nodeTypes"
 import { formatValue as _formatValue } from "../utils/formatValue"
+import PanelShell from "./PanelShell"
 
 const formatValue = (v: unknown) => _formatValue(v, 6)
 
@@ -185,14 +186,7 @@ interface TracePanelProps {
 
 export default function TracePanel({ trace, onClose }: TracePanelProps) {
   return (
-    <div
-      className="shrink-0 flex flex-col overflow-hidden"
-      style={{
-        width: 320,
-        background: "var(--bg-panel)",
-        borderLeft: "1px solid var(--border)",
-      }}
-    >
+    <PanelShell>
       {/* Header */}
       <div
         className="px-4 py-3 flex items-center gap-2 shrink-0"
@@ -252,6 +246,6 @@ export default function TracePanel({ trace, onClose }: TracePanelProps) {
           <StepCard key={step.node_id} step={step} index={i} tracedColumn={trace.column} />
         ))}
       </div>
-    </div>
+    </PanelShell>
   )
 }
