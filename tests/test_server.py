@@ -100,6 +100,23 @@ class TestGetFirstPipeline:
         graph = resp.json()
         assert graph["nodes"] == []
 
+    def test_pipeline_with_no_nodes_returns_source_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A starter pipeline with no nodes should still return source_file and metadata."""
+        (tmp_path / "main.py").write_text(
+            'import haute\n\npipeline = haute.Pipeline("my_project", description="")\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        from haute.server import app
+        c = TestClient(app)
+        resp = c.get("/api/pipeline")
+        assert resp.status_code == 200
+        graph = resp.json()
+        assert graph["nodes"] == []
+        assert graph["source_file"] == "main.py"
+        assert graph["pipeline_name"] == "my_project"
+
 
 # ---------------------------------------------------------------------------
 # GET /api/pipeline/{name}

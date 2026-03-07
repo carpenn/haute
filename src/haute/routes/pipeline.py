@@ -103,16 +103,19 @@ async def get_first_pipeline() -> PipelineGraph:
     cwd = Path.cwd()
 
     def _find_first() -> PipelineGraph:
+        best: PipelineGraph | None = None
         for f in discover_pipelines():
             try:
                 graph = parse_pipeline_to_graph(f)
+                graph.source_file = str(f.relative_to(cwd))
                 if graph.nodes:
-                    graph.source_file = str(f.relative_to(cwd))
                     return graph
+                if best is None:
+                    best = graph
             except Exception as e:
                 logger.warning("parse_failed", file=f.name, error=str(e))
                 continue
-        return PipelineGraph()
+        return best or PipelineGraph()
 
     return await asyncio.to_thread(_find_first)
 
