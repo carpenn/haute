@@ -53,9 +53,9 @@ export default function SubmodelDialog({ nodeCount, onClose, onSubmit }: Submode
             <button
               type="submit"
               className="px-4 py-1.5 text-[12px] font-semibold text-white rounded-md transition-colors"
-              style={{ background: '#f97316' }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#fb923c'}
-              onMouseLeave={(e) => e.currentTarget.style.background = '#f97316'}
+              style={{ background: '#64748b' }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#94a3b8'}
+              onMouseLeave={(e) => e.currentTarget.style.background = '#64748b'}
             >
               Create
             </button>

@@ -89,7 +89,7 @@ function PipelineNode({ data, selected }: NodeProps) {
           {isDeployInput && (
             <span
               className={`ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0`}
-              style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
+              style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
             >
               <Radio size={8} />
               API
@@ -98,7 +98,7 @@ function PipelineNode({ data, selected }: NodeProps) {
           {showLiveBadge && (
             <span
               className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
-              style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
+              style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
             >
               LIVE
             </span>

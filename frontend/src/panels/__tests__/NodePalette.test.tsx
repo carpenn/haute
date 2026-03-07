@@ -14,10 +14,10 @@ describe("NodePalette", () => {
 
   it("renders all node type templates", () => {
     render(<NodePalette />)
-    expect(screen.getByText("API Input")).toBeInTheDocument()
+    expect(screen.getByText("Quote Input")).toBeInTheDocument()
     expect(screen.getByText("Data Source")).toBeInTheDocument()
     expect(screen.getByText("Polars")).toBeInTheDocument()
-    expect(screen.getByText("API Output")).toBeInTheDocument()
+    expect(screen.getByText("Quote Response")).toBeInTheDocument()
     expect(screen.getByText("Model Scoring")).toBeInTheDocument()
     expect(screen.getByText("Banding")).toBeInTheDocument()
   })
@@ -38,11 +38,11 @@ describe("NodePalette", () => {
 
   it("disables singleton types already present in graph", () => {
     const nodes: Node[] = [
-      { id: "ai1", data: { label: "API Input", nodeType: NODE_TYPES.API_INPUT } } as unknown as Node,
+      { id: "ai1", data: { label: "Quote Input", nodeType: NODE_TYPES.API_INPUT } } as unknown as Node,
     ]
     render(<NodePalette nodes={nodes} />)
-    // The API Input item should have a "Only one" title indicating it's disabled
-    const apiInputItem = screen.getByTitle(/Only one API Input/i)
+    // The Quote Input item should have a "Only one" title indicating it's disabled
+    const apiInputItem = screen.getByTitle(/Only one Quote Input/i)
     expect(apiInputItem).toBeInTheDocument()
     expect(apiInputItem).toHaveClass("cursor-not-allowed")
   })

@@ -40,7 +40,7 @@ const DEFAULT_PROPS = {
   config: {},
   onUpdate: vi.fn(),
   inputSources: [],
-  accentColor: "#a855f7",
+  accentColor: "#8b5cf6",
 }
 
 describe("ModelScoreEditor", () => {
@@ -103,7 +103,7 @@ describe("ModelScoreEditor", () => {
       <ModelScoreEditor
         {...DEFAULT_PROPS}
         config={{ task: "classification" }}
-        accentColor="#a855f7"
+        accentColor="#8b5cf6"
       />,
     )
     expect(screen.getByText(/prediction_proba/)).toBeTruthy()
@@ -124,7 +124,7 @@ describe("ModelScoreEditor", () => {
       <ModelScoreEditor
         {...DEFAULT_PROPS}
         config={{ sourceType: "run" }}
-        accentColor="#a855f7"
+        accentColor="#8b5cf6"
       />,
     )
     expect(screen.getByText("Experiment")).toBeTruthy()

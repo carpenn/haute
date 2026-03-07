@@ -59,7 +59,7 @@ function makeProps(overrides: Partial<Parameters<typeof OptimiserConfig>[0]> = {
       constraints: {},
     } as Record<string, unknown>,
     onUpdate: vi.fn(),
-    accentColor: "#f97316",
+    accentColor: "#f59e0b",
     upstreamColumns: [
       { name: "premium", dtype: "Float64" },
       { name: "loss_ratio", dtype: "Float64" },
@@ -106,7 +106,7 @@ describe("OptimiserConfig", () => {
       render(<OptimiserConfig {...makeProps()} />)
       const onlineBtn = screen.getByRole("button", { name: "Online" })
       // Online button should have the active orange background
-      expect(onlineBtn).toHaveStyle({ color: "#f97316" })
+      expect(onlineBtn).toHaveStyle({ color: "#f59e0b" })
     })
 
     it("renders ratebook mode as active when config.mode is ratebook", () => {
@@ -116,7 +116,7 @@ describe("OptimiserConfig", () => {
         />,
       )
       const ratebookBtn = screen.getByRole("button", { name: "Ratebook" })
-      expect(ratebookBtn).toHaveStyle({ color: "#f97316" })
+      expect(ratebookBtn).toHaveStyle({ color: "#f59e0b" })
     })
 
     it("clicking ratebook calls onUpdate with mode ratebook", () => {

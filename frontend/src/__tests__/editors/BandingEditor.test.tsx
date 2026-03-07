@@ -20,7 +20,7 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("age_band")).toBeTruthy()
     expect(screen.getByText("region_group")).toBeTruthy()
@@ -34,14 +34,14 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("driver_age")).toBeTruthy()
   })
 
   it("renders factor tab label as 'Factor N' when both column and outputColumn are empty", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("Factor 1")).toBeTruthy()
   })
@@ -49,7 +49,7 @@ describe("BandingEditor", () => {
   it("adding a factor creates new tab and switches to it", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#22d3ee" />,
     )
     // The + button to add a factor
     const buttons = screen.getAllByRole("button")
@@ -78,7 +78,7 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#22d3ee" />,
     )
 
     // Find the X button for the first factor (age_band tab)
@@ -100,7 +100,7 @@ describe("BandingEditor", () => {
       ],
     }
     const { container } = render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     // When there's only 1 factor, the X button should not be rendered on the tab
     const tabButtons = container.querySelectorAll("button")
@@ -115,7 +115,7 @@ describe("BandingEditor", () => {
   it("type toggle between continuous and categorical calls updateFactor", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#22d3ee" />,
     )
     fireEvent.click(screen.getByText("Categorical"))
     expect(onUpdate).toHaveBeenCalledWith("factors", expect.arrayContaining([
@@ -134,7 +134,7 @@ describe("BandingEditor", () => {
         onUpdate={vi.fn()}
         inputSources={[]}
         upstreamColumns={columns}
-        accentColor="#14b8a6"
+        accentColor="#22d3ee"
       />,
     )
     // Should render a select with column options
@@ -162,7 +162,7 @@ describe("BandingEditor", () => {
         onUpdate={onUpdate}
         inputSources={[]}
         upstreamColumns={columns}
-        accentColor="#14b8a6"
+        accentColor="#22d3ee"
       />,
     )
     // Select the "age" column (numeric dtype)
@@ -194,7 +194,7 @@ describe("BandingEditor", () => {
         onUpdate={onUpdate}
         inputSources={[]}
         upstreamColumns={columns}
-        accentColor="#14b8a6"
+        accentColor="#22d3ee"
       />,
     )
     const selects = screen.getAllByRole("combobox")
@@ -213,7 +213,7 @@ describe("BandingEditor", () => {
   it("add rule button adds appropriate empty rule type for continuous", () => {
     const onUpdate = vi.fn()
     render(
-      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={onUpdate} inputSources={[]} accentColor="#22d3ee" />,
     )
     // Click the "+ Add" button
     fireEvent.click(screen.getByText("Add"))
@@ -232,7 +232,7 @@ describe("BandingEditor", () => {
       factors: [{ banding: "categorical", column: "region", outputColumn: "region_group", rules: [] }],
     }
     render(
-      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={onUpdate} inputSources={[]} accentColor="#22d3ee" />,
     )
     fireEvent.click(screen.getByText("Add"))
     expect(onUpdate).toHaveBeenCalledWith("factors", expect.arrayContaining([
@@ -253,7 +253,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     // Summary shows "column -> outputColumn · 1 rule · continuous"
     const allText = document.body.textContent || ""
@@ -273,7 +273,7 @@ describe("BandingEditor", () => {
       }],
     }
     const { container } = render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     // The summary block should not be rendered since outputColumn is empty
     const summaryText = container.textContent || ""
@@ -282,21 +282,21 @@ describe("BandingEditor", () => {
 
   it("renders text input for column when no upstreamColumns", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByPlaceholderText("driver_age")).toBeTruthy()
   })
 
   it("renders default value input", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByPlaceholderText("null")).toBeTruthy()
   })
 
   it("renders 'No rules yet' when rules are empty", () => {
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("No rules yet")).toBeTruthy()
   })
@@ -311,7 +311,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("Band")).toBeTruthy()
     expect(screen.getByText("Rules (1)")).toBeTruthy()
@@ -327,7 +327,7 @@ describe("BandingEditor", () => {
       }],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("Group")).toBeTruthy()
   })
@@ -340,21 +340,21 @@ describe("BandingEditor", () => {
       ],
     }
     render(
-      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#14b8a6" />,
+      <BandingEditor config={config} onUpdate={vi.fn()} inputSources={[]} accentColor="#22d3ee" />,
     )
     // Initially first tab is active, should show continuous type highlighted
     const catTab = screen.getByText("region_group").closest("button")!
     fireEvent.click(catTab)
     // After clicking region_group tab, the categorical button should be active
     const catTypeBtn = screen.getByText("Categorical").closest("button")!
-    // JSDOM converts hex to rgb, so check for the RGB values of #14b8a6
-    expect(catTypeBtn.style.border).toContain("rgb(20, 184, 166)")
+    // JSDOM converts hex to rgb, so check for the RGB values of #22d3ee
+    expect(catTypeBtn.style.border).toContain("rgb(34, 211, 238)")
   })
 
   it("renders InputSourcesBar when inputs provided", () => {
     const inputSources = [{ varName: "data", sourceLabel: "Data", edgeId: "e1" }]
     render(
-      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={inputSources} accentColor="#14b8a6" />,
+      <BandingEditor config={{}} onUpdate={vi.fn()} inputSources={inputSources} accentColor="#22d3ee" />,
     )
     expect(screen.getByText("data")).toBeTruthy()
   })

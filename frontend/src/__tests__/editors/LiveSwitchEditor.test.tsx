@@ -21,14 +21,14 @@ beforeEach(() => {
 describe("LiveSwitchEditor", () => {
   it("renders scenario routing description", () => {
     render(
-      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#34d399" />,
     )
     expect(screen.getByText("Routes inputs based on the active scenario")).toBeTruthy()
   })
 
   it("shows active scenario", () => {
     render(
-      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#34d399" />,
     )
     expect(screen.getByText("● live")).toBeTruthy()
   })
@@ -39,7 +39,7 @@ describe("LiveSwitchEditor", () => {
       { varName: "backtest_data", sourceLabel: "Backtest Data", edgeId: "e2" },
     ]
     render(
-      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={inputs} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={inputs} accentColor="#34d399" />,
     )
     expect(screen.getByText("Input → Scenario Mapping (2)")).toBeTruthy()
     expect(screen.getByText("Live Data")).toBeTruthy()
@@ -51,7 +51,7 @@ describe("LiveSwitchEditor", () => {
       { varName: "live_data", sourceLabel: "Live Data", edgeId: "e1" },
     ]
     render(
-      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={inputs} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={inputs} accentColor="#34d399" />,
     )
     const selects = screen.getAllByRole("combobox")
     expect(selects.length).toBeGreaterThanOrEqual(1)
@@ -69,7 +69,7 @@ describe("LiveSwitchEditor", () => {
       input_scenario_map: { live_data: "live" },
     }
     render(
-      <LiveSwitchEditor config={config} onUpdate={vi.fn()} inputSources={inputs} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={config} onUpdate={vi.fn()} inputSources={inputs} accentColor="#34d399" />,
     )
     expect(screen.getByText("active")).toBeTruthy()
   })
@@ -82,7 +82,7 @@ describe("LiveSwitchEditor", () => {
       input_scenario_map: { backtest_data: "backtest" },
     }
     render(
-      <LiveSwitchEditor config={config} onUpdate={vi.fn()} inputSources={inputs} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={config} onUpdate={vi.fn()} inputSources={inputs} accentColor="#34d399" />,
     )
     expect(screen.queryByText("active")).toBeNull()
   })
@@ -93,7 +93,7 @@ describe("LiveSwitchEditor", () => {
       { varName: "live_data", sourceLabel: "Live Data", edgeId: "e1" },
     ]
     render(
-      <LiveSwitchEditor config={{}} onUpdate={onUpdate} inputSources={inputs} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={onUpdate} inputSources={inputs} accentColor="#34d399" />,
     )
     const select = screen.getAllByRole("combobox")[0] as HTMLSelectElement
     fireEvent.change(select, { target: { value: "backtest" } })
@@ -103,7 +103,7 @@ describe("LiveSwitchEditor", () => {
   it("renders with non-live active scenario", () => {
     useSettingsStore.setState({ activeScenario: "backtest" })
     render(
-      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#f59e0b" />,
+      <LiveSwitchEditor config={{}} onUpdate={vi.fn()} inputSources={[]} accentColor="#34d399" />,
     )
     expect(screen.getByText("backtest")).toBeTruthy()
   })

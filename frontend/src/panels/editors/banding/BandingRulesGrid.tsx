@@ -61,7 +61,7 @@ export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFa
                 <td className="px-1 py-1">
                   <input type="text" value={rule.assignment ?? ""} onChange={(e) => updateRule(i, "assignment", e.target.value)}
                     className="w-full px-1.5 py-1 rounded text-[11px] font-mono font-semibold focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#14b8a6' }} placeholder="band" />
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#22d3ee' }} placeholder="band" />
                 </td>
                 <td className="px-1 py-1 text-center">
                   <button onClick={() => removeRule(i)} className="p-0.5 rounded transition-colors" style={{ color: 'var(--text-muted)' }}
@@ -94,7 +94,7 @@ export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFa
                 <td className="px-1 py-1">
                   <input type="text" value={rule.assignment ?? ""} onChange={(e) => updateRule(i, "assignment", e.target.value)}
                     className="w-full px-1.5 py-1 rounded text-[11px] font-mono font-semibold focus:outline-none"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#14b8a6' }} placeholder="House" />
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#22d3ee' }} placeholder="House" />
                 </td>
                 <td className="px-1 py-1 text-center">
                   <button onClick={() => removeRule(i)} className="p-0.5 rounded transition-colors" style={{ color: 'var(--text-muted)' }}

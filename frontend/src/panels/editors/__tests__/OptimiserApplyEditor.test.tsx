@@ -71,7 +71,7 @@ const defaultProps = () => ({
   config: {} as Record<string, unknown>,
   onUpdate: vi.fn(),
   inputSources: [] as { varName: string; sourceLabel: string; edgeId: string }[],
-  accentColor: "#fb923c",
+  accentColor: "#f59e0b",
 })
 
 function resetMlflow() {
@@ -127,10 +127,10 @@ describe("OptimiserApplyEditor", () => {
   it("renders with default file source type selected", () => {
     render(<OptimiserApplyEditor {...defaultProps()} />)
     const fileBtn = screen.getByText("File Path")
-    // Active button has the accent border (jsdom converts hex #fb923c to rgb)
-    expect(fileBtn.style.border).toContain("rgb(251, 146, 60)")
+    // Active button has the accent border (jsdom converts hex #f59e0b to rgb)
+    expect(fileBtn.style.border).toContain("rgb(245, 158, 11)")
     const registeredBtn = screen.getByText("Registered")
-    expect(registeredBtn.style.border).not.toContain("rgb(251, 146, 60)")
+    expect(registeredBtn.style.border).not.toContain("rgb(245, 158, 11)")
   })
 
   // 2. Source type toggle among file/registered/run

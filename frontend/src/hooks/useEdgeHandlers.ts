@@ -18,13 +18,13 @@ import { nodeData } from "../types/node"
 import { NODE_TYPES } from "../utils/nodeTypes"
 
 const labelMap: Record<string, string> = {
-  [NODE_TYPES.API_INPUT]: "API Input",
+  [NODE_TYPES.API_INPUT]: "Quote Input",
   [NODE_TYPES.DATA_SOURCE]: "Data Source",
   [NODE_TYPES.TRANSFORM]: "Polars",
   [NODE_TYPES.MODEL_SCORE]: "Model Scoring",
   [NODE_TYPES.RATING_STEP]: "Rating Step",
   [NODE_TYPES.BANDING]: "Banding",
-  [NODE_TYPES.OUTPUT]: "API Output",
+  [NODE_TYPES.OUTPUT]: "Quote Response",
   [NODE_TYPES.DATA_SINK]: "Data Sink",
   [NODE_TYPES.EXTERNAL_FILE]: "Load File",
   [NODE_TYPES.LIVE_SWITCH]: "Source Switch",

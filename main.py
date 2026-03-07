@@ -30,7 +30,7 @@ def competitor_insights() -> pl.LazyFrame:
 
 @pipeline.node(config="config/api_input/quotes.json")
 def quotes() -> pl.LazyFrame:
-    """api_input node"""
+    """quotes node"""
     from haute._json_flatten import read_json_flat
     return read_json_flat("data/quotes_10m.jsonl", config_path="config/api_input/quotes.json")
 
@@ -73,6 +73,10 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
      
+    df
+    df
+    df
+    df
     df
     df
     df
@@ -186,10 +190,10 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 # Wire nodes together - edges define data flow
-pipeline.connect("quotes", "feature_processing")
 pipeline.connect("feature_processing", "policies")
 pipeline.connect("batch_quotes", "policies")
 pipeline.connect("policies", "competitor_join")
 pipeline.connect("competitor_insights", "competitor_join")
 pipeline.connect("competitor_join", "avg_top_5")
 pipeline.connect("policies", "competitor_scoring")
+pipeline.connect("quotes", "feature_processing")

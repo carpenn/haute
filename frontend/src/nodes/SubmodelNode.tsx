@@ -18,7 +18,7 @@ export type SubmodelNodeData = {
   _traceDimmed?: boolean
 }
 
-const accent = nodeTypeColors.submodel || "#f97316"
+const accent = nodeTypeColors.submodel || "#64748b"
 
 function SubmodelNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as SubmodelNodeData

@@ -123,7 +123,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
 
       {/* Header */}
       <div className="h-9 flex items-center px-4 shrink-0 gap-2" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
-        <Target size={14} style={{ color: "#f97316" }} />
+        <Target size={14} style={{ color: "#f59e0b" }} />
         <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{data.nodeLabel}</span>
         <span className="text-[11px]" style={{ color: result.converged ? "#22c55e" : "#f59e0b" }}>
           {result.converged ? "Converged" : "Not converged"}
@@ -189,7 +189,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
                   {result.baseline_objective !== 0 && (
                     <div className="flex justify-between text-xs font-mono gap-4">
                       <span style={{ color: "var(--text-secondary)" }}>Uplift</span>
-                      <span style={{ color: "#f97316" }}>
+                      <span style={{ color: "#f59e0b" }}>
                         {((result.total_objective / result.baseline_objective - 1) * 100).toFixed(2)}%
                       </span>
                     </div>
@@ -272,7 +272,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
                     {counts.map((c, i) => {
                       const barH = maxCount > 0 ? (c / maxCount) * chartH : 0
                       return (
-                        <rect key={i} x={px + i * barW + 0.5} y={py + chartH - barH} width={Math.max(barW - 1, 1)} height={barH} fill="#f97316" opacity={0.7} />
+                        <rect key={i} x={px + i * barW + 0.5} y={py + chartH - barH} width={Math.max(barW - 1, 1)} height={barH} fill="#f59e0b" opacity={0.7} />
                       )
                     })}
                     {oneX != null && oneX >= px && oneX <= px + chartW && (
@@ -388,7 +388,7 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
                         const sel = selectedPoint === i
                         return (
                           <circle key={i} cx={cx} cy={cy} r={sel ? 5 : 3.5}
-                            fill={sel ? "#f97316" : "#a855f7"} stroke={sel ? "#fff" : "none"} strokeWidth={1.5}
+                            fill={sel ? "#f59e0b" : "#a855f7"} stroke={sel ? "#fff" : "none"} strokeWidth={1.5}
                             style={{ cursor: "pointer" }} onClick={() => setSelectedPoint(sel ? null : i)} />
                         )
                       })}
@@ -446,11 +446,11 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Convergence</label>
                 <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-                  <path d={objPath} fill="none" stroke="#f97316" strokeWidth={1.5} />
+                  <path d={objPath} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
                   <path d={lcPath} fill="none" stroke="#3b82f6" strokeWidth={1.5} />
                 </svg>
                 <div className="flex gap-3 mt-0.5 text-[10px]" style={{ color: "var(--text-muted)" }}>
-                  <span><span style={{ color: "#f97316" }}>--</span> Objective</span>
+                  <span><span style={{ color: "#f59e0b" }}>--</span> Objective</span>
                   <span><span style={{ color: "#3b82f6" }}>--</span> Lambda change</span>
                 </div>
               </div>

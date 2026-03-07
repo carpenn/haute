@@ -67,8 +67,8 @@ describe("PipelineNode", () => {
   })
 
   it("renders an apiInput node with API badge", () => {
-    renderNode({ label: "API Input", nodeType: NODE_TYPES.API_INPUT, config: { row_id_column: "id" } })
-    expect(screen.getByText("API Input")).toBeInTheDocument()
+    renderNode({ label: "Quote Input", nodeType: NODE_TYPES.API_INPUT, config: { row_id_column: "id" } })
+    expect(screen.getByText("Quote Input")).toBeInTheDocument()
     expect(screen.getByText("API")).toBeInTheDocument()
   })
 

@@ -27,7 +27,7 @@ const DEFAULT_PROPS = {
   onUpdate: vi.fn(),
   inputSources: [] as { varName: string; edgeId: string; sourceLabel: string }[],
   upstreamColumns: [] as { name: string; dtype: string }[],
-  accentColor: "#0ea5e9",
+  accentColor: "#2dd4bf",
 }
 
 describe("ScenarioExpanderEditor", () => {
