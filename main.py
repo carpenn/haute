@@ -87,6 +87,7 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     df
     df
     df
+    df
     return df
 
 
@@ -190,6 +191,12 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     return result
 
 
+@pipeline.node(config="config/quote_response/output.json")
+def output(competitor_scoring: pl.LazyFrame) -> pl.LazyFrame:
+    """output node"""
+    return competitor_scoring
+
+
 
 # Wire nodes together - edges define data flow
 pipeline.connect("feature_processing", "policies")
@@ -199,3 +206,4 @@ pipeline.connect("competitor_insights", "competitor_join")
 pipeline.connect("competitor_join", "avg_top_5")
 pipeline.connect("policies", "competitor_scoring")
 pipeline.connect("quotes", "feature_processing")
+pipeline.connect("competitor_scoring", "output")
