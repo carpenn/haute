@@ -48,7 +48,7 @@ const defaultColumns = [
 
 function defaultProps(overrides: Partial<Parameters<typeof ModellingConfig>[0]> = {}) {
   return {
-    config: { _nodeId: "node_1", target: "loss_ratio", task: "regression" },
+    config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost" },
     onUpdate: vi.fn(),
     upstreamColumns: defaultColumns,
     allNodes: [],
@@ -133,12 +133,15 @@ describe("ModellingConfig", () => {
       expect(classificationBtn).toBeTruthy()
     })
 
-    it("switching task to classification calls onUpdate with new task and metrics", () => {
+    it("switching task to classification calls onUpdate with new task, metrics, and clears loss", () => {
       const { props } = renderConfig()
       fireEvent.click(screen.getByRole("button", { name: "classification" }))
-      // Should call onUpdate twice: once for task, once for metrics
-      expect(props.onUpdate).toHaveBeenCalledWith("task", "classification")
-      expect(props.onUpdate).toHaveBeenCalledWith("metrics", ["auc", "logloss"])
+      // Should call onUpdate once with merged object
+      expect(props.onUpdate).toHaveBeenCalledWith({
+        task: "classification",
+        metrics: ["auc", "logloss"],
+        loss_function: null,
+      })
     })
 
     it("feature count shows correct number (excludes target and weight)", () => {
@@ -150,7 +153,7 @@ describe("ModellingConfig", () => {
 
     it("feature count adjusts when weight is set", () => {
       renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", weight: "exposure" },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", weight: "exposure" },
       })
       // Target=loss_ratio, weight=exposure both excluded. Features: age, region = 2 of 4
       expect(screen.getByText(/2 of 4/)).toBeTruthy()
@@ -158,63 +161,60 @@ describe("ModellingConfig", () => {
 
     it("exclude column toggles work", () => {
       const { props } = renderConfig()
-      // Click "age" to exclude it
-      const ageBtn = screen.getByRole("button", { name: "age" })
-      fireEvent.click(ageBtn)
+      // Expand features section first
+      fireEvent.click(screen.getByRole("button", { name: /Features/ }))
+      // Find the feature row span for "age" (not <option> elements)
+      const ageSpan = screen.getAllByText("age").find(el => el.tagName === "SPAN")!
+      fireEvent.click(within(ageSpan.closest("div")!).getByRole("button", { name: "Exclude" }))
       expect(props.onUpdate).toHaveBeenCalledWith("exclude", ["age"])
     })
 
     it("excluded column re-includes on second click", () => {
       const { props } = renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", exclude: ["age"] },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", exclude: ["age"] },
       })
-      const ageBtn = screen.getByRole("button", { name: "age" })
-      fireEvent.click(ageBtn)
+      // Expand features section first
+      fireEvent.click(screen.getByRole("button", { name: /Features/ }))
+      // Find the feature row span for "age" (not <option> elements)
+      const ageSpan = screen.getAllByText("age").find(el => el.tagName === "SPAN")!
+      fireEvent.click(within(ageSpan.closest("div")!).getByRole("button", { name: "Include" }))
       // Should remove "age" from exclusion list
       expect(props.onUpdate).toHaveBeenCalledWith("exclude", [])
     })
 
-    it("algorithm dropdown shows CatBoost", () => {
-      renderConfig()
-      const algoSelect = screen.getByDisplayValue("CatBoost")
-      expect(algoSelect).toBeTruthy()
+    it("shows algorithm picker when algorithm is not set", () => {
+      renderConfig({ config: { _nodeId: "node_1", target: "loss_ratio", task: "regression" } })
+      expect(screen.getByText("Select Algorithm")).toBeTruthy()
+      expect(screen.getByText("CatBoost")).toBeTruthy()
     })
 
-    it("loss function dropdown shows regression losses for regression task", () => {
+    it("clicking CatBoost in picker sets algorithm and shows full config", () => {
+      const { props } = renderConfig({ config: { _nodeId: "node_1", target: "loss_ratio", task: "regression" } })
+      fireEvent.click(screen.getByText("CatBoost"))
+      expect(props.onUpdate).toHaveBeenCalledWith("algorithm", "catboost")
+    })
+
+    it("loss function shows regression losses as toggle buttons for regression task", () => {
       renderConfig()
-      // Find the loss function select (value is "" = Default)
-      const selects = screen.getAllByRole("combobox")
-      const lossSelect = selects.find((s) => {
-        const opts = within(s).queryAllByRole("option")
-        return opts.some((o) => o.textContent === "RMSE")
-      })
-      expect(lossSelect).toBeTruthy()
-      const options = within(lossSelect!).getAllByRole("option")
-      const optionTexts = options.map((o) => o.textContent)
-      expect(optionTexts).toContain("RMSE")
-      expect(optionTexts).toContain("MAE")
-      expect(optionTexts).toContain("Poisson")
-      expect(optionTexts).toContain("Tweedie")
+      // RMSE/MAE appear as both loss and metric buttons
+      expect(screen.getAllByRole("button", { name: "RMSE" }).length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByRole("button", { name: "MAE" }).length).toBeGreaterThanOrEqual(1)
+      // Poisson/Tweedie are loss-only
+      expect(screen.getByRole("button", { name: "Poisson" })).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Tweedie" })).toBeTruthy()
       // Should NOT contain classification losses
-      expect(optionTexts).not.toContain("Logloss")
+      expect(screen.queryByRole("button", { name: "CrossEntropy" })).toBeNull()
     })
 
-    it("loss function dropdown changes to classification losses when task=classification", () => {
+    it("loss function shows classification losses when task=classification", () => {
       renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "classification" },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "classification", algorithm: "catboost" },
       })
-      const selects = screen.getAllByRole("combobox")
-      const lossSelect = selects.find((s) => {
-        const opts = within(s).queryAllByRole("option")
-        return opts.some((o) => o.textContent === "Logloss")
-      })
-      expect(lossSelect).toBeTruthy()
-      const options = within(lossSelect!).getAllByRole("option")
-      const optionTexts = options.map((o) => o.textContent)
-      expect(optionTexts).toContain("Logloss")
-      expect(optionTexts).toContain("CrossEntropy")
-      // Should NOT contain regression losses
-      expect(optionTexts).not.toContain("RMSE")
+      // Logloss appears as both loss and metric button
+      expect(screen.getAllByRole("button", { name: "Logloss" }).length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByRole("button", { name: "CrossEntropy" })).toBeTruthy()
+      // Should NOT contain regression-only losses
+      expect(screen.queryByRole("button", { name: "Poisson" })).toBeNull()
     })
 
     it("Tweedie variance power slider only visible when loss_function=Tweedie", () => {
@@ -227,7 +227,7 @@ describe("ModellingConfig", () => {
       render(
         <ModellingConfig
           {...defaultProps({
-            config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", loss_function: "Tweedie" },
+            config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", loss_function: "Tweedie" },
           })}
         />,
       )
@@ -236,47 +236,63 @@ describe("ModellingConfig", () => {
   })
 
   // ═════════════════════════════════════════════════════════════════
-  // Hyperparameter inputs
+  // Hyperparameter JSON editor
   // ═════════════════════════════════════════════════════════════════
 
-  describe("Hyperparameter inputs", () => {
-    it("core params render with defaults", () => {
+  describe("Hyperparameter JSON editor", () => {
+    it("renders Hyperparameters section with JSON textarea", () => {
       renderConfig()
-      expect(screen.getByText("Iterations")).toBeTruthy()
-      expect(screen.getByText("Learning Rate")).toBeTruthy()
-      expect(screen.getByText("Depth")).toBeTruthy()
-      expect(screen.getByText("L2 Reg")).toBeTruthy()
-
-      // Check default values are present
-      expect(screen.getByDisplayValue("1000")).toBeTruthy()
-      expect(screen.getByDisplayValue("0.05")).toBeTruthy()
-      expect(screen.getByDisplayValue("6")).toBeTruthy()
-      expect(screen.getByDisplayValue("3")).toBeTruthy()
+      expect(screen.getByText("Hyperparameters")).toBeTruthy()
+      // Should have a textarea with default params as JSON
+      const textareas = document.querySelectorAll("textarea")
+      expect(textareas.length).toBeGreaterThan(0)
     })
 
-    it("changing a param calls onUpdate with merged params object", () => {
+    it("textarea shows default params when config.params is empty", () => {
+      renderConfig()
+      const textarea = document.querySelector("textarea")!
+      const parsed = JSON.parse(textarea.value)
+      expect(parsed).toHaveProperty("iterations", 1000)
+      expect(parsed).toHaveProperty("learning_rate", 0.05)
+      expect(parsed).toHaveProperty("depth", 6)
+    })
+
+    it("textarea shows custom params from config", () => {
+      renderConfig({
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", params: { iterations: 500, depth: 8 } },
+      })
+      const textarea = document.querySelector("textarea")!
+      const parsed = JSON.parse(textarea.value)
+      expect(parsed).toEqual({ iterations: 500, depth: 8 })
+    })
+
+    it("editing textarea and blurring commits params", () => {
       const { props } = renderConfig()
-      const iterInput = screen.getByDisplayValue("1000")
-      fireEvent.change(iterInput, { target: { value: "500" } })
-      expect(props.onUpdate).toHaveBeenCalledWith("params", expect.objectContaining({ iterations: 500 }))
+      const textarea = document.querySelector("textarea")!
+      fireEvent.change(textarea, { target: { value: '{"iterations": 2000}' } })
+      fireEvent.blur(textarea)
+      expect(props.onUpdate).toHaveBeenCalledWith("params", { iterations: 2000 })
     })
 
-    it("regularisation params render with defaults", () => {
-      renderConfig()
-      expect(screen.getByText("Random Strength")).toBeTruthy()
-      expect(screen.getByText("Bagging Temp")).toBeTruthy()
-      expect(screen.getByText("Min Data in Leaf")).toBeTruthy()
-      expect(screen.getByText("Border Count")).toBeTruthy()
+    it("invalid JSON shows error and does not commit", () => {
+      const { props } = renderConfig()
+      const textarea = document.querySelector("textarea")!
+      fireEvent.change(textarea, { target: { value: "{bad json" } })
+      fireEvent.blur(textarea)
+      // Error message text varies by JS engine — just check the border turned red
+      expect(textarea.style.border).toContain("rgb(239, 68, 68)")
+      // onUpdate should not have been called with params
+      expect(props.onUpdate).not.toHaveBeenCalledWith("params", expect.anything())
     })
 
-    it("grow policy defaults to SymmetricTree", () => {
-      renderConfig()
-      expect(screen.getByDisplayValue("SymmetricTree")).toBeTruthy()
-    })
-
-    it("early stopping rounds defaults to 50", () => {
-      renderConfig()
-      expect(screen.getByDisplayValue("50")).toBeTruthy()
+    it("strips task_type from JSON display when GPU is enabled", () => {
+      renderConfig({
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", params: { iterations: 500, task_type: "GPU" } },
+      })
+      const textarea = document.querySelector("textarea")!
+      const parsed = JSON.parse(textarea.value)
+      expect(parsed).not.toHaveProperty("task_type")
+      expect(parsed).toEqual({ iterations: 500 })
     })
   })
 
@@ -312,6 +328,7 @@ describe("ModellingConfig", () => {
           _nodeId: "node_1",
           target: "loss_ratio",
           task: "regression",
+          algorithm: "catboost",
           split: { strategy: "temporal", test_size: 0.2, seed: 42 },
         },
       })
@@ -325,6 +342,7 @@ describe("ModellingConfig", () => {
           _nodeId: "node_1",
           target: "loss_ratio",
           task: "regression",
+          algorithm: "catboost",
           split: { strategy: "group", test_size: 0.2, seed: 42 },
         },
       })
@@ -333,39 +351,41 @@ describe("ModellingConfig", () => {
 
     it("metrics checkboxes for regression render correctly", () => {
       renderConfig()
-      // Regression metrics
-      expect(screen.getByRole("button", { name: "gini" })).toBeTruthy()
-      expect(screen.getByRole("button", { name: "rmse" })).toBeTruthy()
-      expect(screen.getByRole("button", { name: "mae" })).toBeTruthy()
-      expect(screen.getByRole("button", { name: "r2" })).toBeTruthy()
+      // Regression metrics (display labels)
+      expect(screen.getByRole("button", { name: "Gini" })).toBeTruthy()
+      expect(screen.getByRole("button", { name: "R²" })).toBeTruthy()
+      // RMSE and MAE appear twice (loss function + metric) — check both exist
+      expect(screen.getAllByRole("button", { name: "RMSE" }).length).toBeGreaterThanOrEqual(2)
+      expect(screen.getAllByRole("button", { name: "MAE" }).length).toBeGreaterThanOrEqual(2)
     })
 
     it("clicking a metric button toggles it", () => {
       const { props } = renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", metrics: ["gini", "rmse"] },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", metrics: ["gini", "rmse"] },
       })
-      // Click "mae" to add it
-      fireEvent.click(screen.getByRole("button", { name: "mae" }))
-      expect(props.onUpdate).toHaveBeenCalledWith("metrics", ["gini", "rmse", "mae"])
+      // Click "MSE" metric to add it (only appears once — not a loss function)
+      fireEvent.click(screen.getByRole("button", { name: "MSE" }))
+      expect(props.onUpdate).toHaveBeenCalledWith("metrics", ["gini", "rmse", "mse"])
     })
 
     it("clicking a selected metric removes it", () => {
       const { props } = renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", metrics: ["gini", "rmse"] },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", metrics: ["gini", "rmse"] },
       })
-      // Click "gini" to remove it
-      fireEvent.click(screen.getByRole("button", { name: "gini" }))
+      // Click "Gini" to remove it (only appears once — not a loss function)
+      fireEvent.click(screen.getByRole("button", { name: "Gini" }))
       expect(props.onUpdate).toHaveBeenCalledWith("metrics", ["rmse"])
     })
 
     it("classification task shows classification metrics", () => {
       renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "classification" },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "classification", algorithm: "catboost" },
       })
-      expect(screen.getByRole("button", { name: "auc" })).toBeTruthy()
-      expect(screen.getByRole("button", { name: "logloss" })).toBeTruthy()
-      // Regression metrics should NOT be visible
-      expect(screen.queryByRole("button", { name: "rmse" })).toBeNull()
+      expect(screen.getByRole("button", { name: "AUC" })).toBeTruthy()
+      // Logloss appears twice (loss function + metric)
+      expect(screen.getAllByRole("button", { name: "Logloss" }).length).toBeGreaterThanOrEqual(2)
+      // Regression-only metrics should NOT be visible
+      expect(screen.queryByRole("button", { name: "Gini" })).toBeNull()
     })
   })
 
@@ -390,7 +410,7 @@ describe("ModellingConfig", () => {
 
     it("train button is disabled when no target is set", () => {
       renderConfig({
-        config: { _nodeId: "node_1", target: "", task: "regression" },
+        config: { _nodeId: "node_1", target: "", task: "regression", algorithm: "catboost" },
       })
       const trainBtn = screen.getByRole("button", { name: /Train Model/ })
       expect(trainBtn).toHaveProperty("disabled", true)
@@ -463,7 +483,7 @@ describe("ModellingConfig", () => {
     })
 
     it("does not show staleness warning when config hash matches", () => {
-      const config = { _nodeId: "node_1", target: "loss_ratio", task: "regression" }
+      const config = { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost" }
       const hash = hashConfig(config)
 
       useNodeResultsStore.setState({
@@ -743,7 +763,7 @@ describe("ModellingConfig", () => {
 
     it("export button is disabled when no target", () => {
       renderConfig({
-        config: { _nodeId: "node_1", target: "", task: "regression" },
+        config: { _nodeId: "node_1", target: "", task: "regression", algorithm: "catboost" },
       })
       const exportBtn = screen.getByRole("button", { name: /Export Training Script/ })
       expect(exportBtn).toHaveProperty("disabled", true)
@@ -851,23 +871,6 @@ describe("ModellingConfig", () => {
   // ═════════════════════════════════════════════════════════════════
 
   describe("Collapsible sections", () => {
-    it("advanced params section is collapsed by default", () => {
-      renderConfig()
-      const advBtn = screen.getByRole("button", { name: /Advanced params/ })
-      expect(advBtn).toBeTruthy()
-      // The textarea should not be visible when collapsed
-      expect(screen.queryByRole("textbox", { name: /advanced/i })).toBeNull()
-    })
-
-    it("clicking advanced params toggle opens JSON editor", () => {
-      renderConfig()
-      fireEvent.click(screen.getByRole("button", { name: /Advanced params/ }))
-      // After clicking, the store should be toggled and a textarea should appear
-      // Since we're using the real store, the section should now be open
-      const textareas = document.querySelectorAll("textarea")
-      expect(textareas.length).toBeGreaterThan(0)
-    })
-
     it("MLflow Logging section is collapsed by default", () => {
       renderConfig()
       const mlflowBtn = screen.getByRole("button", { name: /MLflow Logging/ })
@@ -917,7 +920,7 @@ describe("ModellingConfig", () => {
 
     it("clicking CV toggle when on calls onUpdate to disable cv_folds", () => {
       const { props } = renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", cv_folds: 5 },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", cv_folds: 5 },
       })
       fireEvent.click(screen.getByRole("button", { name: "On" }))
       expect(props.onUpdate).toHaveBeenCalledWith("cv_folds", null)
@@ -962,20 +965,21 @@ describe("ModellingConfig", () => {
       expect(screen.getByText(/Features/)).toBeTruthy()
     })
 
-    it("GPU toggle calls handleParamUpdate", () => {
+    it("GPU toggle enables GPU training", () => {
       const { props } = renderConfig()
       const gpuCheckbox = screen.getByRole("checkbox")
       fireEvent.click(gpuCheckbox)
       expect(props.onUpdate).toHaveBeenCalledWith("params", expect.objectContaining({ task_type: "GPU" }))
     })
 
-    it("GPU unchecked sets CPU", () => {
+    it("GPU unchecked removes task_type from params", () => {
       const { props } = renderConfig({
-        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", params: { task_type: "GPU" } },
+        config: { _nodeId: "node_1", target: "loss_ratio", task: "regression", algorithm: "catboost", params: { iterations: 500, task_type: "GPU" } },
       })
       const gpuCheckbox = screen.getByRole("checkbox")
       fireEvent.click(gpuCheckbox)
-      expect(props.onUpdate).toHaveBeenCalledWith("params", expect.objectContaining({ task_type: "CPU" }))
+      // Should commit params without task_type
+      expect(props.onUpdate).toHaveBeenCalledWith("params", { iterations: 500 })
     })
   })
 })

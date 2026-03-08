@@ -57,10 +57,12 @@ const REFRESHABLE_TYPES = new Set<string>([
 ])
 
 // ─── Node types that do NOT show the Columns tab ──
-// Output already has its own field selection; submodels/ports are placeholders.
+// Output already has its own field selection; submodels/ports are placeholders;
+// modelling nodes are sink-only (no outputs).
 const NO_COLUMNS_TAB = new Set<string>([
   NODE_TYPES.OUTPUT,
   NODE_TYPES.SUBMODEL,
+  NODE_TYPES.MODELLING,
 ])
 
 // ─── Instance sub-panel (kept inline — it references multiple node-level concerns) ──
@@ -470,16 +472,18 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         </div>
       )}
 
-      {activeTab === "columns" && showColumnsTab ? (
-        <ColumnsTab
-          config={config}
-          onUpdate={handleConfigUpdate}
-          availableColumns={availableColumns}
-          columns={currentColumns}
-        />
-      ) : (
-        renderEditor()
-      )}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {activeTab === "columns" && showColumnsTab ? (
+          <ColumnsTab
+            config={config}
+            onUpdate={handleConfigUpdate}
+            availableColumns={availableColumns}
+            columns={currentColumns}
+          />
+        ) : (
+          renderEditor()
+        )}
+      </div>
     </PanelShell>
   )
 }

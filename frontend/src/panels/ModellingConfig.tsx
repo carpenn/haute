@@ -85,7 +85,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
 
   // Collapse state from UI store (persisted)
-  const advancedOpen = useSettingsStore((s) => s.isSectionOpen("modelling.advanced"))
+  const featuresOpen = useSettingsStore((s) => s.isSectionOpen("modelling.features"))
   const mlflowOpen = useSettingsStore((s) => s.isSectionOpen("modelling.mlflow"))
   const monotonicOpen = useSettingsStore((s) => s.isSectionOpen("modelling.monotonic"))
   const toggleSection = useSettingsStore((s) => s.toggleSection)
@@ -93,7 +93,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const target = configField(config, "target", "")
   const weight = configField(config, "weight", "")
   const exclude = configField<string[]>(config, "exclude", [])
-  const algorithm = configField(config, "algorithm", "catboost")
+  const algorithm = configField(config, "algorithm", "")
   const task = configField(config, "task", "regression")
   const params = configField<Record<string, unknown>>(config, "params", {})
   const split = configField<Record<string, unknown>>(config, "split", { strategy: "random", test_size: 0.2, seed: 42 })
@@ -101,10 +101,6 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
   const columns = upstreamColumns || []
   const featureCount = columns.filter(c => c.name !== target && c.name !== weight && !exclude.includes(c.name)).length
-
-  const handleParamUpdate = useCallback((key: string, value: unknown) => {
-    onUpdate("params", { ...params, [key]: value })
-  }, [params, onUpdate])
 
   const handleSplitUpdate = useCallback((key: string, value: unknown) => {
     onUpdate("split", { ...split, [key]: value })
@@ -151,6 +147,29 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     }
   }, [config._nodeId, buildGraphCb])
 
+  // ── Gateway: pick algorithm before showing full config ──
+  if (!algorithm) {
+    return (
+      <div className="px-4 py-3 space-y-3">
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+          Select Algorithm
+        </label>
+        <button
+          onClick={() => onUpdate("algorithm", "catboost")}
+          className="w-full flex items-start gap-3 px-3 py-3 rounded-lg text-left transition-colors"
+          style={{ background: "var(--chrome-hover)", border: "1px solid var(--border)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--accent-soft)" }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--chrome-hover)" }}
+        >
+          <div className="min-w-0">
+            <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>CatBoost</div>
+            <div className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>Gradient boosting — handles categoricals natively, fast GPU training</div>
+          </div>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="px-4 py-3 space-y-4">
       <TargetAndTaskConfig
@@ -160,22 +179,19 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         target={target}
         weight={weight}
         task={task}
+        metrics={metrics}
       />
 
       <FeatureAndAlgorithmConfig
-        config={config}
         onUpdate={onUpdate}
         columns={columns}
         target={target}
         weight={weight}
         exclude={exclude}
-        algorithm={algorithm}
-        task={task}
         params={params}
         featureCount={featureCount}
-        advancedOpen={advancedOpen}
+        featuresOpen={featuresOpen}
         toggleSection={toggleSection}
-        onParamUpdate={handleParamUpdate}
       />
 
       <SplitAndMetricsConfig
@@ -185,9 +201,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         target={target}
         weight={weight}
         exclude={exclude}
-        task={task}
         split={split}
-        metrics={metrics}
         mlflowOpen={mlflowOpen}
         monotonicOpen={monotonicOpen}
         toggleSection={toggleSection}

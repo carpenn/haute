@@ -1,11 +1,10 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { OnUpdateConfig } from "../editors"
 import { configField } from "../../utils/configField"
+import { toggleButtonStyle } from "./styles"
 
 type Column = { name: string; dtype: string }
 
-const REGRESSION_METRICS = ["gini", "rmse", "mae", "mse", "r2", "poisson_deviance", "tweedie_deviance"]
-const CLASSIFICATION_METRICS = ["auc", "logloss"]
 
 export type SplitAndMetricsConfigProps = {
   config: Record<string, unknown>
@@ -14,9 +13,7 @@ export type SplitAndMetricsConfigProps = {
   target: string
   weight: string
   exclude: string[]
-  task: string
   split: Record<string, unknown>
-  metrics: string[]
   mlflowOpen: boolean
   monotonicOpen: boolean
   toggleSection: (section: string) => void
@@ -30,16 +27,12 @@ export function SplitAndMetricsConfig({
   target,
   weight,
   exclude,
-  task,
   split,
-  metrics,
   mlflowOpen,
   monotonicOpen,
   toggleSection,
   onSplitUpdate,
 }: SplitAndMetricsConfigProps) {
-  const availableMetrics = task === "classification" ? CLASSIFICATION_METRICS : REGRESSION_METRICS
-
   return (
     <>
       {/* Split Strategy */}
@@ -144,11 +137,7 @@ export function SplitAndMetricsConfig({
             <button
               onClick={() => onUpdate("cv_folds", config.cv_folds ? null : 5)}
               className="px-2 py-0.5 rounded text-[11px] font-mono"
-              style={{
-                background: config.cv_folds ? "rgba(168,85,247,.15)" : "var(--chrome-hover)",
-                color: config.cv_folds ? "#a855f7" : "var(--text-muted)",
-                border: `1px solid ${config.cv_folds ? "rgba(168,85,247,.3)" : "transparent"}`,
-              }}
+              style={toggleButtonStyle(!!config.cv_folds)}
             >
               {config.cv_folds ? "On" : "Off"}
             </button>
@@ -190,33 +179,6 @@ export function SplitAndMetricsConfig({
               </div>
             )
           })()}
-        </div>
-      </div>
-
-      {/* Metrics */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Metrics</label>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {availableMetrics.map(m => {
-            const selected = metrics.includes(m)
-            return (
-              <button
-                key={m}
-                onClick={() => {
-                  const newMetrics = selected ? metrics.filter(x => x !== m) : [...metrics, m]
-                  onUpdate("metrics", newMetrics)
-                }}
-                className="px-2.5 py-1 rounded-md text-xs font-mono transition-colors"
-                style={{
-                  background: selected ? "rgba(168,85,247,.15)" : "var(--chrome-hover)",
-                  color: selected ? "#a855f7" : "var(--text-muted)",
-                  border: `1px solid ${selected ? "rgba(168,85,247,.3)" : "transparent"}`,
-                }}
-              >
-                {m}
-              </button>
-            )
-          })}
         </div>
       </div>
 
@@ -274,6 +236,7 @@ export function SplitAndMetricsConfig({
               <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Set per-feature constraints (numeric features only)</div>
               {columns
                 .filter(c => c.name !== target && c.name !== weight && !exclude.includes(c.name) && !["Utf8", "Categorical", "String"].includes(c.dtype))
+                .sort((a, b) => a.name.localeCompare(b.name))
                 .map(c => {
                   const mc = configField<Record<string, number>>(config, "monotone_constraints", {})
                   const val = mc[c.name] ?? 0
