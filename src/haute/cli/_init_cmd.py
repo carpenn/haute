@@ -214,7 +214,7 @@ def init(target: str, ci: str) -> None:
 
     # -- .gitignore - append if exists, create if not --------------------------
     gitignore_path = project_dir / ".gitignore"
-    haute_entries = ".env\n*.haute.json\nimpact_report.md\n.haute_cache/\n"
+    haute_entries = ".env\n*.haute.json\nimpact_report.md\n.haute_cache/\nmlruns/\ndata/\n"
     if gitignore_path.exists():
         existing = gitignore_path.read_text()
         missing = [line for line in haute_entries.splitlines() if line and line not in existing]
@@ -223,7 +223,7 @@ def init(target: str, ci: str) -> None:
                 fh.write("\n# Haute\n" + "\n".join(missing) + "\n")
     else:
         gitignore_path.write_text(
-            "__pycache__/\n*.pyc\n.venv/\n.env\n*.haute.json\n.haute_cache/\n",
+            "__pycache__/\n*.pyc\n.venv/\n.env\n*.haute.json\n.haute_cache/\nmlruns/\ndata/\n",
             encoding="utf-8",
         )
 

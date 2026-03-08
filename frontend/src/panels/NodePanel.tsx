@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
 import { NODE_TYPES, NODE_TYPE_META } from "../utils/nodeTypes"
 import type { NodeTypeValue } from "../utils/nodeTypes"
@@ -22,6 +22,7 @@ import {
   SubmodelEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
+import ColumnsTab from "./editors/ColumnsTab"
 import PanelShell from "./PanelShell"
 
 // Re-export types (preserve public API for App.tsx)
@@ -53,6 +54,13 @@ const REFRESHABLE_TYPES = new Set<string>([
   NODE_TYPES.RATING_STEP,
   NODE_TYPES.MODEL_SCORE,
   NODE_TYPES.OPTIMISER_APPLY,
+])
+
+// ─── Node types that do NOT show the Columns tab ──
+// Output already has its own field selection; submodels/ports are placeholders.
+const NO_COLUMNS_TAB = new Set<string>([
+  NODE_TYPES.OUTPUT,
+  NODE_TYPES.SUBMODEL,
 ])
 
 // ─── Instance sub-panel (kept inline — it references multiple node-level concerns) ──
@@ -225,6 +233,7 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 
 export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed, errorLine }: NodePanelProps) {
   const config = (node?.data.config || {}) as Record<string, unknown>
+  const [activeTab, setActiveTab] = useState<"config" | "columns">("config")
 
   const handleConfigUpdate = useCallback((keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
     if (!node || !onUpdateNode) return
@@ -243,6 +252,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
 
   const isInstance = !!config.instanceOf
   const nodeType = node.data.nodeType
+  const showColumnsTab = !isInstance && !NO_COLUMNS_TAB.has(nodeType)
 
   // Compute input sources
   const nodeMap = Object.fromEntries(allNodes.map((n) => [n.id, n]))
@@ -397,6 +407,9 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
     }
   }
 
+  const availableColumns = ((node.data as Record<string, unknown>)?._availableColumns as { name: string; dtype: string }[]) || []
+  const currentColumns = ((node.data as Record<string, unknown>)?._columns as { name: string; dtype: string }[]) || []
+
   return (
     <PanelShell style={{ opacity: dimmed ? 0.6 : 1, transition: 'opacity 150ms' }}>
       <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -435,7 +448,38 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         </button>
       </div>
 
-      {renderEditor()}
+      {/* Tab bar — only show when Columns tab is available */}
+      {showColumnsTab && (
+        <div className="flex shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+          {(["config", "columns"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className="flex-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors"
+              style={{
+                color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
+                borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
+                background: activeTab === tab ? 'var(--accent-soft)' : 'transparent',
+              }}
+              onMouseEnter={(e) => { if (activeTab !== tab) e.currentTarget.style.background = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { if (activeTab !== tab) e.currentTarget.style.background = 'transparent' }}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTab === "columns" && showColumnsTab ? (
+        <ColumnsTab
+          config={config}
+          onUpdate={handleConfigUpdate}
+          availableColumns={availableColumns}
+          columns={currentColumns}
+        />
+      ) : (
+        renderEditor()
+      )}
     </PanelShell>
   )
 }

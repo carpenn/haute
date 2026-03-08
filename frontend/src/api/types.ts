@@ -27,6 +27,7 @@ export interface NodeResult {
   row_count?: number
   column_count?: number
   columns?: { name: string; dtype: string }[]
+  available_columns?: { name: string; dtype: string }[]
   preview?: Record<string, unknown>[]
   error?: string | null
   error_line?: number | null

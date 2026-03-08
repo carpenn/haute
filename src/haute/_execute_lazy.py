@@ -176,6 +176,15 @@ def _execute_lazy(
 
         if isinstance(lf, pl.DataFrame):
             lf = lf.lazy()
+
+        # Apply selected_columns filter for downstream propagation
+        sel_cols = node_map[nid].data.config.get("selected_columns")
+        if sel_cols:
+            schema_names = lf.collect_schema().names()
+            valid = [c for c in sel_cols if c in schema_names]
+            if valid and len(valid) < len(schema_names):
+                lf = lf.select(valid)
+
         lazy_outputs[nid] = lf
 
     return lazy_outputs, order, parents_of, id_to_name
@@ -259,6 +268,7 @@ class EagerResult(NamedTuple):
     timings: dict[str, float]
     memory_bytes: dict[str, int]
     error_lines: dict[str, int]
+    available_columns: dict[str, list[tuple[str, str]]]
 
 
 def _execute_eager_core(
@@ -306,6 +316,7 @@ def _execute_eager_core(
     error_lines: dict[str, int] = {}
     timings: dict[str, float] = {}
     memory_bytes: dict[str, int] = {}
+    available_columns: dict[str, list[tuple[str, str]]] = {}
 
     for nid in order:
         fn, is_source = funcs[nid]
@@ -329,6 +340,19 @@ def _execute_eager_core(
                 result = fn(*input_lfs)
 
             df = result.collect(engine="streaming") if isinstance(result, pl.LazyFrame) else result
+
+            # Capture full column set before selected_columns filtering
+            available_columns[nid] = [
+                (c, str(df[c].dtype)) for c in df.columns
+            ]
+
+            # Apply selected_columns filter for downstream propagation
+            sel_cols = node_map[nid].data.config.get("selected_columns")
+            if sel_cols:
+                valid = [c for c in sel_cols if c in df.columns]
+                if valid and len(valid) < len(df.columns):
+                    df = df.select(valid)
+
             eager_outputs[nid] = df
             memory_bytes[nid] = df.estimated_size("b")
         except Exception as exc:
@@ -345,4 +369,5 @@ def _execute_eager_core(
     return EagerResult(
         eager_outputs, order, parents_of, node_map,
         id_to_name, errors, timings, memory_bytes, error_lines,
+        available_columns,
     )

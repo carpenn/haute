@@ -23,6 +23,8 @@ export interface HauteNodeData {
   func_name?: string
   /** Runtime columns from last preview/run — set by usePipelineAPI */
   _columns?: ColumnInfo[]
+  /** Full column set before selected_columns filtering — set by usePipelineAPI */
+  _availableColumns?: ColumnInfo[]
   /** Schema warnings from last preview — set by usePipelineAPI */
   _schemaWarnings?: { column: string; status: string }[]
   /** Node execution status — set by useTracing */

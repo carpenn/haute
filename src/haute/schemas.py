@@ -54,6 +54,7 @@ class NodeResult(BaseModel):
     row_count: int = 0
     column_count: int = 0
     columns: list[ColumnInfo] = Field(default_factory=list)
+    available_columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
     error_line: int | None = None
@@ -97,6 +98,7 @@ class PreviewNodeResponse(BaseModel):
     row_count: int = 0
     column_count: int = 0
     columns: list[ColumnInfo] = Field(default_factory=list)
+    available_columns: list[ColumnInfo] = Field(default_factory=list)
     preview: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
     error_line: int | None = None

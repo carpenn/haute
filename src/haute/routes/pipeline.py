@@ -253,6 +253,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             row_count=node_result.row_count,
             column_count=node_result.column_count,
             columns=node_result.columns,
+            available_columns=node_result.available_columns,
             preview=node_result.preview,
             error=node_result.error,
             error_line=node_result.error_line,

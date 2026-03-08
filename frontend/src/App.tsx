@@ -399,7 +399,11 @@ function FlowEditor() {
               <TracePanel trace={traceResult} onClose={clearTrace} />
             ) : (
               <NodePanel
-                node={(selectedNode ?? lastSelectedNodeRef.current) as unknown as SimpleNode | null}
+                node={(() => {
+                  const id = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+                  if (!id) return null
+                  return (nodes.find((n) => n.id === id) ?? null) as unknown as SimpleNode | null
+                })()}
                 edges={edges as unknown as SimpleEdge[]}
                 allNodes={nodes as unknown as SimpleNode[]}
                 submodels={submodelsSnapshot}

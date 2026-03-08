@@ -835,7 +835,10 @@ def _apply_ratebook(
 
 
 _preview_cache = FingerprintCache(
-    slots=("eager_outputs", "errors", "order", "timings", "memory_bytes", "error_lines"),
+    slots=(
+        "eager_outputs", "errors", "order", "timings",
+        "memory_bytes", "error_lines", "available_columns",
+    ),
 )
 
 
@@ -874,6 +877,7 @@ def execute_graph(
 
     errors: dict[str, str] = {}
     error_lines: dict[str, int] = {}
+    avail_cols: dict[str, list[tuple[str, str]]] = {}
 
     # Check if we can extend the cache (same graph, new target is a superset)
     cached = _preview_cache.try_get(fp)
@@ -893,6 +897,7 @@ def execute_graph(
             timings = cached["timings"]
             memory_bytes = cached["memory_bytes"]
             error_lines = cached["error_lines"]
+            avail_cols = cached["available_columns"]
         else:
             # Partial hit — extend with newly-needed nodes
             logger.debug(
@@ -901,7 +906,8 @@ def execute_graph(
                 target=target_node_id,
                 cached_nodes=len(prev_outputs),
             )
-            raw_outputs, order, errors, timings, memory_bytes, error_lines = _eager_execute(
+            (raw_outputs, order, errors, timings,
+             memory_bytes, error_lines, avail_cols) = _eager_execute(
                 graph, target_node_id, row_limit, scenario=scenario,
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -910,6 +916,7 @@ def execute_graph(
             merged_timings = {**cached["timings"], **timings}
             merged_memory = {**cached["memory_bytes"], **memory_bytes}
             merged_error_lines = {**cached["error_lines"], **error_lines}
+            merged_avail = {**cached["available_columns"], **avail_cols}
             merged_order = list(dict.fromkeys(cached["order"] + order))
             _preview_cache.store(
                 fp,
@@ -919,12 +926,14 @@ def execute_graph(
                 timings=merged_timings,
                 memory_bytes=merged_memory,
                 error_lines=merged_error_lines,
+                available_columns=merged_avail,
             )
             eager_outputs = merged
             errors = merged_errors
             timings = merged_timings
             memory_bytes = merged_memory
             error_lines = merged_error_lines
+            avail_cols = merged_avail
             order = merged_order
     else:
         # Complete cache miss — execute from scratch
@@ -934,7 +943,7 @@ def execute_graph(
             target=target_node_id,
             prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
         )
-        raw_outputs, order, errors, timings, memory_bytes, error_lines = _eager_execute(
+        raw_outputs, order, errors, timings, memory_bytes, error_lines, avail_cols = _eager_execute(
             graph, target_node_id, row_limit, scenario=scenario,
         )
         eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
@@ -946,6 +955,7 @@ def execute_graph(
             timings=timings,
             memory_bytes=memory_bytes,
             error_lines=error_lines,
+            available_columns=avail_cols,
         )
 
     # Pre-compute schema warnings for instance nodes by comparing the
@@ -1000,11 +1010,18 @@ def execute_graph(
         columns = [
             ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns
         ]
+        # available_columns = full column set before selected_columns filtering
+        avail = avail_cols.get(nid)
+        avail_col_infos = (
+            [ColumnInfo(name=n, dtype=d) for n, d in avail]
+            if avail else columns
+        )
         results[nid] = NodeResult(
             status="ok",
             row_count=len(df),
             column_count=len(df.columns),
             columns=columns,
+            available_columns=avail_col_infos,
             preview=df.head(max_preview_rows).to_dicts(),
             timing_ms=timings.get(nid, 0),
             memory_bytes=memory_bytes.get(nid, 0),
@@ -1029,15 +1046,17 @@ def _eager_execute(
 ) -> tuple[
     dict[str, pl.DataFrame | None], list[str],
     dict[str, str], dict[str, float], dict[str, int],
-    dict[str, int],
+    dict[str, int], dict[str, list[tuple[str, str]]],
 ]:
     """Execute the graph eagerly in topo order.
 
-    Returns (outputs, order, errors, timings, memory_bytes, error_lines)
-    where errors maps node_id → message for nodes that failed, timings maps
-    node_id → execution milliseconds, memory_bytes maps
-    node_id → output DataFrame size in bytes, and error_lines maps
-    node_id → 1-based line number in user code for the error.
+    Returns (outputs, order, errors, timings, memory_bytes, error_lines,
+    available_columns) where errors maps node_id → message for nodes that
+    failed, timings maps node_id → execution milliseconds, memory_bytes maps
+    node_id → output DataFrame size in bytes, error_lines maps
+    node_id → 1-based line number in user code for the error, and
+    available_columns maps node_id → list of (name, dtype) pairs before
+    any selected_columns filtering.
     """
     try:
         preamble_ns = _compile_preamble(graph.preamble or "")
@@ -1051,7 +1070,8 @@ def _eager_execute(
         no_timing: dict[str, float] = {}
         no_mem: dict[str, int] = {}
         no_lines: dict[str, int] = {}
-        return empty, order, errors, no_timing, no_mem, no_lines
+        no_avail: dict[str, list[tuple[str, str]]] = {}
+        return empty, order, errors, no_timing, no_mem, no_lines, no_avail
 
     result = _execute_eager_core(
         graph,
@@ -1065,6 +1085,7 @@ def _eager_execute(
     return (
         result.outputs, result.order, result.errors,
         result.timings, result.memory_bytes, result.error_lines,
+        result.available_columns,
     )
 
 

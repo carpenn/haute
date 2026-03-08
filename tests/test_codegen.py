@@ -446,6 +446,92 @@ class TestLiveSwitchSafety:
 # ---------------------------------------------------------------------------
 
 
+class TestSelectedColumnsCodegen:
+    """Tests for selected_columns code generation.
+
+    The executor handles .select() filtering at runtime based on config.
+    Codegen should NOT inject .select() into function bodies — the config
+    (JSON sidecar or decorator kwarg) is sufficient.
+    """
+
+    def test_no_select_in_banding_body(self):
+        """Banding with selected_columns does NOT inject .select() — executor handles it."""
+        node = _n({
+            "id": "b1",
+            "data": {
+                "label": "area_band",
+                "nodeType": "banding",
+                "config": {
+                    "factors": [{"banding": "continuous", "column": "area",
+                                 "outputColumn": "area_factor",
+                                 "rules": [{"from": 0, "to": 10, "value": "1.0"}]}],
+                    "selected_columns": ["area", "area_factor"],
+                },
+            },
+        })
+        code = _node_to_code(node, ["load_data"])
+        assert ".select(" not in code
+
+    def test_no_select_in_source_body(self):
+        """DataSource with selected_columns does NOT inject .select() — executor handles it."""
+        node = _n({
+            "id": "s1",
+            "data": {
+                "label": "load_data",
+                "nodeType": "dataSource",
+                "config": {"path": "data.parquet", "selected_columns": ["a", "b"]},
+            },
+        })
+        code = _node_to_code(node, [])
+        assert ".select(" not in code
+
+    def test_no_select_without_config(self):
+        """No .select() emitted when selected_columns is absent."""
+        node = _n({
+            "id": "s1",
+            "data": {
+                "label": "load_data",
+                "nodeType": "dataSource",
+                "config": {"path": "data.parquet"},
+            },
+        })
+        code = _node_to_code(node, [])
+        assert ".select(" not in code
+
+    def test_transform_uses_decorator_kwarg(self):
+        """Transform with selected_columns uses decorator kwarg, not .select() in body."""
+        node = _n({
+            "id": "t1",
+            "data": {
+                "label": "my_transform",
+                "nodeType": "transform",
+                "config": {
+                    "code": ".with_columns(y=pl.col('x') * 2)",
+                    "selected_columns": ["x", "y"],
+                },
+            },
+        })
+        code = _node_to_code(node, ["load_data"])
+        assert "selected_columns=" in code
+        # .select() should NOT be in the function body (only in decorator)
+        lines = code.split("\n")
+        body_lines = [l for l in lines if not l.startswith("@")]
+        assert not any(".select(" in l for l in body_lines)
+
+    def test_transform_no_decorator_kwarg_when_empty(self):
+        """Transform without selected_columns uses bare @pipeline.node."""
+        node = _n({
+            "id": "t1",
+            "data": {
+                "label": "my_transform",
+                "nodeType": "transform",
+                "config": {"code": ""},
+            },
+        })
+        code = _node_to_code(node, [])
+        assert code.startswith("@pipeline.node\n")
+
+
 class TestCodegenEdgeCases:
     """Edge cases and error paths for code generation."""
 

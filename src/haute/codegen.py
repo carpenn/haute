@@ -756,9 +756,15 @@ def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
     code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     body = _wrap_user_code(code, source_names)
+    sel = config.get("selected_columns", [])
+
+    if sel:
+        decorator = f"@pipeline.node(selected_columns={sel!r})"
+    else:
+        decorator = "@pipeline.node"
 
     return (
-        f"@pipeline.node\n"
+        f"{decorator}\n"
         f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"{body}\n"

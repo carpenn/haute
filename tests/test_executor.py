@@ -1112,6 +1112,112 @@ class TestBuildNodeFnErrorPaths:
             fn(lf)
 
 
+class TestSelectedColumns:
+    """Tests for the selected_columns column-filter feature."""
+
+    def test_selected_columns_filters_output(self, tmp_path):
+        """selected_columns in config filters the node's output DataFrame."""
+        p = tmp_path / "sel.parquet"
+        pl.DataFrame({"a": [1], "b": [2], "c": [3]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _n({
+                    "id": "t",
+                    "data": {
+                        "label": "t",
+                        "nodeType": "transform",
+                        "config": {
+                            "code": ".with_columns(d=pl.col('a') + pl.col('b'))",
+                            "selected_columns": ["a", "d"],
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        results = execute_graph(graph)
+        assert results["t"].status == "ok"
+        col_names = [c.name for c in results["t"].columns]
+        assert col_names == ["a", "d"]
+        # available_columns should have the full pre-filter set
+        avail_names = [c.name for c in results["t"].available_columns]
+        assert set(avail_names) == {"a", "b", "c", "d"}
+
+    def test_selected_columns_empty_keeps_all(self, tmp_path):
+        """Empty selected_columns means keep all columns (default)."""
+        p = tmp_path / "all.parquet"
+        pl.DataFrame({"x": [1], "y": [2]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _n({
+                    "id": "t",
+                    "data": {
+                        "label": "t",
+                        "nodeType": "transform",
+                        "config": {"code": "", "selected_columns": []},
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        results = execute_graph(graph)
+        col_names = [c.name for c in results["t"].columns]
+        assert set(col_names) == {"x", "y"}
+
+    def test_selected_columns_on_source_node(self, tmp_path):
+        """selected_columns works on source nodes too."""
+        p = tmp_path / "src_sel.parquet"
+        pl.DataFrame({"a": [1], "b": [2], "c": [3]}).write_parquet(p)
+
+        src = _source_node("src", str(p))
+        src.data.config["selected_columns"] = ["a", "c"]
+
+        graph = _g({"nodes": [src], "edges": []})
+        results = execute_graph(graph)
+        col_names = [c.name for c in results["src"].columns]
+        assert col_names == ["a", "c"]
+        avail_names = [c.name for c in results["src"].available_columns]
+        assert set(avail_names) == {"a", "b", "c"}
+
+    def test_selected_columns_propagates_downstream(self, tmp_path):
+        """Downstream nodes only see the filtered columns."""
+        p = tmp_path / "prop.parquet"
+        pl.DataFrame({"a": [1], "b": [2], "c": [3]}).write_parquet(p)
+
+        src = _source_node("src", str(p))
+        src.data.config["selected_columns"] = ["a"]
+
+        graph = _g({
+            "nodes": [
+                src,
+                _transform_node("t", ".with_columns(x=pl.col('a') * 10)"),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        results = execute_graph(graph)
+        assert results["t"].status == "ok"
+        col_names = [c.name for c in results["t"].columns]
+        # Transform sees only 'a' from upstream, adds 'x'
+        assert set(col_names) == {"a", "x"}
+
+    def test_selected_columns_invalid_column_ignored(self, tmp_path):
+        """Columns in selected_columns that don't exist are silently ignored."""
+        p = tmp_path / "inv.parquet"
+        pl.DataFrame({"a": [1], "b": [2]}).write_parquet(p)
+
+        src = _source_node("src", str(p))
+        src.data.config["selected_columns"] = ["a", "nonexistent"]
+
+        graph = _g({"nodes": [src], "edges": []})
+        results = execute_graph(graph)
+        col_names = [c.name for c in results["src"].columns]
+        assert col_names == ["a"]
+
+
 class TestExecuteGraphErrorPaths:
     """Error paths in execute_graph — cascading failures, bad node references,
     missing sources, and circular dependencies."""

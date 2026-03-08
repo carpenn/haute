@@ -144,7 +144,7 @@ export default function usePipelineAPI({
           setNodeStatuses(result.node_statuses as Record<string, "ok" | "error" | "running">)
         }
         if (result.columns) {
-          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
+          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _availableColumns: result.available_columns ?? result.columns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
         }
       })
       .catch((err) => {
