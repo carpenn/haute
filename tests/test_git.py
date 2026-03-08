@@ -120,7 +120,7 @@ class TestGenerateCommitMessage:
         assert "5 files" in msg
 
     def test_config_json(self) -> None:
-        msg = _generate_commit_message(["config/factors/area.json"])
+        msg = _generate_commit_message(["config/banding/area.json"])
         assert "config/area" in msg
 
     def test_sidecar_skipped(self) -> None:

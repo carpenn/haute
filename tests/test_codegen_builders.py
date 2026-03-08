@@ -93,7 +93,7 @@ class TestGenApiInput:
             label="PolicyData",
         )
         code = _node_to_code(node)
-        assert 'config="config/api_input/PolicyData.json"' in code
+        assert 'config="config/quote_input/PolicyData.json"' in code
         assert "def PolicyData()" in code
         assert 'scan_parquet("data/api_input.parquet")' in code
         _compile_node_code(code)
@@ -105,7 +105,7 @@ class TestGenApiInput:
             label="CSVInput",
         )
         code = _node_to_code(node)
-        assert 'config="config/api_input/CSVInput.json"' in code
+        assert 'config="config/quote_input/CSVInput.json"' in code
         assert "def CSVInput()" in code
         assert 'scan_csv("data/input.csv")' in code
         _compile_node_code(code)
@@ -117,7 +117,7 @@ class TestGenApiInput:
             label="JSONInput",
         )
         code = _node_to_code(node)
-        assert 'config="config/api_input/JSONInput.json"' in code
+        assert 'config="config/quote_input/JSONInput.json"' in code
         assert "def JSONInput()" in code
         assert "read_json_flat" in code
         _compile_node_code(code)
@@ -142,7 +142,7 @@ class TestGenApiInput:
             label="WithRowID",
         )
         code = _node_to_code(node)
-        assert 'config="config/api_input/WithRowID.json"' in code
+        assert 'config="config/quote_input/WithRowID.json"' in code
         assert "def WithRowID()" in code
         _compile_node_code(code)
 
@@ -188,7 +188,7 @@ class TestGenBanding:
             label="AgeBanding",
         )
         code = _node_to_code(node, source_names=["data"])
-        assert 'config="config/factors/AgeBanding.json"' in code
+        assert 'config="config/banding/AgeBanding.json"' in code
         assert "def AgeBanding(data: pl.LazyFrame)" in code
         assert "return df" in code
         _compile_node_code(code)
@@ -211,7 +211,7 @@ class TestGenBanding:
         )
         code = _node_to_code(node, source_names=["data"])
         # The inline decorator should have default kwarg before config replacement
-        assert 'config="config/factors/WithDefault.json"' in code
+        assert 'config="config/banding/WithDefault.json"' in code
         _compile_node_code(code)
 
     def test_multi_factor_banding(self) -> None:
@@ -238,7 +238,7 @@ class TestGenBanding:
             label="MultiBand",
         )
         code = _node_to_code(node, source_names=["data"])
-        assert 'config="config/factors/MultiBand.json"' in code
+        assert 'config="config/banding/MultiBand.json"' in code
         assert "def MultiBand(data: pl.LazyFrame)" in code
         _compile_node_code(code)
 
@@ -259,7 +259,7 @@ class TestGenBanding:
             label="CatBand",
         )
         code = _node_to_code(node, source_names=["df_in"])
-        assert 'config="config/factors/CatBand.json"' in code
+        assert 'config="config/banding/CatBand.json"' in code
         assert "def CatBand(df_in: pl.LazyFrame)" in code
         _compile_node_code(code)
 
@@ -312,7 +312,7 @@ class TestGenScenarioExpander:
             label="Scenarios",
         )
         code = _node_to_code(node, source_names=["base_data"])
-        assert 'config="config/scenario_expander/Scenarios.json"' in code
+        assert 'config="config/expander/Scenarios.json"' in code
         assert "def Scenarios(base_data: pl.LazyFrame)" in code
         assert "return base_data" in code
         _compile_node_code(code)
@@ -330,7 +330,7 @@ class TestGenScenarioExpander:
             label="Expand",
         )
         code = _node_to_code(node, source_names=["upstream"])
-        assert 'config="config/scenario_expander/Expand.json"' in code
+        assert 'config="config/expander/Expand.json"' in code
         _compile_node_code(code)
 
     def test_empty_config(self) -> None:
@@ -366,7 +366,7 @@ class TestGenScenarioExpander:
         # The inline decorator (before config replacement) should NOT
         # emit empty kwargs.  But after config replacement the decorator
         # is just config="...".
-        assert 'config="config/scenario_expander/PartialExpand.json"' in code
+        assert 'config="config/expander/PartialExpand.json"' in code
         _compile_node_code(code)
 
 
@@ -390,7 +390,7 @@ class TestGenOptimiser:
             label="PriceOpt",
         )
         code = _node_to_code(node, source_names=["scenarios"])
-        assert 'config="config/optimiser/PriceOpt.json"' in code
+        assert 'config="config/optimisation/PriceOpt.json"' in code
         assert "def PriceOpt(scenarios: pl.LazyFrame)" in code
         assert "return scenarios" in code
         _compile_node_code(code)
@@ -410,7 +410,7 @@ class TestGenOptimiser:
             label="Optimizer",
         )
         code = _node_to_code(node, source_names=["expanded"])
-        assert 'config="config/optimiser/Optimizer.json"' in code
+        assert 'config="config/optimisation/Optimizer.json"' in code
         _compile_node_code(code)
 
     def test_optimiser_empty_config(self) -> None:
@@ -443,7 +443,7 @@ class TestGenOptimiser:
             label="Sparse",
         )
         code = _node_to_code(node, source_names=["data"])
-        assert 'config="config/optimiser/Sparse.json"' in code
+        assert 'config="config/optimisation/Sparse.json"' in code
         _compile_node_code(code)
 
 

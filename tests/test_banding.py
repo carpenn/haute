@@ -289,7 +289,7 @@ class TestBandingCodegen:
         )
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        assert 'config="config/factors/band_age.json"' in code
+        assert 'config="config/banding/band_age.json"' in code
 
     def test_codegen_roundtrip(self, tmp_path):
         """Generate code → parse it back → same config."""
@@ -395,7 +395,7 @@ class TestMultiFactor:
         ])
         graph = PipelineGraph(nodes=[node], edges=[])
         code = graph_to_code(graph, "test")
-        assert 'config="config/factors/multi.json"' in code
+        assert 'config="config/banding/multi.json"' in code
 
     def test_codegen_multi_factor_roundtrip(self, tmp_path):
         from haute._config_io import collect_node_configs

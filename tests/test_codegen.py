@@ -51,19 +51,19 @@ class TestNodeToCode:
             pytest.param(
                 "Load Data",
                 {"path": "data/input.parquet"},
-                ["def Load_Data()", 'scan_parquet("data/input.parquet")', 'config="config/datasource/Load_Data.json"'],
+                ["def Load_Data()", 'scan_parquet("data/input.parquet")', 'config="config/data_source/Load_Data.json"'],
                 id="parquet",
             ),
             pytest.param(
                 "CSV Source",
                 {"path": "data/input.csv"},
-                ['scan_csv("data/input.csv")', "def CSV_Source()", 'config="config/datasource/CSV_Source.json"'],
+                ['scan_csv("data/input.csv")', "def CSV_Source()", 'config="config/data_source/CSV_Source.json"'],
                 id="csv",
             ),
             pytest.param(
                 "DB Source",
                 {"sourceType": "databricks", "table": "catalog.schema.tbl"},
-                ["read_cached_table", "catalog.schema.tbl", 'config="config/datasource/DB_Source.json"'],
+                ["read_cached_table", "catalog.schema.tbl", 'config="config/data_source/DB_Source.json"'],
                 id="databricks",
             ),
         ],
@@ -123,7 +123,7 @@ class TestNodeToCode:
             },
         })
         code = _node_to_code(node, source_names=["transform"])
-        assert 'config="config/output/Output.json"' in code
+        assert 'config="config/quote_response/Output.json"' in code
         assert "transform.select(" in code
         assert "def Output(transform: pl.LazyFrame)" in code
         _compile_node_code(code)
@@ -185,7 +185,7 @@ class TestNodeToCode:
             },
         })
         code = _node_to_code(node)
-        assert 'config="config/model_score/Score.json"' in code
+        assert 'config="config/model_scoring/Score.json"' in code
         # Body still contains the model loading logic
         assert 'source_type="run"' in code
         assert 'run_id="abc123"' in code
@@ -209,7 +209,7 @@ class TestNodeToCode:
             },
         })
         code = _node_to_code(node)
-        assert 'config="config/tables/Lookup.json"' in code
+        assert 'config="config/rating_step/Lookup.json"' in code
         assert "def Lookup(" in code
         assert "return df" in code
         _compile_node_code(code)
@@ -221,14 +221,14 @@ class TestNodeToCode:
                 "Model",
                 {"path": "model.pkl", "fileType": "pickle", "code": "df = obj.predict(df)"},
                 ["features"],
-                ['config="config/external_model/Model.json"', "load_external_object", "obj"],
+                ['config="config/load_file/Model.json"', "load_external_object", "obj"],
                 id="pickle",
             ),
             pytest.param(
                 "CB Model",
                 {"path": "model.cbm", "fileType": "catboost", "modelClass": "regressor", "code": "df = obj.predict(df)"},
                 [],
-                ['config="config/external_model/CB_Model.json"', "load_external_object", '"catboost", "regressor"'],
+                ['config="config/load_file/CB_Model.json"', "load_external_object", '"catboost", "regressor"'],
                 id="catboost",
             ),
         ],
@@ -347,7 +347,7 @@ class TestLiveSwitchCodegen:
 
     def test_emits_config_ref_with_live_active(self):
         code = _node_to_code(self._switch_node(), source_names=["live_src", "batch_src"])
-        assert 'config="config/live_switch/Switch.json"' in code
+        assert 'config="config/source_switch/Switch.json"' in code
         assert "return live_src" in code
         _compile_node_code(code)
 
@@ -356,7 +356,7 @@ class TestLiveSwitchCodegen:
             self._switch_node({"live_src": "test_batch", "batch_src": "prod"}),
             source_names=["live_src", "batch_src"],
         )
-        assert 'config="config/live_switch/Switch.json"' in code
+        assert 'config="config/source_switch/Switch.json"' in code
         # Falls back to first param when no input mapped to "live"
         assert "return live_src" in code
         _compile_node_code(code)
@@ -382,11 +382,11 @@ class TestLiveSwitchCodegen:
             'pipeline.connect("batch_src", "Switch")\n'
         )
         # Write config JSON files so the parser can resolve them
-        cfg_dir = tmp_path / "config" / "live_switch"
+        cfg_dir = tmp_path / "config" / "source_switch"
         cfg_dir.mkdir(parents=True)
         (cfg_dir / "Switch.json").write_text(json.dumps({"input_scenario_map": scenario_map, "inputs": ["live_src", "batch_src"]}))
         for name in ("live_src", "batch_src"):
-            ds_dir = tmp_path / "config" / "datasource"
+            ds_dir = tmp_path / "config" / "data_source"
             ds_dir.mkdir(parents=True, exist_ok=True)
             (ds_dir / f"{name}.json").write_text(json.dumps({"path": "a.parquet"}))
 

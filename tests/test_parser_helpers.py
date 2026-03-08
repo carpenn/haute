@@ -824,14 +824,14 @@ class TestResolveNodeConfig:
     def test_external_config_file(self, tmp_path):
         """With config= key, loads JSON from file."""
         cfg = {"path": "data.csv", "sourceType": "flat_file"}
-        cfg_dir = tmp_path / "config" / "datasource"
+        cfg_dir = tmp_path / "config" / "data_source"
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "my_source.json"
         cfg_file.write_text(json.dumps(cfg))
 
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, loaded = _resolve_node_config(
-                {"config": "config/datasource/my_source.json"},
+                {"config": "config/data_source/my_source.json"},
                 "", [], 0, tmp_path,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -841,15 +841,15 @@ class TestResolveNodeConfig:
         """Missing config file falls back gracefully to empty config."""
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
-                {"config": "config/datasource/missing.json"},
+                {"config": "config/data_source/missing.json"},
                 "", [], 0, tmp_path,
             )
         # Should have fallen back to inferring type from the path structure
         assert node_type == NodeType.DATA_SOURCE
 
     def test_factors_path_infers_banding_type(self, tmp_path):
-        """Config path under config/factors/ infers BANDING node type."""
-        cfg_dir = tmp_path / "config" / "factors"
+        """Config path under config/banding/ infers BANDING node type."""
+        cfg_dir = tmp_path / "config" / "banding"
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "my_transform.json"
         cfg_file.write_text("{}")
@@ -861,15 +861,15 @@ class TestResolveNodeConfig:
 
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
-                {"config": "config/factors/my_transform.json"},
+                {"config": "config/banding/my_transform.json"},
                 body, ["source"], 1, tmp_path,
             )
-        # Config path says "factors" => BANDING
+        # Config path says "banding" => BANDING
         assert node_type == NodeType.BANDING
 
     def test_config_pops_config_key_only(self):
         """The 'config' key is consumed but other kwargs survive."""
-        kwargs: dict[str, Any] = {"config": "config/datasource/x.json", "extra": True}
+        kwargs: dict[str, Any] = {"config": "config/data_source/x.json", "extra": True}
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             with patch("haute._parser_helpers.load_node_config", return_value={}):
                 _resolve_node_config(kwargs, "", [], 0, None)

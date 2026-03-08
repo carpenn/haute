@@ -14,20 +14,20 @@ directory, organised by node type:
 
 ```
 config/
-  factors/          # banding nodes
-  tables/           # rating step nodes
-  datasource/       # data source nodes
-  model_score/      # model score nodes
-  optimiser/        # optimiser nodes
-  optimiser_apply/  # optimiser apply nodes
-  scenario_expander/
-  output/
-  sink/             # data sink nodes
-  external_model/   # external file nodes
-  modelling/
-  constant/
-  api_input/
-  live_switch/
+  banding/              # banding nodes
+  rating_step/          # rating step nodes
+  data_source/          # data source nodes
+  model_scoring/        # model scoring nodes
+  optimisation/         # optimisation nodes
+  apply_optimisation/   # apply optimisation nodes
+  expander/             # scenario expander nodes
+  quote_response/       # quote response (output) nodes
+  data_sink/            # data sink nodes
+  load_file/            # load file (external) nodes
+  model_training/       # model training nodes
+  constant/             # constant nodes
+  quote_input/          # quote input (API) nodes
+  source_switch/        # source switch (live) nodes
 ```
 
 Each node gets one file: `config/<type_folder>/<node_name>.json`.
@@ -35,7 +35,7 @@ Each node gets one file: `config/<type_folder>/<node_name>.json`.
 The decorator references the file instead of carrying inline config:
 
 ```python
-@pipeline.node(config="config/factors/optimiser_banding.json")
+@pipeline.node(config="config/banding/optimiser_banding.json")
 def optimiser_banding(data_source):
     ...
 ```

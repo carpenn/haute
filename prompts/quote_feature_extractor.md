@@ -16,7 +16,7 @@ helpers/
   __init__.py
   features.py          ← starter utilities (to_date, years_between, cols_matching)
 main.py                ← pipeline definition (nodes + edges only)
-config/api_input/*.json ← flattenSchema describing the quote JSON
+config/quote_input/*.json ← flattenSchema describing the quote JSON
 ```
 
 Your job is to:
@@ -33,7 +33,7 @@ Your job is to:
 
 Read these files in order:
 
-1. **The api_input config** — `config/api_input/*.json`. Look at the
+1. **The api_input config** — `config/quote_input/*.json`. Look at the
    `flattenSchema` object. This tells you every field in the quote, its type,
    and how arrays are structured (`$max` = max items, `$items` = fields per item).
 2. **The pipeline file** — `main.py`. Find the `api_input` node and the
@@ -429,11 +429,11 @@ from helpers.features import (
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
-@pipeline.node(config="config/api_input/quotes.json")
+@pipeline.node(config="config/quote_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """api_input node"""
     from haute._json_flatten import read_json_flat
-    return read_json_flat("data/quotes_10m.jsonl", config_path="config/api_input/quotes.json")
+    return read_json_flat("data/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
 @pipeline.node

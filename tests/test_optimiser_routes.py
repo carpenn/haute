@@ -193,7 +193,7 @@ class TestCodegen:
             ),
         )
         code = _node_to_code(node, source_names=["scored_data"])
-        assert 'config="config/optimiser/my_optimiser.json"' in code
+        assert 'config="config/optimisation/my_optimiser.json"' in code
         assert "def my_optimiser(" in code
         assert "scored_data: pl.LazyFrame" in code
         assert "return scored_data" in code

@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
 from haute.routes._job_store import JobStore
 from haute.routes._train_service import (
     TrainService,
-    _VramCheck,
     _check_gpu_vram,
     _clamp_row_limit,
     _find_modelling_node,
+    _VramCheck,
 )
 from haute.schemas import (
     ExportScriptRequest,

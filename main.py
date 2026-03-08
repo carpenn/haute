@@ -16,23 +16,23 @@ from utility.features import (
 pipeline = haute.Pipeline("my_pipeline", description='')
 
 
-@pipeline.node(config="config/datasource/batch_quotes.json")
+@pipeline.node(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
     return pl.scan_parquet("data/batch_quotes.parquet")
 
 
-@pipeline.node(config="config/datasource/competitor_insights.json")
+@pipeline.node(config="config/data_source/competitor_insights.json")
 def competitor_insights() -> pl.LazyFrame:
     """competitor_insights node"""
     return pl.scan_parquet("data/competitor_insight.parquet")
 
 
-@pipeline.node(config="config/api_input/quotes.json")
+@pipeline.node(config="config/quote_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """quotes node"""
     from haute._json_flatten import read_json_flat
-    return read_json_flat("data/quotes_10m.jsonl", config_path="config/api_input/quotes.json")
+    return read_json_flat("data/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
 @pipeline.node
@@ -90,7 +90,7 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(config="config/live_switch/policies.json")
+@pipeline.node(config="config/source_switch/policies.json")
 def policies(feature_processing: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """policies node"""
     return feature_processing
@@ -110,13 +110,13 @@ def competitor_join(policies: pl.LazyFrame, competitor_insights: pl.LazyFrame) -
     return df
 
 
-@pipeline.node(config="config/modelling/avg_top_5.json")
+@pipeline.node(config="config/model_training/avg_top_5.json")
 def avg_top_5(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
     """avg_top_5 node"""
     return df
 
 
-@pipeline.node(config="config/model_score/competitor_scoring.json")
+@pipeline.node(config="config/model_scoring/competitor_scoring.json")
 def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_scoring node"""
     import atexit

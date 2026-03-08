@@ -25,8 +25,6 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-import polars as pl
-
 from haute._fingerprint_cache import FingerprintCache
 from haute._logging import get_logger
 from haute.executor import _build_node_fn, _compile_preamble

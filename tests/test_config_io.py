@@ -55,11 +55,11 @@ class TestMappings:
 class TestConfigPathForNode:
     def test_relative_path(self):
         p = config_path_for_node(NodeType.BANDING, "my_banding")
-        assert p == Path("config/factors/my_banding.json")
+        assert p == Path("config/banding/my_banding.json")
 
     def test_absolute_path_with_base_dir(self, tmp_path):
         p = config_path_for_node(NodeType.BANDING, "my_banding", base_dir=tmp_path)
-        assert p == tmp_path / "config" / "factors" / "my_banding.json"
+        assert p == tmp_path / "config" / "banding" / "my_banding.json"
 
     def test_all_types_produce_valid_paths(self):
         for nt, folder in NODE_TYPE_TO_FOLDER.items():
@@ -75,20 +75,20 @@ class TestInferNodeType:
     @pytest.mark.parametrize(
         "path, expected",
         [
-            ("config/factors/banding.json", NodeType.BANDING),
-            ("config/tables/lookup.json", NodeType.RATING_STEP),
-            ("config/datasource/source.json", NodeType.DATA_SOURCE),
-            ("config/model_score/Score.json", NodeType.MODEL_SCORE),
-            ("config/optimiser/opt.json", NodeType.OPTIMISER),
-            ("config/optimiser_apply/apply.json", NodeType.OPTIMISER_APPLY),
-            ("config/scenario_expander/expand.json", NodeType.SCENARIO_EXPANDER),
-            ("config/output/out.json", NodeType.OUTPUT),
-            ("config/sink/write.json", NodeType.DATA_SINK),
-            ("config/external_model/model.json", NodeType.EXTERNAL_FILE),
-            ("config/modelling/train.json", NodeType.MODELLING),
+            ("config/banding/banding.json", NodeType.BANDING),
+            ("config/rating_step/lookup.json", NodeType.RATING_STEP),
+            ("config/data_source/source.json", NodeType.DATA_SOURCE),
+            ("config/model_scoring/Score.json", NodeType.MODEL_SCORE),
+            ("config/optimisation/opt.json", NodeType.OPTIMISER),
+            ("config/apply_optimisation/apply.json", NodeType.OPTIMISER_APPLY),
+            ("config/expander/expand.json", NodeType.SCENARIO_EXPANDER),
+            ("config/quote_response/out.json", NodeType.OUTPUT),
+            ("config/data_sink/write.json", NodeType.DATA_SINK),
+            ("config/load_file/model.json", NodeType.EXTERNAL_FILE),
+            ("config/model_training/train.json", NodeType.MODELLING),
             ("config/constant/const.json", NodeType.CONSTANT),
-            ("config/api_input/quotes.json", NodeType.API_INPUT),
-            ("config/live_switch/switch.json", NodeType.LIVE_SWITCH),
+            ("config/quote_input/quotes.json", NodeType.API_INPUT),
+            ("config/source_switch/switch.json", NodeType.LIVE_SWITCH),
         ],
     )
     def test_infer_from_path(self, path, expected):
@@ -110,26 +110,26 @@ class TestSaveAndLoad:
     def test_save_creates_directories_and_file(self, tmp_path):
         config = {"path": "data/input.parquet", "sourceType": "flat_file"}
         rel = save_node_config(NodeType.DATA_SOURCE, "my_source", config, tmp_path)
-        assert rel == Path("config/datasource/my_source.json")
+        assert rel == Path("config/data_source/my_source.json")
         assert (tmp_path / rel).is_file()
 
     def test_saved_content_is_valid_json(self, tmp_path):
         config = {"path": "data/input.parquet"}
         save_node_config(NodeType.DATA_SOURCE, "src", config, tmp_path)
-        loaded = load_node_config("config/datasource/src.json", base_dir=tmp_path)
+        loaded = load_node_config("config/data_source/src.json", base_dir=tmp_path)
         assert loaded == config
 
     def test_code_key_excluded_from_json(self, tmp_path):
         config = {"path": "model.pkl", "fileType": "pickle", "code": "df = obj.predict(df)"}
         save_node_config(NodeType.EXTERNAL_FILE, "ext", config, tmp_path)
-        loaded = load_node_config("config/external_model/ext.json", base_dir=tmp_path)
+        loaded = load_node_config("config/load_file/ext.json", base_dir=tmp_path)
         assert "code" not in loaded
         assert loaded["path"] == "model.pkl"
         assert loaded["fileType"] == "pickle"
 
     def test_load_nonexistent_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            load_node_config("config/datasource/nope.json", base_dir=tmp_path)
+            load_node_config("config/data_source/nope.json", base_dir=tmp_path)
 
     def test_round_trip_complex_config(self, tmp_path):
         config = {
@@ -145,7 +145,7 @@ class TestSaveAndLoad:
             ],
         }
         save_node_config(NodeType.BANDING, "band", config, tmp_path)
-        loaded = load_node_config("config/factors/band.json", base_dir=tmp_path)
+        loaded = load_node_config("config/banding/band.json", base_dir=tmp_path)
         assert loaded == config
 
 
@@ -154,7 +154,7 @@ class TestRemoveConfigFile:
         config = {"path": "data.parquet"}
         save_node_config(NodeType.DATA_SOURCE, "src", config, tmp_path)
         assert remove_config_file(NodeType.DATA_SOURCE, "src", tmp_path)
-        assert not (tmp_path / "config" / "datasource" / "src.json").exists()
+        assert not (tmp_path / "config" / "data_source" / "src.json").exists()
 
     def test_remove_nonexistent_returns_false(self, tmp_path):
         assert not remove_config_file(NodeType.DATA_SOURCE, "nope", tmp_path)
@@ -178,7 +178,7 @@ class TestCollectNodeConfigs:
             "edges": [{"id": "e1", "source": "src", "target": "t"}],
         })
         configs = collect_node_configs(graph)
-        assert "config/datasource/src.json" in configs
+        assert "config/data_source/src.json" in configs
         # Transform should NOT have a config file
         assert not any("transform" in k for k in configs)
 
@@ -194,7 +194,7 @@ class TestCollectNodeConfigs:
             "edges": [],
         })
         configs = collect_node_configs(graph)
-        content = json.loads(configs["config/external_model/ext.json"])
+        content = json.loads(configs["config/load_file/ext.json"])
         assert "code" not in content
         assert content["path"] == "m.pkl"
 
@@ -211,8 +211,8 @@ class TestCollectNodeConfigs:
             "edges": [],
         })
         configs = collect_node_configs(graph)
-        assert "config/datasource/orig.json" in configs
-        assert "config/datasource/inst.json" not in configs
+        assert "config/data_source/orig.json" in configs
+        assert "config/data_source/inst.json" not in configs
 
     def test_all_node_types_produce_config(self):
         """Every non-transform, non-submodel node type should generate a config file."""

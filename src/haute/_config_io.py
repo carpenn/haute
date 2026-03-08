@@ -4,7 +4,7 @@ Each pipeline node's declarative config (everything except user code in
 the function body) is stored in a JSON file under
 ``config/<type_folder>/<node_name>.json``.  The decorator references it::
 
-    @pipeline.node(config="config/factors/optimiser_banding.json")
+    @pipeline.node(config="config/banding/optimiser_banding.json")
 
 This module provides:
 
@@ -29,19 +29,19 @@ logger = get_logger(component="config_io")
 # ---------------------------------------------------------------------------
 
 NODE_TYPE_TO_FOLDER: dict[NodeType, str] = {
-    NodeType.API_INPUT: "api_input",
-    NodeType.DATA_SOURCE: "datasource",
-    NodeType.LIVE_SWITCH: "live_switch",
-    NodeType.MODEL_SCORE: "model_score",
-    NodeType.BANDING: "factors",
-    NodeType.RATING_STEP: "tables",
-    NodeType.OUTPUT: "output",
-    NodeType.DATA_SINK: "sink",
-    NodeType.EXTERNAL_FILE: "external_model",
-    NodeType.MODELLING: "modelling",
-    NodeType.OPTIMISER: "optimiser",
-    NodeType.OPTIMISER_APPLY: "optimiser_apply",
-    NodeType.SCENARIO_EXPANDER: "scenario_expander",
+    NodeType.API_INPUT: "quote_input",
+    NodeType.DATA_SOURCE: "data_source",
+    NodeType.LIVE_SWITCH: "source_switch",
+    NodeType.MODEL_SCORE: "model_scoring",
+    NodeType.BANDING: "banding",
+    NodeType.RATING_STEP: "rating_step",
+    NodeType.OUTPUT: "quote_response",
+    NodeType.DATA_SINK: "data_sink",
+    NodeType.EXTERNAL_FILE: "load_file",
+    NodeType.MODELLING: "model_training",
+    NodeType.OPTIMISER: "optimisation",
+    NodeType.OPTIMISER_APPLY: "apply_optimisation",
+    NodeType.SCENARIO_EXPANDER: "expander",
     NodeType.CONSTANT: "constant",
 }
 
@@ -68,7 +68,7 @@ def config_path_for_node(
 ) -> Path:
     """Build the config file path for a node.
 
-    Returns a relative path like ``config/factors/optimiser_banding.json``.
+    Returns a relative path like ``config/banding/optimiser_banding.json``.
     If *base_dir* is provided, returns an absolute path.
     """
     folder = NODE_TYPE_TO_FOLDER.get(node_type)
@@ -83,7 +83,7 @@ def config_path_for_node(
 def infer_node_type_from_config_path(config_path: str | Path) -> NodeType | None:
     """Extract the node type from the config path's folder name.
 
-    E.g. ``"config/factors/optimiser_banding.json"`` → ``NodeType.BANDING``.
+    E.g. ``"config/banding/optimiser_banding.json"`` → ``NodeType.BANDING``.
     """
     parts = Path(config_path).parts
     # Expected: config/<type_folder>/<name>.json  (or just <type_folder>/<name>.json)
@@ -159,7 +159,7 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
     """Extract config files for all nodes in a graph.
 
     Returns a dict mapping relative path (e.g.
-    ``"config/factors/optimiser_banding.json"``) to JSON content string.
+    ``"config/banding/optimiser_banding.json"``) to JSON content string.
 
     Nodes without a config folder (transforms, submodels) are skipped.
     Instance nodes are skipped (they reference an original).

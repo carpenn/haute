@@ -43,7 +43,7 @@ const branchStatus = {
   branch: "pricing/test-user/update-factors",
   is_main: false,
   is_read_only: false,
-  changed_files: ["main.py", "config/factors/area.json"],
+  changed_files: ["main.py", "config/banding/area.json"],
   main_ahead: false,
   main_ahead_by: 0,
   main_last_updated: null,
@@ -163,7 +163,7 @@ describe("GitPanel", () => {
     render(<GitPanel {...defaultProps} />)
     await waitFor(() => {
       expect(screen.getByText("main.py")).toBeInTheDocument()
-      expect(screen.getByText("config/factors/area.json")).toBeInTheDocument()
+      expect(screen.getByText("config/banding/area.json")).toBeInTheDocument()
     })
   })
 

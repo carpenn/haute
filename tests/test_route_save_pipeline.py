@@ -319,9 +319,9 @@ class TestRemoveStaleConfigFiles:
         graph = _make_graph(
             _make_node("b1", "my_banding", "banding", {"bands": []}),
         )
-        svc._write_config_files(graph)  # Writes config/factors/my_banding.json
+        svc._write_config_files(graph)  # Writes config/banding/my_banding.json
 
-        fresh_file = tmp_path / "config" / "factors" / "my_banding.json"
+        fresh_file = tmp_path / "config" / "banding" / "my_banding.json"
         assert fresh_file.exists(), "Config file should be written by _write_config_files"
 
         svc._remove_stale_config_files(graph)
@@ -332,7 +332,7 @@ class TestRemoveStaleConfigFiles:
         """Empty config type folders are removed after stale file deletion."""
         svc = SavePipelineService(tmp_path)
 
-        config_dir = tmp_path / "config" / "factors"
+        config_dir = tmp_path / "config" / "banding"
         config_dir.mkdir(parents=True)
         stale_file = config_dir / "old.json"
         stale_file.write_text("{}")
@@ -340,7 +340,7 @@ class TestRemoveStaleConfigFiles:
         graph = _make_graph()
         svc._write_config_files(graph)  # No banding nodes → empty config files
 
-        with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
+        with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "banding"}):
             svc._remove_stale_config_files(graph)
 
         assert not config_dir.exists()
@@ -353,7 +353,7 @@ class TestRemoveStaleConfigFiles:
         graph = _make_graph()
         svc._write_config_files(graph)
 
-        with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "factors"}):
+        with patch("haute._config_io.NODE_TYPE_TO_FOLDER", {NodeType.BANDING: "banding"}):
             # Should not raise
             svc._remove_stale_config_files(graph)
 
@@ -362,14 +362,14 @@ class TestRemoveStaleConfigFiles:
         svc = SavePipelineService(tmp_path)
 
         # Build a graph with one banding node that produces
-        # config/factors/current_banding.json via _write_config_files
+        # config/banding/current_banding.json via _write_config_files
         graph = _make_graph(
             _make_node("b1", "current_banding", "banding", {"bands": []}),
         )
         svc._write_config_files(graph)
 
-        config_dir = tmp_path / "config" / "factors"
-        assert config_dir.exists(), "_write_config_files should create the factors dir"
+        config_dir = tmp_path / "config" / "banding"
+        assert config_dir.exists(), "_write_config_files should create the banding dir"
 
         fresh = config_dir / "current_banding.json"
         assert fresh.exists(), "Config for current_banding should exist"

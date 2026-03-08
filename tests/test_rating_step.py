@@ -297,7 +297,7 @@ class TestRatingStepCodegen:
             edges=[GraphEdge(id="e1", source="src", target="rating")],
         )
         code = graph_to_code(graph)
-        assert 'config="config/tables/rating.json"' in code
+        assert 'config="config/rating_step/rating.json"' in code
 
     def test_codegen_roundtrip(self, tmp_path):
         """Code generated from a graph can be parsed back."""
@@ -355,7 +355,7 @@ class TestRatingStepCodegen:
             edges=[GraphEdge(id="e1", source="src", target="rating")],
         )
         code = graph_to_code(graph)
-        assert 'config="config/tables/rating.json"' in code
+        assert 'config="config/rating_step/rating.json"' in code
 
         # Write config files so the parser can resolve them
         for rel_path, content in collect_node_configs(graph).items():
@@ -387,9 +387,9 @@ class TestRatingStepCodegen:
         )
         code = graph_to_code(graph)
         # Decorator should just be a config= reference
-        assert 'config="config/tables/rating.json"' in code
+        assert 'config="config/rating_step/rating.json"' in code
 
         # Verify config file contents
         configs = collect_node_configs(graph)
-        rating_cfg = json.loads(configs["config/tables/rating.json"])
+        rating_cfg = json.loads(configs["config/rating_step/rating.json"])
         assert rating_cfg["combinedColumn"] == "c"

@@ -36,13 +36,13 @@ from haute.routes._helpers import (
 )
 from haute.routes.databricks import router as databricks_router
 from haute.routes.files import router as files_router
+from haute.routes.git import router as git_router
 from haute.routes.json_cache import router as json_cache_router
 from haute.routes.mlflow import router as mlflow_router
 from haute.routes.modelling import router as modelling_router
 from haute.routes.optimiser import router as optimiser_router
 from haute.routes.pipeline import router as pipeline_router
 from haute.routes.submodel import router as submodel_router
-from haute.routes.git import router as git_router
 from haute.routes.utility import router as utility_router
 
 STATIC_DIR = Path(__file__).parent / "static"

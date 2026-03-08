@@ -199,7 +199,7 @@ class TestModellingNodeToCode:
             ),
         )
         code = _node_to_code(node, source_names=["frequency_set"])
-        assert 'config="config/modelling/train_freq.json"' in code
+        assert 'config="config/model_training/train_freq.json"' in code
         assert "def train_freq" in code
 
     def test_modelling_code_is_parseable(self):

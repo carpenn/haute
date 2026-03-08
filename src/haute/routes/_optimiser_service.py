@@ -315,7 +315,8 @@ class OptimiserSolveService:
         if not objective:
             raise HTTPException(
                 status_code=400,
-                detail="No objective column configured. Open the config panel and set an objective.",
+                detail="No objective column configured."
+                " Open the config panel and set an objective.",
             )
 
         constraints = config.get("constraints")
@@ -329,7 +330,8 @@ class OptimiserSolveService:
         if mode not in ("online", "ratebook"):
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported optimiser mode '{mode}'. Currently supported: online, ratebook.",
+                detail=f"Unsupported optimiser mode '{mode}'."
+                " Currently supported: online, ratebook.",
             )
 
         if mode == "ratebook":

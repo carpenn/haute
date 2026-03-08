@@ -68,7 +68,7 @@ class TestCodegen:
         }
         node = _make_node(config, label="expand_scenarios")
         code = _node_to_code(node, source_names=["base_data"])
-        assert 'config="config/scenario_expander/expand_scenarios.json"' in code
+        assert 'config="config/expander/expand_scenarios.json"' in code
         assert "def expand_scenarios(base_data" in code
         assert "return base_data" in code
 

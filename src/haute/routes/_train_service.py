@@ -202,7 +202,8 @@ class TrainService:
         if not target:
             raise HTTPException(
                 status_code=400,
-                detail="No target column selected. Open the config panel and choose a target column.",
+                detail="No target column selected."
+                " Open the config panel and choose a target column.",
             )
 
         algorithm = config.get("algorithm", "catboost")

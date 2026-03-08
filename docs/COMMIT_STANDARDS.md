@@ -192,12 +192,9 @@ if not str(target).startswith(str(base)):
 - The purpose is to catch bad designs before they become 2,000 lines of code. A 20-minute doc saves a week of rework.
 - Trivial changes (rename, bug fix, test addition) do not need a doc.
 
-## 19. Small Pull Requests
+## 19. 
 
-- PRs should be **under 400 lines of diff** wherever possible. Reviewers lose concentration after that; large PRs get rubber-stamped, not reviewed.
-- If a feature requires more, split it into a stack of dependent PRs that each compile and pass tests independently.
-- Refactors and behaviour changes must be in separate PRs. Never mix "move code around" with "change what it does" — it makes the behaviour change invisible.
-- A PR that only adds tests is a perfectly valid PR.
+- Solutions are as elegant as possible and not overly engineered
 
 ## 20. Canonical Data Types
 
@@ -438,7 +435,6 @@ Engineering Standards
 - [ ] Path traversal rejection tested (e.g. `../../etc/passwd` → 403)
 - [ ] Tests added for new logic; bug fixes include regression tests
 - [ ] Design doc in `docs/` if change touches >3 files or changes a public API
-- [ ] PR is under 400 lines of diff, or split into a reviewable stack
 - [ ] Structured data uses Pydantic models, not raw dicts
 - [ ] Internal helpers prefixed with `_`; only intentional public API is exported
 - [ ] Tests are deterministic, fast, focused, and independent

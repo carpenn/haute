@@ -74,13 +74,13 @@ class TestBuildJsonCache:
         with patch("haute._json_flatten.build_json_cache", return_value=fake_result) as mock_build:
             resp = client.post("/api/json-cache/build", json={
                 "path": "data.jsonl",
-                "config_path": "config/api_input/my_api.json",
+                "config_path": "config/quote_input/my_api.json",
             })
 
         assert resp.status_code == 200
         mock_build.assert_called_once_with(
             data_path="data.jsonl",
-            config_path="config/api_input/my_api.json",
+            config_path="config/quote_input/my_api.json",
         )
 
     def test_build_internal_error_returns_500(self, client: TestClient) -> None:

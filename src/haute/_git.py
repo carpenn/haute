@@ -13,8 +13,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from haute._logging import get_logger
@@ -550,7 +550,7 @@ def revert_to(sha: str, cwd: Path | None = None) -> RevertResult:
         raise GitError(f"Commit '{sha}' not found.")
 
     # Create a backup tag before resetting
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     branch_slug = branch.replace("/", "-")
     backup_tag = f"backup/{branch_slug}/{now}"
     _run_git("tag", backup_tag, "HEAD", cwd=cwd)
@@ -673,7 +673,7 @@ def archive_branch(branch: str, cwd: Path | None = None) -> str:
     ok, _ = _run_git_ok("rev-parse", "--verify", archive_name, cwd=cwd)
     if ok:
         # Add timestamp to make unique
-        now = datetime.now(timezone.utc).strftime("%Y%m%d")
+        now = datetime.now(UTC).strftime("%Y%m%d")
         archive_name = f"{archive_name}-{now}"
 
     # Can't rename the current branch while on it — switch away first
