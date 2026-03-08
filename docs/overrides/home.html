@@ -6,76 +6,143 @@
   <style>
     /* ── Hero section ──────────────────────────────────────── */
     .hero {
-      padding: 4rem 1rem 3rem;
-      background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1025 100%);
+      padding: 6rem 1.5rem 5rem;
+      background: #0d1117;
       color: #fff;
       text-align: center;
+      position: relative;
+      overflow: hidden;
+      min-height: 92vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Animated gradient orbs */
+    .hero-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .hero-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.55;
+      animation: orbDrift 18s ease-in-out infinite alternate;
+    }
+
+    .hero-orb--1 {
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle, rgba(236,72,153,0.28) 0%, transparent 70%);
+      top: -200px;
+      left: -100px;
+      animation-duration: 20s;
+    }
+
+    .hero-orb--2 {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(139,92,246,0.22) 0%, transparent 70%);
+      top: -100px;
+      right: -150px;
+      animation-duration: 25s;
+      animation-delay: -8s;
+    }
+
+    .hero-orb--3 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(34,211,238,0.15) 0%, transparent 70%);
+      bottom: -150px;
+      left: 30%;
+      animation-duration: 22s;
+      animation-delay: -14s;
+    }
+
+    @keyframes orbDrift {
+      0%   { transform: translate(0, 0) scale(1); }
+      33%  { transform: translate(30px, -20px) scale(1.05); }
+      66%  { transform: translate(-20px, 30px) scale(0.97); }
+      100% { transform: translate(20px, 10px) scale(1.03); }
+    }
+
+    /* Fine dot grid overlay */
+    .hero-bg::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(236,72,153,0.14) 1px, transparent 1px);
+      background-size: 30px 30px;
+      mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, black 20%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 40%, black 20%, transparent 100%);
+    }
+
+    .hero__inner {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+    }
+
+    /* Label pill */
+    .hero__label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.71rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--haute-pink, #ec4899);
+      background: rgba(236,72,153,0.08);
+      border: 1px solid rgba(236,72,153,0.25);
+      padding: 0.32rem 0.9rem;
+      border-radius: 100px;
+      margin-bottom: 2rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .hero__label-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: var(--haute-pink, #ec4899);
+      border-radius: 50%;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.75); }
     }
 
     .hero__title {
-      font-size: 3.5rem;
-      font-weight: 800;
+      font-size: clamp(2.4rem, 5.8vw, 4.1rem);
+      font-weight: 900;
       letter-spacing: -0.04em;
-      margin: 0 0 0.5rem;
+      margin: 0 auto 1.5rem;
       line-height: 1.1;
+      max-width: 860px;
+      color: #fff;
     }
 
     .hero__title span {
-      background: linear-gradient(135deg, #ec4899, #8b5cf6, #22d3ee);
+      font-style: normal;
+      background: linear-gradient(130deg, #ec4899 0%, #8b5cf6 50%, #22d3ee 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
     .hero__subtitle {
-      font-size: 1.25rem;
+      font-size: 1.175rem;
       color: #8b949e;
-      margin: 0 auto 2rem;
+      margin: 0 auto 2.5rem;
       max-width: 600px;
-      line-height: 1.6;
-    }
-
-    .hero__buttons {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 2.5rem;
-    }
-
-    .hero__button {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.75rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.95rem;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-
-    .hero__button--primary {
-      background: #ec4899;
-      color: #fff;
-    }
-
-    .hero__button--primary:hover {
-      background: #db2777;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 20px rgba(236, 72, 153, 0.4);
-    }
-
-    .hero__button--secondary {
-      background: rgba(255, 255, 255, 0.1);
-      color: #e6edf3;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-    }
-
-    .hero__button--secondary:hover {
-      background: rgba(255, 255, 255, 0.15);
-      border-color: rgba(255, 255, 255, 0.3);
-      transform: translateY(-1px);
+      line-height: 1.72;
     }
 
     .hero__badges {
@@ -86,101 +153,183 @@
       margin-bottom: 2.5rem;
     }
 
+    .hero__buttons {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 3.5rem;
+    }
+
+    .hero__button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.7rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: all 0.18s;
+      letter-spacing: -0.01em;
+    }
+
+    .hero__button--primary {
+      background: var(--haute-pink, #ec4899);
+      color: #fff;
+      box-shadow: 0 1px 3px rgba(236,72,153,0.3), 0 0 0 0 rgba(236,72,153,0.3);
+    }
+
+    .hero__button--primary:hover {
+      background: #db2777;
+      color: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 24px rgba(236,72,153,0.45);
+    }
+
+    .hero__button--secondary {
+      background: transparent;
+      color: #e6edf3;
+      border: 1px solid rgba(255,255,255,0.16);
+    }
+
+    .hero__button--secondary:hover {
+      background: rgba(255,255,255,0.07);
+      color: #fff;
+      border-color: rgba(255,255,255,0.28);
+      transform: translateY(-1px);
+    }
+
+    /* Terminal */
     .hero__terminal {
-      max-width: 500px;
+      max-width: 580px;
       margin: 0 auto;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
+      background: rgba(13,17,23,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
       overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(236,72,153,0.12), inset 0 1px 0 rgba(255,255,255,0.05);
       text-align: left;
     }
 
     .hero__terminal-bar {
+      background: rgba(255,255,255,0.04);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 0.65rem 1rem;
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 10px 14px;
-      background: #0d1117;
-      border-bottom: 1px solid #30363d;
+      gap: 0.5rem;
     }
 
-    .hero__terminal-dot {
+    .hero__term-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .hero__term-dots span {
+      display: inline-block;
       width: 10px;
       height: 10px;
       border-radius: 50%;
     }
 
-    .hero__terminal-dot--red { background: #ff5f57; }
-    .hero__terminal-dot--yellow { background: #febc2e; }
-    .hero__terminal-dot--green { background: #28c840; }
+    .hero__term-dots span:nth-child(1) { background: #ff5f57; }
+    .hero__term-dots span:nth-child(2) { background: #febc2e; }
+    .hero__term-dots span:nth-child(3) { background: #28c840; }
 
-    .hero__terminal-code {
-      padding: 1rem 1.25rem;
+    .hero__term-title {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
+      font-size: 0.7rem;
+      color: rgba(255,255,255,0.3);
+      margin-left: 0.25rem;
+    }
+
+    .hero__terminal-body {
+      padding: 1.25rem 1.5rem 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
       line-height: 1.8;
-      color: #e6edf3;
+      color: #c9d1d9;
+      min-height: 180px;
     }
 
-    .hero__terminal-code .prompt {
-      color: #8b949e;
+    .term-line { display: block; }
+    .term-prompt { color: rgba(236,72,153,0.7); margin-right: 0.5rem; }
+    .term-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 1em;
+      background: var(--haute-pink, #ec4899);
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
     }
 
-    .hero__terminal-code .cmd {
-      color: #22d3ee;
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
     }
 
-    .hero__terminal-code .comment {
-      color: #6e7681;
-    }
+    .term-output  { color: #8b949e; }
+    .term-success { color: #3fb950; }
+    .term-cmd     { color: #22d3ee; }
+    .term-flag    { color: #8b5cf6; }
+    .term-url     { color: #ec4899; }
 
     /* ── Features strip ────────────────────────────────────── */
     .features {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 1.5rem;
+      gap: 1.1rem;
       max-width: 1100px;
-      margin: -2rem auto 0;
-      padding: 0 1rem 3rem;
+      margin: -2.5rem auto 0;
+      padding: 0 1.5rem 3rem;
       position: relative;
       z-index: 1;
     }
 
     .feature-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
-      padding: 1.5rem;
-      transition: all 0.25s ease;
+      background: var(--haute-card-bg, #fff);
+      border: 1px solid var(--haute-card-border, #e5e7eb);
+      border-radius: 14px;
+      padding: 1.6rem 1.5rem;
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
     }
 
     .feature-card:hover {
-      border-color: #ec4899;
-      box-shadow: 0 8px 24px rgba(236, 72, 153, 0.12);
+      border-color: var(--haute-pink, #ec4899);
+      box-shadow: 0 8px 32px rgba(236,72,153,0.12);
       transform: translateY(-3px);
     }
 
     .feature-card__icon {
-      font-size: 1.75rem;
-      margin-bottom: 0.75rem;
-      background: linear-gradient(135deg, #ec4899, #8b5cf6);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      margin-bottom: 1.1rem;
+      background: rgba(236,72,153,0.08);
+      border: 1px solid rgba(236,72,153,0.2);
+      color: var(--haute-pink, #ec4899);
     }
 
     .feature-card__title {
       font-weight: 700;
-      font-size: 1rem;
-      color: #0d1117;
-      margin-bottom: 0.4rem;
+      font-size: 0.95rem;
+      color: var(--haute-heading-color, #0d1117);
+      margin-bottom: 0.5rem;
+      line-height: 1.32;
     }
 
     .feature-card__desc {
-      font-size: 0.875rem;
-      color: #57606a;
-      line-height: 1.5;
+      font-size: 0.84rem;
+      color: var(--haute-text-muted, #57606a);
+      line-height: 1.62;
       margin: 0;
     }
 
@@ -188,11 +337,12 @@
     [data-md-color-scheme="slate"] .feature-card {
       background: #161b22;
       border-color: #30363d;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
 
     [data-md-color-scheme="slate"] .feature-card:hover {
-      border-color: #ec4899;
-      box-shadow: 0 8px 24px rgba(236, 72, 153, 0.15);
+      border-color: var(--haute-pink, #ec4899);
+      box-shadow: 0 8px 32px rgba(236,72,153,0.15);
     }
 
     [data-md-color-scheme="slate"] .feature-card__title {
@@ -203,66 +353,111 @@
       color: #8b949e;
     }
 
-    /* ── Hero fade-in animation ──────────────────────────── */
+    /* ── Hero fade-in animations ──────────────────────────── */
     @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px); }
+      from { opacity: 0; transform: translateY(28px); }
       to   { opacity: 1; transform: translateY(0); }
     }
 
-    .hero__title      { animation: fadeInUp 0.6s ease both; }
-    .hero__subtitle   { animation: fadeInUp 0.6s ease 0.1s both; }
-    .hero__badges     { animation: fadeInUp 0.6s ease 0.2s both; }
-    .hero__buttons    { animation: fadeInUp 0.6s ease 0.3s both; }
-    .hero__terminal   { animation: fadeInUp 0.6s ease 0.4s both; }
+    .hero__label     { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) both; }
+    .hero__title     { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.08s both; }
+    .hero__subtitle  { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.16s both; }
+    .hero__badges    { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.24s both; }
+    .hero__buttons   { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.32s both; }
+    .hero__terminal  { animation: fadeInUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.40s both; }
 
+    /* ── Scroll fade-up animations ────────────────────────── */
+    .fade-up {
+      opacity: 0;
+      transform: translateY(32px);
+      transition: opacity 0.65s cubic-bezier(0.16,1,0.3,1), transform 0.65s cubic-bezier(0.16,1,0.3,1);
+    }
+
+    .fade-up.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .fade-up-children > * {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.55s cubic-bezier(0.16,1,0.3,1), transform 0.55s cubic-bezier(0.16,1,0.3,1);
+    }
+
+    .fade-up-children.visible > *:nth-child(1) { opacity: 1; transform: translateY(0); transition-delay: 0.05s; }
+    .fade-up-children.visible > *:nth-child(2) { opacity: 1; transform: translateY(0); transition-delay: 0.13s; }
+    .fade-up-children.visible > *:nth-child(3) { opacity: 1; transform: translateY(0); transition-delay: 0.21s; }
+    .fade-up-children.visible > *:nth-child(4) { opacity: 1; transform: translateY(0); transition-delay: 0.29s; }
+
+    /* ── Responsive ───────────────────────────────────────── */
     @media (max-width: 768px) {
-      .hero__title { font-size: 2.5rem; }
-      .hero__subtitle { font-size: 1.1rem; }
+      .hero {
+        padding: 4rem 1.25rem 4rem;
+        min-height: auto;
+      }
+      .hero__title { font-size: 2.2rem; }
+      .hero__subtitle { font-size: 1.02rem; }
+      .hero__terminal { max-width: 100%; }
       .features { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 480px) {
+      .hero__title { font-size: 2rem; letter-spacing: -0.03em; }
+      .hero__buttons { flex-direction: column; align-items: center; }
+      .hero__button { width: 100%; max-width: 280px; justify-content: center; }
     }
   </style>
 
   <section class="hero">
-    <h1 class="hero__title"><span>Haute</span></h1>
-    <p class="hero__subtitle">
-      The open-source pricing engine for insurance teams.
-      Build visually. Deploy instantly. Own your code.
-    </p>
-
-    <div class="hero__badges">
-      <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
-      <img src="https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square" alt="License">
-      <img src="https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white" alt="Databricks">
-      <img src="https://img.shields.io/badge/deploy-Azure_Container_Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white" alt="Azure Container Apps">
-      <img src="https://img.shields.io/badge/deploy-AWS_ECS-FF9900?style=flat-square&logo=amazonaws&logoColor=white" alt="AWS ECS">
-      <img src="https://img.shields.io/badge/deploy-Cloud_Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="GCP Cloud Run">
-      <img src="https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+    <div class="hero-bg">
+      <div class="hero-orb hero-orb--1"></div>
+      <div class="hero-orb hero-orb--2"></div>
+      <div class="hero-orb hero-orb--3"></div>
     </div>
-
-    <div class="hero__buttons">
-      <a href="#quick-start" class="hero__button hero__button--primary">
-        Get started
-      </a>
-      <a href="https://github.com/pricingfrontier/haute" class="hero__button hero__button--secondary">
-        View on GitHub
-      </a>
-    </div>
-
-    <div class="hero__terminal">
-      <div class="hero__terminal-bar">
-        <div class="hero__terminal-dot hero__terminal-dot--red"></div>
-        <div class="hero__terminal-dot hero__terminal-dot--yellow"></div>
-        <div class="hero__terminal-dot hero__terminal-dot--green"></div>
+    <div class="hero__inner">
+      <div class="hero__label">
+        <span class="hero__label-dot"></span>
+        Open source &middot; Insurance pricing engine
       </div>
-      <div class="hero__terminal-code">
-        <span class="prompt">$</span> <span class="cmd">uv add haute</span><br>
-        <span class="prompt">$</span> <span class="cmd">haute init</span><br>
-        <span class="prompt">$</span> <span class="cmd">haute serve</span>
+
+      <h1 class="hero__title"><span>Haute</span></h1>
+      <p class="hero__subtitle">
+        The open-source pricing engine for insurance teams.
+        Build visually. Deploy instantly. Own your code.
+      </p>
+
+      <div class="hero__badges">
+        <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+        <img src="https://img.shields.io/badge/license-Elastic_2.0-blue?style=flat-square" alt="License">
+        <img src="https://img.shields.io/badge/deploy-Databricks-FF3621?style=flat-square&logo=databricks&logoColor=white" alt="Databricks">
+        <img src="https://img.shields.io/badge/deploy-Azure_Container_Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white" alt="Azure Container Apps">
+        <img src="https://img.shields.io/badge/deploy-AWS_ECS-FF9900?style=flat-square&logo=amazonaws&logoColor=white" alt="AWS ECS">
+        <img src="https://img.shields.io/badge/deploy-Cloud_Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="GCP Cloud Run">
+        <img src="https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+      </div>
+
+      <div class="hero__buttons">
+        <a href="#quick-start" class="hero__button hero__button--primary">
+          Get started
+        </a>
+        <a href="https://github.com/pricingfrontier/haute" class="hero__button hero__button--secondary">
+          View on GitHub
+        </a>
+      </div>
+
+      <div class="hero__terminal">
+        <div class="hero__terminal-bar">
+          <div class="hero__term-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="hero__term-title">terminal</span>
+        </div>
+        <div class="hero__terminal-body" id="hero-term-body"><span class="term-cursor"></span></div>
       </div>
     </div>
   </section>
 
-  <section class="features">
+  <section class="features fade-up-children">
     <div class="feature-card">
       <div class="feature-card__icon">{ }</div>
       <div class="feature-card__title">Code-native</div>
@@ -271,7 +466,7 @@
     <div class="feature-card">
       <div class="feature-card__icon">&#9671;</div>
       <div class="feature-card__title">Visual editor</div>
-      <p class="feature-card__desc">Drag-and-drop flow editor. Edit visually or in code - they stay in sync.</p>
+      <p class="feature-card__desc">Drag-and-drop flow editor. Edit visually or in code &mdash; they stay in sync.</p>
     </div>
     <div class="feature-card">
       <div class="feature-card__icon">&#9889;</div>
@@ -284,6 +479,123 @@
       <p class="feature-card__desc">Staging, impact analysis, smoke tests, and approval gates on every release.</p>
     </div>
   </section>
+
+  <script>
+    (function() {
+      /* ── Intersection observer for fade-up animations ── */
+      if ('IntersectionObserver' in window) {
+        var observer = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('visible');
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.06, rootMargin: '0px 0px -50px 0px' });
+
+        document.querySelectorAll('.fade-up, .fade-up-children').forEach(function(el) {
+          observer.observe(el);
+        });
+      } else {
+        document.querySelectorAll('.fade-up, .fade-up-children').forEach(function(el) {
+          el.classList.add('visible');
+        });
+      }
+
+      /* ── Hero terminal typewriter ── */
+      var termBody = document.getElementById('hero-term-body');
+      if (!termBody) return;
+
+      var lines = [
+        { text: 'uv add haute',                              type: 'cmd',     delay: 600  },
+        { text: 'Resolved 12 packages in 0.8s',              type: 'output',  delay: 80   },
+        { text: '\u2713 Installed haute-0.12.0',              type: 'success', delay: 400  },
+        { text: '',                                           type: 'blank',   delay: 400  },
+        { text: 'haute init --target databricks --ci github', type: 'cmd',     delay: 500  },
+        { text: '\u2713 Created motor_pricing/pipeline.py',   type: 'success', delay: 100  },
+        { text: '\u2713 Created .github/workflows/deploy.yml',type: 'success', delay: 100  },
+        { text: '\u2713 Created .github/workflows/impact.yml',type: 'success', delay: 400  },
+        { text: '',                                           type: 'blank',   delay: 400  },
+        { text: 'haute serve',                                type: 'cmd',     delay: 500  },
+        { text: '\u25c6 Serving at http://localhost:8000',    type: 'output',  delay: 100  },
+        { text: '\u25c6 Visual editor ready',                 type: 'success', delay: 200  },
+      ];
+
+      var currentLine = 0;
+      var currentChar = 0;
+      var outputEl = null;
+      var cursorEl = termBody.querySelector('.term-cursor');
+
+      function typeNextChar() {
+        if (currentLine >= lines.length) {
+          if (cursorEl) cursorEl.style.display = 'inline-block';
+          return;
+        }
+        var line = lines[currentLine];
+
+        if (currentChar === 0) {
+          outputEl = document.createElement('span');
+          outputEl.className = 'term-line';
+
+          if (line.type === 'blank') {
+            outputEl.innerHTML = '\n';
+            termBody.insertBefore(outputEl, cursorEl);
+            currentLine++;
+            currentChar = 0;
+            setTimeout(typeNextChar, line.delay);
+            return;
+          }
+
+          if (line.type === 'output')  outputEl.className += ' term-output';
+          if (line.type === 'success') outputEl.className += ' term-success';
+
+          if (line.type === 'cmd') {
+            var promptEl = document.createElement('span');
+            promptEl.className = 'term-prompt';
+            promptEl.textContent = '$ ';
+            outputEl.appendChild(promptEl);
+          }
+
+          termBody.insertBefore(outputEl, cursorEl);
+        }
+
+        /* For non-cmd lines, print instantly */
+        if (line.type !== 'cmd') {
+          var textNode = document.createTextNode(line.text + '\n');
+          outputEl.appendChild(textNode);
+          currentLine++;
+          currentChar = 0;
+          setTimeout(typeNextChar, line.delay);
+          return;
+        }
+
+        /* Type cmd lines character by character */
+        var textNode = outputEl.lastChild;
+        if (!textNode || textNode.className === 'term-prompt') {
+          textNode = document.createTextNode('');
+          outputEl.appendChild(textNode);
+        }
+
+        if (currentChar < line.text.length) {
+          textNode.textContent += line.text[currentChar];
+          currentChar++;
+          var charDelay = 30 + Math.random() * 30;
+          setTimeout(typeNextChar, charDelay);
+        } else {
+          outputEl.appendChild(document.createTextNode('\n'));
+          currentLine++;
+          currentChar = 0;
+          setTimeout(typeNextChar, line.delay);
+        }
+      }
+
+      /* Start after initial animations settle */
+      setTimeout(function() {
+        if (cursorEl) cursorEl.style.display = 'none';
+        typeNextChar();
+      }, 1200);
+    })();
+  </script>
 {% endblock %}
 
 {% block content %}
