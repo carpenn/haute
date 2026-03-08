@@ -189,20 +189,20 @@ def score_graph(
                     _c: str = _code,
                     _sn: list[str] = _src_names,
                 ) -> _Frame:
-                    from haute._mlflow_io import _load_catboost_model, _score_eager
+                    from haute._mlflow_io import _score_eager, load_local_model
 
-                    model = _load_catboost_model(_p, _t)
+                    scoring_model = load_local_model(_p, _t)
                     lf = dfs[0] if dfs else pl.LazyFrame()
                     available = set(lf.collect_schema().names())
                     features = [
-                        f for f in model.feature_names_
+                        f for f in scoring_model.feature_names
                         if f in available
                     ]
-                    result_lf = _score_eager(model, lf, features, _oc, _t)
+                    result_lf = _score_eager(scoring_model, lf, features, _oc, _t)
                     if _c:
                         result_lf = _exec_user_code(
                             _c, _sn, (result_lf,),
-                            extra_ns={"model": model},
+                            extra_ns={"model": scoring_model},
                         )
                     return result_lf
 

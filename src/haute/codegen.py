@@ -124,75 +124,8 @@ _MODEL_SCORE = '''\
 @pipeline.node({decorator_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    import atexit
-    import os
-    import tempfile
-
-    import pyarrow.parquet as pq
-
-    from haute.graph_utils import load_mlflow_model
-
-    lf = {first_param}
-    model = load_mlflow_model({load_kwargs})
-    features = [
-        f for f in model.feature_names_
-        if f in set(lf.collect_schema().names())
-    ]
-
-    # Null handling: float32 for numerics (null→NaN), sentinel for cats
-    cat_idx = (
-        set(model.get_cat_feature_indices())
-        if hasattr(model, "get_cat_feature_indices") else set()
-    )
-    cat_names = {{features[i] for i in cat_idx if i < len(features)}}
-    _num = [c for c in features if c not in cat_names]
-    _cat = [c for c in features if c in cat_names]
-
-    def _prepare(chunk: pl.DataFrame):
-        sel = chunk.select(features)
-        if _num:
-            sel = sel.with_columns(
-                [pl.col(c).cast(pl.Float32) for c in _num]
-            )
-        if _cat:
-            sel = sel.with_columns(
-                [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical)
-                 for c in _cat]
-            )
-        return sel.to_pandas() if _cat else sel.to_numpy()
-
-    # 1. Sink upstream to temp parquet (streaming — low memory)
-    fd1, in_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_score_in_")
-    os.close(fd1)
-    try:
-        lf.sink_parquet(in_path)
-    except Exception:
-        lf.collect(engine="streaming").write_parquet(in_path)
-
-    # 2. Score in batches → scored parquet
-    fd2, out_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_score_out_")
-    os.close(fd2)
-    atexit.register(lambda p=out_path: os.unlink(p) if os.path.exists(p) else None)
-    pf = pq.ParquetFile(in_path)
-    writer = None
-    try:
-        for batch in pf.iter_batches(batch_size=500_000):
-            chunk = pl.from_arrow(batch)
-            X = _prepare(chunk)
-            preds = model.predict(X).flatten()
-            chunk = chunk.with_columns(pl.Series("{output_column}", preds))
-{proba_block_batched}            table = chunk.to_arrow()
-            if writer is None:
-                writer = pq.ParquetWriter(out_path, table.schema)
-            writer.write_table(table)
-            del chunk, X, table
-    finally:
-        if writer is not None:
-            writer.close()
-    os.unlink(in_path)
-
-    result = pl.scan_parquet(out_path)
-{user_code_block}    return result
+    from haute.graph_utils import score_from_config
+    return score_from_config({first_param}, config="{config_path}")
 '''
 
 _MODEL_SCORE_USER_CODE_SENTINEL = "# -- user code --"
@@ -476,28 +409,9 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
     user_code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     first_param = _first_source(source_names)
+    cfg_path = str(config_path_for_node(NodeType.MODEL_SCORE, func_name))
 
-    proba_block_batched = ""
-    if task_val == "classification":
-        proba_block_batched = (
-            f'            if hasattr(model, "predict_proba"):\n'
-            f"                probas = model.predict_proba(X)\n"
-            f"                if probas.ndim == 2:\n"
-            f"                    probas = probas[:, 1]\n"
-            f"                chunk = chunk.with_columns(\n"
-            f'                    pl.Series("{output_column}_proba",'
-            f" probas))\n"
-        )
-
-    user_code_block = ""
-    if user_code:
-        wrapped = _wrap_external_code(user_code).rstrip("\n") + "\n"
-        # Replace the trailing "    return df" that _wrap_external_code appends
-        if wrapped.rstrip().endswith("return df"):
-            wrapped = wrapped.rstrip()
-            wrapped = wrapped[: wrapped.rfind("return df")].rstrip() + "\n"
-        user_code_block = f"    {_MODEL_SCORE_USER_CODE_SENTINEL}\n{wrapped}"
-
+    # Build decorator kwargs (post-processed to config= by _post_process_node_code)
     if source_type == "registered":
         reg_model = config.get("registered_model", "")
         ver = config.get("version", "latest")
@@ -505,10 +419,6 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
             f'model_score=True, source_type="registered", '
             f'registered_model="{reg_model}", version="{ver}", '
             f'task="{task_val}", output_column="{output_column}"'
-        )
-        load_kwargs = (
-            f'source_type="registered", registered_model="{reg_model}", '
-            f'version="{ver}", task="{task_val}"'
         )
     else:
         rid = config.get("run_id", "")
@@ -527,9 +437,18 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
             decorator_kwargs += f', experiment_name="{exp_name}"'
         if exp_id:
             decorator_kwargs += f', experiment_id="{exp_id}"'
-        load_kwargs = (
-            f'source_type="run", run_id="{rid}", '
-            f'artifact_path="{apath}", task="{task_val}"'
+
+    if user_code:
+        indented = "\n".join(f"    {line}" for line in user_code.splitlines())
+        return (
+            f'@pipeline.node({decorator_kwargs})\n'
+            f'def {func_name}({params}) -> pl.LazyFrame:\n'
+            f'    """{description}"""\n'
+            f'    from haute.graph_utils import score_from_config\n'
+            f'    result = score_from_config({first_param}, config="{cfg_path}")\n'
+            f'    {_MODEL_SCORE_USER_CODE_SENTINEL}\n'
+            f'{indented}\n'
+            f'    return result\n'
         )
 
     return _MODEL_SCORE.format(
@@ -538,10 +457,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         params=params,
         first_param=first_param,
         decorator_kwargs=decorator_kwargs,
-        load_kwargs=load_kwargs,
-        output_column=output_column,
-        proba_block_batched=proba_block_batched,
-        user_code_block=user_code_block,
+        config_path=cfg_path,
     )
 
 

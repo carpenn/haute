@@ -11,9 +11,12 @@ import pytest
 
 from haute._mlflow_io import (
     _MODEL_CACHE_MAX_SIZE,
+    ScoringModel,
     _find_cbm_artifact,
     _model_cache,
     _prepare_predict_frame,
+    _wrap_catboost,
+    _wrap_pyfunc,
     load_mlflow_model,
 )
 from haute._mlflow_utils import resolve_version as _resolve_version
@@ -55,8 +58,10 @@ def mock_mlflow_env():
 
 class TestLoadRunBasedModel:
     def test_load_run_based_model(self, mock_mlflow_env):
-        """Run-based loading downloads artifacts and loads CatBoost model."""
+        """Run-based loading downloads artifacts and returns ScoringModel."""
         fake_model = MagicMock()
+        fake_model.feature_names_ = ["a", "b"]
+        fake_model.get_cat_feature_indices.return_value = []
         _mock_mlflow, _mock_client, modules_patch, resolve_patch = mock_mlflow_env
 
         with modules_patch, resolve_patch, \
@@ -69,7 +74,10 @@ class TestLoadRunBasedModel:
                 task="regression",
             )
 
-        assert result is fake_model
+        assert isinstance(result, ScoringModel)
+        assert result.raw_model is fake_model
+        assert result.flavor == "catboost"
+        assert result.feature_names == ["a", "b"]
 
     def test_run_based_missing_run_id(self, mock_mlflow_env):
         """Raises ValueError when run_id is empty for source_type=run."""
@@ -99,8 +107,10 @@ class TestLoadRegisteredModel:
                 )
 
     def test_load_registered_model(self, mock_mlflow_env):
-        """Registered model loading resolves version and downloads."""
+        """Registered model loading resolves version and returns ScoringModel."""
         fake_model = MagicMock()
+        fake_model.feature_names_ = ["x"]
+        fake_model.get_cat_feature_indices.return_value = []
         _, mock_client, modules_patch, resolve_patch = mock_mlflow_env
 
         mv = MagicMock(run_id="resolved_run_id")
@@ -117,7 +127,54 @@ class TestLoadRegisteredModel:
                 task="regression",
             )
 
-        assert result is fake_model
+        assert isinstance(result, ScoringModel)
+        assert result.raw_model is fake_model
+
+
+# ---------------------------------------------------------------------------
+# load_mlflow_model — pyfunc auto-detection
+# ---------------------------------------------------------------------------
+
+
+class TestPyfuncAutoDetect:
+    def test_non_cbm_artifact_uses_pyfunc(self, mock_mlflow_env):
+        """Artifact path not ending in .cbm loads via pyfunc."""
+        fake_pyfunc = MagicMock()
+        fake_pyfunc.metadata.signature.inputs.input_names.return_value = ["f1", "f2"]
+        _, _, modules_patch, resolve_patch = mock_mlflow_env
+
+        with modules_patch, resolve_patch, \
+             patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc):
+            result = load_mlflow_model(
+                source_type="run",
+                run_id="abc123",
+                artifact_path="model",
+                task="regression",
+            )
+
+        assert isinstance(result, ScoringModel)
+        assert result.flavor == "pyfunc"
+        assert result.feature_names == ["f1", "f2"]
+        assert result.cat_feature_names == frozenset()
+
+    def test_auto_discover_falls_back_to_pyfunc(self, mock_mlflow_env):
+        """When no .cbm found and no artifact_path, falls back to pyfunc 'model'."""
+        fake_pyfunc = MagicMock()
+        fake_pyfunc.metadata.signature.inputs.input_names.return_value = ["a"]
+        _, _, modules_patch, resolve_patch = mock_mlflow_env
+
+        with modules_patch, resolve_patch, \
+             patch("haute._mlflow_io._find_cbm_artifact", side_effect=FileNotFoundError), \
+             patch("haute._mlflow_io._find_model_artifact", return_value=("model", "pyfunc")), \
+             patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc):
+            result = load_mlflow_model(
+                source_type="run",
+                run_id="abc123",
+                artifact_path="model",
+                task="regression",
+            )
+
+        assert result.flavor == "pyfunc"
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +200,9 @@ class TestInvalidSourceType:
 class TestModelCache:
     def test_cache_hit(self, mock_mlflow_env):
         """Second call with same args returns cached model without re-download."""
-        fake_model = MagicMock()
-        # Pre-populate cache with the key that load_mlflow_model will produce
+        fake_sm = ScoringModel(MagicMock(), ["a"], frozenset(), "catboost")
         cache_key = ("run", "abc123", "model.cbm", "regression")
-        _model_cache.put(cache_key, fake_model)
+        _model_cache.put(cache_key, fake_sm)
 
         mock_mlflow, _, modules_patch, resolve_patch = mock_mlflow_env
 
@@ -159,17 +215,18 @@ class TestModelCache:
                 task="regression",
             )
 
-        assert result is fake_model
+        assert result is fake_sm
         # download_artifacts should NOT be called (cache hit)
         mock_mlflow.artifacts.download_artifacts.assert_not_called()
 
     def test_cache_lru_eviction(self, mock_mlflow_env):
         """Exceeding max cache size evicts oldest entry."""
-        # Fill cache beyond max
         for i in range(_MODEL_CACHE_MAX_SIZE + 2):
             _model_cache.put(("run", f"run_{i}", f"art_{i}", "regression"), MagicMock())
 
         fake_model = MagicMock()
+        fake_model.feature_names_ = ["a"]
+        fake_model.get_cat_feature_indices.return_value = []
         _, _, modules_patch, resolve_patch = mock_mlflow_env
 
         with modules_patch, resolve_patch, \
@@ -182,7 +239,6 @@ class TestModelCache:
                 task="regression",
             )
 
-        # The new entry should be in the cache
         assert ("run", "new_run", "model.cbm", "regression") in _model_cache
 
 
@@ -287,6 +343,52 @@ class TestLoadCatboostModel:
 
 
 # ---------------------------------------------------------------------------
+# _wrap_catboost / _wrap_pyfunc
+# ---------------------------------------------------------------------------
+
+
+class TestWrappers:
+    def test_wrap_catboost(self):
+        """_wrap_catboost extracts feature names and cat features."""
+        model = MagicMock()
+        model.feature_names_ = ["a", "b", "c"]
+        model.get_cat_feature_indices.return_value = [2]
+
+        sm = _wrap_catboost(model)
+        assert sm.flavor == "catboost"
+        assert sm.feature_names == ["a", "b", "c"]
+        assert sm.cat_feature_names == frozenset({"c"})
+        assert sm.raw_model is model
+
+    def test_wrap_catboost_no_cat_features(self):
+        """_wrap_catboost with no cat feature indices."""
+        model = MagicMock()
+        model.feature_names_ = ["x", "y"]
+        model.get_cat_feature_indices.return_value = []
+
+        sm = _wrap_catboost(model)
+        assert sm.cat_feature_names == frozenset()
+
+    def test_wrap_pyfunc(self):
+        """_wrap_pyfunc extracts features from model signature."""
+        model = MagicMock()
+        model.metadata.signature.inputs.input_names.return_value = ["f1", "f2"]
+
+        sm = _wrap_pyfunc(model)
+        assert sm.flavor == "pyfunc"
+        assert sm.feature_names == ["f1", "f2"]
+        assert sm.cat_feature_names == frozenset()
+
+    def test_wrap_pyfunc_no_signature(self):
+        """_wrap_pyfunc with no signature returns empty feature list."""
+        model = MagicMock()
+        model.metadata = None
+
+        sm = _wrap_pyfunc(model)
+        assert sm.feature_names == []
+
+
+# ---------------------------------------------------------------------------
 # MLflow not installed
 # ---------------------------------------------------------------------------
 
@@ -321,71 +423,60 @@ class TestTaskValidation:
 # ---------------------------------------------------------------------------
 
 
-def _mock_model(cat_indices: list[int] | None = None) -> MagicMock:
-    """Create a mock CatBoost model with optional categorical feature indices."""
-    m = MagicMock()
-    if cat_indices is not None:
-        m.get_cat_feature_indices.return_value = cat_indices
-    else:
-        del m.get_cat_feature_indices  # no categorical features
-    return m
-
-
 class TestPreparePredictFrame:
     def test_numeric_only_returns_numpy(self):
-        """All-numeric features should return a numpy array."""
-        model = _mock_model(cat_indices=[])
+        """All-numeric features return numpy array (catboost flavor, no cats)."""
         df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
-        result = _prepare_predict_frame(model, df, ["a", "b"])
+        result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "catboost")
         assert isinstance(result, np.ndarray)
         assert result.shape == (2, 2)
 
     def test_numeric_nulls_become_nan(self):
-        """Null values in numeric columns should become NaN after Float32 cast."""
-        model = _mock_model(cat_indices=[])
+        """Null values in numeric columns become NaN after Float32 cast."""
         df = pl.DataFrame({"x": [1.0, None, 3.0]})
-        result = _prepare_predict_frame(model, df, ["x"])
+        result = _prepare_predict_frame(df, ["x"], frozenset(), "catboost")
         assert isinstance(result, np.ndarray)
         assert np.isnan(result[1, 0]), "Null should become NaN"
         assert result[0, 0] == pytest.approx(1.0, abs=0.01)
 
     def test_categorical_nulls_become_sentinel(self):
-        """Null values in categorical columns should be filled with '_MISSING_'."""
-        model = _mock_model(cat_indices=[0])
+        """Null values in categorical columns filled with '_MISSING_'."""
         df = pl.DataFrame({"cat": ["a", None, "b"]})
-        result = _prepare_predict_frame(model, df, ["cat"])
-        # With cat features, returns pandas DataFrame
+        result = _prepare_predict_frame(df, ["cat"], frozenset({"cat"}), "catboost")
         import pandas as pd
         assert isinstance(result, pd.DataFrame)
         assert result.iloc[1, 0] == "_MISSING_"
 
     def test_mixed_numeric_and_categorical(self):
-        """Mixed features: numeric→numpy float, categorical→sentinel+Categorical."""
-        model = _mock_model(cat_indices=[1])  # second feature is categorical
+        """Mixed features: numeric→float32, categorical→sentinel+Categorical."""
         df = pl.DataFrame({
             "num": [1.0, None, 3.0],
             "cat": ["x", None, "y"],
         })
-        result = _prepare_predict_frame(model, df, ["num", "cat"])
+        result = _prepare_predict_frame(
+            df, ["num", "cat"], frozenset({"cat"}), "catboost",
+        )
         import pandas as pd
         assert isinstance(result, pd.DataFrame)
-        # numeric column should have NaN for null
         assert np.isnan(result["num"].iloc[1])
-        # categorical column should have sentinel for null
         assert result["cat"].iloc[1] == "_MISSING_"
 
-    def test_no_cat_feature_indices_attr(self):
-        """Model without get_cat_feature_indices treats all features as numeric."""
-        model = _mock_model(cat_indices=None)  # deletes the attribute
+    def test_no_cat_features_returns_numpy(self):
+        """No cat_feature_names treats all features as numeric."""
         df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})
-        result = _prepare_predict_frame(model, df, ["a"])
+        result = _prepare_predict_frame(df, ["a"], frozenset(), "catboost")
         assert isinstance(result, np.ndarray)
 
     def test_feature_order_preserved(self):
-        """Output columns should match the requested feature order."""
-        model = _mock_model(cat_indices=[])
+        """Output columns match the requested feature order."""
         df = pl.DataFrame({"b": [10.0, 20.0], "a": [1.0, 2.0]})
-        result = _prepare_predict_frame(model, df, ["a", "b"])
-        # First column should be "a", second "b"
+        result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "catboost")
         assert result[0, 0] == pytest.approx(1.0, abs=0.01)
         assert result[0, 1] == pytest.approx(10.0, abs=0.01)
+
+    def test_pyfunc_always_returns_pandas(self):
+        """Pyfunc flavor always returns pandas DataFrame, even with no cats."""
+        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "pyfunc")
+        import pandas as pd
+        assert isinstance(result, pd.DataFrame)

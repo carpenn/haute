@@ -6,6 +6,7 @@ Covers:
   - ModelScorer._score_eager delegation
   - _sink_to_temp helper
   - _batch_score_to_parquet helper
+  - score_from_config thin delegation
   - Error cases: missing model features, empty input
 
 All MLflow and CatBoost dependencies are mocked.
@@ -13,6 +14,7 @@ All MLflow and CatBoost dependencies are mocked.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -20,10 +22,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import polars as pl
 
+from haute._mlflow_io import ScoringModel
 from haute._model_scorer import (
     ModelScorer,
     _batch_score_to_parquet,
     _sink_to_temp,
+    score_from_config,
 )
 
 # ---------------------------------------------------------------------------
@@ -49,6 +53,23 @@ def _make_mock_model(
         # Default: no predict_proba
         del model.predict_proba
     return model
+
+
+def _make_scoring_model(
+    feature_names: list[str] | None = None,
+    cat_feature_names: frozenset[str] | None = None,
+    predictions: Any = None,
+    probas: Any = None,
+    flavor: str = "catboost",
+) -> ScoringModel:
+    """Create a ScoringModel wrapping a mock model."""
+    model = _make_mock_model(feature_names, predictions, probas)
+    return ScoringModel(
+        model=model,
+        feature_names=feature_names or ["a", "b"],
+        cat_feature_names=cat_feature_names or frozenset(),
+        flavor=flavor,
+    )
 
 
 # ===========================================================================
@@ -104,8 +125,8 @@ class TestModelScorerScore:
     @patch("haute._model_scorer.ModelScorer._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_live_scenario_uses_eager(self, mock_load, mock_eager):
-        model = _make_mock_model()
-        mock_load.return_value = model
+        sm = _make_scoring_model()
+        mock_load.return_value = sm
         mock_eager.return_value = pl.DataFrame({"x": [1], "prediction": [0.5]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
@@ -120,8 +141,8 @@ class TestModelScorerScore:
     @patch("haute._model_scorer.ModelScorer._score_batched")
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_non_live_scenario_uses_batched(self, mock_load, mock_batched):
-        model = _make_mock_model()
-        mock_load.return_value = model
+        sm = _make_scoring_model()
+        mock_load.return_value = sm
         mock_batched.return_value = pl.DataFrame({"x": [1]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch")
@@ -135,8 +156,8 @@ class TestModelScorerScore:
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_row_limit_forces_eager(self, mock_load, mock_eager):
         """Even non-live scenario uses eager when row_limit is set."""
-        model = _make_mock_model()
-        mock_load.return_value = model
+        sm = _make_scoring_model()
+        mock_load.return_value = sm
         mock_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch", row_limit=10)
@@ -149,8 +170,8 @@ class TestModelScorerScore:
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_feature_intersection(self, mock_load):
         """Only features present in both model and input are used."""
-        model = _make_mock_model(feature_names=["a", "b", "missing_col"])
-        mock_load.return_value = model
+        sm = _make_scoring_model(feature_names=["a", "b", "missing_col"])
+        mock_load.return_value = sm
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
 
@@ -169,9 +190,9 @@ class TestModelScorerScore:
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_empty_input_doesnt_crash(self, mock_load):
         """score() with no dfs should use an empty LazyFrame."""
-        model = _make_mock_model(feature_names=[])
-        model.predict.return_value = np.array([])
-        mock_load.return_value = model
+        sm = _make_scoring_model(feature_names=[])
+        sm._model.predict.return_value = np.array([])
+        mock_load.return_value = sm
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
 
@@ -185,8 +206,8 @@ class TestModelScorerScore:
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_user_code_applied_after_scoring(self, mock_load, mock_exec):
         """Post-processing user code should be applied after scoring."""
-        model = _make_mock_model()
-        mock_load.return_value = model
+        sm = _make_scoring_model()
+        mock_load.return_value = sm
         mock_exec.return_value = pl.DataFrame({"result": [1]}).lazy()
 
         scorer = ModelScorer(
@@ -252,16 +273,14 @@ class TestBatchScoreToParquet:
         df = pl.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
         df.write_parquet(input_path)
 
-        model = _make_mock_model(
+        sm = _make_scoring_model(
             feature_names=["a", "b"],
             predictions=np.array([0.1, 0.2, 0.3]),
         )
 
-        with patch("haute._mlflow_io._prepare_predict_frame") as mock_prep:
-            mock_prep.return_value = df[["a", "b"]].to_pandas()
-            out_path = _batch_score_to_parquet(
-                model, input_path, ["a", "b"], "pred", "regression",
-            )
+        out_path = _batch_score_to_parquet(
+            sm, input_path, ["a", "b"], "pred", "regression",
+        )
 
         try:
             result = pl.read_parquet(out_path)
@@ -276,17 +295,15 @@ class TestBatchScoreToParquet:
         df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
         df.write_parquet(input_path)
 
-        model = _make_mock_model(
+        sm = _make_scoring_model(
             feature_names=["a", "b"],
             predictions=np.array([0, 1]),
             probas=np.array([[0.3, 0.7], [0.4, 0.6]]),
         )
 
-        with patch("haute._mlflow_io._prepare_predict_frame") as mock_prep:
-            mock_prep.return_value = df[["a", "b"]].to_pandas()
-            out_path = _batch_score_to_parquet(
-                model, input_path, ["a", "b"], "pred", "classification",
-            )
+        out_path = _batch_score_to_parquet(
+            sm, input_path, ["a", "b"], "pred", "classification",
+        )
 
         try:
             result = pl.read_parquet(out_path)
@@ -302,17 +319,15 @@ class TestBatchScoreToParquet:
         df = pl.DataFrame({"a": [1.0], "b": [2.0]})
         df.write_parquet(input_path)
 
-        model = _make_mock_model(
+        sm = _make_scoring_model(
             feature_names=["a", "b"],
             predictions=np.array([1]),
         )
         # No predict_proba
 
-        with patch("haute._mlflow_io._prepare_predict_frame") as mock_prep:
-            mock_prep.return_value = df[["a", "b"]].to_pandas()
-            out_path = _batch_score_to_parquet(
-                model, input_path, ["a", "b"], "pred", "classification",
-            )
+        out_path = _batch_score_to_parquet(
+            sm, input_path, ["a", "b"], "pred", "classification",
+        )
 
         try:
             result = pl.read_parquet(out_path)
@@ -320,3 +335,98 @@ class TestBatchScoreToParquet:
             assert "pred_proba" not in result.columns
         finally:
             os.unlink(out_path)
+
+
+# ===========================================================================
+# ScoringModel
+# ===========================================================================
+
+
+class TestScoringModel:
+    def test_catboost_flavor(self):
+        """CatBoost ScoringModel with categorical features."""
+        sm = _make_scoring_model(
+            feature_names=["a", "b", "c"],
+            cat_feature_names=frozenset({"c"}),
+            flavor="catboost",
+        )
+        assert sm.feature_names == ["a", "b", "c"]
+        assert sm.cat_feature_names == frozenset({"c"})
+        assert sm.flavor == "catboost"
+
+    def test_pyfunc_flavor(self):
+        """Pyfunc ScoringModel with no categorical features."""
+        sm = _make_scoring_model(
+            feature_names=["x", "y"],
+            flavor="pyfunc",
+        )
+        assert sm.feature_names == ["x", "y"]
+        assert sm.cat_feature_names == frozenset()
+        assert sm.flavor == "pyfunc"
+
+    def test_predict_flattens(self):
+        """predict() returns 1-D array regardless of model output shape."""
+        sm = _make_scoring_model(predictions=np.array([[0.1], [0.2]]))
+        result = sm.predict(np.array([[1, 2], [3, 4]]))
+        assert result.ndim == 1
+        assert len(result) == 2
+
+    def test_predict_proba_returns_none_when_missing(self):
+        """predict_proba returns None for models without it."""
+        sm = _make_scoring_model()
+        assert sm.predict_proba(np.array([[1, 2]])) is None
+
+    def test_predict_proba_returns_array(self):
+        """predict_proba returns ndarray when model supports it."""
+        sm = _make_scoring_model(probas=np.array([[0.3, 0.7]]))
+        result = sm.predict_proba(np.array([[1, 2]]))
+        assert result is not None
+        assert isinstance(result, np.ndarray)
+
+    def test_getattr_proxies_to_raw_model(self):
+        """Attribute access falls through to the underlying model."""
+        sm = _make_scoring_model()
+        # Access CatBoost-specific attribute via proxy
+        assert sm.feature_names_ == ["a", "b"]
+
+    def test_raw_model_property(self):
+        """raw_model exposes the underlying model object."""
+        sm = _make_scoring_model()
+        assert sm.raw_model is sm._model
+
+
+# ===========================================================================
+# score_from_config
+# ===========================================================================
+
+
+class TestScoreFromConfig:
+    @patch("haute._mlflow_io.load_mlflow_model")
+    def test_reads_config_and_delegates(self, mock_load, tmp_path):
+        """score_from_config reads JSON config and scores via ModelScorer."""
+        sm = _make_scoring_model(predictions=np.array([0.42]))
+        mock_load.return_value = sm
+
+        config_path = tmp_path / "config" / "model_scoring" / "test.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(json.dumps({
+            "sourceType": "run",
+            "run_id": "abc123",
+            "artifact_path": "model.cbm",
+            "task": "regression",
+            "output_column": "pred",
+        }))
+
+        lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
+        result = score_from_config(lf, config=str(config_path))
+        collected = result.collect()
+
+        assert "pred" in collected.columns
+        mock_load.assert_called_once_with(
+            source_type="run",
+            run_id="abc123",
+            artifact_path="model.cbm",
+            registered_model="",
+            version="latest",
+            task="regression",
+        )

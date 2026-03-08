@@ -186,10 +186,8 @@ class TestNodeToCode:
         })
         code = _node_to_code(node)
         assert 'config="config/model_scoring/Score.json"' in code
-        # Body still contains the model loading logic
-        assert 'source_type="run"' in code
-        assert 'run_id="abc123"' in code
-        assert "load_mlflow_model" in code
+        # Thin delegation body
+        assert "score_from_config" in code
         assert "def Score(df: pl.LazyFrame)" in code
         _compile_node_code(code)
 

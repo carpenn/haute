@@ -11,6 +11,7 @@ import numpy as np
 import polars as pl
 import pytest
 
+from haute._mlflow_io import ScoringModel
 from haute.executor import _build_node_fn, execute_graph
 from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from tests.conftest import make_edge, make_graph
@@ -72,10 +73,12 @@ def sample_data(tmp_path):
 
 
 def _make_mock_model(task: str = "regression", feature_names: list[str] | None = None):
-    """Create a mock CatBoost model."""
+    """Create a ScoringModel wrapping a mock CatBoost model."""
+    fnames = feature_names or ["x1", "x2"]
     model = MagicMock()
-    model.feature_names_ = feature_names or ["x1", "x2"]
+    model.feature_names_ = fnames
     model.predict.return_value = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    model.get_cat_feature_indices.return_value = []
     if task == "classification":
         model.predict_proba.return_value = np.array([
             [0.9, 0.1],
@@ -84,7 +87,14 @@ def _make_mock_model(task: str = "regression", feature_names: list[str] | None =
             [0.6, 0.4],
             [0.2, 0.8],
         ])
-    return model
+    else:
+        del model.predict_proba
+    return ScoringModel(
+        model=model,
+        feature_names=fnames,
+        cat_feature_names=frozenset(),
+        flavor="catboost",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,17 +211,17 @@ class TestModelScorePassthrough:
 
 class TestModelScoreMissingFeatures:
     def test_partial_features(self, sample_data):
-        """Model features not in input are skipped; CatBoost gets available ones."""
-        mock_model = _make_mock_model("regression", feature_names=["x1", "x2", "x_missing"])
-        mock_model.predict.return_value = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        """Model features not in input are skipped; model gets available ones."""
+        sm = _make_mock_model("regression", feature_names=["x1", "x2", "x_missing"])
+        sm._model.predict.return_value = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
 
         graph = _make_model_score_graph(data_path=sample_data)
-        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=sm):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
 
         assert results["score"].status == "ok"
         # Verify predict was called with only the available features
-        call_args = mock_model.predict.call_args
+        call_args = sm._model.predict.call_args
         x_data = call_args[0][0]
         # x_data may be a numpy array (pure numeric) or pandas DataFrame (has cats)
         if hasattr(x_data, "columns"):
@@ -311,7 +321,7 @@ class TestModelScoreScenarioRouting:
 
     def test_live_scenario_uses_eager_path(self, sample_data):
         """Live scenario scores in-memory — no temp parquet files created."""
-        mock_model = _make_mock_model("regression")
+        sm = _make_mock_model("regression")
 
         graph = _make_model_score_graph(data_path=sample_data)
 
@@ -319,7 +329,7 @@ class TestModelScoreScenarioRouting:
         tmp_dir = tempfile.gettempdir()
         before = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
 
-        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=sm):
             results = execute_graph(graph, target_node_id="score", scenario="live")
 
         assert results["score"].status == "ok"
@@ -332,15 +342,15 @@ class TestModelScoreScenarioRouting:
         )
 
         # Eager path calls predict once with the full dataset
-        mock_model.predict.assert_called_once()
+        sm._model.predict.assert_called_once()
 
     def test_batch_scenario_uses_parquet_path(self, sample_data):
         """Non-live scenario sinks to parquet, batch-scores, then scans back."""
-        mock_model = _make_mock_model("regression")
+        sm = _make_mock_model("regression")
 
         graph = _make_model_score_graph(data_path=sample_data)
 
-        with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
+        with patch("haute._mlflow_io.load_mlflow_model", return_value=sm):
             results = execute_graph(graph, target_node_id="score", scenario="test_batch")
 
         assert results["score"].status == "ok"
@@ -350,7 +360,7 @@ class TestModelScoreScenarioRouting:
 
         # Batched path goes through _batch_score_to_parquet which calls predict
         # on chunks — still should have been called at least once
-        assert mock_model.predict.call_count >= 1
+        assert sm._model.predict.call_count >= 1
 
     def test_row_limited_preview_uses_eager_path(self, sample_data):
         """Non-live scenario with row_limit still uses eager path (preview)."""
@@ -384,24 +394,32 @@ class TestModelScoreScenarioRouting:
 class TestScoreEager:
     """Tests for the shared _score_eager / _prepare_predict_frame helpers."""
 
-    def _mock_model(self, task="regression", n_rows=5):
+    def _mock_scoring_model(self, task="regression", n_rows=5):
         model = MagicMock()
         model.feature_names_ = ["x1", "x2"]
         model.predict.return_value = np.arange(n_rows, dtype=float)
+        model.get_cat_feature_indices.return_value = []
         if task == "classification":
             model.predict_proba.return_value = np.column_stack([
                 np.linspace(0.9, 0.1, n_rows),
                 np.linspace(0.1, 0.9, n_rows),
             ])
-        return model
+        else:
+            del model.predict_proba
+        return ScoringModel(
+            model=model,
+            feature_names=["x1", "x2"],
+            cat_feature_names=frozenset(),
+            flavor="catboost",
+        )
 
     def test_score_eager_adds_prediction(self):
         from haute._mlflow_io import _score_eager
 
-        model = self._mock_model(n_rows=2)
+        sm = self._mock_scoring_model(n_rows=2)
         lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
 
-        result = _score_eager(model, lf, ["x1", "x2"])
+        result = _score_eager(sm, lf, ["x1", "x2"])
         df = result.collect()
         assert "prediction" in df.columns
         assert len(df) == 2
@@ -409,11 +427,11 @@ class TestScoreEager:
     def test_score_eager_classification_proba(self):
         from haute._mlflow_io import _score_eager
 
-        model = self._mock_model(task="classification", n_rows=2)
+        sm = self._mock_scoring_model(task="classification", n_rows=2)
         lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
 
         result = _score_eager(
-            model, lf, ["x1", "x2"], task="classification",
+            sm, lf, ["x1", "x2"], task="classification",
         )
         df = result.collect()
         assert "prediction" in df.columns
@@ -422,10 +440,10 @@ class TestScoreEager:
     def test_score_eager_custom_output_col(self):
         from haute._mlflow_io import _score_eager
 
-        model = self._mock_model(n_rows=2)
+        sm = self._mock_scoring_model(n_rows=2)
         lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
 
-        result = _score_eager(model, lf, ["x1", "x2"], output_col="my_pred")
+        result = _score_eager(sm, lf, ["x1", "x2"], output_col="my_pred")
         assert "my_pred" in result.collect().columns
 
 

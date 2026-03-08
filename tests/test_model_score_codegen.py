@@ -17,7 +17,7 @@ from tests.conftest import make_edge, make_graph
 
 class TestModelScoreCodegen:
     def test_codegen_run_based(self):
-        """Generates correct code for run-based model scoring."""
+        """Generates thin delegation code for run-based model scoring."""
         graph = make_graph({
             "nodes": [
                 {
@@ -43,20 +43,22 @@ class TestModelScoreCodegen:
         })
         code = graph_to_code(graph)
 
-        assert 'source_type="run"' in code
-        assert 'run_id="abc123"' in code
-        assert 'artifact_path="model.cbm"' in code
-        assert 'task="regression"' in code
-        assert "load_mlflow_model" in code
-        assert "model.predict" in code
-        assert 'pl.Series("prediction"' in code
+        # Decorator post-processed to config= path
+        assert 'config="config/model_scoring/scorer.json"' in code
+        # Thin delegation body
+        assert "score_from_config" in code
+        assert "from haute.graph_utils import score_from_config" in code
+        # No verbose boilerplate
+        assert "load_mlflow_model" not in code
+        assert "model.predict" not in code
+        assert "pyarrow" not in code
+        # Upstream is named "source", passed to score_from_config
+        assert "score_from_config(source," in code
         # Generated code must be valid Python
         compile(code, "<test_run_based>", "exec")
-        # Upstream is named "source", template must alias lf = source
-        assert "lf = source" in code
 
     def test_codegen_registered(self):
-        """Generates correct code for registered model scoring."""
+        """Generates thin delegation code for registered model scoring."""
         graph = make_graph({
             "nodes": [
                 {
@@ -82,15 +84,12 @@ class TestModelScoreCodegen:
         })
         code = graph_to_code(graph)
 
-        assert 'source_type="registered"' in code
-        assert 'registered_model="my-model"' in code
-        assert 'version="3"' in code
-        assert "load_mlflow_model" in code
-        assert 'pl.Series("pred"' in code
+        assert "score_from_config" in code
+        assert 'config="config/model_scoring/scorer.json"' in code
         compile(code, "<test_registered>", "exec")
 
-    def test_codegen_classification_includes_proba(self):
-        """Classification task includes predict_proba code."""
+    def test_codegen_classification_same_template(self):
+        """Classification task uses the same thin delegation (no inline proba)."""
         graph = make_graph({
             "nodes": [
                 {
@@ -116,12 +115,13 @@ class TestModelScoreCodegen:
         })
         code = graph_to_code(graph)
 
-        assert "predict_proba" in code
-        assert "prediction_proba" in code
+        # Classification uses same thin template — proba handled by library
+        assert "score_from_config" in code
+        assert "predict_proba" not in code
         compile(code, "<test_classification>", "exec")
 
     def test_codegen_regression_no_proba(self):
-        """Regression task does NOT include predict_proba code."""
+        """Regression task uses thin delegation with no proba code."""
         graph = make_graph({
             "nodes": [
                 {
@@ -149,6 +149,40 @@ class TestModelScoreCodegen:
 
         assert "predict_proba" not in code
         compile(code, "<test_regression>", "exec")
+
+    def test_codegen_with_user_code(self):
+        """User post-processing code appears after sentinel in thin body."""
+        graph = make_graph({
+            "nodes": [
+                {
+                    "id": "source",
+                    "data": {"label": "source", "nodeType": "dataSource", "config": {"path": "data.parquet"}},
+                },
+                {
+                    "id": "score",
+                    "data": {
+                        "label": "scorer",
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "run",
+                            "run_id": "abc",
+                            "artifact_path": "model.cbm",
+                            "task": "regression",
+                            "output_column": "prediction",
+                            "code": 'result = result.with_columns(doubled=pl.col("prediction") * 2)',
+                        },
+                    },
+                },
+            ],
+            "edges": [make_edge("source", "score").model_dump()],
+        })
+        code = graph_to_code(graph)
+
+        assert "score_from_config" in code
+        assert "# -- user code --" in code
+        assert "doubled" in code
+        assert "return result" in code
+        compile(code, "<test_user_code>", "exec")
 
 
 # ---------------------------------------------------------------------------
