@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import {
   X, GitBranch, GitFork, Plus, ChevronDown, Clock, ArrowDownToLine,
   ExternalLink, Archive, Trash2, RotateCcw, AlertTriangle,
 } from "lucide-react"
 import PanelShell from "./PanelShell"
+import useClickOutside from "../hooks/useClickOutside"
 import {
   getGitStatus,
   listGitBranches,
@@ -41,6 +42,8 @@ export default function GitPanel({ onClose }: GitPanelProps) {
 
   // Branch list dropdown
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
+  const branchDropdownRef = useRef<HTMLDivElement>(null)
+  useClickOutside(branchDropdownRef, () => setBranchDropdownOpen(false), branchDropdownOpen)
 
   // Confirmation state
   const [confirmAction, setConfirmAction] = useState<{ type: "delete" | "archive" | "revert"; target: string; label: string } | null>(null)
@@ -307,7 +310,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
           </div>
 
           {/* Branch dropdown */}
-          <div className="relative">
+          <div className="relative" ref={branchDropdownRef}>
             <button
               onClick={() => setBranchDropdownOpen((v) => !v)}
               className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-mono rounded-md transition-colors"

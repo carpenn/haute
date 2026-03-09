@@ -205,10 +205,10 @@ describe("useWebSocketSync", () => {
         type: "graph_update",
         graph: {
           nodes: [
-            { id: "n1", position: { x: 100, y: 200 }, data: { label: "test" } },
+            { id: "transform_3", position: { x: 100, y: 200 }, data: { label: "test" } },
           ],
           edges: [
-            { id: "e1", source: "n1", target: "n2" },
+            { id: "e1", source: "transform_3", target: "transform_4" },
           ],
           preamble: "import numpy as np",
         },
@@ -227,8 +227,8 @@ describe("useWebSocketSync", () => {
         expect.arrayContaining([
           expect.objectContaining({
             id: "e1",
-            source: "n1",
-            target: "n2",
+            source: "transform_3",
+            target: "transform_4",
             type: "default",
             animated: false,
           }),
@@ -237,8 +237,8 @@ describe("useWebSocketSync", () => {
       // Preamble updated
       expect(params.setPreamble).toHaveBeenCalledWith("import numpy as np")
       expect(params.preambleRef.current).toBe("import numpy as np")
-      // nodeIdCounter updated
-      expect(params.nodeIdCounter.current).toBe(1)
+      // nodeIdCounter updated — computed from max numeric suffix (3) + 1
+      expect(params.nodeIdCounter.current).toBe(4)
       // Toast fired
       expect(useToastStore.getState().addToast).toHaveBeenCalledWith(
         "info",

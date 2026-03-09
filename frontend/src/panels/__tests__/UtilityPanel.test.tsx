@@ -278,3 +278,45 @@ describe("UtilityPanel auto-save", () => {
     })
   })
 })
+
+// ── U1: dropdown closes on outside click ───────────────────────────
+
+describe("UtilityPanel dropdown close-on-outside-click", () => {
+  const defaultProps = {
+    onClose: vi.fn(),
+    onImportAdded: vi.fn(),
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockListFiles.mockResolvedValue({
+      files: [
+        { name: "helpers.py", module: "helpers" },
+        { name: "utils.py", module: "utils" },
+      ],
+    })
+    mockReadFile.mockResolvedValue({
+      name: "helpers.py", module: "helpers", content: "x = 1\n",
+    })
+  })
+
+  afterEach(cleanup)
+
+  it("closes dropdown when clicking outside", async () => {
+    render(<UtilityPanel {...defaultProps} />)
+    await waitFor(() => expect(screen.getByText("helpers")).toBeInTheDocument())
+
+    // Open the dropdown
+    fireEvent.click(screen.getByText("helpers"))
+    await waitFor(() => expect(screen.getByText("utils")).toBeInTheDocument())
+
+    // Click outside the dropdown (on the document body)
+    fireEvent.mouseDown(document.body)
+
+    // Dropdown items should disappear
+    await waitFor(() => {
+      // "utils" only appears in the dropdown, not as active module
+      expect(screen.queryByText("utils")).not.toBeInTheDocument()
+    })
+  })
+})

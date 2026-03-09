@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
 import { NODE_TYPES, NODE_TYPE_META } from "../utils/nodeTypes"
 import type { NodeTypeValue } from "../utils/nodeTypes"
@@ -237,13 +237,21 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
   const config = (node?.data.config || {}) as Record<string, unknown>
   const [activeTab, setActiveTab] = useState<"config" | "columns">("config")
 
+  // Keep config and node in refs so handleConfigUpdate never captures stale values
+  const configRef = useRef(config)
+  configRef.current = config
+  const nodeRef = useRef(node)
+  nodeRef.current = node
+
   const handleConfigUpdate = useCallback((keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
-    if (!node || !onUpdateNode) return
+    const currentNode = nodeRef.current
+    if (!currentNode || !onUpdateNode) return
+    const currentConfig = configRef.current
     const newConfig = typeof keyOrUpdates === "string"
-      ? { ...config, [keyOrUpdates]: value }
-      : { ...config, ...keyOrUpdates }
-    onUpdateNode(node.id, { ...node.data, config: newConfig })
-  }, [config, node, onUpdateNode])
+      ? { ...currentConfig, [keyOrUpdates]: value }
+      : { ...currentConfig, ...keyOrUpdates }
+    onUpdateNode(currentNode.id, { ...currentNode.data, config: newConfig })
+  }, [onUpdateNode])
 
   const configWithNodeId = useMemo(
     () => ({ ...config, _nodeId: node?.id ?? "" }),

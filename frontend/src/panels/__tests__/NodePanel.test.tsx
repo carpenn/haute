@@ -454,6 +454,95 @@ describe("NodePanel", () => {
     })
   })
 
+  // ─── U2: stale config callback fix ─────────────────────────────
+
+  describe("handleConfigUpdate uses fresh config after re-render", () => {
+    it("uses updated config when node prop changes between renders", () => {
+      const origNode = makeNode({
+        id: "orig_1",
+        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+      })
+      const upOrig = makeNode({
+        id: "up_orig",
+        data: { label: "Source A", description: "", nodeType: "dataSource", config: {} },
+      })
+      const upInst = makeNode({
+        id: "up_inst",
+        data: { label: "Source B", description: "", nodeType: "dataSource", config: {} },
+      })
+
+      // Initial render: instance with no inputMapping
+      const instanceNode1 = makeNode({
+        id: "inst_1",
+        data: {
+          label: "Instance",
+          description: "",
+          nodeType: "transform",
+          config: { instanceOf: "orig_1", existingKey: "v1" },
+        },
+      })
+
+      const edges: SimpleEdge[] = [
+        { id: "e1", source: "up_orig", target: "orig_1" },
+        { id: "e2", source: "up_inst", target: "inst_1" },
+      ]
+      const allNodes = [origNode, upOrig, upInst, instanceNode1]
+
+      const onUpdateNode = vi.fn()
+      const { rerender } = render(
+        <NodePanel
+          node={instanceNode1}
+          edges={edges}
+          allNodes={allNodes}
+          onClose={vi.fn()}
+          onUpdateNode={onUpdateNode}
+          onDeleteEdge={vi.fn()}
+          onRefreshPreview={vi.fn()}
+        />,
+      )
+
+      // Now re-render with updated config (simulating external update)
+      const instanceNode2 = makeNode({
+        id: "inst_1",
+        data: {
+          label: "Instance",
+          description: "",
+          nodeType: "transform",
+          config: { instanceOf: "orig_1", existingKey: "v2", newKey: "added" },
+        },
+      })
+
+      rerender(
+        <NodePanel
+          node={instanceNode2}
+          edges={edges}
+          allNodes={[origNode, upOrig, upInst, instanceNode2]}
+          onClose={vi.fn()}
+          onUpdateNode={onUpdateNode}
+          onDeleteEdge={vi.fn()}
+          onRefreshPreview={vi.fn()}
+        />,
+      )
+
+      // Trigger handleConfigUpdate via mapping dropdown change
+      const selects = screen.getAllByRole("combobox")
+      fireEvent.change(selects[0], { target: { value: "Source_B" } })
+
+      // Should include the FRESH config (existingKey: "v2", newKey: "added"),
+      // not the stale initial config (existingKey: "v1")
+      expect(onUpdateNode).toHaveBeenCalledWith(
+        "inst_1",
+        expect.objectContaining({
+          config: expect.objectContaining({
+            existingKey: "v2",
+            newKey: "added",
+            inputMapping: expect.any(Object),
+          }),
+        }),
+      )
+    })
+  })
+
   // ─── collectUpstreamColumns integration ─────────────────────────
 
   describe("upstream columns", () => {

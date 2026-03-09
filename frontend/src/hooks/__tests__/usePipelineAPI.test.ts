@@ -215,4 +215,42 @@ describe("usePipelineAPI", () => {
     // Wait for the async preview to resolve
     await waitFor(() => expect(result.current.nodeStatuses).toEqual({ n1: "ok", n0: "ok" }))
   })
+
+  // ── B10: nodeIdCounter from max ID suffix, not nodes.length ──────
+
+  it("sets nodeIdCounter from max numeric suffix, not nodes.length", async () => {
+    // Simulate nodes with gaps: node_0, node_5 → length=2, but max suffix=5
+    mockLoad.mockResolvedValue({
+      nodes: [makeNode("transform_0"), makeNode("transform_5")],
+      edges: [],
+    })
+    const params = makeParams()
+    renderHook(() => usePipelineAPI(params))
+    await waitFor(() => {
+      // Counter should be max suffix (5) + 1 = 6, not nodes.length (2)
+      expect(params.nodeIdCounter.current).toBe(6)
+    })
+  })
+
+  it("sets nodeIdCounter to 0 when no nodes have numeric suffixes", async () => {
+    mockLoad.mockResolvedValue({
+      nodes: [makeNode("legacy_node")],
+      edges: [],
+    })
+    const params = makeParams()
+    renderHook(() => usePipelineAPI(params))
+    await waitFor(() => {
+      // No _\d+ suffix match → max = -1, counter = -1 + 1 = 0
+      expect(params.nodeIdCounter.current).toBe(0)
+    })
+  })
+
+  it("sets nodeIdCounter to 0 when pipeline has no nodes", async () => {
+    mockLoad.mockResolvedValue({ nodes: [], edges: [] })
+    const params = makeParams()
+    renderHook(() => usePipelineAPI(params))
+    await waitFor(() => {
+      expect(params.nodeIdCounter.current).toBe(0)
+    })
+  })
 })

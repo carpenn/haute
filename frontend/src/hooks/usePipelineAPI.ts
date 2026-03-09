@@ -102,7 +102,10 @@ export default function usePipelineAPI({
         if (data.active_scenario) {
           useSettingsStore.getState().setActiveScenario(data.active_scenario)
         }
-        nodeIdCounter.current = pipelineNodes.length
+        nodeIdCounter.current = pipelineNodes.reduce((max, n) => {
+          const match = n.id.match(/_(\d+)$/)
+          return match ? Math.max(max, parseInt(match[1], 10)) : max
+        }, -1) + 1
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
         setLoading(false)
       })

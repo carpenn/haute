@@ -363,4 +363,29 @@ describe("GitPanel", () => {
     fireEvent.click(screen.getByText("✕"))
     expect(screen.queryByText("Test error")).not.toBeInTheDocument()
   })
+
+  // ---------------------------------------------------------------------------
+  // U1: dropdown closes on outside click
+  // ---------------------------------------------------------------------------
+
+  it("closes branch dropdown when clicking outside", async () => {
+    render(<GitPanel {...defaultProps} />)
+    await waitFor(() => screen.getByText("main"))
+
+    // Open the branch dropdown
+    const branchBtn = screen.getByRole("button", { name: /main/i })
+    fireEvent.click(branchBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText("Your branches")).toBeInTheDocument()
+    })
+
+    // Click outside the dropdown (on the document body)
+    fireEvent.mouseDown(document.body)
+
+    // Dropdown section headers should disappear
+    await waitFor(() => {
+      expect(screen.queryByText("Your branches")).not.toBeInTheDocument()
+    })
+  })
 })

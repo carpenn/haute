@@ -74,7 +74,10 @@ export default function useWebSocketSync({
               setPreamble(g.preamble || "")
               preambleRef.current = g.preamble || ""
             }
-            nodeIdCounter.current = newNodes.length
+            nodeIdCounter.current = newNodes.reduce((max: number, n: Node) => {
+              const match = n.id.match(/_(\d+)$/)
+              return match ? Math.max(max, parseInt(match[1], 10)) : max
+            }, -1) + 1
             setSyncBanner(null)
             addToast("info", "Pipeline updated from file")
             setTimeout(() => fitView({ padding: 0.8 }), 100)
