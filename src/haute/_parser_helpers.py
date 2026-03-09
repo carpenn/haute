@@ -112,7 +112,9 @@ def _is_pipeline_node_decorator(decorator: ast.expr) -> bool:
     """Check if a decorator is @pipeline.node or @pipeline.node(...)."""
     # @pipeline.node
     if isinstance(decorator, ast.Attribute):
-        if isinstance(decorator.value, ast.Name) and decorator.attr == "node":
+        if (isinstance(decorator.value, ast.Name)
+                and decorator.value.id == "pipeline"
+                and decorator.attr == "node"):
             return True
 
     # @pipeline.node(...)

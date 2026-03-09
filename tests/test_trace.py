@@ -32,6 +32,55 @@ class TestJsonifyRow:
         result = _jsonify_row(row)
         assert result == row
 
+    def test_nan_replaced_with_none(self):
+        row = {"a": float("nan")}
+        result = _jsonify_row(row)
+        assert result["a"] is None
+
+    def test_positive_inf_replaced_with_none(self):
+        row = {"a": float("inf")}
+        result = _jsonify_row(row)
+        assert result["a"] is None
+
+    def test_negative_inf_replaced_with_none(self):
+        row = {"a": float("-inf")}
+        result = _jsonify_row(row)
+        assert result["a"] is None
+
+    def test_mixed_nan_inf_and_normal_values(self):
+        row = {
+            "ok": 1.5,
+            "nan_val": float("nan"),
+            "inf_val": float("inf"),
+            "neg_inf": float("-inf"),
+            "text": "hello",
+            "none_val": None,
+        }
+        result = _jsonify_row(row)
+        assert result["ok"] == 1.5
+        assert result["nan_val"] is None
+        assert result["inf_val"] is None
+        assert result["neg_inf"] is None
+        assert result["text"] == "hello"
+        assert result["none_val"] is None
+
+    def test_result_is_json_serializable(self):
+        """Ensure the output of _jsonify_row can be passed to json.dumps."""
+        import json
+
+        row = {
+            "a": float("nan"),
+            "b": float("inf"),
+            "c": float("-inf"),
+            "d": 1.5,
+            "e": "text",
+            "f": None,
+        }
+        result = _jsonify_row(row)
+        # json.dumps would raise ValueError for NaN/Inf if not handled
+        serialized = json.dumps(result)
+        assert isinstance(serialized, str)
+
     def test_non_primitives_stringified(self):
         from datetime import date
 

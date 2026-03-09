@@ -144,11 +144,22 @@ def _is_nan(v: Any) -> bool:
     return isinstance(v, float) and math.isnan(v)
 
 
+def _is_non_finite(v: Any) -> bool:
+    """Return True if *v* is a float that is NaN, +Inf, or -Inf."""
+    return isinstance(v, float) and (math.isnan(v) or math.isinf(v))
+
+
 def _jsonify_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Convert Polars row values to JSON-serialisable Python types."""
+    """Convert Polars row values to JSON-serialisable Python types.
+
+    NaN, +Inf, and -Inf are replaced with ``None`` because they are not
+    valid JSON values and would cause frontend parsing errors.
+    """
     clean: dict[str, Any] = {}
     for k, v in row.items():
         if v is None:
+            clean[k] = None
+        elif _is_non_finite(v):
             clean[k] = None
         elif isinstance(v, (int, float, str, bool)):
             clean[k] = v

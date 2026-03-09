@@ -190,7 +190,7 @@ class TestGenBanding:
         code = _node_to_code(node, source_names=["data"])
         assert 'config="config/banding/AgeBanding.json"' in code
         assert "def AgeBanding(data: pl.LazyFrame)" in code
-        assert "return df" in code
+        assert "return data" in code
         _compile_node_code(code)
 
     def test_single_factor_with_default(self) -> None:

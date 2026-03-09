@@ -267,20 +267,51 @@ def _validate_user_code_cached(
 
     Uses a mutable default dict as a simple cache.  Safe-code results
     (``True``) are cached; unsafe code always raises before caching.
+
+    Code that cannot be parsed as standalone Python (e.g. chain syntax
+    ``.filter(…)``) is wrapped as ``df = (\\n    df\\n    <code>\\n)``
+    and re-parsed before giving up — this mirrors how the executor
+    wraps user code fragments.
     """
     cache_key = (code, allow_imports)
     if cache_key in _cache:
         return
 
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        # Let exec() produce the proper SyntaxError with line numbers
-        _cache[cache_key] = True
-        return
+    # _try_parse_code raises UnsafeCodeError (wrapping the SyntaxError)
+    # if neither the raw code nor a wrapped version can be parsed.
+    tree = _try_parse_code(code)
+
     v = _preamble_validator if allow_imports else _validator
     v.visit(tree)
     _cache[cache_key] = True
+
+
+def _try_parse_code(code: str) -> ast.Module | None:
+    """Try to parse *code* as Python; return the AST or raise.
+
+    If *code* is a fragment (e.g. chain syntax starting with ``"."`` or
+    a bare expression), wrap it in an assignment context and retry.
+    Raises ``UnsafeCodeError`` (with the original ``SyntaxError`` as
+    ``__cause__``) only when all parse attempts fail.
+    """
+    first_exc: SyntaxError | None = None
+    try:
+        return ast.parse(code)
+    except SyntaxError as exc:
+        first_exc = exc
+
+    # Retry with executor-style wrapping for code fragments.
+    if code.lstrip().startswith("."):
+        wrapped = f"df = (\n    df\n    {code}\n)"
+    else:
+        wrapped = f"df = (\n    {code}\n)"
+    try:
+        return ast.parse(wrapped)
+    except SyntaxError:
+        raise UnsafeCodeError(
+            f"Cannot validate code with syntax errors "
+            f"(line {first_exc.lineno}): {first_exc.msg}"
+        ) from first_exc
 
 
 # ---------------------------------------------------------------------------
