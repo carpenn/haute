@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { X, Plus, Trash2, FileCode2, ChevronDown } from "lucide-react"
 import { CodeEditor } from "./editors"
 import PanelShell from "./PanelShell"
+import useClickOutside from "../hooks/useClickOutside"
 import {
   listUtilityFiles,
   readUtilityFile,
@@ -23,6 +24,8 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
   const [errorLine, setErrorLine] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  useClickOutside(dropdownRef, () => setDropdownOpen(false), dropdownOpen)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState("")
 
@@ -164,7 +167,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
           </form>
         ) : (
           <>
-            <div className="relative flex-1">
+            <div className="relative flex-1" ref={dropdownRef}>
               <button
                 onClick={() => setDropdownOpen((v) => !v)}
                 className="w-full flex items-center gap-1.5 px-2 py-1 text-[12px] font-mono rounded-md transition-colors"

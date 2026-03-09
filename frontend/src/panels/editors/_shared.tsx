@@ -491,9 +491,23 @@ export function CodeEditor({
   const onChangeRef = useRef(onChange)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const placeholderCompartment = useRef(new Compartment())
+  const isFocusedRef = useRef(false)
 
   // Keep onChange ref fresh without recreating the editor
   useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  // Sync external value changes to the editor when not focused
+  // (avoids overwriting user typing)
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || isFocusedRef.current) return
+    const currentDoc = view.state.doc.toString()
+    if (defaultValue !== currentDoc) {
+      view.dispatch({
+        changes: { from: 0, to: currentDoc.length, insert: defaultValue },
+      })
+    }
+  }, [defaultValue])
 
   // Create the editor once on mount
   useEffect(() => {
@@ -555,6 +569,12 @@ export function CodeEditor({
           indentWithTab,
           ...defaultKeymap,
         ]),
+
+        // Focus tracking for external sync
+        EditorView.domEventHandlers({
+          focus: () => { isFocusedRef.current = true },
+          blur: () => { isFocusedRef.current = false },
+        }),
 
         // Change listener
         updateListener,
