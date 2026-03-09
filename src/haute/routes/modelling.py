@@ -96,7 +96,21 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
     training_mb = data_mb * _CATBOOST_OVERHEAD_MULTIPLIER
 
     # Apply user row limit to the estimate
-    safe_limit = _clamp_row_limit(ram_est.safe_row_limit, node.data.config.get("row_limit"))
+    user_limit = node.data.config.get("row_limit")
+    safe_limit = _clamp_row_limit(ram_est.safe_row_limit, user_limit)
+
+    # If user's row_limit is the binding constraint, suppress the RAM warning
+    warning = ram_est.warning
+    was_downsampled = ram_est.was_downsampled
+    if (
+        warning
+        and user_limit
+        and isinstance(user_limit, (int, float))
+        and int(user_limit) > 0
+        and (safe_limit is not None and safe_limit == int(user_limit))
+    ):
+        warning = None
+        was_downsampled = False
 
     # GPU VRAM estimation
     vram_check = _VramCheck()
@@ -114,8 +128,8 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
         training_mb=round(training_mb, 1),
         available_mb=round(ram_est.available_bytes / 1024**2, 1),
         bytes_per_row=round(ram_est.bytes_per_row, 1),
-        was_downsampled=ram_est.was_downsampled,
-        warning=ram_est.warning,
+        was_downsampled=was_downsampled,
+        warning=warning,
         gpu_vram_estimated_mb=vram_check.estimated_mb,
         gpu_vram_available_mb=vram_check.available_mb,
         gpu_warning=vram_check.warning,
@@ -175,6 +189,38 @@ async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
 
     try:
         from haute.modelling._mlflow_log import log_experiment
+        from haute.modelling._result_types import (
+            ModelCardMetadata,
+            ModelDiagnostics,
+        )
+
+        diagnostics = ModelDiagnostics(
+            feature_importance=result.feature_importance,
+            shap_summary=result.shap_summary,
+            feature_importance_loss=result.feature_importance_loss,
+            double_lift=result.double_lift,
+            loss_history=result.loss_history,
+            cv_results=result.cv_results,
+            ave_per_feature=result.ave_per_feature,
+            residuals_histogram=result.residuals_histogram,
+            residuals_stats=result.residuals_stats,
+            actual_vs_predicted=result.actual_vs_predicted,
+            lorenz_curve=result.lorenz_curve,
+            lorenz_curve_perfect=result.lorenz_curve_perfect,
+            pdp_data=result.pdp_data,
+            holdout_metrics=result.holdout_metrics,
+            diagnostics_set=result.diagnostics_set,
+        )
+        metadata = ModelCardMetadata(
+            algorithm=config.get("algorithm", "catboost"),
+            task=config.get("task", "regression"),
+            train_rows=result.train_rows,
+            test_rows=result.test_rows,
+            holdout_rows=result.holdout_rows,
+            features=result.features,
+            split_config=config.get("split", {}),
+            best_iteration=result.best_iteration,
+        )
 
         log_result = log_experiment(
             experiment_name=experiment_name,
@@ -186,22 +232,10 @@ async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
                 "target": config.get("target", ""),
                 "weight": config.get("weight", ""),
             },
+            diagnostics=diagnostics,
+            metadata=metadata,
             model_path=result.model_path or None,
             model_name=model_name,
-            shap_summary=result.shap_summary or None,
-            feature_importance_loss=result.feature_importance_loss or None,
-            cv_results=result.cv_results,
-            double_lift=result.double_lift or None,
-            loss_history=result.loss_history or None,
-            feature_importance=result.feature_importance or None,
-            ave_per_feature=result.ave_per_feature or None,
-            algorithm=config.get("algorithm", "catboost"),
-            task=config.get("task", "regression"),
-            train_rows=result.train_rows,
-            test_rows=result.test_rows,
-            best_iteration=result.best_iteration,
-            features=result.features or None,
-            split_config=config.get("split", {}),
         )
 
         return LogExperimentResponse(

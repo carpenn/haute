@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 from haute.modelling._model_card import generate_model_card
+from haute.modelling._result_types import ModelCardMetadata, ModelDiagnostics
 
 
 def _minimal_kwargs() -> dict:
     """Minimal required kwargs for generate_model_card."""
     return {
         "name": "test-model",
-        "algorithm": "catboost",
-        "task": "regression",
         "metrics": {"rmse": 0.1234, "gini": 0.5678},
         "params": {"iterations": 100},
-        "train_rows": 800,
-        "test_rows": 200,
-        "features": ["x1", "x2"],
-        "split_config": {"strategy": "random", "test_size": 0.2},
+        "metadata": ModelCardMetadata(
+            algorithm="catboost",
+            task="regression",
+            train_rows=800,
+            test_rows=200,
+            features=["x1", "x2"],
+            split_config={"strategy": "random", "test_size": 0.2},
+        ),
     }
 
 
@@ -77,20 +80,34 @@ class TestModelCardOmitsEmptySections:
         html = generate_model_card(**_minimal_kwargs())
         assert "Actual vs Expected" not in html
 
+    def test_no_lorenz_when_empty(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Lorenz Curve" not in html
+
+    def test_no_residuals_when_empty(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Residuals" not in html
+
+    def test_no_scatter_when_empty(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Actual vs Predicted" not in html
+
+    def test_no_pdp_when_empty(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Partial Dependence" not in html
+
+    def test_no_holdout_metrics_when_empty(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Holdout Metrics" not in html
+
 
 class TestModelCardMinimalInput:
     def test_empty_everything_no_crash(self):
         """With only required args (metrics/params empty), still produces valid HTML."""
         html = generate_model_card(
             name="empty",
-            algorithm="catboost",
-            task="regression",
             metrics={},
             params={},
-            train_rows=0,
-            test_rows=0,
-            features=[],
-            split_config={},
         )
         assert "<!DOCTYPE html>" in html
         assert "empty" in html
@@ -100,8 +117,7 @@ class TestModelCardAllSections:
     def test_all_section_headers_present(self):
         """When all data is provided, all section headers should appear."""
         kwargs = _minimal_kwargs()
-        kwargs.update(
-            best_iteration=50,
+        kwargs["diagnostics"] = ModelDiagnostics(
             loss_history=[
                 {"iteration": i, "train_RMSE": 1.0 / (i + 1)} for i in range(10)
             ],
@@ -135,6 +151,39 @@ class TestModelCardAllSections:
                     ],
                 },
             ],
+            residuals_histogram=[
+                {"bin_center": i, "count": 10, "weighted_count": 10.0} for i in range(5)
+            ],
+            residuals_stats={"mean": 0.01, "std": 0.5, "skew": 0.1, "min": -2.0, "max": 2.0},
+            actual_vs_predicted=[
+                {"actual": 0.5, "predicted": 0.6, "weight": 1.0},
+            ],
+            lorenz_curve=[
+                {"cum_weight_frac": 0.0, "cum_actual_frac": 0.0},
+                {"cum_weight_frac": 1.0, "cum_actual_frac": 1.0},
+            ],
+            lorenz_curve_perfect=[
+                {"cum_weight_frac": 0.0, "cum_actual_frac": 0.0},
+                {"cum_weight_frac": 1.0, "cum_actual_frac": 1.0},
+            ],
+            pdp_data=[
+                {"feature": "x1", "type": "numeric", "grid": [
+                    {"value": 1, "avg_prediction": 0.5},
+                    {"value": 2, "avg_prediction": 0.6},
+                ]},
+            ],
+            holdout_metrics={"rmse": 0.15, "gini": 0.55},
+            diagnostics_set="validation",
+        )
+        kwargs["metadata"] = ModelCardMetadata(
+            algorithm="catboost",
+            task="regression",
+            train_rows=800,
+            test_rows=200,
+            holdout_rows=500,
+            features=["x1", "x2"],
+            split_config={"strategy": "random", "test_size": 0.2},
+            best_iteration=50,
         )
         html = generate_model_card(**kwargs)
         assert "Training Summary" in html
@@ -147,6 +196,58 @@ class TestModelCardAllSections:
         assert "LossFunctionChange" in html
         assert "Actual vs Expected" in html
         assert "Parameters" in html
+        # New sections
+        assert "Lorenz Curve" in html
+        assert "Residuals" in html
+        assert "Actual vs Predicted" in html
+        assert "Partial Dependence" in html
+        assert "Holdout Metrics" in html
+
+
+class TestModelCardHoldoutAndDiagnostics:
+    def test_validation_rows_label(self):
+        html = generate_model_card(**_minimal_kwargs())
+        assert "Validation rows" in html
+        assert "Test rows" not in html
+
+    def test_holdout_rows_shown(self):
+        kwargs = _minimal_kwargs()
+        kwargs["metadata"] = ModelCardMetadata(
+            algorithm="catboost", task="regression",
+            train_rows=800, test_rows=200, holdout_rows=1000,
+            features=["x1", "x2"],
+            split_config={"strategy": "random"},
+        )
+        html = generate_model_card(**kwargs)
+        assert "Holdout rows" in html
+        assert "1,000" in html
+
+    def test_diagnostics_set_label(self):
+        kwargs = _minimal_kwargs()
+        kwargs["diagnostics"] = ModelDiagnostics(diagnostics_set="holdout")
+        html = generate_model_card(**kwargs)
+        assert "Diagnostics computed on" in html
+        assert "Holdout" in html
+
+    def test_holdout_metrics_hidden_when_diagnostics_is_holdout(self):
+        """When holdout IS the diagnostics set, don't show a separate holdout section."""
+        kwargs = _minimal_kwargs()
+        kwargs["diagnostics"] = ModelDiagnostics(
+            holdout_metrics={"rmse": 0.15},
+            diagnostics_set="holdout",
+        )
+        html = generate_model_card(**kwargs)
+        assert "Holdout Metrics" not in html
+
+    def test_holdout_metrics_shown_when_diagnostics_is_validation(self):
+        """When validation is diagnostics, holdout metrics shown separately."""
+        kwargs = _minimal_kwargs()
+        kwargs["diagnostics"] = ModelDiagnostics(
+            holdout_metrics={"rmse": 0.15},
+            diagnostics_set="validation",
+        )
+        html = generate_model_card(**kwargs)
+        assert "Holdout Metrics" in html
 
 
 class TestModelCardEscaping:

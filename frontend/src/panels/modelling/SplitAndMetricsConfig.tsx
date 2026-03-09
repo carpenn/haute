@@ -56,27 +56,51 @@ export function SplitAndMetricsConfig({
             ))}
           </div>
           {split.strategy === "random" && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Test size</label>
-                <input
-                  type="number" step={0.05} min={0.05} max={0.5}
-                  value={(split.test_size as number) ?? 0.2}
-                  onChange={(e) => onSplitUpdate("test_size", parseFloat(e.target.value) || 0.2)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Validation</label>
+                  <input
+                    type="number" step={0.05} min={0} max={0.5}
+                    value={(split.validation_size as number) ?? (split.test_size as number) ?? 0.2}
+                    onChange={(e) => onSplitUpdate("validation_size", parseFloat(e.target.value) || 0)}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Holdout</label>
+                  <input
+                    type="number" step={0.05} min={0} max={0.5}
+                    value={(split.holdout_size as number) ?? 0}
+                    onChange={(e) => onSplitUpdate("holdout_size", parseFloat(e.target.value) || 0)}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Seed</label>
+                  <input
+                    type="number"
+                    value={(split.seed as number) ?? 42}
+                    onChange={(e) => onSplitUpdate("seed", parseInt(e.target.value) || 42)}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Seed</label>
-                <input
-                  type="number"
-                  value={(split.seed as number) ?? 42}
-                  onChange={(e) => onSplitUpdate("seed", parseInt(e.target.value) || 42)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
+              {(() => {
+                const valSize = (split.validation_size as number) ?? (split.test_size as number) ?? 0.2
+                const holdoutSize = (split.holdout_size as number) ?? 0
+                const trainSize = Math.max(0, 1 - valSize - holdoutSize)
+                return (
+                  <div className="flex gap-0.5 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--chrome-hover)" }}>
+                    <div style={{ width: `${trainSize * 100}%`, background: "#a855f7" }} title={`Train: ${(trainSize * 100).toFixed(0)}%`} />
+                    {valSize > 0 && <div style={{ width: `${valSize * 100}%`, background: "#3b82f6" }} title={`Validation: ${(valSize * 100).toFixed(0)}%`} />}
+                    {holdoutSize > 0 && <div style={{ width: `${holdoutSize * 100}%`, background: "#22c55e" }} title={`Holdout: ${(holdoutSize * 100).toFixed(0)}%`} />}
+                  </div>
+                )
+              })()}
             </div>
           )}
           {split.strategy === "temporal" && (
@@ -119,15 +143,27 @@ export function SplitAndMetricsConfig({
                   {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Test size</label>
-                <input
-                  type="number" step={0.05} min={0.05} max={0.5}
-                  value={(split.test_size as number) ?? 0.2}
-                  onChange={(e) => onSplitUpdate("test_size", parseFloat(e.target.value) || 0.2)}
-                  className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Validation</label>
+                  <input
+                    type="number" step={0.05} min={0} max={0.5}
+                    value={(split.validation_size as number) ?? (split.test_size as number) ?? 0.2}
+                    onChange={(e) => onSplitUpdate("validation_size", parseFloat(e.target.value) || 0)}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Holdout</label>
+                  <input
+                    type="number" step={0.05} min={0} max={0.5}
+                    value={(split.holdout_size as number) ?? 0}
+                    onChange={(e) => onSplitUpdate("holdout_size", parseFloat(e.target.value) || 0)}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  />
+                </div>
               </div>
             </div>
           )}

@@ -444,7 +444,10 @@ class TrainResponse(BaseModel):
     feature_importance: list[dict[str, Any]] = Field(default_factory=list)
     model_path: str = ""
     train_rows: int = 0
-    test_rows: int = 0
+    test_rows: int = 0  # validation rows (kept as test_rows for backward compat)
+    holdout_rows: int = 0
+    holdout_metrics: dict[str, float] = Field(default_factory=dict)
+    diagnostics_set: str = "validation"  # "train" | "validation" | "holdout"
     features: list[str] = Field(default_factory=list)
     cat_features: list[str] = Field(default_factory=list)
     error: str | None = None
@@ -455,6 +458,12 @@ class TrainResponse(BaseModel):
     feature_importance_loss: list[dict[str, Any]] = Field(default_factory=list)
     cv_results: dict[str, Any] | None = None
     ave_per_feature: list[dict[str, Any]] = Field(default_factory=list)
+    residuals_histogram: list[dict[str, Any]] = Field(default_factory=list)
+    residuals_stats: dict[str, float] = Field(default_factory=dict)
+    actual_vs_predicted: list[dict[str, float]] = Field(default_factory=list)
+    lorenz_curve: list[dict[str, float]] = Field(default_factory=list)
+    lorenz_curve_perfect: list[dict[str, float]] = Field(default_factory=list)
+    pdp_data: list[dict[str, Any]] = Field(default_factory=list)
     warning: str | None = None
     total_source_rows: int | None = None
 

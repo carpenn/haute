@@ -80,17 +80,6 @@ describe("DataPreview", () => {
     expect(screen.getByText("Executing pipeline...")).toBeInTheDocument()
   })
 
-  it("close button calls onClose", () => {
-    const onClose = vi.fn()
-    render(<DataPreview data={makePreview()} onClose={onClose} />)
-    // Find the close X button (last button in header)
-    const closeButtons = screen.getAllByRole("button")
-    // The close button is the last one in the header area
-    const closeBtn = closeButtons[closeButtons.length - 1]
-    fireEvent.click(closeBtn)
-    expect(onClose).toHaveBeenCalledOnce()
-  })
-
   it("cell click calls onCellClick with row index and column", () => {
     const onCellClick = vi.fn()
     render(<DataPreview data={makePreview()} onClose={vi.fn()} onCellClick={onCellClick} />)
@@ -108,8 +97,7 @@ describe("DataPreview", () => {
           ],
           row_count: 1,
         })}
-        onClose={vi.fn()}
-      />,
+              />,
     )
     // null is rendered as the string "null" via formatValue
     const nullCell = screen.getByText("null")
@@ -127,8 +115,7 @@ describe("DataPreview", () => {
             { age: 30, premium: 200 },
           ],
         })}
-        onClose={vi.fn()}
-      />,
+              />,
     )
     expect(screen.getByText(/Showing 2 of 10,000 rows/)).toBeInTheDocument()
   })
@@ -181,8 +168,7 @@ describe("DataPreview", () => {
     render(
       <DataPreview
         data={makePreview()}
-        onClose={vi.fn()}
-        tracedCell={{ rowIndex: 0, column: "age" }}
+                tracedCell={{ rowIndex: 0, column: "age" }}
       />,
     )
     const cell = screen.getByText("25").closest("td") as HTMLElement
@@ -218,8 +204,7 @@ describe("DataPreview", () => {
     render(
       <DataPreview
         data={makePreview({ status: "error", error: "Column not found: xyz" })}
-        onClose={vi.fn()}
-      />,
+              />,
     )
     // Error message appears in both header and body
     const errors = screen.getAllByText("Column not found: xyz")

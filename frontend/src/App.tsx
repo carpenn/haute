@@ -19,6 +19,8 @@ import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview from "./panels/DataPreview"
 import OptimiserPreview from "./panels/OptimiserPreview"
+import { ModellingPreview } from "./panels/ModellingPreview"
+
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
 import { ErrorBoundary } from "./components/ErrorBoundary"
@@ -120,7 +122,8 @@ function FlowEditor() {
   // Node results store — background jobs + cached results
   const bumpGraphVersion = useNodeResultsStore((s) => s.bumpGraphVersion)
   const getOptimiserPreview = useNodeResultsStore((s) => s.getOptimiserPreview)
-  const clearNode = useNodeResultsStore((s) => s.clearNode)
+  const getModellingPreview = useNodeResultsStore((s) => s.getModellingPreview)
+
 
   // Refs
   const submodelsRef = useRef<Record<string, unknown>>({})
@@ -344,22 +347,26 @@ function FlowEditor() {
           <ErrorBoundary name="DataPreview">
             {(() => {
               const activeNodeId = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+              const modelPreview = activeNodeId ? getModellingPreview(activeNodeId) : null
+              if (modelPreview) {
+                return (
+                  <ModellingPreview
+                    data={modelPreview}
+                    nodeId={activeNodeId!}
+                  />
+                )
+              }
               const optPreview = activeNodeId ? getOptimiserPreview(activeNodeId) : null
               if (optPreview) {
                 return (
                   <OptimiserPreview
                     data={optPreview}
-                    onClose={() => {
-                      // Clear from store so the preview dismisses
-                      if (activeNodeId) clearNode(activeNodeId)
-                    }}
                   />
                 )
               }
               return (
                 <DataPreview
                   data={previewData}
-                  onClose={() => { setPreviewData(null); clearTrace() }}
                   onCellClick={handleCellClick}
                   tracedCell={tracedCell}
                 />

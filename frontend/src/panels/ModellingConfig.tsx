@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
-import { trainModel, exportTraining, estimateTrainingRam } from "../api/client"
+import { trainModel, estimateTrainingRam } from "../api/client"
 import type { TrainEstimate } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useSettingsStore from "../stores/useSettingsStore"
@@ -33,16 +33,10 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const training = !!trainJob
   const trainProgress: TrainProgress | null = trainJob?.progress ?? null
   const trainResult: TrainResult | null = cachedResult?.result ?? null
-  const trainJobId: string | null = cachedResult?.jobId ?? trainJob?.jobId ?? null
 
   // Staleness detection
   const currentConfigHash = useMemo(() => hashConfig(config), [config])
   const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
-
-  // ── Local UI state (cheap, ok to recreate) ──
-  const [exporting, setExporting] = useState(false)
-  const [exportedScript, setExportedScript] = useState<string | null>(null)
-  const [, setMlflowResult] = useState<{ status: string; error?: string } | null>(null)
 
   // ── RAM estimate (fetched once when modelling node selected) ──
   const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)
@@ -80,10 +74,6 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     return () => controller.abort()
   }, [nodeId])
 
-  // Global MLflow status from store (fetched once on app startup)
-  const mlflow = useSettingsStore((s) => s.mlflow)
-  const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
-
   // Collapse state from UI store (persisted)
   const featuresOpen = useSettingsStore((s) => s.isSectionOpen("modelling.features"))
   const mlflowOpen = useSettingsStore((s) => s.isSectionOpen("modelling.mlflow"))
@@ -96,7 +86,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const algorithm = configField(config, "algorithm", "")
   const task = configField(config, "task", "regression")
   const params = configField<Record<string, unknown>>(config, "params", {})
-  const split = configField<Record<string, unknown>>(config, "split", { strategy: "random", test_size: 0.2, seed: 42 })
+  const split = configField<Record<string, unknown>>(config, "split", { strategy: "random", validation_size: 0.2, holdout_size: 0, seed: 42 })
   const metrics = configField<string[]>(config, "metrics", task === "regression" ? ["gini", "rmse"] : ["auc", "logloss"])
 
   const columns = upstreamColumns || []
@@ -112,7 +102,6 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   )
 
   const handleTrain = useCallback(async () => {
-    setMlflowResult(null)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     try {
       const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario })
@@ -134,18 +123,6 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       })
     }
   }, [nodeId, allNodes, buildGraphCb, currentConfigHash, startTrainJob])
-
-  const handleExport = useCallback(async () => {
-    setExporting(true)
-    try {
-      const result = await exportTraining({ graph: buildGraphCb(), node_id: config._nodeId as string, data_path: "" })
-      setExportedScript(result.script || null)
-    } catch (e) {
-      console.warn("Export failed:", e)
-    } finally {
-      setExporting(false)
-    }
-  }, [config._nodeId, buildGraphCb])
 
   // ── Gateway: pick algorithm before showing full config ──
   if (!algorithm) {
@@ -209,22 +186,14 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       />
 
       <TrainingActionsAndResults
-        config={config}
         target={target}
-        params={params}
         training={training}
         trainProgress={trainProgress}
         trainResult={trainResult}
-        trainJobId={trainJobId}
         isStale={isStale}
-        exporting={exporting}
-        exportedScript={exportedScript}
-        mlflowBackend={mlflowBackend}
         ramEstimate={ramEstimate}
         ramEstimateLoading={ramEstimateLoading}
         onTrain={handleTrain}
-        onExport={handleExport}
-        onMlflowResult={setMlflowResult}
       />
     </div>
   )

@@ -32,7 +32,12 @@ export type TrainResult = {
   feature_importance: { feature: string; importance: number }[]
   model_path: string
   train_rows: number
-  test_rows: number
+  test_rows: number  // validation rows (kept as test_rows for backward compat)
+  holdout_rows?: number
+  holdout_metrics?: Record<string, number>
+  diagnostics_set?: string  // "train" | "validation" | "holdout"
+  features?: string[]
+  cat_features?: string[]
   error?: string
   best_iteration?: number | null
   loss_history?: { iteration: number; [key: string]: number }[]
@@ -40,7 +45,15 @@ export type TrainResult = {
   shap_summary?: { feature: string; mean_abs_shap: number }[]
   feature_importance_loss?: { feature: string; importance: number }[]
   cv_results?: { mean_metrics: Record<string, number>; std_metrics: Record<string, number>; n_folds: number } | null
+  ave_per_feature?: { feature: string; type: string; bins: { label: string; exposure: number; avg_actual: number; avg_predicted: number }[] }[]
+  residuals_histogram?: { bin_center: number; count: number; weighted_count: number }[]
+  residuals_stats?: { mean: number; std: number; skew: number; min: number; max: number }
+  actual_vs_predicted?: { actual: number; predicted: number; weight: number }[]
+  lorenz_curve?: { cum_weight_frac: number; cum_actual_frac: number }[]
+  lorenz_curve_perfect?: { cum_weight_frac: number; cum_actual_frac: number }[]
+  pdp_data?: { feature: string; type: string; grid: { value: number | string; avg_prediction: number }[] }[]
   warning?: string | null
+  total_source_rows?: number | null
 }
 
 export type TrainProgress = {
@@ -158,6 +171,8 @@ interface NodeResultsState {
   // ── Derived helpers ──
   /** Build OptimiserPreviewData for a node (from completed result or null). */
   getOptimiserPreview: (nodeId: string) => OptimiserPreviewData | null
+  /** Return completed training result for a node, or null. */
+  getModellingPreview: (nodeId: string) => { result: TrainResult; jobId: string; nodeLabel: string; configHash: string } | null
 
   // ── Cleanup ──
   clearNode: (nodeId: string) => void
@@ -306,6 +321,20 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       jobId: cached.jobId,
       constraints: cached.constraints,
       nodeLabel: cached.nodeLabel,
+    }
+  },
+
+  getModellingPreview: (nodeId) => {
+    const cached = get().trainResults[nodeId]
+    if (!cached) return null
+    // Only show completed (non-error) results in the preview panel
+    if (cached.result.status === "error") return null
+    const job = get().trainJobs[nodeId]
+    return {
+      result: cached.result,
+      jobId: cached.jobId,
+      nodeLabel: job?.nodeLabel ?? "Model",
+      configHash: cached.configHash,
     }
   },
 

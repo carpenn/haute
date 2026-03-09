@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from haute.modelling._result_types import ModelCardMetadata, ModelDiagnostics
+
 
 class TestResolveTrackingBackend:
     def test_databricks_when_env_vars_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,9 +201,15 @@ class TestLogExperiment:
                 metrics={"rmse": 0.5},
                 params={},
                 model_path=str(model_file),
-                shap_summary=[{"feature": "x1", "mean_abs_shap": 0.3}],
-                feature_importance_loss=[{"feature": "x1", "importance": 0.4}],
-                cv_results={"mean_metrics": {"rmse": 0.45}, "std_metrics": {"rmse": 0.02}, "n_folds": 3},
+                diagnostics=ModelDiagnostics(
+                    shap_summary=[{"feature": "x1", "mean_abs_shap": 0.3}],
+                    feature_importance_loss=[{"feature": "x1", "importance": 0.4}],
+                    cv_results={
+                        "mean_metrics": {"rmse": 0.45},
+                        "std_metrics": {"rmse": 0.02},
+                        "n_folds": 3,
+                    },
+                ),
             )
 
             assert result.run_id == "abc123"
@@ -291,14 +299,18 @@ class TestLogExperiment:
                 metrics={"rmse": 0.5},
                 params={"algorithm": "catboost"},
                 model_path=str(model_file),
-                double_lift=[{"decile": 1, "actual": 0.1, "predicted": 0.12, "count": 100}],
-                feature_importance=[{"feature": "x1", "importance": 0.8}],
-                algorithm="catboost",
-                task="regression",
-                train_rows=800,
-                test_rows=200,
-                features=["x1"],
-                split_config={"strategy": "random"},
+                diagnostics=ModelDiagnostics(
+                    double_lift=[{"decile": 1, "actual": 0.1, "predicted": 0.12, "count": 100}],
+                    feature_importance=[{"feature": "x1", "importance": 0.8}],
+                ),
+                metadata=ModelCardMetadata(
+                    algorithm="catboost",
+                    task="regression",
+                    train_rows=800,
+                    test_rows=200,
+                    features=["x1"],
+                    split_config={"strategy": "random"},
+                ),
             )
 
             # Check that model_card artifact was logged
@@ -336,9 +348,7 @@ class TestLogExperiment:
                 run_name="test-run",
                 metrics={"rmse": 0.5},
                 params={},
-                # No additional data — model card is still generated (with minimal content)
-                algorithm="catboost",
-                task="regression",
+                metadata=ModelCardMetadata(algorithm="catboost", task="regression"),
             )
 
             # Model card should still be logged even with minimal data

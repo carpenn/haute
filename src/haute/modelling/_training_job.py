@@ -20,7 +20,13 @@ from haute.modelling._algorithms import (
     resolve_loss_function,
 )
 from haute.modelling._metrics import compute_metrics
-from haute.modelling._split import SplitConfig, split_mask
+from haute.modelling._split import (
+    PARTITION_HOLDOUT,
+    PARTITION_TRAIN,
+    PARTITION_VALIDATION,
+    SplitConfig,
+    split_mask,
+)
 
 logger = get_logger(component="training_job")
 
@@ -33,9 +39,12 @@ class TrainResult:
     feature_importance: list[dict[str, Any]]
     model_path: str
     train_rows: int
-    test_rows: int
+    test_rows: int  # validation rows (kept as test_rows for backward compat)
     features: list[str]
     cat_features: list[str]
+    holdout_rows: int = 0
+    holdout_metrics: dict[str, float] = field(default_factory=dict)
+    diagnostics_set: str = "validation"  # "train" | "validation" | "holdout"
     best_iteration: int | None = None
     loss_history: list[dict[str, float]] = field(default_factory=list)
     double_lift: list[dict[str, Any]] = field(default_factory=list)
@@ -43,6 +52,12 @@ class TrainResult:
     feature_importance_loss: list[dict[str, Any]] = field(default_factory=list)
     cv_results: dict[str, Any] | None = None
     ave_per_feature: list[dict[str, Any]] = field(default_factory=list)
+    residuals_histogram: list[dict[str, Any]] = field(default_factory=list)
+    residuals_stats: dict[str, float] = field(default_factory=dict)
+    actual_vs_predicted: list[dict[str, float]] = field(default_factory=list)
+    lorenz_curve: list[dict[str, float]] = field(default_factory=list)
+    lorenz_curve_perfect: list[dict[str, float]] = field(default_factory=list)
+    pdp_data: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -58,12 +73,13 @@ class _PreparedData:
 
 @dataclass
 class _SplitResult:
-    """Intermediate result from the train/test split phase."""
+    """Intermediate result from the train/validation/holdout split phase."""
 
     split_path: str
     owns_tmp: bool
     n_train: int
-    n_test: int
+    n_validation: int
+    n_holdout: int
 
 
 @dataclass
@@ -81,12 +97,20 @@ class _MetricsResult:
     """Intermediate result from the metrics/evaluation phase."""
 
     metrics: dict[str, float]
+    holdout_metrics: dict[str, float]
+    diagnostics_set: str  # "train" | "validation" | "holdout"
     importance: list[dict[str, Any]]
     double_lift: list[dict[str, Any]]
     shap_summary: list[dict[str, float]]
     feature_importance_loss: list[dict[str, Any]]
     cv_results: dict[str, Any] | None
     ave_per_feature: list[dict[str, Any]]
+    residuals_histogram: list[dict[str, Any]]
+    residuals_stats: dict[str, float]
+    actual_vs_predicted: list[dict[str, float]]
+    lorenz_curve: list[dict[str, float]]
+    lorenz_curve_perfect: list[dict[str, float]]
+    pdp_data: list[dict[str, Any]]
 
 
 class TrainingJob:
@@ -214,7 +238,7 @@ class TrainingJob:
             on_iteration, _report,
         )
 
-        _report("Evaluating on test set", 0.7)
+        _report("Evaluating model", 0.7)
         metrics_result = self._compute_metrics(
             split_result, prepared.features, prepared.cat_features,
             train_result, _report,
@@ -228,7 +252,10 @@ class TrainingJob:
             feature_importance=metrics_result.importance,
             model_path=str(model_path),
             train_rows=split_result.n_train,
-            test_rows=split_result.n_test,
+            test_rows=split_result.n_validation,
+            holdout_rows=split_result.n_holdout,
+            holdout_metrics=metrics_result.holdout_metrics,
+            diagnostics_set=metrics_result.diagnostics_set,
             features=prepared.features,
             cat_features=prepared.cat_features,
             best_iteration=train_result.fit_result.best_iteration,
@@ -238,6 +265,12 @@ class TrainingJob:
             feature_importance_loss=metrics_result.feature_importance_loss,
             cv_results=metrics_result.cv_results,
             ave_per_feature=metrics_result.ave_per_feature,
+            residuals_histogram=metrics_result.residuals_histogram,
+            residuals_stats=metrics_result.residuals_stats,
+            actual_vs_predicted=metrics_result.actual_vs_predicted,
+            lorenz_curve=metrics_result.lorenz_curve,
+            lorenz_curve_perfect=metrics_result.lorenz_curve_perfect,
+            pdp_data=metrics_result.pdp_data,
         )
 
         if self.mlflow_experiment:
@@ -337,7 +370,7 @@ class TrainingJob:
         prepared: _PreparedData,
         _report: Callable[[str, float], None],
     ) -> _SplitResult:
-        """Compute train/test split mask and write split parquet."""
+        """Compute train/validation/holdout split mask and write split parquet."""
         from haute.modelling._algorithms import _mem_checkpoint
 
         data_path = prepared.data_path
@@ -351,11 +384,14 @@ class TrainingJob:
             mask_df = pl.scan_parquet(data_path).select(col).collect()
         mask = split_mask(total_rows, self.split_config, df=mask_df)
         del mask_df
-        n_train = int(mask.sum())
-        n_test = total_rows - n_train
-        _mem_checkpoint(f"split mask (train={n_train:,} test={n_test:,})")
+        n_train = int((mask == PARTITION_TRAIN).sum())
+        n_validation = int((mask == PARTITION_VALIDATION).sum())
+        n_holdout = int((mask == PARTITION_HOLDOUT).sum())
+        _mem_checkpoint(
+            f"split mask (train={n_train:,} val={n_validation:,} holdout={n_holdout:,})"
+        )
 
-        # Write split parquet: original data + _is_train column
+        # Write split parquet: original data + _partition column
         tmp_fd3, split_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_split_")
         os.close(tmp_fd3)
         try:
@@ -382,7 +418,8 @@ class TrainingJob:
             split_path=split_path,
             owns_tmp=True,
             n_train=n_train,
-            n_test=n_test,
+            n_validation=n_validation,
+            n_holdout=n_holdout,
         )
 
     def _train_model(
@@ -397,6 +434,7 @@ class TrainingJob:
         from haute.modelling._algorithms import _build_pool, _mem_checkpoint
 
         data_path = split_result.split_path
+        has_validation = split_result.n_validation > 0
 
         # Look up algorithm
         algo_cls = ALGORITHM_REGISTRY.get(self.algorithm)
@@ -414,22 +452,18 @@ class TrainingJob:
             fit_params["loss_function"] = resolved_loss
 
         # Read train partition, extract labels, free DataFrame, then build pool.
-        # Extracting y/w/baseline first and freeing the full DataFrame
-        # before _build_pool prevents triple-copy (Polars + Pandas + Pool).
         _report("Building training pool", 0.2)
         train_df = (
             pl.scan_parquet(data_path)
-            .filter(pl.col("_is_train"))
-            .drop("_is_train")
+            .filter(pl.col("_partition") == PARTITION_TRAIN)
+            .drop("_partition")
             .collect()
         )
         _mem_checkpoint(f"read train partition ({len(train_df):,} rows)")
 
-        # Extract labels/weights as numpy BEFORE freeing the DataFrame
         train_y = train_df[self.target].cast(pl.Float64).to_numpy()
         train_w = train_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
         train_baseline = train_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
-        # Keep only feature columns, free the full DataFrame
         train_features_df = train_df.select(features)
         del train_df
         gc.collect()
@@ -445,35 +479,36 @@ class TrainingJob:
         _malloc_trim()
         _mem_checkpoint("train pool built")
 
-        # Read test partition, same extract-then-free pattern
-        _report("Building eval pool", 0.25)
-        test_df = (
-            pl.scan_parquet(data_path)
-            .filter(~pl.col("_is_train"))
-            .drop("_is_train")
-            .collect()
-        )
-        _mem_checkpoint(f"read test partition ({len(test_df):,} rows)")
+        # Build eval pool from validation set (if present — needed for early stopping)
+        eval_pool = None
+        if has_validation:
+            _report("Building eval pool", 0.25)
+            val_df = (
+                pl.scan_parquet(data_path)
+                .filter(pl.col("_partition") == PARTITION_VALIDATION)
+                .drop("_partition")
+                .collect()
+            )
+            _mem_checkpoint(f"read validation partition ({len(val_df):,} rows)")
 
-        test_y = test_df[self.target].cast(pl.Float64).to_numpy()
-        test_w = test_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
-        test_baseline = test_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
-        test_features_df = test_df.select(features)
-        del test_df
-        gc.collect()
-        _malloc_trim()
-        _mem_checkpoint("extracted labels, freed test_df")
+            val_y = val_df[self.target].cast(pl.Float64).to_numpy()
+            val_w = val_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
+            val_baseline = val_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
+            val_features_df = val_df.select(features)
+            del val_df
+            gc.collect()
+            _malloc_trim()
 
-        eval_pool = _build_pool(
-            test_features_df, features, cat_features,
-            y=test_y, w=test_w, baseline=test_baseline,
-        )
-        del test_features_df, test_y, test_w, test_baseline
-        gc.collect()
-        _malloc_trim()
-        _mem_checkpoint("eval pool built")
+            eval_pool = _build_pool(
+                val_features_df, features, cat_features,
+                y=val_y, w=val_w, baseline=val_baseline,
+            )
+            del val_features_df, val_y, val_w, val_baseline
+            gc.collect()
+            _malloc_trim()
+            _mem_checkpoint("eval pool built")
 
-        # Fit with pre-built pools (no DataFrame needed -- pools hold data)
+        # Fit with pre-built pools
         _report("Training model", 0.3)
         fit_result = algo.fit(
             None, features, cat_features,
@@ -498,6 +533,20 @@ class TrainingJob:
             fit_params=fit_params,
         )
 
+    def _read_partition(
+        self,
+        data_path: str,
+        partition: int,
+        features: list[str],
+    ) -> pl.DataFrame:
+        """Read a single partition from the split parquet."""
+        return (
+            pl.scan_parquet(data_path)
+            .filter(pl.col("_partition") == partition)
+            .drop("_partition")
+            .collect()
+        )
+
     def _compute_metrics(
         self,
         split_result: _SplitResult,
@@ -506,78 +555,113 @@ class TrainingJob:
         train_result: _TrainModelResult,
         _report: Callable[[str, float], None],
     ) -> _MetricsResult:
-        """Evaluate on the test set: metrics, importance, SHAP, and optional CV."""
+        """Evaluate model: metrics on validation + holdout, diagnostics on best available set.
+
+        Memory-optimised: each partition is read at most once.  The diagnostics
+        partition (holdout > validation > train) is read once and used for both
+        its per-partition metrics *and* all diagnostic plots.  A separate read
+        is only done for validation when holdout also exists.
+        """
         from haute.modelling._algorithms import _build_pool, _mem_checkpoint
-        from haute.modelling._metrics import compute_ave_per_feature, compute_double_lift
+        from haute.modelling._metrics import (
+            compute_actual_vs_predicted,
+            compute_ave_per_feature,
+            compute_double_lift,
+            compute_lorenz_curve,
+            compute_pdp,
+            compute_residuals_histogram,
+        )
 
         data_path = split_result.split_path
         algo = train_result.algo
         model = train_result.model
         need_cv = bool(self.cv_folds and self.cv_folds > 1)
 
-        # Re-read test partition from disk for evaluation
-        test_df = (
-            pl.scan_parquet(data_path)
-            .filter(~pl.col("_is_train"))
-            .drop("_is_train")
-            .collect()
-        )
-        _mem_checkpoint(f"re-read test partition ({len(test_df):,} rows)")
-        y_true = test_df[self.target].to_numpy()
-        y_pred = algo.predict(model, test_df, features)
-        w = test_df[self.weight].to_numpy() if self.weight else None
+        has_validation = split_result.n_validation > 0
+        has_holdout = split_result.n_holdout > 0
 
-        # Compute metrics
-        _report("Computing metrics", 0.8)
+        # Feature importance (doesn't need eval data)
+        importance = algo.feature_importance(model)
+        sorted_features = [fi["feature"] for fi in importance if fi["feature"] in features]
+        sorted_features += [f for f in features if f not in sorted_features]
+
+        # ── Determine which set to use for diagnostics (holdout > validation > train) ──
+        if has_holdout:
+            diag_partition = PARTITION_HOLDOUT
+            diagnostics_set = "holdout"
+        elif has_validation:
+            diag_partition = PARTITION_VALIDATION
+            diagnostics_set = "validation"
+        else:
+            diag_partition = PARTITION_TRAIN
+            diagnostics_set = "train"
+
+        # ── Read the diagnostics partition ONCE — metrics + all diagnostics ──
+        _report("Computing diagnostics", 0.8)
+        diag_df = self._read_partition(data_path, diag_partition, features)
+        _mem_checkpoint(f"read {diagnostics_set} partition for diagnostics ({len(diag_df):,} rows)")
+        y_true = diag_df[self.target].to_numpy()
+        y_pred = algo.predict(model, diag_df, features)
+        w = diag_df[self.weight].to_numpy() if self.weight else None
+
+        # Primary metrics from the diagnostics set
         metrics = compute_metrics(y_true, y_pred, w, self.metrics)
 
-        # Double-lift (actual vs predicted by decile)
+        # Derive holdout metrics from the same computation (no extra read)
+        holdout_metrics: dict[str, float] = {}
+        if diagnostics_set == "holdout":
+            holdout_metrics = metrics
+
+        # Double-lift
         double_lift = compute_double_lift(y_true, y_pred, w)
 
-        # Feature importance (PredictionValuesChange)
-        importance = algo.feature_importance(model)
-
-        # Actual vs Expected per feature (top 15 by importance)
-        sorted_features = [fi["feature"] for fi in importance if fi["feature"] in features]
-        # Add any features not in importance list (shouldn't happen, but defensive)
-        sorted_features += [f for f in features if f not in sorted_features]
+        # AvE per feature
         ave_per_feature = compute_ave_per_feature(
-            test_df, sorted_features, cat_features, y_true, y_pred, w,
+            diag_df, sorted_features, cat_features, y_true, y_pred, w,
         )
 
-        # SHAP values + LossFunctionChange importance on test set
+        # SHAP + LossFunctionChange importance
         _report("Computing SHAP values", 0.85)
         shap_summary: list[dict[str, float]] = []
         feature_importance_loss: list[dict[str, Any]] = []
         if hasattr(algo, "shap_summary"):
             try:
-                shap_summary = algo.shap_summary(model, test_df, features)
+                shap_summary = algo.shap_summary(model, diag_df, features)
             except Exception:
-                pass  # SHAP is best-effort, don't fail the run
+                pass
         if hasattr(algo, "feature_importance_typed"):
             try:
-                _test_pool = _build_pool(
-                    test_df, features, cat_features, target=self.target,
+                _diag_pool = _build_pool(
+                    diag_df, features, cat_features, target=self.target,
                 )
                 feature_importance_loss = algo.feature_importance_typed(
-                    model, _test_pool, "LossFunctionChange",
+                    model, _diag_pool, "LossFunctionChange",
                 )
-                del _test_pool
+                del _diag_pool
             except Exception:
                 pass
 
-        # Free test DataFrame -- no longer needed after this point
-        del test_df
+        # Residuals, scatter, Lorenz
+        _report("Computing diagnostics", 0.86)
+        residuals_histogram, residuals_stats = compute_residuals_histogram(y_true, y_pred, w)
+        actual_vs_predicted = compute_actual_vs_predicted(y_true, y_pred, w)
+        lorenz_model, lorenz_perfect = compute_lorenz_curve(y_true, y_pred, w)
+
+        # PDP
+        _report("Computing partial dependence", 0.87)
+        pdp_data = compute_pdp(model, algo, diag_df, sorted_features, cat_features)
+
+        del diag_df
         gc.collect()
 
-        # Cross-validation (in addition to the normal train)
+        # ── Cross-validation ──
         cv_results: dict[str, Any] | None = None
         if need_cv and hasattr(algo, "cross_validate"):
             _report("Running cross-validation", 0.88)
             try:
                 _cv_df = (
                     pl.scan_parquet(data_path)
-                    .drop("_is_train")
+                    .drop("_partition")
                     .collect()
                 )
                 cv_results = algo.cross_validate(
@@ -588,20 +672,28 @@ class TrainingJob:
                 del _cv_df
                 gc.collect()
             except Exception:
-                pass  # CV is best-effort
+                pass
 
-        # Clean up split parquet (kept alive for test re-read + CV)
+        # Clean up split parquet
         if split_result.owns_tmp and os.path.exists(data_path):
             os.unlink(data_path)
 
         return _MetricsResult(
             metrics=metrics,
+            holdout_metrics=holdout_metrics,
+            diagnostics_set=diagnostics_set,
             importance=importance,
             double_lift=double_lift,
             shap_summary=shap_summary,
             feature_importance_loss=feature_importance_loss,
             cv_results=cv_results,
             ave_per_feature=ave_per_feature,
+            residuals_histogram=residuals_histogram,
+            residuals_stats=residuals_stats,
+            actual_vs_predicted=actual_vs_predicted,
+            lorenz_curve=lorenz_model,
+            lorenz_curve_perfect=lorenz_perfect,
+            pdp_data=pdp_data,
         )
 
     def _save_artifacts(self, train_result: _TrainModelResult) -> Path:
@@ -690,9 +782,41 @@ class TrainingJob:
             from haute.modelling._mlflow_log import log_experiment
         except ImportError:
             return
+        from haute.modelling._result_types import (
+            ModelCardMetadata,
+            ModelDiagnostics,
+        )
 
         if not self.mlflow_experiment:
             return
+
+        diagnostics = ModelDiagnostics(
+            feature_importance=result.feature_importance,
+            shap_summary=result.shap_summary,
+            feature_importance_loss=result.feature_importance_loss,
+            double_lift=result.double_lift,
+            loss_history=result.loss_history,
+            cv_results=result.cv_results,
+            ave_per_feature=result.ave_per_feature,
+            residuals_histogram=result.residuals_histogram,
+            residuals_stats=result.residuals_stats,
+            actual_vs_predicted=result.actual_vs_predicted,
+            lorenz_curve=result.lorenz_curve,
+            lorenz_curve_perfect=result.lorenz_curve_perfect,
+            pdp_data=result.pdp_data,
+            holdout_metrics=result.holdout_metrics,
+            diagnostics_set=result.diagnostics_set,
+        )
+        metadata = ModelCardMetadata(
+            algorithm=self.algorithm,
+            task=self.task,
+            train_rows=result.train_rows,
+            test_rows=result.test_rows,
+            holdout_rows=result.holdout_rows,
+            features=result.features,
+            split_config=asdict(self.split_config) if self.split_config else {},
+            best_iteration=result.best_iteration,
+        )
 
         log_experiment(
             experiment_name=self.mlflow_experiment,
@@ -704,23 +828,12 @@ class TrainingJob:
                 "target": self.target,
                 "weight": self.weight or "",
                 "split_strategy": self.split_config.strategy,
-                "test_size": self.split_config.test_size,
+                "validation_size": self.split_config.validation_size,
+                "holdout_size": self.split_config.holdout_size,
                 **{f"param_{k}": v for k, v in self.params.items()},
             },
+            diagnostics=diagnostics,
+            metadata=metadata,
             model_path=result.model_path or None,
             model_name=self.model_name,
-            shap_summary=result.shap_summary or None,
-            feature_importance_loss=result.feature_importance_loss or None,
-            cv_results=result.cv_results,
-            feature_importance=result.feature_importance or None,
-            double_lift=result.double_lift or None,
-            loss_history=result.loss_history or None,
-            ave_per_feature=result.ave_per_feature or None,
-            algorithm=self.algorithm,
-            task=self.task,
-            train_rows=result.train_rows,
-            test_rows=result.test_rows,
-            best_iteration=result.best_iteration,
-            features=result.features or None,
-            split_config=asdict(self.split_config) if self.split_config else None,
         )

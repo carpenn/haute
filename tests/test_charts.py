@@ -9,6 +9,7 @@ import pytest
 from haute.modelling._charts import (
     COLOR_ACTUAL,
     COLOR_BARS,
+    COLOR_EVAL,
     COLOR_IMPORTANCE,
     COLOR_PREDICTED,
     COLOR_SHAP,
@@ -16,7 +17,11 @@ from haute.modelling._charts import (
     render_ave_feature_svg,
     render_double_lift_svg,
     render_horizontal_bars_svg,
+    render_lorenz_curve_svg,
     render_loss_curve_svg,
+    render_pdp_feature_svg,
+    render_residuals_svg,
+    render_scatter_svg,
 )
 
 
@@ -59,6 +64,41 @@ def _sample_numeric_bins() -> list[dict]:
     ]
 
 
+def _sample_lorenz_curve() -> list[dict]:
+    return [
+        {"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.6}
+        for i in range(11)
+    ]
+
+
+def _sample_residuals_histogram() -> list[dict]:
+    return [
+        {"bin_center": -5 + i, "count": 10 + i * 5, "weighted_count": 10.0 + i * 5.0}
+        for i in range(10)
+    ]
+
+
+def _sample_scatter_points() -> list[dict]:
+    return [
+        {"actual": i * 0.1, "predicted": i * 0.11, "weight": 1.0}
+        for i in range(20)
+    ]
+
+
+def _sample_pdp_numeric() -> list[dict]:
+    return [
+        {"value": i * 10, "avg_prediction": 0.5 + i * 0.02}
+        for i in range(10)
+    ]
+
+
+def _sample_pdp_categorical() -> list[dict]:
+    return [
+        {"value": cat, "avg_prediction": v}
+        for cat, v in [("sedan", 0.3), ("suv", 0.5), ("truck", 0.7)]
+    ]
+
+
 def _render_double_lift_data():
     return render_double_lift_svg(_sample_double_lift())
 
@@ -71,6 +111,21 @@ def _render_importance_data():
 def _render_ave_data():
     return render_ave_feature_svg("age", _sample_numeric_bins(), is_categorical=False)
 
+def _render_lorenz_data():
+    return render_lorenz_curve_svg(_sample_lorenz_curve(), _sample_lorenz_curve())
+
+def _render_residuals_data():
+    return render_residuals_svg(_sample_residuals_histogram(), {"mean": 0.1, "std": 0.5, "skew": 0.3})
+
+def _render_scatter_data():
+    return render_scatter_svg(_sample_scatter_points())
+
+def _render_pdp_numeric_data():
+    return render_pdp_feature_svg("age", _sample_pdp_numeric(), "numeric")
+
+def _render_pdp_cat_data():
+    return render_pdp_feature_svg("vehicle", _sample_pdp_categorical(), "categorical")
+
 
 @pytest.mark.parametrize(
     "render_fn",
@@ -79,6 +134,11 @@ def _render_ave_data():
         pytest.param(_render_loss_data, id="loss_curve"),
         pytest.param(_render_importance_data, id="horizontal_bars"),
         pytest.param(_render_ave_data, id="ave_feature"),
+        pytest.param(_render_lorenz_data, id="lorenz_curve"),
+        pytest.param(_render_residuals_data, id="residuals"),
+        pytest.param(_render_scatter_data, id="scatter"),
+        pytest.param(_render_pdp_numeric_data, id="pdp_numeric"),
+        pytest.param(_render_pdp_cat_data, id="pdp_categorical"),
     ],
 )
 class TestChartValidXml:
@@ -96,6 +156,10 @@ class TestChartValidXml:
         pytest.param(lambda: render_loss_curve_svg([]), id="loss_curve"),
         pytest.param(lambda: render_horizontal_bars_svg([], "f", "v", title="Empty"), id="horizontal_bars"),
         pytest.param(lambda: render_ave_feature_svg("empty", [], is_categorical=False), id="ave_feature"),
+        pytest.param(lambda: render_lorenz_curve_svg([], []), id="lorenz_curve"),
+        pytest.param(lambda: render_residuals_svg([]), id="residuals"),
+        pytest.param(lambda: render_scatter_svg([]), id="scatter"),
+        pytest.param(lambda: render_pdp_feature_svg("empty", [], "numeric"), id="pdp"),
     ],
 )
 class TestChartEmptyPlaceholder:
@@ -283,3 +347,121 @@ class TestAveFeatureSvg:
         assert len(circles) >= 2  # one for actual, one for predicted
         polylines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
         assert len(polylines) == 0  # no line for single point
+
+
+# ---------------------------------------------------------------------------
+# Lorenz Curve
+# ---------------------------------------------------------------------------
+
+
+class TestLorenzCurveSvg:
+    def test_contains_two_curves(self):
+        model = _sample_lorenz_curve()
+        perfect = [
+            {"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.3}
+            for i in range(11)
+        ]
+        svg = render_lorenz_curve_svg(model, perfect)
+        root = _parse_svg(svg)
+        polylines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
+        assert len(polylines) == 2  # model + perfect
+
+    def test_contains_diagonal(self):
+        svg = render_lorenz_curve_svg(_sample_lorenz_curve(), _sample_lorenz_curve())
+        root = _parse_svg(svg)
+        lines = root.findall(".//{http://www.w3.org/2000/svg}line")
+        # Grid lines + diagonal
+        dashed = [l for l in lines if l.get("stroke-dasharray")]
+        assert len(dashed) >= 1
+
+    def test_correct_colors(self):
+        svg = render_lorenz_curve_svg(_sample_lorenz_curve(), _sample_lorenz_curve())
+        assert COLOR_ACTUAL in svg  # model curve
+        assert COLOR_EVAL in svg    # perfect curve
+
+    def test_model_only(self):
+        svg = render_lorenz_curve_svg(_sample_lorenz_curve(), [])
+        root = _parse_svg(svg)
+        polylines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
+        assert len(polylines) == 1
+
+
+# ---------------------------------------------------------------------------
+# Residuals Histogram
+# ---------------------------------------------------------------------------
+
+
+class TestResidualsSvg:
+    def test_contains_bars(self):
+        svg = render_residuals_svg(_sample_residuals_histogram())
+        root = _parse_svg(svg)
+        rects = root.findall(".//{http://www.w3.org/2000/svg}rect")
+        # background + bars
+        assert len(rects) >= 10
+
+    def test_stats_annotation(self):
+        stats = {"mean": 0.1234, "std": 0.5678, "skew": 0.3}
+        svg = render_residuals_svg(_sample_residuals_histogram(), stats)
+        assert "mean=" in svg
+        assert "std=" in svg
+        assert "skew=" in svg
+
+    def test_no_stats_no_crash(self):
+        svg = render_residuals_svg(_sample_residuals_histogram())
+        root = _parse_svg(svg)
+        assert root.tag == "{http://www.w3.org/2000/svg}svg"
+
+
+# ---------------------------------------------------------------------------
+# Scatter
+# ---------------------------------------------------------------------------
+
+
+class TestScatterSvg:
+    def test_contains_dots(self):
+        svg = render_scatter_svg(_sample_scatter_points())
+        root = _parse_svg(svg)
+        circles = root.findall(".//{http://www.w3.org/2000/svg}circle")
+        assert len(circles) == 20
+
+    def test_contains_diagonal(self):
+        svg = render_scatter_svg(_sample_scatter_points())
+        root = _parse_svg(svg)
+        lines = root.findall(".//{http://www.w3.org/2000/svg}line")
+        dashed = [l for l in lines if l.get("stroke-dasharray")]
+        assert len(dashed) >= 1
+
+    def test_axis_labels(self):
+        svg = render_scatter_svg(_sample_scatter_points())
+        assert "Predicted" in svg
+        assert "Actual" in svg
+
+
+# ---------------------------------------------------------------------------
+# PDP
+# ---------------------------------------------------------------------------
+
+
+class TestPdpFeatureSvg:
+    def test_numeric_contains_line(self):
+        svg = render_pdp_feature_svg("age", _sample_pdp_numeric(), "numeric")
+        root = _parse_svg(svg)
+        polylines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
+        assert len(polylines) == 1
+
+    def test_numeric_contains_dots(self):
+        svg = render_pdp_feature_svg("age", _sample_pdp_numeric(), "numeric")
+        root = _parse_svg(svg)
+        circles = root.findall(".//{http://www.w3.org/2000/svg}circle")
+        assert len(circles) == 10
+
+    def test_categorical_contains_bars(self):
+        svg = render_pdp_feature_svg("vehicle", _sample_pdp_categorical(), "categorical")
+        root = _parse_svg(svg)
+        rects = root.findall(".//{http://www.w3.org/2000/svg}rect")
+        # background + 3 bars
+        assert len(rects) >= 3
+
+    def test_feature_name_in_title(self):
+        svg = render_pdp_feature_svg("my_feature", _sample_pdp_numeric(), "numeric")
+        assert "my_feature" in svg

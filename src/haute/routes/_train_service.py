@@ -173,7 +173,20 @@ class TrainService:
         ram_warning, row_limit, total_source_rows, probe_columns = (
             self._estimate_ram(body.graph, body.node_id, preamble_ns, job_id)
         )
-        row_limit = _clamp_row_limit(row_limit, config.get("row_limit"))
+        user_limit = config.get("row_limit")
+        row_limit = _clamp_row_limit(row_limit, user_limit)
+
+        # If the user's row_limit is the binding constraint, the RAM
+        # downsample warning is irrelevant — suppress it.
+        if (
+            ram_warning
+            and user_limit
+            and isinstance(user_limit, (int, float))
+            and int(user_limit) > 0
+            and (row_limit is not None and row_limit == int(user_limit))
+        ):
+            ram_warning = None
+            self._store.update_job(job_id, warning=None)
 
         train_params = {**config.get("params", {})}
         ram_warning = self._check_gpu_fallback(
@@ -467,6 +480,12 @@ class TrainService:
                     feature_importance_loss=train_result.feature_importance_loss,
                     cv_results=train_result.cv_results,
                     ave_per_feature=train_result.ave_per_feature,
+                    residuals_histogram=train_result.residuals_histogram,
+                    residuals_stats=train_result.residuals_stats,
+                    actual_vs_predicted=train_result.actual_vs_predicted,
+                    lorenz_curve=train_result.lorenz_curve,
+                    lorenz_curve_perfect=train_result.lorenz_curve_perfect,
+                    pdp_data=train_result.pdp_data,
                     warning=ram_warning,
                     total_source_rows=total_source_rows,
                 )

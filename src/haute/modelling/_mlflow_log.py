@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from haute._logging import get_logger
+from haute.modelling._result_types import ModelCardMetadata, ModelDiagnostics
 
 logger = get_logger(component="mlflow_log")
 
@@ -65,56 +66,23 @@ def log_experiment(
     run_name: str,
     metrics: dict[str, float],
     params: dict[str, Any],
+    diagnostics: ModelDiagnostics | None = None,
+    metadata: ModelCardMetadata | None = None,
     model_path: str | None = None,
     model_name: str | None = None,
-    shap_summary: list[dict[str, Any]] | None = None,
-    feature_importance_loss: list[dict[str, Any]] | None = None,
-    cv_results: dict[str, Any] | None = None,
-    # --- additional artifacts ---
-    feature_importance: list[dict[str, Any]] | None = None,
-    double_lift: list[dict[str, Any]] | None = None,
-    loss_history: list[dict[str, float]] | None = None,
-    ave_per_feature: list[dict[str, Any]] | None = None,
-    # --- metadata for model card ---
-    algorithm: str = "",
-    task: str = "",
-    train_rows: int = 0,
-    test_rows: int = 0,
-    best_iteration: int | None = None,
-    features: list[str] | None = None,
-    split_config: dict[str, Any] | None = None,
 ) -> MLflowLogResult:
     """Log a training experiment to MLflow.
 
     Auto-detects Databricks (when DATABRICKS_HOST/TOKEN present)
     vs local file-based MLflow.
 
-    Args:
-        experiment_name: MLflow experiment path (e.g. "/Shared/haute/my-model").
-        run_name: Name for this run.
-        metrics: Metric dict to log.
-        params: Parameter dict to log.
-        model_path: Optional path to model file to log as artifact.
-        model_name: Optional registered model name (Databricks UC only).
-        shap_summary: Optional SHAP summary to log as artifact.
-        feature_importance_loss: Optional LossFunctionChange importance to log.
-        cv_results: Optional cross-validation results to log.
-        feature_importance: Optional PredictionValuesChange importance.
-        double_lift: Optional double-lift data.
-        loss_history: Optional training loss history.
-        ave_per_feature: Optional AvE per-feature data.
-        algorithm: Algorithm name for model card.
-        task: Task type for model card.
-        train_rows: Training set size.
-        test_rows: Test set size.
-        best_iteration: Best iteration from early stopping.
-        features: List of feature names.
-        split_config: Split configuration dict.
-
     Returns:
         MLflowLogResult with backend, experiment name, run ID, and URLs.
     """
     import mlflow
+
+    diag = diagnostics or ModelDiagnostics()
+    meta = metadata or ModelCardMetadata()
 
     tracking_uri, backend = resolve_tracking_backend()
     logger.info("mlflow_logging_started", experiment=experiment_name, backend=backend)
@@ -127,14 +95,14 @@ def log_experiment(
 
     # Enhanced params: add training metadata
     enhanced_params = dict(params)
-    if train_rows:
-        enhanced_params["train_rows"] = train_rows
-    if test_rows:
-        enhanced_params["test_rows"] = test_rows
-    if features:
-        enhanced_params["n_features"] = len(features)
-    if best_iteration is not None:
-        enhanced_params["best_iteration"] = best_iteration
+    if meta.train_rows:
+        enhanced_params["train_rows"] = meta.train_rows
+    if meta.test_rows:
+        enhanced_params["test_rows"] = meta.test_rows
+    if meta.features:
+        enhanced_params["n_features"] = len(meta.features)
+    if meta.best_iteration is not None:
+        enhanced_params["best_iteration"] = meta.best_iteration
 
     with mlflow.start_run(run_name=run_name) as run:
         mlflow.log_params(enhanced_params)
@@ -145,56 +113,87 @@ def log_experiment(
             mlflow.log_artifact(model_path)
 
         # Log SHAP summary
-        if shap_summary:
-            _log_json_artifact(mlflow, shap_summary, "shap_summary", "shap")
+        if diag.shap_summary:
+            _log_json_artifact(mlflow, diag.shap_summary, "shap_summary", "shap")
 
         # Log LossFunctionChange importance
-        if feature_importance_loss:
-            _log_json_artifact(mlflow, feature_importance_loss, "importance_loss", "importance")
+        if diag.feature_importance_loss:
+            _log_json_artifact(
+                mlflow, diag.feature_importance_loss, "importance_loss", "importance",
+            )
 
         # Log CV results
-        if cv_results:
-            _log_json_artifact(mlflow, cv_results, "cv_results", "cv")
-            for k, v in cv_results.get("mean_metrics", {}).items():
+        if diag.cv_results:
+            _log_json_artifact(mlflow, diag.cv_results, "cv_results", "cv")
+            for k, v in diag.cv_results.get("mean_metrics", {}).items():
                 mlflow.log_metric(f"cv_mean_{k}", v)
 
         # Log double lift
-        if double_lift:
-            _log_json_artifact(mlflow, double_lift, "double_lift", "diagnostics")
+        if diag.double_lift:
+            _log_json_artifact(mlflow, diag.double_lift, "double_lift", "diagnostics")
 
         # Log loss history
-        if loss_history:
-            _log_json_artifact(mlflow, loss_history, "loss_history", "diagnostics")
+        if diag.loss_history:
+            _log_json_artifact(
+                mlflow, diag.loss_history, "loss_history", "diagnostics",
+            )
 
         # Log PredictionValuesChange importance
-        if feature_importance:
-            _log_json_artifact(mlflow, feature_importance, "importance_prediction", "importance")
+        if diag.feature_importance:
+            _log_json_artifact(
+                mlflow, diag.feature_importance, "importance_prediction", "importance",
+            )
 
         # Log AvE per feature
-        if ave_per_feature:
-            _log_json_artifact(mlflow, ave_per_feature, "ave_per_feature", "diagnostics")
+        if diag.ave_per_feature:
+            _log_json_artifact(
+                mlflow, diag.ave_per_feature, "ave_per_feature", "diagnostics",
+            )
+
+        # Log residuals
+        if diag.residuals_histogram:
+            _log_json_artifact(
+                mlflow, diag.residuals_histogram, "residuals_histogram", "diagnostics",
+            )
+        if diag.residuals_stats:
+            _log_json_artifact(
+                mlflow, diag.residuals_stats, "residuals_stats", "diagnostics",
+            )
+
+        # Log actual vs predicted
+        if diag.actual_vs_predicted:
+            _log_json_artifact(
+                mlflow, diag.actual_vs_predicted, "actual_vs_predicted", "diagnostics",
+            )
+
+        # Log Lorenz curves
+        if diag.lorenz_curve:
+            _log_json_artifact(
+                mlflow, diag.lorenz_curve, "lorenz_curve", "diagnostics",
+            )
+        if diag.lorenz_curve_perfect:
+            _log_json_artifact(
+                mlflow, diag.lorenz_curve_perfect, "lorenz_curve_perfect", "diagnostics",
+            )
+
+        # Log PDP
+        if diag.pdp_data:
+            _log_json_artifact(mlflow, diag.pdp_data, "pdp_data", "diagnostics")
+
+        # Log holdout metrics as separate MLflow metrics
+        if diag.holdout_metrics:
+            for k, v in diag.holdout_metrics.items():
+                mlflow.log_metric(f"holdout_{k}", v)
 
         # Generate and log model card (best-effort — never fails the run)
         try:
             _log_model_card(
                 mlflow,
                 name=run_name,
-                algorithm=algorithm,
-                task=task,
                 metrics=metrics,
                 params=params,
-                train_rows=train_rows,
-                test_rows=test_rows,
-                features=features or [],
-                split_config=split_config or {},
-                best_iteration=best_iteration,
-                loss_history=loss_history,
-                double_lift=double_lift,
-                feature_importance=feature_importance,
-                shap_summary=shap_summary,
-                feature_importance_loss=feature_importance_loss,
-                cv_results=cv_results,
-                ave_per_feature=ave_per_feature,
+                diagnostics=diag,
+                metadata=meta,
             )
         except Exception:
             logger.warning("model_card_generation_failed", exc_info=True)
@@ -226,12 +225,23 @@ def log_experiment(
 
 def _log_model_card(
     mlflow: Any,
-    **kwargs: Any,
+    *,
+    name: str,
+    metrics: dict[str, float],
+    params: dict[str, Any],
+    diagnostics: ModelDiagnostics,
+    metadata: ModelCardMetadata,
 ) -> None:
     """Generate HTML model card and log as MLflow artifact."""
     from haute.modelling._model_card import generate_model_card
 
-    html_content = generate_model_card(**kwargs)
+    html_content = generate_model_card(
+        name=name,
+        metrics=metrics,
+        params=params,
+        diagnostics=diagnostics,
+        metadata=metadata,
+    )
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".html", prefix="model_card_", delete=False,
     ) as f:

@@ -8,12 +8,10 @@ import type { TrainResult } from "../../stores/useNodeResultsStore"
 // ── Mocks ────────────────────────────────────────────────────────
 
 const mockTrainModel = vi.fn()
-const mockExportTraining = vi.fn()
 const mockEstimateTrainingRam = vi.fn()
 
 vi.mock("../../api/client", () => ({
   trainModel: (...args: unknown[]) => mockTrainModel(...args),
-  exportTraining: (...args: unknown[]) => mockExportTraining(...args),
   estimateTrainingRam: (...args: unknown[]) => mockEstimateTrainingRam(...args),
 }))
 
@@ -22,17 +20,6 @@ vi.mock("../../utils/buildGraph", () => ({
 }))
 
 // Mock child components that are already well-tested
-vi.mock("../modelling/LossChart", () => ({
-  LossChart: ({ lossHistory }: { lossHistory: unknown[] }) => (
-    <div data-testid="loss-chart">{lossHistory ? "chart" : "no data"}</div>
-  ),
-}))
-vi.mock("../modelling/FeatureImportance", () => ({
-  FeatureImportance: () => <div data-testid="feature-importance" />,
-}))
-vi.mock("../modelling/MlflowExportSection", () => ({
-  MlflowExportSection: () => <div data-testid="mlflow-export" />,
-}))
 vi.mock("../modelling/TrainingProgress", () => ({
   TrainingProgress: () => <div data-testid="training-progress" />,
 }))
@@ -90,7 +77,6 @@ beforeEach(() => {
     collapsedSections: {},
   })
   mockTrainModel.mockReset()
-  mockExportTraining.mockReset()
   // Return a never-resolving promise by default so the useEffect doesn't cause
   // act() warnings from resolved promises after unmount.
   mockEstimateTrainingRam.mockReset().mockReturnValue(new Promise(() => {}))
@@ -308,9 +294,10 @@ describe("ModellingConfig", () => {
       expect(screen.getByRole("button", { name: "group" })).toBeTruthy()
     })
 
-    it("random split shows test size and seed inputs", () => {
+    it("random split shows validation, holdout, and seed inputs", () => {
       renderConfig()
-      expect(screen.getByText("Test size")).toBeTruthy()
+      expect(screen.getByText("Validation")).toBeTruthy()
+      expect(screen.getByText("Holdout")).toBeTruthy()
       expect(screen.getByText("Seed")).toBeTruthy()
       expect(screen.getByDisplayValue("0.2")).toBeTruthy()
       expect(screen.getByDisplayValue("42")).toBeTruthy()
@@ -545,7 +532,7 @@ describe("ModellingConfig", () => {
       expect(screen.getByText("OOM: out of memory")).toBeTruthy()
     })
 
-    it("shows model path and row counts on successful result", () => {
+    it("shows completion badge when trainResult is successful and not training", () => {
       useNodeResultsStore.setState({
         trainResults: {
           node_1: {
@@ -556,217 +543,45 @@ describe("ModellingConfig", () => {
         },
       })
       renderConfig()
-      expect(screen.getByText(/\/models\/catboost_model\.cbm/)).toBeTruthy()
-      expect(screen.getByText(/8,000 train/)).toBeTruthy()
-      expect(screen.getByText(/2,000 test/)).toBeTruthy()
+      expect(screen.getByText(/Model trained — results in preview panel below/)).toBeTruthy()
     })
 
-    it("shows loss chart when trainResult has loss_history", () => {
+    it("does not show completion badge when training is active", () => {
       useNodeResultsStore.setState({
-        trainResults: {
+        trainJobs: {
           node_1: {
-            result: makeTrainResult({
-              loss_history: [
-                { iteration: 1, train_rmse: 0.5 },
-                { iteration: 2, train_rmse: 0.3 },
-              ],
-            }),
             jobId: "job_1",
-            configHash: "irrelevant",
+            nodeId: "node_1",
+            nodeLabel: "Model",
+            progress: null,
+            error: null,
+            configHash: "abc",
           },
         },
-      })
-      renderConfig()
-      expect(screen.getByTestId("loss-chart")).toBeTruthy()
-    })
-
-    it("does not show loss chart when loss_history has fewer than 2 entries", () => {
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult({
-              loss_history: [{ iteration: 1, train_rmse: 0.5 }],
-            }),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.queryByTestId("loss-chart")).toBeNull()
-    })
-
-    it("shows feature importance when trainResult has non-empty feature_importance", () => {
-      useNodeResultsStore.setState({
         trainResults: {
           node_1: {
             result: makeTrainResult(),
             jobId: "job_1",
-            configHash: "irrelevant",
+            configHash: "abc",
           },
         },
       })
       renderConfig()
-      expect(screen.getByTestId("feature-importance")).toBeTruthy()
+      expect(screen.queryByText(/Model trained — results in preview panel below/)).toBeNull()
     })
 
-    it("does not show feature importance when feature_importance is empty", () => {
+    it("does not show completion badge for error results", () => {
       useNodeResultsStore.setState({
         trainResults: {
           node_1: {
-            result: makeTrainResult({ feature_importance: [] }),
+            result: makeTrainResult({ status: "error", error: "fail" }),
             jobId: "job_1",
             configHash: "irrelevant",
           },
         },
       })
       renderConfig()
-      expect(screen.queryByTestId("feature-importance")).toBeNull()
-    })
-
-    it("shows MlflowExportSection when result exists and mlflow is connected", () => {
-      useSettingsStore.setState({
-        mlflow: { status: "connected", backend: "databricks", host: "https://example.com" },
-      })
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult(),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.getByTestId("mlflow-export")).toBeTruthy()
-    })
-
-    it("does not show MlflowExportSection when mlflow is not connected", () => {
-      useSettingsStore.setState({
-        mlflow: { status: "pending", backend: "", host: "" },
-      })
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult(),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.queryByTestId("mlflow-export")).toBeNull()
-    })
-
-    it("shows metrics from successful result", () => {
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult({ metrics: { gini: 0.4567, rmse: 0.1234 } }),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.getByText("0.4567")).toBeTruthy()
-      expect(screen.getByText("0.1234")).toBeTruthy()
-    })
-
-    it("shows early stopping info when best_iteration is set", () => {
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult({ best_iteration: 300 }),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.getByText(/Stopped early at iteration 300/)).toBeTruthy()
-    })
-
-    it("shows warning when trainResult.warning is set", () => {
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult({ warning: "Dataset was downsampled" }),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.getByText("Dataset was downsampled")).toBeTruthy()
-    })
-
-    it("shows double lift table when present", () => {
-      useNodeResultsStore.setState({
-        trainResults: {
-          node_1: {
-            result: makeTrainResult({
-              double_lift: [
-                { decile: 1, actual: 0.05, predicted: 0.06, count: 500 },
-                { decile: 2, actual: 0.10, predicted: 0.11, count: 500 },
-              ],
-            }),
-            jobId: "job_1",
-            configHash: "irrelevant",
-          },
-        },
-      })
-      renderConfig()
-      expect(screen.getByText("Double Lift (Actual vs Predicted by Decile)")).toBeTruthy()
-      expect(screen.getByText("0.0500")).toBeTruthy()
-      expect(screen.getByText("0.0600")).toBeTruthy()
-    })
-  })
-
-  // ═════════════════════════════════════════════════════════════════
-  // Export
-  // ═════════════════════════════════════════════════════════════════
-
-  describe("Export", () => {
-    it("export button calls exportTraining API", async () => {
-      mockExportTraining.mockResolvedValue({ script: "print('hello')" })
-      renderConfig()
-      fireEvent.click(screen.getByRole("button", { name: /Export Training Script/ }))
-      await waitFor(() => expect(mockExportTraining).toHaveBeenCalledTimes(1))
-      const callArgs = mockExportTraining.mock.calls[0][0]
-      expect(callArgs).toEqual(
-        expect.objectContaining({
-          graph: expect.any(Object),
-          node_id: "node_1",
-        }),
-      )
-    })
-
-    it("shows exported script text after export", async () => {
-      mockExportTraining.mockResolvedValue({ script: "import catboost\nmodel.fit()" })
-      renderConfig()
-      fireEvent.click(screen.getByRole("button", { name: /Export Training Script/ }))
-      await waitFor(() => {
-        expect(screen.getByText(/import catboost/)).toBeTruthy()
-      })
-    })
-
-    it("shows Generated Script heading and Copy button after export", async () => {
-      mockExportTraining.mockResolvedValue({ script: "print('hello')" })
-      renderConfig()
-      fireEvent.click(screen.getByRole("button", { name: /Export Training Script/ }))
-      await waitFor(() => {
-        expect(screen.getByText("Generated Script")).toBeTruthy()
-        expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy()
-      })
-    })
-
-    it("export button is disabled when no target", () => {
-      renderConfig({
-        config: { _nodeId: "node_1", target: "", task: "regression", algorithm: "catboost" },
-      })
-      const exportBtn = screen.getByRole("button", { name: /Export Training Script/ })
-      expect(exportBtn).toHaveProperty("disabled", true)
+      expect(screen.queryByText(/Model trained — results in preview panel below/)).toBeNull()
     })
   })
 
@@ -926,7 +741,7 @@ describe("ModellingConfig", () => {
       expect(props.onUpdate).toHaveBeenCalledWith("cv_folds", null)
     })
 
-    it("shows CV results in train output when present", () => {
+    it("CV results are not shown inline (moved to preview panel)", () => {
       useNodeResultsStore.setState({
         trainResults: {
           node_1: {
@@ -943,9 +758,8 @@ describe("ModellingConfig", () => {
         },
       })
       renderConfig()
-      expect(screen.getByText(/Cross-Validation \(5-fold\)/)).toBeTruthy()
-      expect(screen.getByText("0.4400")).toBeTruthy()
-      expect(screen.getByText(/0\.0200/)).toBeTruthy()
+      // CV results should NOT appear in config panel — they're in ModellingPreview
+      expect(screen.queryByText(/Cross-Validation \(5-fold\)/)).toBeNull()
     })
   })
 

@@ -46,7 +46,6 @@ function makeData(overrides: Partial<OptimiserPreviewData> = {}): OptimiserPrevi
 function renderPreview(overrides: Partial<Parameters<typeof OptimiserPreview>[0]> = {}) {
   const props = {
     data: makeData(),
-    onClose: vi.fn(),
     ...overrides,
   }
   return { ...render(<OptimiserPreview {...props} />), props }
@@ -234,17 +233,6 @@ describe("OptimiserPreview", () => {
         // In collapsed state, node label should still be visible
         expect(screen.getByText("My Optimiser")).toBeInTheDocument()
       }
-    })
-  })
-
-  describe("close", () => {
-    it("close button calls onClose", () => {
-      const { props } = renderPreview()
-      const buttons = screen.getAllByRole("button")
-      // Close is the last button in the header area (after tab buttons)
-      const closeBtn = buttons[buttons.length - 1]
-      fireEvent.click(closeBtn)
-      expect(props.onClose).toHaveBeenCalledOnce()
     })
   })
 

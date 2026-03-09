@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback } from "react"
-import { X, ChevronDown, ChevronUp, Loader2, Target } from "lucide-react"
+import { ChevronDown, ChevronUp, Loader2, Target } from "lucide-react"
 import { runFrontier } from "../api/client"
 import { formatNumber } from "../utils/formatValue"
 import { useDragResize } from "../hooks/useDragResize"
@@ -57,10 +57,9 @@ type FrontierPoint = Record<string, unknown>
 
 interface OptimiserPreviewProps {
   data: OptimiserPreviewData
-  onClose: () => void
 }
 
-export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProps) {
+export default function OptimiserPreview({ data }: OptimiserPreviewProps) {
   const { result, jobId, constraints } = data
   const [collapsed, setCollapsed] = useState(false)
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 320, minHeight: 160, maxHeight: 600 })
@@ -158,12 +157,6 @@ export default function OptimiserPreview({ data, onClose }: OptimiserPreviewProp
             onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}
           >
             <ChevronDown size={14} />
-          </button>
-          <button onClick={onClose} className="p-1 rounded transition-colors" style={{ color: "var(--text-muted)" }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-hover)" }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent" }}
-          >
-            <X size={14} />
           </button>
         </div>
       </div>

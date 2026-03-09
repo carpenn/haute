@@ -256,13 +256,6 @@ export function estimateTrainingRam(
   return post("/api/modelling/estimate", payload, { timeout: 30_000, ...options })
 }
 
-export function exportTraining(
-  payload: { graph: GraphPayload; node_id: string; data_path: string },
-  options?: { signal?: AbortSignal },
-): Promise<{ script?: string }> {
-  return post("/api/modelling/export", payload, options)
-}
-
 export function logToMlflow(
   payload: { job_id: string; experiment_name?: string | null; model_name?: string | null },
   options?: { signal?: AbortSignal },

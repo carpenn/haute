@@ -8,7 +8,7 @@ import pytest
 
 from haute.modelling._algorithms import ALGORITHM_REGISTRY, CatBoostAlgorithm, FitResult, resolve_loss_function
 from haute.modelling._metrics import compute_double_lift, compute_metrics
-from haute.modelling._split import SplitConfig, _assign_group_split, split_data, split_mask
+from haute.modelling._split import PARTITION_HOLDOUT, PARTITION_TRAIN, PARTITION_VALIDATION, SplitConfig, _assign_group_split, split_data, split_mask
 from haute.modelling._training_job import TrainResult, TrainingJob
 
 
@@ -19,12 +19,15 @@ from haute.modelling._training_job import TrainResult, TrainingJob
 
 class TestSplitConfig:
     def test_invalid_test_size_zero(self):
-        with pytest.raises(ValueError, match="test_size"):
-            SplitConfig(test_size=0)
+        """test_size=0 is now valid (no validation set). test_size=-1 is not."""
+        # 0 is valid — no validation
+        SplitConfig(test_size=0)
+        with pytest.raises(ValueError, match="validation_size"):
+            SplitConfig(validation_size=-0.1)
 
     def test_invalid_test_size_one(self):
-        with pytest.raises(ValueError, match="test_size"):
-            SplitConfig(test_size=1.0)
+        with pytest.raises(ValueError, match="validation_size"):
+            SplitConfig(validation_size=1.0)
 
     def test_temporal_requires_date_column(self):
         with pytest.raises(ValueError, match="date_column"):
@@ -115,7 +118,7 @@ class TestSplitData:
 
 
 # ---------------------------------------------------------------------------
-# split_mask (Boolean mask variant — no DataFrame copies)
+# split_mask (partition mask: 0=train, 1=validation, 2=holdout)
 # ---------------------------------------------------------------------------
 
 
@@ -124,9 +127,27 @@ class TestSplitMask:
         n = 1000
         mask = split_mask(n, SplitConfig(test_size=0.2, seed=42))
         assert len(mask) == n
-        assert mask.dtype == pl.Boolean
-        train_n = mask.sum()
+        assert mask.dtype == pl.Int8
+        train_n = int((mask == PARTITION_TRAIN).sum())
+        val_n = int((mask == PARTITION_VALIDATION).sum())
         assert train_n == 800
+        assert val_n == 200
+
+    def test_random_mask_with_holdout(self):
+        n = 1000
+        mask = split_mask(n, SplitConfig(validation_size=0.2, holdout_size=0.1, seed=42))
+        train_n = int((mask == PARTITION_TRAIN).sum())
+        val_n = int((mask == PARTITION_VALIDATION).sum())
+        ho_n = int((mask == PARTITION_HOLDOUT).sum())
+        assert train_n == 700
+        assert val_n == 200
+        assert ho_n == 100
+        assert train_n + val_n + ho_n == n
+
+    def test_random_mask_no_validation_no_holdout(self):
+        n = 1000
+        mask = split_mask(n, SplitConfig(validation_size=0, holdout_size=0, seed=42))
+        assert int((mask == PARTITION_TRAIN).sum()) == n
 
     def test_random_mask_deterministic(self):
         cfg = SplitConfig(test_size=0.2, seed=42)
@@ -145,7 +166,8 @@ class TestSplitMask:
             strategy="temporal", date_column="date", cutoff_date="2024-07-01",
         )
         mask = split_mask(len(df), cfg, df=df)
-        assert mask.to_list() == [True, True, False]
+        # Before cutoff = train (0), on/after cutoff = validation (1)
+        assert mask.to_list() == [PARTITION_TRAIN, PARTITION_TRAIN, PARTITION_VALIDATION]
 
     def test_temporal_mask_missing_df_raises(self):
         cfg = SplitConfig(
@@ -160,11 +182,11 @@ class TestSplitMask:
         })
         cfg = SplitConfig(strategy="group", group_column="group", test_size=0.3, seed=42)
         mask = split_mask(len(df), cfg, df=df)
-        # Each group should be entirely in train or entirely in test
+        # Each group should be entirely in one partition
         labeled = df.with_columns(mask)
         for group_val in df["group"].unique().to_list():
-            group_masks = labeled.filter(pl.col("group") == group_val)["_is_train"].to_list()
-            assert len(set(group_masks)) == 1, f"Group {group_val} split across train/test"
+            group_partitions = labeled.filter(pl.col("group") == group_val)["_partition"].to_list()
+            assert len(set(group_partitions)) == 1, f"Group {group_val} split across partitions"
 
     def test_empty_raises(self):
         with pytest.raises(ValueError, match="empty"):

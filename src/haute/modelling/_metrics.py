@@ -247,13 +247,13 @@ def compute_ave_per_feature(
     weight: np.ndarray | None = None,
     *,
     n_bins: int = 10,
-    max_features: int = 15,
+    max_features: int | None = None,
     max_categories: int = 15,
 ) -> list[dict[str, Any]]:
     """Compute Actual vs Expected (AvE) one-way analysis per feature.
 
-    For each feature (up to *max_features*, in the order given — the caller
-    should pre-sort by importance):
+    For each feature (up to *max_features* when set, in the order given —
+    the caller should pre-sort by importance):
     - Numeric features are quantile-binned into *n_bins*.
     - Categorical features are grouped by category (top *max_categories*
       by weight, remainder lumped into ``"Other"``).
@@ -270,7 +270,8 @@ def compute_ave_per_feature(
     cat_set = set(cat_features)
     results: list[dict[str, Any]] = []
 
-    for feat in features[:max_features]:
+    selected = features[:max_features] if max_features is not None else features
+    for feat in selected:
         if feat not in df.columns:
             continue
         col = df[feat]
@@ -365,62 +366,337 @@ def _ave_categorical_bins(
     max_categories: int,
 ) -> list[dict[str, Any]]:
     """Group a categorical feature by category and compute weighted AvE."""
-    vals = col.cast(pl.Utf8).to_list()
-    n = len(vals)
+    if len(col) == 0:
+        return []
 
-    # Count exposure per category
-    cat_exposure: dict[str, float] = {}
-    for i in range(n):
-        key = vals[i] if vals[i] is not None else "__MISSING__"
-        cat_exposure[key] = cat_exposure.get(key, 0.0) + weight[i]
+    # Vectorized groupby: no Python row loops
+    tmp = pl.DataFrame({
+        "cat": col.cast(pl.Utf8).fill_null("__MISSING__"),
+        "w": weight,
+        "wa": y_true * weight,
+        "wp": y_pred * weight,
+    })
+    grouped = (
+        tmp.group_by("cat")
+        .agg(
+            pl.col("w").sum().alias("exposure"),
+            pl.col("wa").sum().alias("sum_actual"),
+            pl.col("wp").sum().alias("sum_predicted"),
+        )
+        .sort("exposure", descending=True)
+    )
 
-    # Top categories by exposure
-    sorted_cats = sorted(cat_exposure.items(), key=lambda x: -x[1])
-    top_cats = {c for c, _ in sorted_cats[:max_categories]}
-    has_other = len(sorted_cats) > max_categories
-
-    # Build category → index mapping
-    cat_labels = [c for c, _ in sorted_cats[:max_categories]]
-    if has_other:
-        cat_labels.append("Other")
-
-    # Assign each row to a category label
-    bins_data: dict[str, dict[str, float]] = {
-        label: {"exposure": 0.0, "sum_actual": 0.0, "sum_predicted": 0.0}
-        for label in cat_labels
-    }
-
-    for i in range(n):
-        key = vals[i] if vals[i] is not None else "__MISSING__"
-        if key in top_cats:
-            label = "Missing" if key == "__MISSING__" else key
-            if label not in bins_data:
-                label = key  # use raw key if "Missing" wasn't in top_cats
-        else:
-            label = "Other"
-
-        if label not in bins_data:
-            bins_data[label] = {"exposure": 0.0, "sum_actual": 0.0, "sum_predicted": 0.0}
-
-        bins_data[label]["exposure"] += weight[i]
-        bins_data[label]["sum_actual"] += y_true[i] * weight[i]
-        bins_data[label]["sum_predicted"] += y_pred[i] * weight[i]
+    top = grouped.head(max_categories)
+    remainder = grouped.slice(max_categories)
 
     bins: list[dict[str, Any]] = []
-    for label in cat_labels:
-        # Rename __MISSING__ to Missing for display
-        display_label = "Missing" if label == "__MISSING__" else label
-        d = bins_data.get(label, bins_data.get(display_label, None))
-        if d is None or d["exposure"] == 0:
+    for row in top.iter_rows(named=True):
+        if row["exposure"] == 0:
             continue
+        label = "Missing" if row["cat"] == "__MISSING__" else row["cat"]
         bins.append({
-            "label": display_label,
-            "exposure": round(d["exposure"], 4),
-            "avg_actual": round(d["sum_actual"] / d["exposure"], 6),
-            "avg_predicted": round(d["sum_predicted"] / d["exposure"], 6),
+            "label": label,
+            "exposure": round(row["exposure"], 4),
+            "avg_actual": round(row["sum_actual"] / row["exposure"], 6),
+            "avg_predicted": round(row["sum_predicted"] / row["exposure"], 6),
         })
 
+    # Lump remaining categories into "Other"
+    if remainder.height > 0:
+        other_exposure = float(remainder["exposure"].sum())
+        if other_exposure > 0:
+            bins.append({
+                "label": "Other",
+                "exposure": round(other_exposure, 4),
+                "avg_actual": round(float(remainder["sum_actual"].sum()) / other_exposure, 6),
+                "avg_predicted": round(float(remainder["sum_predicted"].sum()) / other_exposure, 6),
+            })
+
     return bins
+
+
+def compute_residuals_histogram(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None = None,
+    n_bins: int = 50,
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """Compute a weighted histogram of residuals (actual - predicted).
+
+    Returns ``(bins, stats)`` where:
+
+    - *bins*: ``[{bin_center, count, weighted_count}, ...]``
+    - *stats*: ``{mean, std, skew, min, max}``
+    """
+    if len(y_true) == 0:
+        return [], {"mean": 0.0, "std": 0.0, "skew": 0.0, "min": 0.0, "max": 0.0}
+
+    residuals = y_true - y_pred
+    w = weight if weight is not None else np.ones(len(residuals))
+
+    # Histogram edges
+    counts, edges = np.histogram(residuals, bins=n_bins)
+    centers = (edges[:-1] + edges[1:]) / 2.0
+
+    # Weighted counts via digitize + bincount (single O(n) pass)
+    bin_indices = np.digitize(residuals, edges[1:-1])  # 0..n_bins-1
+    weighted_counts = np.bincount(bin_indices, weights=w, minlength=n_bins)
+
+    bins: list[dict[str, Any]] = [
+        {
+            "bin_center": round(float(centers[i]), 6),
+            "count": int(counts[i]),
+            "weighted_count": round(float(weighted_counts[i]), 6),
+        }
+        for i in range(len(counts))
+    ]
+
+    # Weighted statistics (scipy-free)
+    total_w = w.sum()
+    if total_w == 0:
+        return bins, {"mean": 0.0, "std": 0.0, "skew": 0.0, "min": 0.0, "max": 0.0}
+
+    w_mean = float(np.average(residuals, weights=w))
+    deviations = residuals - w_mean
+    w_var = float(np.average(deviations**2, weights=w))
+    w_std = float(np.sqrt(w_var))
+
+    # Weighted skewness
+    if w_std > 0:
+        w_skew = float(np.average((deviations / w_std) ** 3, weights=w))
+    else:
+        w_skew = 0.0
+
+    stats = {
+        "mean": round(w_mean, 6),
+        "std": round(w_std, 6),
+        "skew": round(w_skew, 6),
+        "min": round(float(residuals.min()), 6),
+        "max": round(float(residuals.max()), 6),
+    }
+    return bins, stats
+
+
+def compute_actual_vs_predicted(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None = None,
+    max_points: int = 2000,
+) -> list[dict[str, float]]:
+    """Subsample actual vs predicted pairs for scatter plot.
+
+    Returns ``[{actual, predicted, weight}, ...]`` with at most *max_points*
+    entries.  Uses stratified subsampling by predicted decile to preserve
+    the distribution shape.
+    """
+    n = len(y_true)
+    if n == 0:
+        return []
+
+    w = weight if weight is not None else np.ones(n)
+
+    if n <= max_points:
+        return [
+            {
+                "actual": round(float(y_true[i]), 6),
+                "predicted": round(float(y_pred[i]), 6),
+                "weight": round(float(w[i]), 6),
+            }
+            for i in range(n)
+        ]
+
+    rng = np.random.RandomState(42)
+
+    # Split into 10 deciles by y_pred
+    decile_edges = np.percentile(y_pred, np.linspace(0, 100, 11))
+    per_decile = max_points // 10
+
+    sampled_indices: list[int] = []
+    for d in range(10):
+        lo = decile_edges[d]
+        hi = decile_edges[d + 1]
+        if d < 9:
+            mask = (y_pred >= lo) & (y_pred < hi)
+        else:
+            # Last decile includes the right edge
+            mask = (y_pred >= lo) & (y_pred <= hi)
+        indices = np.where(mask)[0]
+        if len(indices) == 0:
+            continue
+        sample_size = min(per_decile, len(indices))
+        replace = len(indices) < per_decile
+        chosen = rng.choice(indices, size=sample_size, replace=replace)
+        sampled_indices.extend(chosen.tolist())
+
+    return [
+        {
+            "actual": round(float(y_true[i]), 6),
+            "predicted": round(float(y_pred[i]), 6),
+            "weight": round(float(w[i]), 6),
+        }
+        for i in sampled_indices
+    ]
+
+
+def compute_lorenz_curve(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None = None,
+    n_points: int = 200,
+) -> tuple[list[dict[str, float]], list[dict[str, float]]]:
+    """Compute Lorenz curves for model predictions and perfect model.
+
+    Returns ``(model_curve, perfect_curve)`` where each is
+    ``[{cum_weight_frac, cum_actual_frac}, ...]``.
+
+    The model curve sorts by predicted (descending).
+    The perfect curve sorts by actual (descending).
+    Both include ``(0, 0)`` and ``(1, 1)`` endpoints.
+    """
+    n = len(y_true)
+    if n == 0:
+        return [{"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}], \
+               [{"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}]
+
+    w = weight if weight is not None else np.ones(n)
+
+    def _build_curve(sort_key: np.ndarray) -> list[dict[str, float]]:
+        order = np.argsort(-sort_key)
+        w_sorted = w[order]
+        y_sorted = y_true[order]
+
+        cum_w = np.cumsum(w_sorted)
+        cum_y = np.cumsum(y_sorted * w_sorted)
+
+        total_w = cum_w[-1]
+        total_y = cum_y[-1]
+
+        if total_w == 0 or total_y == 0:
+            return [
+                {"cum_weight_frac": 0.0, "cum_actual_frac": 0.0},
+                {"cum_weight_frac": 1.0, "cum_actual_frac": 1.0},
+            ]
+
+        cum_w_frac = cum_w / total_w
+        cum_y_frac = cum_y / total_y
+
+        # Prepend (0, 0)
+        cum_w_frac = np.insert(cum_w_frac, 0, 0.0)
+        cum_y_frac = np.insert(cum_y_frac, 0, 0.0)
+
+        # Downsample to n_points evenly spaced indices (always include first/last)
+        total_len = len(cum_w_frac)
+        if total_len <= n_points:
+            indices = np.arange(total_len)
+        else:
+            indices = np.unique(
+                np.round(np.linspace(0, total_len - 1, n_points)).astype(int)
+            )
+
+        return [
+            {
+                "cum_weight_frac": round(float(cum_w_frac[i]), 6),
+                "cum_actual_frac": round(float(cum_y_frac[i]), 6),
+            }
+            for i in indices
+        ]
+
+    model_curve = _build_curve(y_pred)
+    perfect_curve = _build_curve(y_true)
+    return model_curve, perfect_curve
+
+
+def compute_pdp(
+    model: Any,
+    algo: Any,
+    df: pl.DataFrame,
+    features: list[str],
+    cat_features: list[str],
+    *,
+    n_grid: int = 50,
+    max_sample: int = 500,
+) -> list[dict[str, Any]]:
+    """Compute partial dependence plots for all features.
+
+    For each feature:
+
+    - *Numeric*: create a grid of *n_grid* values (percentile-spaced from
+      data), then ``np.unique`` to deduplicate.
+    - *Categorical*: use unique values (up to 30 most frequent).
+    - For each grid value: replace the column, predict, and average.
+
+    Returns ``[{feature, type, grid: [{value, avg_prediction}]}]`` in the
+    same order as *features*.
+    """
+    if df.is_empty() or len(features) == 0:
+        return []
+
+    # Subsample rows if needed
+    n_rows = df.height
+    if n_rows > max_sample:
+        rng = np.random.RandomState(42)
+        idx = rng.choice(n_rows, size=max_sample, replace=False)
+        sample_df = df[idx.tolist()]
+    else:
+        sample_df = df
+
+    cat_set = set(cat_features)
+    results: list[dict[str, Any]] = []
+
+    for feat in features:
+        try:
+            if feat not in sample_df.columns:
+                continue
+
+            is_cat = feat in cat_set
+
+            if is_cat:
+                # Categorical: unique values, top 30 by frequency
+                val_counts = (
+                    sample_df.select(pl.col(feat).cast(pl.Utf8))
+                    .group_by(feat)
+                    .len()
+                    .sort("len", descending=True)
+                )
+                grid_values = val_counts[feat].to_list()[:30]
+                feat_type = "categorical"
+            else:
+                # Numeric: percentile-spaced grid
+                col_vals = sample_df[feat].drop_nulls().to_numpy().astype(float)
+                if len(col_vals) == 0:
+                    continue
+                percentiles = np.linspace(0, 100, n_grid)
+                raw_grid = np.percentile(col_vals, percentiles)
+                grid_values = np.unique(raw_grid).tolist()
+                feat_type = "numeric"
+
+            grid_entries: list[dict[str, Any]] = []
+            for val in grid_values:
+                if is_cat:
+                    modified = sample_df.with_columns(
+                        pl.lit(val).cast(sample_df[feat].dtype).alias(feat)
+                    )
+                else:
+                    modified = sample_df.with_columns(
+                        pl.lit(float(val)).cast(sample_df[feat].dtype).alias(feat)
+                    )
+                preds = algo.predict(model, modified, features)
+                avg_pred = float(np.mean(preds))
+                grid_entries.append({
+                    "value": val if is_cat else round(float(val), 6),
+                    "avg_prediction": round(avg_pred, 6),
+                })
+
+            results.append({
+                "feature": feat,
+                "type": feat_type,
+                "grid": grid_entries,
+            })
+        except Exception:  # noqa: BLE001
+            # Defensive: skip features that fail (e.g. unsupported dtype)
+            continue
+
+    return results
 
 
 _METRIC_REGISTRY: dict[str, Any] = {

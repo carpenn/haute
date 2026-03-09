@@ -526,3 +526,416 @@ def render_ave_feature_svg(
         bottom_margin=70,
         rotate_labels=any_long,
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. Lorenz curve chart
+# ---------------------------------------------------------------------------
+
+COLOR_DIAGONAL = "#9CA3AF"  # light grey — diagonal reference
+
+
+def render_lorenz_curve_svg(
+    model_curve: list[dict[str, float]],
+    perfect_curve: list[dict[str, float]],
+) -> str:
+    """Lorenz curve: model (blue) vs perfect (green) with diagonal reference."""
+    width, height = 420, 400
+    if not model_curve and not perfect_curve:
+        return _placeholder_svg(width, height, "No Lorenz curve data")
+
+    margin = {"top": 30, "right": 20, "bottom": 45, "left": 50}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+
+    def x_pos(v: float) -> float:
+        return margin["left"] + plot_w * v
+
+    def y_pos(v: float) -> float:
+        return margin["top"] + plot_h * (1 - v)
+
+    parts: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
+        f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
+        f'font-weight="600" fill="{COLOR_AXIS}">Lorenz Curve</text>',
+    ]
+
+    # Grid + axis labels (0%, 20%, 40%, 60%, 80%, 100%)
+    for tick in (0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        yp, xp = y_pos(tick), x_pos(tick)
+        parts.append(
+            f'<line x1="{margin["left"]}" y1="{yp:.1f}" '
+            f'x2="{margin["left"] + plot_w}" y2="{yp:.1f}" '
+            f'stroke="{COLOR_GRID}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{margin["left"] - 5}" y="{yp:.1f}" text-anchor="end" '
+            f'dominant-baseline="middle" font-size="10" fill="{COLOR_AXIS}">'
+            f"{tick:.0%}</text>"
+        )
+        parts.append(
+            f'<text x="{xp:.1f}" y="{margin["top"] + plot_h + 16}" '
+            f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
+            f"{tick:.0%}</text>"
+        )
+
+    # Diagonal reference (random model)
+    parts.append(
+        f'<line x1="{x_pos(0):.1f}" y1="{y_pos(0):.1f}" '
+        f'x2="{x_pos(1):.1f}" y2="{y_pos(1):.1f}" '
+        f'stroke="{COLOR_DIAGONAL}" stroke-width="1" stroke-dasharray="4,3"/>'
+    )
+
+    # Model curve (blue)
+    if model_curve:
+        pts = " ".join(
+            f'{x_pos(p["cum_weight_frac"]):.1f},{y_pos(p["cum_actual_frac"]):.1f}'
+            for p in model_curve
+        )
+        parts.append(
+            f'<polyline points="{pts}" fill="none" '
+            f'stroke="{COLOR_ACTUAL}" stroke-width="2"/>'
+        )
+
+    # Perfect curve (green)
+    if perfect_curve:
+        pts = " ".join(
+            f'{x_pos(p["cum_weight_frac"]):.1f},{y_pos(p["cum_actual_frac"]):.1f}'
+            for p in perfect_curve
+        )
+        parts.append(
+            f'<polyline points="{pts}" fill="none" '
+            f'stroke="{COLOR_EVAL}" stroke-width="2"/>'
+        )
+
+    # Legend
+    lx, ly = margin["left"] + 10, margin["top"] + 14
+    parts.append(
+        f'<rect x="{lx}" y="{ly - 4}" width="10" height="3" fill="{COLOR_ACTUAL}"/>'
+        f'<text x="{lx + 14}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">Model</text>'
+    )
+    parts.append(
+        f'<rect x="{lx + 55}" y="{ly - 4}" width="10" height="3" fill="{COLOR_EVAL}"/>'
+        f'<text x="{lx + 69}" y="{ly}" font-size="10" fill="{COLOR_AXIS}">Perfect</text>'
+    )
+
+    # X-axis label
+    parts.append(
+        f'<text x="{width // 2}" y="{height - 5}" text-anchor="middle" '
+        f'font-size="11" fill="{COLOR_AXIS}">Cumulative weight fraction</text>'
+    )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 6. Residuals histogram
+# ---------------------------------------------------------------------------
+
+
+def render_residuals_svg(
+    histogram: list[dict[str, Any]],
+    stats: dict[str, float] | None = None,
+) -> str:
+    """Vertical bar histogram of residuals with optional stats annotation."""
+    width, height = 600, 320
+    if not histogram:
+        return _placeholder_svg(width, height, "No residuals data")
+
+    margin = {"top": 30, "right": 20, "bottom": 40, "left": 60}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+
+    centers = [b["bin_center"] for b in histogram]
+    wc = [b["weighted_count"] for b in histogram]
+    x_min, x_max = min(centers), max(centers)
+    y_max = max(wc) if wc else 1
+    if x_min == x_max:
+        x_min -= 1
+        x_max += 1
+    if y_max == 0:
+        y_max = 1
+
+    n = len(histogram)
+    bar_w = max(plot_w / n * 0.85, 2)
+
+    def x_pos(v: float) -> float:
+        return margin["left"] + plot_w * (v - x_min) / (x_max - x_min)
+
+    def y_pos(v: float) -> float:
+        return margin["top"] + plot_h * (1 - v / y_max)
+
+    parts: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
+        f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
+        f'font-weight="600" fill="{COLOR_AXIS}">Residual Distribution</text>',
+    ]
+
+    # Y-axis grid
+    for tick in _nice_ticks(0, y_max, 5):
+        yp = y_pos(tick)
+        if margin["top"] <= yp <= margin["top"] + plot_h:
+            parts.append(
+                f'<line x1="{margin["left"]}" y1="{yp:.1f}" '
+                f'x2="{margin["left"] + plot_w}" y2="{yp:.1f}" '
+                f'stroke="{COLOR_GRID}" stroke-width="1"/>'
+            )
+            parts.append(
+                f'<text x="{margin["left"] - 5}" y="{yp:.1f}" text-anchor="end" '
+                f'dominant-baseline="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_format_tick(tick)}</text>"
+            )
+
+    # Bars
+    baseline_y = margin["top"] + plot_h
+    for b in histogram:
+        bx = x_pos(b["bin_center"]) - bar_w / 2
+        by = y_pos(b["weighted_count"])
+        bh = max(baseline_y - by, 0)
+        parts.append(
+            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" '
+            f'height="{bh:.1f}" fill="{COLOR_ACTUAL}" rx="1"/>'
+        )
+
+    # X-axis ticks
+    for tick in _nice_ticks(x_min, x_max, 6):
+        xp = x_pos(tick)
+        if margin["left"] <= xp <= margin["left"] + plot_w:
+            parts.append(
+                f'<text x="{xp:.1f}" y="{margin["top"] + plot_h + 16}" '
+                f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_format_tick(tick)}</text>"
+            )
+
+    # Stats annotation (top-right)
+    if stats:
+        sx = margin["left"] + plot_w - 5
+        sy = margin["top"] + 10
+        lines = [
+            f'mean={stats.get("mean", 0):.4g}',
+            f'std={stats.get("std", 0):.4g}',
+            f'skew={stats.get("skew", 0):.4g}',
+        ]
+        for j, line in enumerate(lines):
+            parts.append(
+                f'<text x="{sx}" y="{sy + j * 14}" text-anchor="end" '
+                f'font-size="10" fill="{COLOR_AXIS}">{_escape(line)}</text>'
+            )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 7. Actual vs Predicted scatter
+# ---------------------------------------------------------------------------
+
+COLOR_DOT = "#2563EB"  # blue, same as COLOR_ACTUAL
+
+
+def render_scatter_svg(
+    points: list[dict[str, float]],
+) -> str:
+    """Actual vs predicted scatter plot with diagonal reference."""
+    width, height = 420, 400
+    if not points:
+        return _placeholder_svg(width, height, "No scatter data")
+
+    margin = {"top": 30, "right": 20, "bottom": 45, "left": 55}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+
+    actuals = [p["actual"] for p in points]
+    preds = [p["predicted"] for p in points]
+    all_vals = actuals + preds
+    v_min, v_max = min(all_vals), max(all_vals)
+    if v_min == v_max:
+        v_min -= 1
+        v_max += 1
+    pad = (v_max - v_min) * 0.05
+    v_min -= pad
+    v_max += pad
+
+    def x_pos(v: float) -> float:
+        return margin["left"] + plot_w * (v - v_min) / (v_max - v_min)
+
+    def y_pos(v: float) -> float:
+        return margin["top"] + plot_h * (1 - (v - v_min) / (v_max - v_min))
+
+    parts: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
+        f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
+        f'font-weight="600" fill="{COLOR_AXIS}">Actual vs Predicted</text>',
+    ]
+
+    # Grid
+    ticks = _nice_ticks(v_min, v_max, 5)
+    for tick in ticks:
+        yp, xp = y_pos(tick), x_pos(tick)
+        if margin["top"] <= yp <= margin["top"] + plot_h:
+            parts.append(
+                f'<line x1="{margin["left"]}" y1="{yp:.1f}" '
+                f'x2="{margin["left"] + plot_w}" y2="{yp:.1f}" '
+                f'stroke="{COLOR_GRID}" stroke-width="1"/>'
+            )
+            parts.append(
+                f'<text x="{margin["left"] - 5}" y="{yp:.1f}" text-anchor="end" '
+                f'dominant-baseline="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_format_tick(tick)}</text>"
+            )
+        if margin["left"] <= xp <= margin["left"] + plot_w:
+            parts.append(
+                f'<text x="{xp:.1f}" y="{margin["top"] + plot_h + 16}" '
+                f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_format_tick(tick)}</text>"
+            )
+
+    # Diagonal reference
+    parts.append(
+        f'<line x1="{x_pos(v_min):.1f}" y1="{y_pos(v_min):.1f}" '
+        f'x2="{x_pos(v_max):.1f}" y2="{y_pos(v_max):.1f}" '
+        f'stroke="{COLOR_DIAGONAL}" stroke-width="1" stroke-dasharray="4,3"/>'
+    )
+
+    # Dots (semi-transparent for overlap)
+    for p in points:
+        parts.append(
+            f'<circle cx="{x_pos(p["predicted"]):.1f}" cy="{y_pos(p["actual"]):.1f}" '
+            f'r="2.5" fill="{COLOR_DOT}" opacity="0.35"/>'
+        )
+
+    # Axis labels
+    parts.append(
+        f'<text x="{width // 2}" y="{height - 5}" text-anchor="middle" '
+        f'font-size="11" fill="{COLOR_AXIS}">Predicted</text>'
+    )
+    parts.append(
+        f'<text x="12" y="{margin["top"] + plot_h // 2}" text-anchor="middle" '
+        f'font-size="11" fill="{COLOR_AXIS}" '
+        f'transform="rotate(-90, 12, {margin["top"] + plot_h // 2})">Actual</text>'
+    )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 8. Partial Dependence Plot (per feature)
+# ---------------------------------------------------------------------------
+
+
+def render_pdp_feature_svg(
+    feature_name: str,
+    grid: list[dict[str, Any]],
+    feat_type: str,
+) -> str:
+    """PDP chart for one feature: line for numeric, bars for categorical."""
+    width, height = 600, 280
+    if not grid:
+        return _placeholder_svg(width, height, f"No PDP data for {_escape(feature_name)}")
+
+    margin = {"top": 30, "right": 20, "bottom": 50, "left": 60}
+    plot_w = width - margin["left"] - margin["right"]
+    plot_h = height - margin["top"] - margin["bottom"]
+
+    values = [g["value"] for g in grid]
+    preds = [g["avg_prediction"] for g in grid]
+    y_min, y_max = min(preds), max(preds)
+    if y_min == y_max:
+        y_min -= 0.5
+        y_max += 0.5
+    y_pad = (y_max - y_min) * 0.1
+    y_min -= y_pad
+    y_max += y_pad
+
+    def y_pos(v: float) -> float:
+        return margin["top"] + plot_h * (1 - (v - y_min) / (y_max - y_min))
+
+    parts: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="system-ui, sans-serif">',
+        f'<rect width="{width}" height="{height}" fill="white" rx="4"/>',
+        f'<text x="{width // 2}" y="18" text-anchor="middle" font-size="13" '
+        f'font-weight="600" fill="{COLOR_AXIS}">{_escape(feature_name)}</text>',
+    ]
+
+    # Y-axis grid
+    for tick in _nice_ticks(y_min, y_max, 5):
+        yp = y_pos(tick)
+        if margin["top"] <= yp <= margin["top"] + plot_h:
+            parts.append(
+                f'<line x1="{margin["left"]}" y1="{yp:.1f}" '
+                f'x2="{margin["left"] + plot_w}" y2="{yp:.1f}" '
+                f'stroke="{COLOR_GRID}" stroke-width="1"/>'
+            )
+            parts.append(
+                f'<text x="{margin["left"] - 5}" y="{yp:.1f}" text-anchor="end" '
+                f'dominant-baseline="middle" font-size="10" fill="{COLOR_AXIS}">'
+                f"{_format_tick(tick)}</text>"
+            )
+
+    n = len(grid)
+    if feat_type == "categorical":
+        # Bar chart
+        gap = plot_w / n
+        bar_w = max(gap * 0.6, 4)
+        for i, g in enumerate(grid):
+            cx = margin["left"] + gap * i + gap / 2
+            by = y_pos(g["avg_prediction"])
+            baseline = y_pos(y_min)
+            bh = max(baseline - by, 0)
+            parts.append(
+                f'<rect x="{cx - bar_w / 2:.1f}" y="{by:.1f}" width="{bar_w:.1f}" '
+                f'height="{bh:.1f}" fill="{COLOR_ACTUAL}" rx="2"/>'
+            )
+            label = _truncate_label(str(g["value"]), 12)
+            parts.append(
+                f'<text x="{cx:.1f}" y="{margin["top"] + plot_h + 14}" '
+                f'text-anchor="end" font-size="9" fill="{COLOR_AXIS}" '
+                f'transform="rotate(-45, {cx:.1f}, {margin["top"] + plot_h + 14})">'
+                f"{_escape(label)}</text>"
+            )
+    else:
+        # Line chart — numeric values on X axis
+        num_vals = [float(v) for v in values]
+        x_min_v, x_max_v = min(num_vals), max(num_vals)
+        if x_min_v == x_max_v:
+            x_min_v -= 1
+            x_max_v += 1
+
+        def x_pos(v: float) -> float:
+            return margin["left"] + plot_w * (v - x_min_v) / (x_max_v - x_min_v)
+
+        # Line
+        pts = " ".join(
+            f"{x_pos(num_vals[i]):.1f},{y_pos(preds[i]):.1f}" for i in range(n)
+        )
+        parts.append(
+            f'<polyline points="{pts}" fill="none" '
+            f'stroke="{COLOR_ACTUAL}" stroke-width="2" stroke-linejoin="round"/>'
+        )
+        for i in range(n):
+            parts.append(
+                f'<circle cx="{x_pos(num_vals[i]):.1f}" cy="{y_pos(preds[i]):.1f}" '
+                f'r="2.5" fill="{COLOR_ACTUAL}"/>'
+            )
+
+        # X-axis ticks
+        for tick in _nice_ticks(x_min_v, x_max_v, 6):
+            xp = x_pos(tick)
+            if margin["left"] <= xp <= margin["left"] + plot_w:
+                parts.append(
+                    f'<text x="{xp:.1f}" y="{margin["top"] + plot_h + 16}" '
+                    f'text-anchor="middle" font-size="10" fill="{COLOR_AXIS}">'
+                    f"{_format_tick(tick)}</text>"
+                )
+
+    parts.append("</svg>")
+    return "\n".join(parts)

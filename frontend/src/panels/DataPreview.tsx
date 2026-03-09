@@ -25,7 +25,6 @@ export interface PreviewData {
 
 interface DataPreviewProps {
   data: PreviewData | null
-  onClose: () => void
   onCellClick?: (rowIndex: number, column: string) => void
   tracedCell?: { rowIndex: number; column: string } | null
 }
@@ -35,7 +34,7 @@ const ROW_HEIGHT = 28
 const VIRTUALIZE_THRESHOLD = 50
 const OVERSCAN = 10
 
-export default function DataPreview({ data, onClose, onCellClick, tracedCell }: DataPreviewProps) {
+export default function DataPreview({ data, onCellClick, tracedCell }: DataPreviewProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [columnSearch, setColumnSearch] = useState("")
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 256, minHeight: 120, maxHeight: 600 })
@@ -163,13 +162,6 @@ export default function DataPreview({ data, onClose, onCellClick, tracedCell }: 
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
           >
             <ChevronDown size={14} />
-          </button>
-          <button onClick={onClose} className="p-1 rounded transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            <X size={14} />
           </button>
         </div>
       </div>

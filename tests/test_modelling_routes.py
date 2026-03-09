@@ -441,6 +441,63 @@ class TestEstimateEndpoint:
         data = resp.json()
         assert data.get("total_rows") is None
 
+    def test_estimate_suppresses_ram_warning_when_user_limit_binds(self, client, training_data):
+        """When user's row_limit is lower than the RAM-safe limit, suppress the RAM warning."""
+        graph = _make_modelling_graph(training_data)
+        # Inject a user row_limit that is lower than the RAM-safe limit
+        for node in graph["nodes"]:
+            if node["id"] == "train":
+                node["data"]["config"]["row_limit"] = 500
+
+        mock_est = SimpleNamespace(
+            safe_row_limit=9_000_000,
+            warning="Dataset downsampled to 9,000,000 of 10,000,000 rows",
+            total_rows=10_000_000,
+            probe_columns=5,
+            estimated_bytes=1e9,
+            available_bytes=2e10,
+            bytes_per_row=100.0,
+            was_downsampled=True,
+        )
+        with patch(
+            "haute._ram_estimate.estimate_safe_training_rows",
+            return_value=mock_est,
+        ):
+            resp = client.post("/api/modelling/estimate", json={"graph": graph, "node_id": "train"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["safe_row_limit"] == 500
+        assert data["warning"] is None
+        assert data["was_downsampled"] is False
+
+    def test_estimate_keeps_ram_warning_when_ram_limit_binds(self, client, training_data):
+        """When RAM-safe limit is lower than user's row_limit, keep the RAM warning."""
+        graph = _make_modelling_graph(training_data)
+        for node in graph["nodes"]:
+            if node["id"] == "train":
+                node["data"]["config"]["row_limit"] = 20_000_000
+
+        mock_est = SimpleNamespace(
+            safe_row_limit=9_000_000,
+            warning="Dataset downsampled to 9,000,000 of 10,000,000 rows",
+            total_rows=10_000_000,
+            probe_columns=5,
+            estimated_bytes=1e9,
+            available_bytes=2e10,
+            bytes_per_row=100.0,
+            was_downsampled=True,
+        )
+        with patch(
+            "haute._ram_estimate.estimate_safe_training_rows",
+            return_value=mock_est,
+        ):
+            resp = client.post("/api/modelling/estimate", json={"graph": graph, "node_id": "train"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["safe_row_limit"] == 9_000_000
+        assert data["warning"] is not None
+        assert data["was_downsampled"] is True
+
 
 class TestMlflowLogSuccess:
     """Tests for /mlflow/log success and exception paths."""
@@ -614,3 +671,30 @@ class TestBackgroundThreadErrors:
             # Whether it completed or errored, the warning should be set
             warning = status.get("warning") or ""
             assert "Row limit" in warning or "RAM" in warning
+
+    def test_ram_warning_suppressed_when_user_limit_binds(self, client, training_data):
+        """When user's row_limit is lower than RAM-safe limit, no RAM warning in job status."""
+        graph = _make_modelling_graph(training_data)
+        for node in graph["nodes"]:
+            if node["id"] == "train":
+                node["data"]["config"]["row_limit"] = 30
+
+        mock_est = SimpleNamespace(
+            safe_row_limit=50,
+            warning="Dataset downsampled to 50 of 100 rows",
+            total_rows=100,
+            probe_columns=2,
+            estimated_bytes=1000.0,
+            available_bytes=500.0,
+            bytes_per_row=10.0,
+            was_downsampled=True,
+        )
+        with patch(
+            "haute._ram_estimate.estimate_safe_training_rows",
+            return_value=mock_est,
+        ):
+            resp = client.post("/api/modelling/train", json={"graph": graph, "node_id": "train"})
+            data = resp.json()
+            status = _poll_until_done(client, data["job_id"])
+            # RAM warning should be suppressed since user limit (30) < RAM limit (50)
+            assert status.get("warning") is None
