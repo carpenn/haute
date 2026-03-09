@@ -728,3 +728,106 @@ class TestCodegenEdgeCases:
         code = graph_to_code(graph, description='Motor "premium" model')
         # Should compile without error
         compile(code, "<test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Template param consistency (B8): all templates use {first} for return value
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateParamConsistency:
+    """Templates must use the first param name (not hardcoded 'df') for return."""
+
+    def test_banding_single_returns_first_param(self):
+        """Banding single-factor should return the first upstream name, not 'df'."""
+        node = _n({
+            "id": "b",
+            "data": {
+                "label": "Band",
+                "nodeType": "banding",
+                "config": {
+                    "factors": [{
+                        "banding": "continuous",
+                        "column": "age",
+                        "outputColumn": "age_factor",
+                        "rules": [{"op1": ">=", "val1": 0, "op2": "<", "val2": 100, "assignment": "1.0"}],
+                    }],
+                },
+            },
+        })
+        code = _node_to_code(node, source_names=["upstream_data"])
+        assert "return upstream_data" in code
+        assert "return df" not in code
+        _compile_node_code(code)
+
+    def test_banding_multi_returns_first_param(self):
+        """Banding multi-factor should return the first upstream name, not 'df'."""
+        node = _n({
+            "id": "b",
+            "data": {
+                "label": "MultiBand",
+                "nodeType": "banding",
+                "config": {
+                    "factors": [
+                        {"banding": "continuous", "column": "age", "outputColumn": "age_f", "rules": []},
+                        {"banding": "discrete", "column": "region", "outputColumn": "region_f", "rules": []},
+                    ],
+                },
+            },
+        })
+        code = _node_to_code(node, source_names=["my_source"])
+        assert "return my_source" in code
+        assert "return df" not in code
+        _compile_node_code(code)
+
+    def test_rating_step_returns_first_param(self):
+        """Rating step should return the first upstream name, not 'df'."""
+        node = _n({
+            "id": "rs",
+            "data": {
+                "label": "Rate",
+                "nodeType": "ratingStep",
+                "config": {"tables": [{
+                    "name": "T", "factors": ["x"], "outputColumn": "f",
+                    "entries": [{"x": "a", "value": 1.0}],
+                }]},
+            },
+        })
+        code = _node_to_code(node, source_names=["input_df"])
+        assert "return input_df" in code
+        assert "return df" not in code
+        _compile_node_code(code)
+
+    def test_modelling_returns_first_param(self):
+        """Modelling should return the first upstream name, not 'df'."""
+        node = _n({
+            "id": "m",
+            "data": {
+                "label": "Train",
+                "nodeType": "modelling",
+                "config": {"target": "loss", "algorithm": "catboost"},
+            },
+        })
+        code = _node_to_code(node, source_names=["features"])
+        assert "return features" in code
+        assert "return df" not in code
+        _compile_node_code(code)
+
+    def test_templates_default_to_df_without_sources(self):
+        """Without source names, templates should use 'df' as default param."""
+        node = _n({
+            "id": "b",
+            "data": {
+                "label": "Band",
+                "nodeType": "banding",
+                "config": {
+                    "factors": [{
+                        "banding": "continuous", "column": "x",
+                        "outputColumn": "x_f", "rules": [],
+                    }],
+                },
+            },
+        })
+        code = _node_to_code(node, source_names=[])
+        assert "return df" in code
+        _compile_node_code(code)

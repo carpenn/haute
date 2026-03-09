@@ -27,7 +27,7 @@ from haute._rating import (
     _combine_rating_columns,
     _normalise_banding_factors,
 )
-from haute._sandbox import safe_globals, validate_user_code
+from haute._sandbox import UnsafeCodeError, safe_globals, validate_user_code
 from haute.graph_utils import (
     GraphNode,
     NodeType,
@@ -180,10 +180,24 @@ def _exec_user_code(
         exec_code = f"df = (\n    {code}\n)"
         line_offset = 1
 
-    # Validate the original user code at the AST level before exec().
+    # Validate the *wrapped* code at the AST level before exec().
+    # We validate exec_code (not the raw snippet) because user code
+    # fragments like chain syntax (".filter(...)") are not valid Python
+    # on their own — only the wrapped version is parseable.
     # This blocks dunder access, imports, getattr, class defs, etc.
     # at the structural level — a stronger layer than restricted builtins.
-    validate_user_code(code)
+    try:
+        validate_user_code(exec_code)
+    except UnsafeCodeError as uce:
+        # If the sandbox rejection was caused by a SyntaxError (code we
+        # couldn't parse), convert back to SyntaxError with adjusted line
+        # numbers so callers see the same error type they'd get from exec().
+        if isinstance(uce.__cause__, SyntaxError):
+            syn = uce.__cause__
+            if syn.lineno is not None:
+                syn.lineno = max(1, syn.lineno - line_offset)
+            raise syn from None
+        raise
 
     try:
         exec(exec_code, safe_globals(pl=pl, **(extra_ns or {})), local_ns)

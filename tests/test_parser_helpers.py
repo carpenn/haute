@@ -168,10 +168,22 @@ class TestIsPipelineNodeDecorator:
             self._dec("@pipeline.connect\ndef f(): pass")
         )
 
-    def test_any_object_with_node_attr_matches(self):
-        """The function only checks .attr == 'node', not the object name."""
-        assert _is_pipeline_node_decorator(
+    def test_other_object_with_node_attr_does_not_match(self):
+        """The function checks both .attr == 'node' AND the receiver name == 'pipeline'."""
+        assert not _is_pipeline_node_decorator(
             self._dec("@other.node\ndef f(): pass")
+        )
+
+    def test_submodel_node_does_not_match_pipeline(self):
+        """@submodel.node should NOT match the pipeline checker."""
+        assert not _is_pipeline_node_decorator(
+            self._dec("@submodel.node\ndef f(): pass")
+        )
+
+    def test_submodel_node_call_does_not_match_pipeline(self):
+        """@submodel.node(...) should NOT match the pipeline checker."""
+        assert not _is_pipeline_node_decorator(
+            self._dec("@submodel.node(path='x')\ndef f(): pass")
         )
 
     def test_plain_name_decorator(self):
@@ -1109,14 +1121,14 @@ class TestExtractDecoratedNodes:
         )
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
-            # pipeline checker should not match submodel decorator
+            # submodel checker matches @submodel.node
             nodes = _extract_decorated_nodes(
                 tree, _is_submodel_node_decorator, bodies, None,
             )
-            assert len(nodes) == 1  # submodel checker matches
+            assert len(nodes) == 1
+            # pipeline checker must NOT match @submodel.node —
+            # it checks decorator.value.id == "pipeline"
             nodes2 = _extract_decorated_nodes(
                 tree, _is_pipeline_node_decorator, bodies, None,
             )
-            # pipeline checker also matches because it only checks .attr == "node"
-            # on any Name -- this is existing behavior we preserve
-            assert len(nodes2) == 1
+            assert len(nodes2) == 0

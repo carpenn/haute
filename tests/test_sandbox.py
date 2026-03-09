@@ -302,14 +302,34 @@ class TestValidateUserCode:
         # __name__ is not in _BLOCKED_ATTRS — it's harmless
         validate_user_code('x = "hello".__len__()')
 
-    def test_syntax_error_passes_through(self):
-        """SyntaxError code should not raise UnsafeCodeError — let exec() handle it."""
-        from haute._sandbox import UnsafeCodeError
-
-        try:
+    def test_syntax_error_raises_unsafe_code_error(self):
+        """SyntaxError code must raise UnsafeCodeError — we cannot verify safety without a valid AST."""
+        with pytest.raises(UnsafeCodeError, match="syntax errors"):
             validate_user_code("df = (((")
-        except UnsafeCodeError:
-            pytest.fail("validate_user_code raised UnsafeCodeError for syntax error")
+
+    def test_syntax_error_preserves_cause(self):
+        """UnsafeCodeError for syntax errors should chain the original SyntaxError as __cause__."""
+        with pytest.raises(UnsafeCodeError) as exc_info:
+            validate_user_code("def f(\n")
+        assert isinstance(exc_info.value.__cause__, SyntaxError)
+
+    def test_syntax_error_not_cached_as_safe(self):
+        """Code with syntax errors must not be cached as 'safe' on subsequent calls."""
+        # First call should raise
+        with pytest.raises(UnsafeCodeError):
+            validate_user_code("really broken ((( code ===")
+        # Second call should also raise (not return from cache)
+        with pytest.raises(UnsafeCodeError):
+            validate_user_code("really broken ((( code ===")
+
+    def test_chain_syntax_passes_validation(self):
+        """Chain syntax (.filter(...)) is valid transform code and should pass."""
+        validate_user_code('.filter(pl.col("x") > 0)')
+
+    def test_chain_syntax_with_dangerous_pattern_blocked(self):
+        """Chain syntax that contains a dangerous pattern should still be blocked."""
+        with pytest.raises(UnsafeCodeError, match="__class__"):
+            validate_user_code('.filter(x.__class__)')
 
     def test_empty_code_passes(self):
         """Empty string should pass."""

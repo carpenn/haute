@@ -135,21 +135,21 @@ _BANDING_SINGLE = '''\
                output_column="{output_column}"{rules_kw}{default_kw})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    return df
+    return {first}
 '''
 
 _BANDING_MULTI = '''\
 @pipeline.node(factors={factors_repr})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    return df
+    return {first}
 '''
 
 _RATING_STEP = '''\
 @pipeline.node(tables={tables_repr}{extra_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    return df
+    return {first}
 '''
 
 _SINK_PARQUET = '''\
@@ -193,7 +193,7 @@ _MODELLING = '''\
 @pipeline.node(modelling=True{extra_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    return df
+    return {first}
 '''
 
 _CONSTANT = '''\
@@ -475,6 +475,7 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
         default = f.get("default")
         rules_kw = f", rules={rules!r}" if rules else ""
         default_kw = f', default="{default}"' if default else ""
+        first = _first_source(source_names)
         return _BANDING_SINGLE.format(
             func_name=func_name,
             description=description,
@@ -484,6 +485,7 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
             rules_kw=rules_kw,
             default_kw=default_kw,
             params=params,
+            first=first,
         )
     else:
         # Multi-factor: emit factors list with output_column key for decorator
@@ -498,11 +500,13 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
             if f.get("default"):
                 ef["default"] = f["default"]
             emit_factors.append(ef)
+        first = _first_source(source_names)
         return _BANDING_MULTI.format(
             func_name=func_name,
             description=description,
             factors_repr=repr(emit_factors),
             params=params,
+            first=first,
         )
 
 
@@ -530,11 +534,13 @@ def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
     if combined:
         extra_parts.append(f"combined_column={combined!r}")
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    first = _first_source(source_names)
     return _RATING_STEP.format(
         func_name=func_name,
         description=description,
         tables_repr=repr(emit_tables),
         params=params,
+        first=first,
         extra_kwargs=extra_kwargs,
     )
 
@@ -593,10 +599,12 @@ def _gen_modelling(node: GraphNode, source_names: list[str]) -> str:
     params = _build_params(source_names)
     extra_parts = _build_extra_kwargs(config, MODELLING_CONFIG_KEYS)
     extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    first = _first_source(source_names)
     return _MODELLING.format(
         func_name=func_name,
         description=description,
         params=params,
+        first=first,
         extra_kwargs=extra_kwargs,
     )
 
