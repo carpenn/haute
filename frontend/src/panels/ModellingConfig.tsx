@@ -193,6 +193,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         isStale={isStale}
         ramEstimate={ramEstimate}
         ramEstimateLoading={ramEstimateLoading}
+        rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
         onTrain={handleTrain}
       />
     </div>

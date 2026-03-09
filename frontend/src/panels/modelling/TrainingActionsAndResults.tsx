@@ -1,7 +1,15 @@
+import { useMemo } from "react"
 import { Play, Loader2, AlertTriangle, RefreshCw, CheckCircle2 } from "lucide-react"
 import type { TrainResult, TrainProgress } from "../../stores/useNodeResultsStore"
 import type { TrainEstimate } from "../../api/client"
 import { TrainingProgress as TrainingProgressPanel } from "./TrainingProgress"
+
+/** Must match _CATBOOST_OVERHEAD_MULTIPLIER in _ram_estimate.py */
+const CATBOOST_OVERHEAD = 3.0
+
+function formatMb(mb: number): string {
+  return mb < 1024 ? `${mb.toFixed(0)} MB` : `${(mb / 1024).toFixed(1)} GB`
+}
 
 export type TrainingActionsAndResultsProps = {
   target: string
@@ -11,6 +19,7 @@ export type TrainingActionsAndResultsProps = {
   isStale: boolean
   ramEstimate: TrainEstimate | null
   ramEstimateLoading: boolean
+  rowLimit: number | null
   onTrain: () => void
 }
 
@@ -22,8 +31,43 @@ export function TrainingActionsAndResults({
   isStale,
   ramEstimate,
   ramEstimateLoading,
+  rowLimit,
   onTrain,
 }: TrainingActionsAndResultsProps) {
+  // Recalculate training MB and GPU VRAM reactively as row_limit changes
+  const adjusted = useMemo(() => {
+    if (!ramEstimate || ramEstimate.total_rows == null) return null
+    const sourceRows = ramEstimate.total_rows
+    const hasUserLimit = rowLimit != null && rowLimit > 0
+
+    // Effective rows for RAM: user limit, then RAM-safe limit, capped at source
+    let rows = sourceRows
+    if (hasUserLimit) rows = Math.min(rows, rowLimit)
+    if (ramEstimate.safe_row_limit != null) rows = Math.min(rows, ramEstimate.safe_row_limit)
+
+    const trainingMb = rows * ramEstimate.bytes_per_row * CATBOOST_OVERHEAD / (1024 * 1024)
+    const isLimited = rows < sourceRows
+
+    // Amber when RAM requires downsampling, unless the user's limit
+    // is already at or below the safe limit (they've preempted it)
+    const wasDownsampled = ramEstimate.was_downsampled
+      && !(hasUserLimit && rowLimit <= (ramEstimate.safe_row_limit ?? sourceRows))
+
+    // GPU VRAM: scale from the backend estimate using effective rows.
+    // Unlike RAM, don't clamp to safe_row_limit — show what the user's
+    // chosen row count would actually need on the GPU.
+    let gpuVramMb = ramEstimate.gpu_vram_estimated_mb ?? null
+    if (gpuVramMb != null) {
+      const gpuRows = hasUserLimit ? Math.min(rowLimit, sourceRows) : sourceRows
+      const originalRows = ramEstimate.safe_row_limit ?? sourceRows
+      if (originalRows > 0 && gpuRows !== originalRows) {
+        gpuVramMb = gpuVramMb * gpuRows / originalRows
+      }
+    }
+
+    return { rows, trainingMb, wasDownsampled, isLimited, gpuVramMb }
+  }, [ramEstimate, rowLimit])
+
   return (
     <>
       {/* Staleness indicator */}
@@ -49,51 +93,53 @@ export function TrainingActionsAndResults({
           <span style={{ color: "var(--text-muted)" }}>Estimating dataset size...</span>
         </div>
       )}
-      {ramEstimate && !ramEstimateLoading && ramEstimate.total_rows != null && (
+      {ramEstimate && !ramEstimateLoading && adjusted && (
         <div className="px-3 py-2.5 rounded-lg text-xs space-y-1.5" style={{
-          background: ramEstimate.was_downsampled ? "rgba(245,158,11,.06)" : "rgba(34,197,94,.06)",
-          border: `1px solid ${ramEstimate.was_downsampled ? "rgba(245,158,11,.2)" : "rgba(34,197,94,.15)"}`,
+          background: adjusted.wasDownsampled ? "rgba(245,158,11,.06)" : "rgba(34,197,94,.06)",
+          border: `1px solid ${adjusted.wasDownsampled ? "rgba(245,158,11,.2)" : "rgba(34,197,94,.15)"}`,
         }}>
           <div className="flex items-center gap-2">
-            {ramEstimate.was_downsampled && <AlertTriangle size={12} className="shrink-0" style={{ color: "#f59e0b" }} />}
-            <span className="font-medium" style={{ color: ramEstimate.was_downsampled ? "#fbbf24" : "#22c55e" }}>
-              {ramEstimate.was_downsampled ? "Will downsample" : "Dataset fits in memory"}
+            {adjusted.wasDownsampled && <AlertTriangle size={12} className="shrink-0" style={{ color: "#f59e0b" }} />}
+            <span className="font-medium" style={{ color: adjusted.wasDownsampled ? "#fbbf24" : "#22c55e" }}>
+              {adjusted.wasDownsampled ? "Will downsample" : "Dataset fits in memory"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
             <span>Source rows</span>
             <span style={{ color: "var(--text-primary)" }}>{ramEstimate.total_rows!.toLocaleString()}</span>
-            <span>Est. training RAM</span>
-            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.training_mb < 1024 ? `${ramEstimate.training_mb.toFixed(0)} MB` : `${(ramEstimate.training_mb / 1024).toFixed(1)} GB`}</span>
-            <span>Available RAM</span>
-            <span style={{ color: "var(--text-primary)" }}>{ramEstimate.available_mb < 1024 ? `${ramEstimate.available_mb.toFixed(0)} MB` : `${(ramEstimate.available_mb / 1024).toFixed(1)} GB`}</span>
-            {ramEstimate.was_downsampled && ramEstimate.safe_row_limit != null && (
+            {adjusted.isLimited && (
               <>
                 <span>Training rows</span>
-                <span style={{ color: "#f59e0b" }}>{ramEstimate.safe_row_limit.toLocaleString()}</span>
+                <span style={{ color: adjusted.wasDownsampled ? "#f59e0b" : "var(--text-primary)" }}>{adjusted.rows.toLocaleString()}</span>
               </>
             )}
-            {ramEstimate.gpu_vram_estimated_mb != null && (
+            <span>Est. training RAM</span>
+            <span style={{ color: "var(--text-primary)" }}>{formatMb(adjusted.trainingMb)}</span>
+            <span>Available RAM</span>
+            <span style={{ color: "var(--text-primary)" }}>{formatMb(ramEstimate.available_mb)}</span>
+            {adjusted.gpuVramMb != null && (
               <>
                 <span>Est. GPU VRAM</span>
-                <span style={{ color: ramEstimate.gpu_warning ? "#f59e0b" : "var(--text-primary)" }}>
-                  {ramEstimate.gpu_vram_estimated_mb < 1024 ? `${ramEstimate.gpu_vram_estimated_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_estimated_mb / 1024).toFixed(1)} GB`}
+                <span style={{ color: ramEstimate.gpu_vram_available_mb != null && adjusted.gpuVramMb > ramEstimate.gpu_vram_available_mb ? "#f59e0b" : "var(--text-primary)" }}>
+                  {formatMb(adjusted.gpuVramMb)}
                 </span>
                 {ramEstimate.gpu_vram_available_mb != null && (
                   <>
                     <span>GPU VRAM</span>
                     <span style={{ color: "var(--text-primary)" }}>
-                      {ramEstimate.gpu_vram_available_mb < 1024 ? `${ramEstimate.gpu_vram_available_mb.toFixed(0)} MB` : `${(ramEstimate.gpu_vram_available_mb / 1024).toFixed(1)} GB`}
+                      {formatMb(ramEstimate.gpu_vram_available_mb)}
                     </span>
                   </>
                 )}
               </>
             )}
           </div>
-          {ramEstimate.gpu_warning && (
+          {adjusted.gpuVramMb != null && ramEstimate.gpu_vram_available_mb != null && adjusted.gpuVramMb > ramEstimate.gpu_vram_available_mb && (
             <div className="flex items-center gap-2 mt-1" style={{ color: "#f59e0b" }}>
               <AlertTriangle size={12} className="shrink-0" />
-              <span>{ramEstimate.gpu_warning}</span>
+              <span>
+                GPU training needs ~{formatMb(adjusted.gpuVramMb)} but GPU has {formatMb(ramEstimate.gpu_vram_available_mb)}. Training will fall back to CPU automatically.
+              </span>
             </div>
           )}
         </div>

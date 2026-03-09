@@ -609,13 +609,14 @@ describe("ModellingConfig", () => {
     })
 
     it("shows RAM estimate data when resolved", async () => {
+      // bytes_per_row=700 → 700 * 100k * 3.0 / 1024² ≈ 200 MB
       mockEstimateTrainingRam.mockResolvedValue({
         total_rows: 100000,
         safe_row_limit: null,
         estimated_mb: 50,
         training_mb: 200,
         available_mb: 8192,
-        bytes_per_row: 500,
+        bytes_per_row: 700,
         was_downsampled: false,
       })
       renderConfig()
@@ -662,7 +663,7 @@ describe("ModellingConfig", () => {
       })
     })
 
-    it("shows GPU warning when gpu_warning is set", async () => {
+    it("shows GPU warning when estimated VRAM exceeds available", async () => {
       mockEstimateTrainingRam.mockResolvedValue({
         total_rows: 100000,
         safe_row_limit: null,
@@ -672,11 +673,11 @@ describe("ModellingConfig", () => {
         bytes_per_row: 500,
         was_downsampled: false,
         gpu_vram_estimated_mb: 12000,
-        gpu_warning: "VRAM may be insufficient",
+        gpu_vram_available_mb: 8192,
       })
       renderConfig()
       await waitFor(() => {
-        expect(screen.getByText("VRAM may be insufficient")).toBeTruthy()
+        expect(screen.getByText(/GPU training needs.*but GPU has/)).toBeTruthy()
       })
     })
   })
