@@ -587,3 +587,11 @@ class CatBoostAlgorithm(BaseAlgorithm):
 ALGORITHM_REGISTRY: dict[str, type[BaseAlgorithm]] = {
     "catboost": CatBoostAlgorithm,
 }
+
+# Register GLM if RustyStats is installed (lazy import keeps it optional)
+try:
+    from haute.modelling._rustystats import GLMAlgorithm
+
+    ALGORITHM_REGISTRY["glm"] = GLMAlgorithm
+except ImportError:
+    pass

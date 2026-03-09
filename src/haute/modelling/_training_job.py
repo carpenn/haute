@@ -30,6 +30,8 @@ from haute.modelling._split import (
 
 logger = get_logger(component="training_job")
 
+_MODEL_EXT_MAP: dict[str, str] = {"catboost": ".cbm", "glm": ".rsglm"}
+
 
 @dataclass
 class TrainResult:
@@ -58,6 +60,11 @@ class TrainResult:
     lorenz_curve: list[dict[str, float]] = field(default_factory=list)
     lorenz_curve_perfect: list[dict[str, float]] = field(default_factory=list)
     pdp_data: list[dict[str, Any]] = field(default_factory=list)
+    # GLM-specific (empty for CatBoost)
+    glm_coefficients: list[dict[str, Any]] = field(default_factory=list)
+    glm_relativities: list[dict[str, Any]] = field(default_factory=list)
+    glm_fit_statistics: dict[str, float] = field(default_factory=dict)
+    glm_regularization_path: dict[str, Any] | None = None
 
 
 @dataclass
@@ -111,6 +118,11 @@ class _MetricsResult:
     lorenz_curve: list[dict[str, float]]
     lorenz_curve_perfect: list[dict[str, float]]
     pdp_data: list[dict[str, Any]]
+    # GLM-specific
+    glm_coefficients: list[dict[str, Any]] = field(default_factory=list)
+    glm_relativities: list[dict[str, Any]] = field(default_factory=list)
+    glm_fit_statistics: dict[str, float] = field(default_factory=dict)
+    glm_regularization_path: dict[str, Any] | None = None
 
 
 class TrainingJob:
@@ -229,6 +241,39 @@ class TrainingJob:
         _report("Loading data", 0.0)
         prepared = self._prepare_data(_report)
 
+        # GLM: narrow features to only the terms the user selected.
+        # CatBoost uses all features; GLM should only carry the columns
+        # referenced by its terms dict so we don't build a massive
+        # design matrix or load unnecessary columns from parquet.
+        if self.algorithm == "glm":
+            glm_terms = self.params.get("terms", {})
+            if glm_terms:
+                term_names = set(glm_terms.keys())
+                missing = term_names - set(prepared.features)
+                if missing:
+                    raise ValueError(
+                        f"GLM terms reference columns not found in training data: "
+                        f"{sorted(missing)}. Available columns: {prepared.features[:20]}"
+                        + ("..." if len(prepared.features) > 20 else "")
+                    )
+                prepared = _PreparedData(
+                    data_path=prepared.data_path,
+                    owns_tmp=prepared.owns_tmp,
+                    features=[f for f in prepared.features if f in term_names],
+                    cat_features=[f for f in prepared.cat_features if f in term_names],
+                    total_rows=prepared.total_rows,
+                )
+                _report(
+                    f"GLM: using {len(prepared.features)} term features "
+                    f"({len(prepared.cat_features)} categorical)",
+                    0.12,
+                )
+                if not prepared.features:
+                    raise ValueError(
+                        "GLM: no valid features remaining after matching terms to data columns. "
+                        "Check that your factor names match column names in the training data."
+                    )
+
         _report("Splitting data", 0.15)
         split_result = self._split_data(prepared, _report)
 
@@ -271,6 +316,10 @@ class TrainingJob:
             lorenz_curve=metrics_result.lorenz_curve,
             lorenz_curve_perfect=metrics_result.lorenz_curve_perfect,
             pdp_data=metrics_result.pdp_data,
+            glm_coefficients=metrics_result.glm_coefficients,
+            glm_relativities=metrics_result.glm_relativities,
+            glm_fit_statistics=metrics_result.glm_fit_statistics,
+            glm_regularization_path=metrics_result.glm_regularization_path,
         )
 
         if self.mlflow_experiment:
@@ -311,8 +360,10 @@ class TrainingJob:
                 if null_count is not None and null_count > 0:
                     _mem_checkpoint(f"target has {null_count:,} null rows (will be cleaned)")
 
-            tmp_fd, data_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_split_")
-            os.close(tmp_fd)
+            with tempfile.NamedTemporaryFile(
+                suffix=".parquet", prefix="haute_split_", delete=False,
+            ) as f:
+                data_path = f.name
             owns_tmp = True
             df.write_parquet(data_path)
             del df
@@ -338,8 +389,10 @@ class TrainingJob:
         )
         if null_count is not None and null_count > 0:
             clean_lf = pl.scan_parquet(data_path).filter(pl.col(self.target).is_not_null())
-            tmp_fd2, clean_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_clean_")
-            os.close(tmp_fd2)
+            with tempfile.NamedTemporaryFile(
+                suffix=".parquet", prefix="haute_clean_", delete=False,
+            ) as f:
+                clean_path = f.name
             try:
                 clean_lf.sink_parquet(clean_path)
             except Exception as sink_exc:
@@ -391,20 +444,16 @@ class TrainingJob:
             f"split mask (train={n_train:,} val={n_validation:,} holdout={n_holdout:,})"
         )
 
-        # Write split parquet: original data + _partition column
-        tmp_fd3, split_path = tempfile.mkstemp(suffix=".parquet", prefix="haute_split_")
-        os.close(tmp_fd3)
-        try:
-            (
-                pl.scan_parquet(data_path)
-                .with_columns(mask.to_frame().lazy())
-                .sink_parquet(split_path)
-            )
-        except Exception as sink_exc:
-            logger.info("sink_streaming_fallback", step="split_mask", reason=str(sink_exc))
-            df_tmp = pl.scan_parquet(data_path).collect(engine="streaming")
-            df_tmp.with_columns(mask).write_parquet(split_path)
-            del df_tmp
+        # Write split parquet: original data + _partition column.
+        # Read eagerly (data already fits after RAM-based downsampling),
+        # add partition mask, write back.
+        with tempfile.NamedTemporaryFile(
+            suffix=".parquet", prefix="haute_split_", delete=False,
+        ) as f:
+            split_path = f.name
+        df_data = pl.read_parquet(data_path)
+        df_data.with_columns(mask).write_parquet(split_path)
+        del df_data
         del mask
         gc.collect()
         _malloc_trim()
@@ -430,8 +479,8 @@ class TrainingJob:
         on_iteration: IterationCallback | None,
         _report: Callable[[str, float], None],
     ) -> _TrainModelResult:
-        """Build train/eval pools, fit the model, and free pool memory."""
-        from haute.modelling._algorithms import _build_pool, _mem_checkpoint
+        """Build train/eval pools (or DataFrames for GLM), fit the model."""
+        from haute.modelling._algorithms import _mem_checkpoint
 
         data_path = split_result.split_path
         has_validation = split_result.n_validation > 0
@@ -447,84 +496,123 @@ class TrainingJob:
 
         # Resolve loss function and inject into params
         fit_params = {**self.params}
-        resolved_loss = resolve_loss_function(self.loss_function, self.task, self.variance_power)
-        if resolved_loss:
-            fit_params["loss_function"] = resolved_loss
 
-        # Read train partition, extract labels, free DataFrame, then build pool.
-        _report("Building training pool", 0.2)
+        # GLM: pack all GLM-specific config into fit_params for the algorithm
+        is_glm = self.algorithm == "glm"
+        if not is_glm:
+            resolved_loss = resolve_loss_function(
+                self.loss_function, self.task, self.variance_power,
+            )
+            if resolved_loss:
+                fit_params["loss_function"] = resolved_loss
+
+        # Read train partition
+        _report("Loading training data", 0.2)
         train_df = (
-            pl.scan_parquet(data_path)
+            self._scan_with_columns(data_path, features)
             .filter(pl.col("_partition") == PARTITION_TRAIN)
             .drop("_partition")
             .collect()
         )
         _mem_checkpoint(f"read train partition ({len(train_df):,} rows)")
 
-        train_y = train_df[self.target].cast(pl.Float64).to_numpy()
-        train_w = train_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
-        train_baseline = train_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
-        train_features_df = train_df.select(features)
-        del train_df
-        gc.collect()
-        _malloc_trim()
-        _mem_checkpoint("extracted labels, freed train_df")
-
-        train_pool = _build_pool(
-            train_features_df, features, cat_features,
-            y=train_y, w=train_w, baseline=train_baseline,
-        )
-        del train_features_df, train_y, train_w, train_baseline
-        gc.collect()
-        _malloc_trim()
-        _mem_checkpoint("train pool built")
-
-        # Build eval pool from validation set (if present — needed for early stopping)
-        eval_pool = None
+        eval_df = None
         if has_validation:
-            _report("Building eval pool", 0.25)
-            val_df = (
-                pl.scan_parquet(data_path)
+            _report("Loading validation data", 0.25)
+            eval_df = (
+                self._scan_with_columns(data_path, features)
                 .filter(pl.col("_partition") == PARTITION_VALIDATION)
                 .drop("_partition")
                 .collect()
             )
-            _mem_checkpoint(f"read validation partition ({len(val_df):,} rows)")
+            _mem_checkpoint(f"read validation partition ({len(eval_df):,} rows)")
 
-            val_y = val_df[self.target].cast(pl.Float64).to_numpy()
-            val_w = val_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
-            val_baseline = val_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
-            val_features_df = val_df.select(features)
-            del val_df
-            gc.collect()
-            _malloc_trim()
-
-            eval_pool = _build_pool(
-                val_features_df, features, cat_features,
-                y=val_y, w=val_w, baseline=val_baseline,
+        if is_glm:
+            # GLM: pass DataFrames directly (no Pool conversion needed)
+            _report("Fitting GLM", 0.3)
+            fit_result = algo.fit(
+                train_df, features, cat_features,
+                self.target, self.weight, fit_params, self.task,
+                on_iteration=on_iteration,
+                eval_df=eval_df,
+                offset=self.offset,
+                monotone_constraints=self.monotone_constraints,
+                feature_weights=self.feature_weights,
             )
-            del val_features_df, val_y, val_w, val_baseline
+            _mem_checkpoint("glm algo.fit() returned")
+            del train_df, eval_df
             gc.collect()
             _malloc_trim()
-            _mem_checkpoint("eval pool built")
+        else:
+            # CatBoost: build memory-efficient pools, then fit
+            from haute.modelling._algorithms import _build_pool
 
-        # Fit with pre-built pools
-        _report("Training model", 0.3)
-        fit_result = algo.fit(
-            None, features, cat_features,
-            self.target, self.weight, fit_params, self.task,
-            on_iteration=on_iteration,
-            offset=self.offset,
-            monotone_constraints=self.monotone_constraints,
-            feature_weights=self.feature_weights,
-            pool=train_pool,
-            eval_pool=eval_pool,
-        )
-        _mem_checkpoint("algo.fit() returned")
-        del train_pool, eval_pool
-        gc.collect()
-        _malloc_trim()
-        _mem_checkpoint("del pools")
+            train_y = train_df[self.target].cast(pl.Float64).to_numpy()
+            train_w = (
+                train_df[self.weight].cast(pl.Float64).to_numpy()
+                if self.weight else None
+            )
+            train_baseline = (
+                train_df[self.offset].cast(pl.Float64).to_numpy()
+                if self.offset else None
+            )
+            train_features_df = train_df.select(features)
+            del train_df
+            gc.collect()
+            _malloc_trim()
+            _mem_checkpoint("extracted labels, freed train_df")
+
+            train_pool = _build_pool(
+                train_features_df, features, cat_features,
+                y=train_y, w=train_w, baseline=train_baseline,
+            )
+            del train_features_df, train_y, train_w, train_baseline
+            gc.collect()
+            _malloc_trim()
+            _mem_checkpoint("train pool built")
+
+            eval_pool = None
+            if eval_df is not None:
+                _report("Building eval pool", 0.25)
+                val_y = eval_df[self.target].cast(pl.Float64).to_numpy()
+                val_w = (
+                    eval_df[self.weight].cast(pl.Float64).to_numpy()
+                    if self.weight else None
+                )
+                val_baseline = (
+                    eval_df[self.offset].cast(pl.Float64).to_numpy()
+                    if self.offset else None
+                )
+                val_features_df = eval_df.select(features)
+                del eval_df
+                gc.collect()
+                _malloc_trim()
+
+                eval_pool = _build_pool(
+                    val_features_df, features, cat_features,
+                    y=val_y, w=val_w, baseline=val_baseline,
+                )
+                del val_features_df, val_y, val_w, val_baseline
+                gc.collect()
+                _malloc_trim()
+                _mem_checkpoint("eval pool built")
+
+            _report("Training model", 0.3)
+            fit_result = algo.fit(
+                None, features, cat_features,
+                self.target, self.weight, fit_params, self.task,
+                on_iteration=on_iteration,
+                offset=self.offset,
+                monotone_constraints=self.monotone_constraints,
+                feature_weights=self.feature_weights,
+                pool=train_pool,
+                eval_pool=eval_pool,
+            )
+            _mem_checkpoint("algo.fit() returned")
+            del train_pool, eval_pool
+            gc.collect()
+            _malloc_trim()
+            _mem_checkpoint("del pools")
 
         return _TrainModelResult(
             model=fit_result.model,
@@ -533,15 +621,49 @@ class TrainingJob:
             fit_params=fit_params,
         )
 
+    def _glm_select_columns(self, features: list[str]) -> list[str] | None:
+        """Column subset needed for GLM parquet reads, or ``None`` for CatBoost.
+
+        GLM only needs the terms + target + weight + offset columns.
+        Returning ``None`` means "read all columns" (CatBoost path).
+        """
+        if self.algorithm != "glm":
+            return None
+        needed = set(features)
+        needed.add(self.target)
+        if self.weight:
+            needed.add(self.weight)
+        if self.offset:
+            needed.add(self.offset)
+        return sorted(needed)
+
+    def _scan_with_columns(self, data_path: str, features: list[str]) -> pl.LazyFrame:
+        """Scan parquet with optional GLM column projection (includes _partition)."""
+        scan = pl.scan_parquet(data_path)
+        glm_columns = self._glm_select_columns(features)
+        if glm_columns is not None:
+            scan = scan.select([*glm_columns, "_partition"])
+        return scan
+
     def _read_partition(
         self,
         data_path: str,
         partition: int,
-        features: list[str],
+        columns: list[str] | None = None,
     ) -> pl.DataFrame:
-        """Read a single partition from the split parquet."""
+        """Read a single partition from the split parquet.
+
+        If *columns* is given, only those columns (plus ``_partition`` for
+        filtering) are loaded — Polars pushes the projection into the
+        parquet reader so unused columns never touch RAM.
+        """
+        scan = pl.scan_parquet(data_path)
+        if columns is not None:
+            # Always need _partition for the filter; drop it after
+            select_cols = columns if "_partition" in columns else [*columns, "_partition"]
+            scan = scan.select(select_cols)
         return (
-            pl.scan_parquet(data_path)
+            scan
             .filter(pl.col("_partition") == partition)
             .drop("_partition")
             .collect()
@@ -579,6 +701,7 @@ class TrainingJob:
 
         has_validation = split_result.n_validation > 0
         has_holdout = split_result.n_holdout > 0
+        glm_columns = self._glm_select_columns(features)
 
         # Feature importance (doesn't need eval data)
         importance = algo.feature_importance(model)
@@ -598,7 +721,7 @@ class TrainingJob:
 
         # ── Read the diagnostics partition ONCE — metrics + all diagnostics ──
         _report("Computing diagnostics", 0.8)
-        diag_df = self._read_partition(data_path, diag_partition, features)
+        diag_df = self._read_partition(data_path, diag_partition, columns=glm_columns)
         _mem_checkpoint(f"read {diagnostics_set} partition for diagnostics ({len(diag_df):,} rows)")
         y_true = diag_df[self.target].to_numpy()
         y_pred = algo.predict(model, diag_df, features)
@@ -627,8 +750,8 @@ class TrainingJob:
         if hasattr(algo, "shap_summary"):
             try:
                 shap_summary = algo.shap_summary(model, diag_df, features)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("shap_summary_failed", error=str(exc))
         if hasattr(algo, "feature_importance_typed"):
             try:
                 _diag_pool = _build_pool(
@@ -638,8 +761,8 @@ class TrainingJob:
                     model, _diag_pool, "LossFunctionChange",
                 )
                 del _diag_pool
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("feature_importance_loss_failed", error=str(exc))
 
         # Residuals, scatter, Lorenz
         _report("Computing diagnostics", 0.86)
@@ -651,6 +774,38 @@ class TrainingJob:
         _report("Computing partial dependence", 0.87)
         pdp_data = compute_pdp(model, algo, diag_df, sorted_features, cat_features)
 
+        # ── GLM-specific diagnostics ──
+        glm_coefficients: list[dict[str, Any]] = []
+        glm_relativities: list[dict[str, Any]] = []
+        glm_fit_statistics: dict[str, float] = {}
+        glm_regularization_path: dict[str, Any] | None = None
+
+        if hasattr(algo, "coefficients_table"):
+            try:
+                glm_coefficients = algo.coefficients_table(model)
+            except Exception as exc:
+                logger.warning("glm_coefficients_failed", error=str(exc))
+        if hasattr(algo, "relativities"):
+            try:
+                glm_relativities = algo.relativities(model)
+            except Exception as exc:
+                logger.warning("glm_relativities_failed", error=str(exc))
+        if hasattr(algo, "fit_statistics"):
+            try:
+                glm_fit_statistics = algo.fit_statistics(model)
+            except Exception as exc:
+                logger.warning("glm_fit_statistics_failed", error=str(exc))
+        if hasattr(model, "regularization_path") and model.regularization_path:
+            try:
+                rp = model.regularization_path
+                glm_regularization_path = {
+                    "selected_alpha": float(getattr(rp, "selected_alpha", 0)),
+                    "n_nonzero": int(model.n_nonzero())
+                        if hasattr(model, "n_nonzero") else 0,
+                }
+            except Exception as exc:
+                logger.warning("glm_regularization_path_failed", error=str(exc))
+
         del diag_df
         gc.collect()
 
@@ -660,7 +815,7 @@ class TrainingJob:
             _report("Running cross-validation", 0.88)
             try:
                 _cv_df = (
-                    pl.scan_parquet(data_path)
+                    self._scan_with_columns(data_path, features)
                     .drop("_partition")
                     .collect()
                 )
@@ -671,8 +826,8 @@ class TrainingJob:
                 )
                 del _cv_df
                 gc.collect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("cv_failed", error=str(exc))
 
         # Clean up split parquet
         if split_result.owns_tmp and os.path.exists(data_path):
@@ -694,11 +849,15 @@ class TrainingJob:
             lorenz_curve=lorenz_model,
             lorenz_curve_perfect=lorenz_perfect,
             pdp_data=pdp_data,
+            glm_coefficients=glm_coefficients,
+            glm_relativities=glm_relativities,
+            glm_fit_statistics=glm_fit_statistics,
+            glm_regularization_path=glm_regularization_path,
         )
 
     def _save_artifacts(self, train_result: _TrainModelResult) -> Path:
         """Save the trained model to disk and return the model path."""
-        ext = ".cbm" if self.algorithm == "catboost" else ".model"
+        ext = _MODEL_EXT_MAP.get(self.algorithm, ".model")
         model_path = Path(self.output_dir) / f"{self.name}{ext}"
         train_result.algo.save(train_result.model, model_path)
         return model_path
@@ -802,6 +961,10 @@ class TrainingJob:
             residuals_stats=result.residuals_stats,
             actual_vs_predicted=result.actual_vs_predicted,
             lorenz_curve=result.lorenz_curve,
+            glm_coefficients=result.glm_coefficients,
+            glm_relativities=result.glm_relativities,
+            glm_fit_statistics=result.glm_fit_statistics,
+            glm_regularization_path=result.glm_regularization_path,
             lorenz_curve_perfect=result.lorenz_curve_perfect,
             pdp_data=result.pdp_data,
             holdout_metrics=result.holdout_metrics,

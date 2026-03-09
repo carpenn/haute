@@ -112,6 +112,46 @@ export function SummaryTab({ result, jobId, mlflowBackend, config }: SummaryTabP
         </div>
       )}
 
+      {/* GLM fit statistics */}
+      {result.glm_fit_statistics && Object.keys(result.glm_fit_statistics).length > 0 && (
+        <div className="min-w-[180px]">
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+            Fit Statistics
+          </label>
+          <div className="mt-1 space-y-0.5">
+            {Object.entries(result.glm_fit_statistics).map(([k, v]) => (
+              <div key={k} className="flex justify-between text-xs font-mono gap-4">
+                <span style={{ color: "var(--text-secondary)" }}>{k}</span>
+                <span style={{ color: "var(--text-primary)" }}>{typeof v === "number" ? v.toFixed(4) : String(v)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* GLM regularization info */}
+      {result.glm_regularization_path && (result.glm_regularization_path.selected_alpha != null || result.glm_regularization_path.n_nonzero != null) && (
+        <div className="min-w-[160px]">
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+            Regularization
+          </label>
+          <div className="mt-1 space-y-0.5">
+            {result.glm_regularization_path.selected_alpha != null && (
+              <div className="flex justify-between text-xs font-mono gap-4">
+                <span style={{ color: "var(--text-secondary)" }}>Alpha</span>
+                <span style={{ color: "var(--text-primary)" }}>{result.glm_regularization_path.selected_alpha.toFixed(6)}</span>
+              </div>
+            )}
+            {result.glm_regularization_path.n_nonzero != null && (
+              <div className="flex justify-between text-xs font-mono gap-4">
+                <span style={{ color: "var(--text-secondary)" }}>Non-zero</span>
+                <span style={{ color: "var(--text-primary)" }}>{result.glm_regularization_path.n_nonzero}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* MLflow export */}
       {mlflowBackend?.installed && jobId && (
         <div className="min-w-[200px]">

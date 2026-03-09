@@ -72,6 +72,8 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
+    df
+    df
     return df
 
 
@@ -101,11 +103,23 @@ def avg_top_5(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
+@pipeline.node(config="config/model_training/avg_top_5_glm.json")
+def avg_top_5_glm(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
+    """avg_top_5_glm node"""
+    return df
+
+
 @pipeline.node(config="config/model_scoring/competitor_scoring.json")
 def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_scoring node"""
     from haute.graph_utils import score_from_config
     return score_from_config(policies, config="config/model_scoring/competitor_scoring.json")
+
+
+@pipeline.node(config="config/model_training/Model_Training_11.json")
+def Model_Training_11(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
+    """Model Training 11 node"""
+    return df
 
 
 @pipeline.node(config="config/quote_response/output.json")
@@ -124,3 +138,5 @@ pipeline.connect("competitor_join", "avg_top_5")
 pipeline.connect("policies", "competitor_scoring")
 pipeline.connect("quotes", "feature_processing")
 pipeline.connect("competitor_scoring", "output")
+pipeline.connect("competitor_join", "avg_top_5_glm")
+pipeline.connect("competitor_join", "Model_Training_11")

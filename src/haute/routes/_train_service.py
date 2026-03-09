@@ -31,6 +31,14 @@ _DEFAULT_DEPTH = 6  # CatBoost tree depth for VRAM estimation
 _DEFAULT_TEST_SIZE = 0.2  # train/test split proportion
 _DEFAULT_SPLIT_SEED = 42  # reproducible random split seed
 
+# GLM config keys live at the top level of ModellingConfig (not inside
+# config.params).  Must be merged into train_params for GLMAlgorithm.
+_GLM_CONFIG_KEYS: tuple[str, ...] = (
+    "terms", "family", "link", "interactions",
+    "regularization", "alpha", "l1_ratio", "intercept",
+    "var_power", "offset", "cv_folds",
+)
+
 
 class _VramCheck:
     """Result of a GPU VRAM feasibility check."""
@@ -144,6 +152,7 @@ class TrainService:
 
     def __init__(self, store: JobStore) -> None:
         self._store = store
+        self._start_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -159,15 +168,16 @@ class TrainService:
         config = node.data.config
 
         self._validate_config(config)
-        self._check_no_concurrent_jobs()
 
-        job_id = self._store.create_job({
-            "status": "running",
-            "progress": 0.0,
-            "message": "Starting",
-            "config": dict(config),
-            "node_label": node.data.label,
-        })
+        with self._start_lock:
+            self._check_no_concurrent_jobs()
+            job_id = self._store.create_job({
+                "status": "running",
+                "progress": 0.0,
+                "message": "Starting",
+                "config": dict(config),
+                "node_label": node.data.label,
+            })
 
         preamble_ns = self._compile_preamble(body.graph)
         ram_warning, row_limit, total_source_rows, probe_columns = (
@@ -189,6 +199,10 @@ class TrainService:
             self._store.update_job(job_id, warning=None)
 
         train_params = {**config.get("params", {})}
+        for k in _GLM_CONFIG_KEYS:
+            if k in config and k not in train_params:
+                train_params[k] = config[k]
+
         ram_warning = self._check_gpu_fallback(
             train_params, row_limit, total_source_rows, probe_columns,
             ram_warning, job_id,
@@ -393,7 +407,7 @@ class TrainService:
                 os.unlink(tmp_parquet)
             error_msg = f"Pipeline execution failed: {exc}"
             logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
-            self._store.jobs[job_id] = {"status": "error", "message": error_msg}
+            self._store.update_job(job_id, status="error", message=error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
 
         return tmp_parquet

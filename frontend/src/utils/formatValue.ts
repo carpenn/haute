@@ -19,6 +19,13 @@ export function formatNumber(n: number): string {
   return n.toFixed(4)
 }
 
+/** Safely format a number with fixed decimal places. Returns 'N/A' for non-numeric/non-finite values. */
+export function formatFixed(value: unknown, digits: number): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toFixed(digits)
+    : 'N/A'
+}
+
 export function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(0)}s`
   const mins = Math.floor(seconds / 60)

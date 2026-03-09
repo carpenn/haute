@@ -117,19 +117,37 @@ def _wrap_catboost(model: CatBoostRegressor | CatBoostClassifier) -> ScoringMode
     )
 
 
+def _load_rustystats_model(path: str) -> ScoringModel:
+    """Load a RustyStats GLM from a ``.rsglm`` binary file."""
+    import rustystats as rs
+
+    with open(path, "rb") as f:
+        model = rs.GLMModel.from_bytes(f.read())
+    feature_names = list(model.feature_names) if hasattr(model, "feature_names") else []
+    return ScoringModel(
+        model=model,
+        feature_names=feature_names,
+        cat_feature_names=frozenset(),
+        flavor="rustystats",
+    )
+
+
 def load_local_model(path: str, task: str = "regression") -> ScoringModel:
     """Load a model from a local file path (e.g. bundled deploy artifact).
 
     Auto-detects flavor from file extension:
     - ``.cbm`` → CatBoost native loader
+    - ``.rsglm`` → RustyStats GLM loader
     - Otherwise → not yet supported (pyfunc local loading planned)
     """
     if path.endswith(".cbm"):
         raw = _load_catboost_model(path, task)
         return _wrap_catboost(raw)
+    if path.endswith(".rsglm"):
+        return _load_rustystats_model(path)
     raise NotImplementedError(
         f"Local model loading not yet supported for: {path!r}. "
-        "Only .cbm (CatBoost) files are currently supported for bundled deploy."
+        "Supported formats: .cbm (CatBoost), .rsglm (RustyStats GLM)."
     )
 
 
@@ -193,14 +211,36 @@ def _find_cbm_artifact(client: MlflowClient, run_id: str) -> str:
     )
 
 
+def _find_rsglm_artifact(client: MlflowClient, run_id: str) -> str:
+    """Find the first ``.rsglm`` artifact in a run's artifact list."""
+    artifacts = client.list_artifacts(run_id)
+    for art in artifacts:
+        if art.path.endswith(".rsglm"):
+            return str(art.path)
+    for art in artifacts:
+        if art.is_dir:
+            sub_artifacts = client.list_artifacts(run_id, art.path)
+            for sub in sub_artifacts:
+                if sub.path.endswith(".rsglm"):
+                    return str(sub.path)
+    raise FileNotFoundError(
+        f"No .rsglm artifact found in run '{run_id}'."
+    )
+
+
 def _find_model_artifact(client: MlflowClient, run_id: str) -> tuple[str, str]:
     """Find the model artifact in a run, returning ``(path, flavor)``.
 
-    Checks for CatBoost (``.cbm``) first, then falls back to a pyfunc
-    model directory.
+    Checks for CatBoost (``.cbm``) first, then RustyStats (``.rsglm``),
+    then falls back to a pyfunc model directory.
     """
     try:
         return _find_cbm_artifact(client, run_id), "catboost"
+    except FileNotFoundError:
+        pass
+
+    try:
+        return _find_rsglm_artifact(client, run_id), "rustystats"
     except FileNotFoundError:
         pass
 
@@ -219,7 +259,7 @@ def _find_model_artifact(client: MlflowClient, run_id: str) -> tuple[str, str]:
 
     raise FileNotFoundError(
         f"No model artifact found in run '{run_id}'. "
-        "Expected .cbm file (CatBoost) or model directory (pyfunc)."
+        "Expected .cbm (CatBoost), .rsglm (RustyStats), or model directory (pyfunc)."
     )
 
 
@@ -344,7 +384,12 @@ def load_mlflow_model(
     # else: detect from the artifact path extension
 
     # Detect flavor from artifact path
-    flavor = "catboost" if resolved_artifact.endswith(".cbm") else "pyfunc"
+    if resolved_artifact.endswith(".cbm"):
+        flavor = "catboost"
+    elif resolved_artifact.endswith(".rsglm"):
+        flavor = "rustystats"
+    else:
+        flavor = "pyfunc"
 
     cache_key = (source_type, resolved_run_id, resolved_version or resolved_artifact, task)
 
@@ -360,6 +405,11 @@ def load_mlflow_model(
         )
         raw_model = _load_catboost_model(local_path, task)
         scoring_model = _wrap_catboost(raw_model)
+    elif flavor == "rustystats":
+        local_path = _resolve_artifact_local(
+            mlflow, resolved_run_id, resolved_artifact,
+        )
+        scoring_model = _load_rustystats_model(local_path)
     else:
         raw_model = _load_pyfunc_model(mlflow, resolved_run_id, resolved_artifact)
         scoring_model = _wrap_pyfunc(raw_model)
@@ -393,11 +443,17 @@ def _prepare_predict_frame(
     Handles null values: float32 cast for numerics (null→NaN),
     sentinel fill + Categorical cast for categorical features.
 
-    Returns numpy array or pandas DataFrame depending on model needs:
+    Returns numpy array, pandas DataFrame, or Polars DataFrame depending
+    on model needs:
+    - RustyStats: Polars DataFrame (native Polars input)
     - CatBoost with no categoricals: numpy array (fastest)
     - CatBoost with categoricals: pandas DataFrame (CatBoost requirement)
     - Pyfunc: always pandas DataFrame
     """
+    # RustyStats handles its own preprocessing — pass Polars directly
+    if flavor == "rustystats":
+        return df_eager
+
     numeric_cols = [c for c in features if c not in cat_feature_names]
     cat_cols = [c for c in features if c in cat_feature_names]
     selected = df_eager.select(features)

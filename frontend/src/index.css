@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: dark;
+
   /* Surfaces - blue-black */
   --bg-base: #0f1117;
   --bg-canvas: #131620;
@@ -24,12 +26,30 @@
   --accent: #3b82f6;
   --accent-soft: rgba(59,130,246,.12);
 
+  /* GLM significance & chart colors */
+  --signif-high: #22c55e;
+  --signif-med: #4ade80;
+  --signif-low: #86efac;
+  --signif-marginal: #fbbf24;
+  --chart-above: #a855f7;
+  --chart-below: #3b82f6;
+
   /* Node shadows - subtle, single layer */
   --node-shadow: 0 1px 4px rgba(0,0,0,.4);
 
   /* Borders */
   --border: rgba(255,255,255,.07);
   --border-bright: rgba(255,255,255,.10);
+}
+
+/* Native dropdown styling — forces dark background on option popups */
+select {
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+}
+option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 html, body, #root {

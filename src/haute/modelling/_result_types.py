@@ -29,6 +29,11 @@ class ModelDiagnostics:
     pdp_data: list[dict[str, Any]] = field(default_factory=list)
     holdout_metrics: dict[str, float] = field(default_factory=dict)
     diagnostics_set: str = "validation"
+    # GLM-specific
+    glm_coefficients: list[dict[str, Any]] = field(default_factory=list)
+    glm_relativities: list[dict[str, Any]] = field(default_factory=list)
+    glm_fit_statistics: dict[str, float] = field(default_factory=dict)
+    glm_regularization_path: dict[str, Any] | None = None
 
 
 @dataclass

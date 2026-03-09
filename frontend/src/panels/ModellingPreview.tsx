@@ -18,6 +18,8 @@ import { ResidualsTab } from "./modelling/ResidualsTab"
 import { FeaturesTab } from "./modelling/FeaturesTab"
 import { AveTab } from "./modelling/AveTab"
 import { PdpTab } from "./modelling/PdpTab"
+import { GLMCoefficientsTab } from "./modelling/GLMCoefficientsTab"
+import { GLMRelativitiesTab } from "./modelling/GLMRelativitiesTab"
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -35,11 +37,13 @@ interface ModellingPreviewProps {
 
 // ─── Tab definitions ─────────────────────────────────────────────
 
-const TAB_KEYS = ["summary", "loss", "lift", "residuals", "features", "ave", "pdp"] as const
+const TAB_KEYS = ["summary", "coefficients", "relativities", "loss", "lift", "residuals", "features", "ave", "pdp"] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
 const TAB_LABELS: Record<TabKey, string> = {
   summary: "Summary",
+  coefficients: "Coefficients",
+  relativities: "Relativities",
   loss: "Loss",
   lift: "Lift",
   residuals: "Residuals",
@@ -70,6 +74,8 @@ export function ModellingPreview({
   const availableTabs = TAB_KEYS.filter(t => {
     switch (t) {
       case "summary": return true
+      case "coefficients": return result.glm_coefficients && result.glm_coefficients.length > 0
+      case "relativities": return result.glm_relativities && result.glm_relativities.length > 0
       case "loss": return result.loss_history && result.loss_history.length > 1
       case "lift": return (result.double_lift && result.double_lift.length > 0) || (result.lorenz_curve && result.lorenz_curve.length > 0)
       case "residuals": return (result.residuals_histogram && result.residuals_histogram.length > 0) || (result.actual_vs_predicted && result.actual_vs_predicted.length > 0)
@@ -158,6 +164,8 @@ export function ModellingPreview({
         {tab === "summary" && (
           <SummaryTab result={result} jobId={data.jobId} mlflowBackend={mlflowBackend} config={{}} />
         )}
+        {tab === "coefficients" && <GLMCoefficientsTab result={result} />}
+        {tab === "relativities" && <GLMRelativitiesTab result={result} />}
         {tab === "loss" && <LossTab result={result} />}
         {tab === "lift" && <LiftTab result={result} />}
         {tab === "residuals" && <ResidualsTab result={result} />}

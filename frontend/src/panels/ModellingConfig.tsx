@@ -10,6 +10,9 @@ import { TargetAndTaskConfig } from "./modelling/TargetAndTaskConfig"
 import { FeatureAndAlgorithmConfig } from "./modelling/FeatureAndAlgorithmConfig"
 import { SplitAndMetricsConfig } from "./modelling/SplitAndMetricsConfig"
 import { TrainingActionsAndResults } from "./modelling/TrainingActionsAndResults"
+import { GLMTargetConfig } from "./modelling/GLMTargetConfig"
+import { GLMFactorConfig } from "./modelling/GLMFactorConfig"
+import { GLMRegularizationConfig } from "./modelling/GLMRegularizationConfig"
 
 type ModellingConfigProps = {
   config: Record<string, unknown>
@@ -131,22 +134,82 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
           Select Algorithm
         </label>
-        <button
-          onClick={() => onUpdate("algorithm", "catboost")}
-          className="w-full flex items-start gap-3 px-3 py-3 rounded-lg text-left transition-colors"
-          style={{ background: "var(--chrome-hover)", border: "1px solid var(--border)" }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--accent-soft)" }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--chrome-hover)" }}
-        >
-          <div className="min-w-0">
-            <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>CatBoost</div>
-            <div className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>Gradient boosting — handles categoricals natively, fast GPU training</div>
-          </div>
-        </button>
+        {[
+          { id: "catboost", name: "CatBoost", desc: "Gradient boosting — handles categoricals natively, fast GPU training" },
+          { id: "glm", name: "GLM", desc: "Generalised linear model — interpretable coefficients, regulatory-friendly" },
+        ].map(algo => (
+          <button
+            key={algo.id}
+            onClick={() => onUpdate("algorithm", algo.id)}
+            className="w-full flex items-start gap-3 px-3 py-3 rounded-lg text-left transition-colors"
+            style={{ background: "var(--chrome-hover)", border: "1px solid var(--border)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--accent-soft)" }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--chrome-hover)" }}
+          >
+            <div className="min-w-0">
+              <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{algo.name}</div>
+              <div className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{algo.desc}</div>
+            </div>
+          </button>
+        ))}
       </div>
     )
   }
 
+  // ── GLM config panels ──
+  if (algorithm === "glm") {
+    return (
+      <div className="px-4 py-3 space-y-4">
+        <GLMTargetConfig
+          config={config}
+          onUpdate={onUpdate}
+          columns={columns}
+        />
+
+        <GLMFactorConfig
+          config={config}
+          onUpdate={onUpdate}
+          columns={columns}
+          target={target}
+          weight={weight}
+          exclude={exclude}
+        />
+
+        <GLMRegularizationConfig
+          config={config}
+          onUpdate={onUpdate}
+        />
+
+        <SplitAndMetricsConfig
+          config={config}
+          onUpdate={onUpdate}
+          columns={columns}
+          target={target}
+          weight={weight}
+          exclude={exclude}
+          split={split}
+          mlflowOpen={mlflowOpen}
+          monotonicOpen={monotonicOpen}
+          toggleSection={toggleSection}
+          onSplitUpdate={handleSplitUpdate}
+        />
+
+        <TrainingActionsAndResults
+          target={target}
+          training={training}
+          trainProgress={trainProgress}
+          trainResult={trainResult}
+          isStale={isStale}
+          ramEstimate={ramEstimate}
+          ramEstimateLoading={ramEstimateLoading}
+          rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
+          onTrain={handleTrain}
+        />
+      </div>
+    )
+  }
+
+  // ── CatBoost config panels ──
   return (
     <div className="px-4 py-3 space-y-4">
       <TargetAndTaskConfig

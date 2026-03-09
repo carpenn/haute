@@ -54,6 +54,11 @@ export type TrainResult = {
   pdp_data?: { feature: string; type: string; grid: { value: number | string; avg_prediction: number }[] }[]
   warning?: string | null
   total_source_rows?: number | null
+  // GLM-specific
+  glm_coefficients?: { feature: string; coefficient: number; std_error: number; z_value: number; p_value: number; significance: string }[]
+  glm_relativities?: { feature: string; relativity: number; ci_lower?: number; ci_upper?: number }[]
+  glm_fit_statistics?: Record<string, number>
+  glm_regularization_path?: { selected_alpha?: number; n_nonzero?: number }
 }
 
 export type TrainProgress = {

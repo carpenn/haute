@@ -180,6 +180,29 @@ def log_experiment(
         if diag.pdp_data:
             _log_json_artifact(mlflow, diag.pdp_data, "pdp_data", "diagnostics")
 
+        # Log GLM-specific diagnostics
+        if diag.glm_coefficients:
+            _log_json_artifact(
+                mlflow, diag.glm_coefficients, "glm_coefficients", "glm",
+            )
+        if diag.glm_relativities:
+            _log_json_artifact(
+                mlflow, diag.glm_relativities, "glm_relativities", "glm",
+            )
+        if diag.glm_fit_statistics:
+            _log_json_artifact(
+                mlflow, diag.glm_fit_statistics, "glm_fit_statistics", "glm",
+            )
+            # Also log key GLM stats as top-level metrics
+            for key in ("aic", "bic", "deviance", "null_deviance"):
+                if key in diag.glm_fit_statistics:
+                    mlflow.log_metric(key, diag.glm_fit_statistics[key])
+        if diag.glm_regularization_path:
+            _log_json_artifact(
+                mlflow, diag.glm_regularization_path,
+                "glm_regularization_path", "glm",
+            )
+
         # Log holdout metrics as separate MLflow metrics
         if diag.holdout_metrics:
             for k, v in diag.holdout_metrics.items():

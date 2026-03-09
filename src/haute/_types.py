@@ -181,7 +181,7 @@ class ModellingConfig(TypedDict, total=False):
     target: str
     weight: str
     exclude: list[str]
-    algorithm: str  # "catboost"
+    algorithm: str  # "catboost" | "glm"
     task: str  # "regression" | "classification"
     params: dict[str, Any]
     split: dict[str, Any]
@@ -190,6 +190,23 @@ class ModellingConfig(TypedDict, total=False):
     model_name: str
     output_dir: str
     row_limit: int
+    # GLM-specific (RustyStats)
+    terms: dict[str, Any]
+    family: str
+    link: str
+    offset: str
+    interactions: list[dict[str, Any]]
+    regularization: str
+    alpha: float
+    l1_ratio: float
+    intercept: bool
+    var_power: float
+    cv_folds: int
+    # CatBoost / shared
+    loss_function: str
+    variance_power: float
+    monotone_constraints: dict[str, int]
+    feature_weights: dict[str, float]
 
 
 class OptimiserConfig(TypedDict, total=False):

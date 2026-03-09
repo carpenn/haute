@@ -1,0 +1,17 @@
+{
+  "algorithm": "glm",
+  "offset": null,
+  "terms": {
+    "proposer_age": {
+      "type": "bs",
+      "df": 5
+    }
+  },
+  "family": "gamma",
+  "link": "",
+  "metrics": [
+    "rmse"
+  ],
+  "row_limit": 100000,
+  "target": "avg_cheapest_5"
+}
