@@ -476,3 +476,41 @@ class TestDatabricksSchema:
         assert data["row_count"] == 3
         assert data["column_count"] == 2
         assert len(data["preview"]) <= 5
+
+
+# ---------------------------------------------------------------------------
+# Table name validation on route endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestRouteTableValidation:
+    """Verify that cache/progress endpoints reject invalid table names."""
+
+    def test_cache_status_rejects_invalid_table(self, client: TestClient) -> None:
+        resp = client.get("/api/databricks/cache", params={"table": "DROP TABLE foo"})
+        assert resp.status_code == 400
+        assert "Invalid table name" in resp.json()["detail"]
+
+    def test_delete_cache_rejects_invalid_table(self, client: TestClient) -> None:
+        resp = client.delete("/api/databricks/cache", params={"table": "../../../etc/passwd"})
+        assert resp.status_code == 400
+        assert "Invalid table name" in resp.json()["detail"]
+
+    def test_fetch_progress_rejects_invalid_table(self, client: TestClient) -> None:
+        resp = client.get(
+            "/api/databricks/fetch/progress",
+            params={"table": "just_a_table"},
+        )
+        assert resp.status_code == 400
+        assert "Invalid table name" in resp.json()["detail"]
+
+    def test_cache_status_accepts_valid_table(self, client: TestClient) -> None:
+        resp = client.get("/api/databricks/cache", params={"table": "cat.sch.tbl"})
+        assert resp.status_code == 200
+
+    def test_fetch_progress_accepts_valid_table(self, client: TestClient) -> None:
+        resp = client.get(
+            "/api/databricks/fetch/progress",
+            params={"table": "cat.sch.tbl"},
+        )
+        assert resp.status_code == 200

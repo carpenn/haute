@@ -20,6 +20,7 @@ from haute._git import (
     _get_user_slug,
     _is_own_branch,
     _slugify,
+    _validate_ref_name,
     archive_branch,
     create_branch,
     delete_branch,
@@ -592,3 +593,99 @@ class TestGetUserSlug:
         repo = _init_repo(tmp_path, user="Jean-Pierre O'Brien")
         slug = _get_user_slug(repo)
         assert slug == "jean-pierre-o-brien"
+
+
+# ---------------------------------------------------------------------------
+# Ref name validation (argument injection prevention)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRefName:
+    """_validate_ref_name blocks names that could be interpreted as git flags
+    or contain characters dangerous for shell/git."""
+
+    def test_normal_branch_passes(self) -> None:
+        _validate_ref_name("pricing/user/my-feature")
+
+    def test_normal_sha_passes(self) -> None:
+        _validate_ref_name("abc123def456")
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(GitError, match="empty"):
+            _validate_ref_name("")
+
+    def test_rejects_leading_dash(self) -> None:
+        with pytest.raises(GitError, match="must not start with '-'"):
+            _validate_ref_name("--upload-pack=evil")
+
+    def test_rejects_single_dash(self) -> None:
+        with pytest.raises(GitError, match="must not start with '-'"):
+            _validate_ref_name("-b")
+
+    def test_rejects_null_byte(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch\x00name")
+
+    def test_rejects_tilde(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch~1")
+
+    def test_rejects_caret(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch^2")
+
+    def test_rejects_colon(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch:name")
+
+    def test_rejects_backslash(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch\\name")
+
+    def test_rejects_question_mark(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch?name")
+
+    def test_rejects_asterisk(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch*name")
+
+    def test_rejects_bracket(self) -> None:
+        with pytest.raises(GitError, match="forbidden characters"):
+            _validate_ref_name("branch[name")
+
+
+class TestArgumentInjectionPrevention:
+    """Verify that public functions reject malicious ref names before
+    passing them to git commands."""
+
+    def test_switch_branch_rejects_flag(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError, match="must not start with '-'"):
+            switch_branch("--upload-pack=evil", repo)
+
+    def test_delete_branch_rejects_flag(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError, match="must not start with '-'"):
+            delete_branch("--force", repo)
+
+    def test_archive_branch_rejects_flag(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError, match="must not start with '-'"):
+            archive_branch("--delete", repo)
+
+    def test_revert_to_rejects_flag(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        with pytest.raises(GitError, match="must not start with '-'"):
+            revert_to("--hard", repo)
+
+    def test_switch_branch_rejects_control_chars(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError, match="forbidden characters"):
+            switch_branch("branch\x00evil", repo)
+
+    def test_delete_branch_rejects_control_chars(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError, match="forbidden characters"):
+            delete_branch("branch\x00evil", repo)

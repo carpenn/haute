@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from haute._databricks_io import _TABLE_NAME_RE
 from haute._logging import get_logger
 from haute.schemas import (
     CacheStatusResponse,
@@ -29,6 +30,16 @@ router = APIRouter(prefix="/api/databricks", tags=["databricks"])
 
 # ── Timeout constant (seconds) ───────────────────────────────────
 _FETCH_TIMEOUT = 600.0  # Databricks table fetch — large tables can be slow
+
+
+def _validate_table_param(table: str) -> None:
+    """Reject table names that don't match the expected catalog.schema.table format."""
+    if not _TABLE_NAME_RE.match(table):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid table name: {table!r}. "
+            "Expected fully-qualified name like 'catalog.schema.table'.",
+        )
 
 
 def _get_databricks_client() -> Any:
@@ -170,6 +181,7 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
 @router.get("/fetch/progress", response_model=FetchProgressResponse)
 async def get_fetch_progress(table: str) -> FetchProgressResponse:
     """Poll fetch progress for a table currently being downloaded."""
+    _validate_table_param(table)
     from haute._databricks_io import fetch_progress
 
     progress = fetch_progress(table)
@@ -181,6 +193,7 @@ async def get_fetch_progress(table: str) -> FetchProgressResponse:
 @router.get("/cache", response_model=CacheStatusResponse)
 async def get_databricks_cache_status(table: str) -> CacheStatusResponse:
     """Check whether a Databricks table has been fetched and cached locally."""
+    _validate_table_param(table)
     from haute._databricks_io import cache_info
 
     info = cache_info(table)
@@ -192,6 +205,7 @@ async def get_databricks_cache_status(table: str) -> CacheStatusResponse:
 @router.delete("/cache", response_model=CacheStatusResponse)
 async def delete_databricks_cache(table: str) -> CacheStatusResponse:
     """Delete the local parquet cache for a Databricks table."""
+    _validate_table_param(table)
     from haute._databricks_io import clear_cache
 
     clear_cache(table)

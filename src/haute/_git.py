@@ -27,6 +27,10 @@ PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
 _BRANCH_PREFIX = "pricing"
 _ARCHIVE_PREFIX = "archive"
 
+# Characters that have no business in a branch name or SHA — used by
+# ``_validate_ref_name`` to block argument injection.
+_BAD_REF_CHARS = re.compile(r"[\x00-\x1f\x7f~^:?*\[\\]")
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -185,6 +189,19 @@ def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
     slug = slug.strip("-")
     return slug or "user"
+
+
+def _validate_ref_name(name: str) -> None:
+    """Reject ref names that could be interpreted as git flags or contain
+    suspicious characters.  This prevents argument injection when user-supplied
+    branch names or SHAs are passed to git CLI commands.
+    """
+    if not name:
+        raise GitError("Ref name cannot be empty.")
+    if name.startswith("-"):
+        raise GitError(f"Invalid ref name: {name!r} (must not start with '-').")
+    if _BAD_REF_CHARS.search(name):
+        raise GitError(f"Invalid ref name: {name!r} (contains forbidden characters).")
 
 
 def _is_protected(branch: str) -> bool:
@@ -352,6 +369,7 @@ def create_branch(description: str, cwd: Path | None = None) -> str:
 
     user_slug = _get_user_slug(cwd)
     branch_name = f"{_BRANCH_PREFIX}/{user_slug}/{slug}"
+    _validate_ref_name(branch_name)
 
     # Check it doesn't already exist
     ok, _ = _run_git_ok("rev-parse", "--verify", branch_name, cwd=cwd)
@@ -426,6 +444,7 @@ def list_branches(cwd: Path | None = None) -> BranchListResult:
 def switch_branch(branch: str, cwd: Path | None = None) -> None:
     """Switch to a branch, auto-committing any pending changes first."""
     _assert_git_repo(cwd)
+    _validate_ref_name(branch)
 
     current = _get_current_branch(cwd)
     if branch == current:
@@ -519,7 +538,8 @@ def get_history(limit: int = 20, cwd: Path | None = None) -> list[HistoryEntry]:
                 continue
             sha, short_sha, message, timestamp = parts
 
-            # Get files changed in this commit
+            # Get files changed in this commit.  The SHA comes from
+            # git log output (not user input) so no injection risk.
             ok_files, files_raw = _run_git_ok(
                 "diff-tree", "--no-commit-id", "--name-only", "-r", sha,
                 cwd=cwd,
@@ -540,12 +560,14 @@ def get_history(limit: int = 20, cwd: Path | None = None) -> list[HistoryEntry]:
 def revert_to(sha: str, cwd: Path | None = None) -> RevertResult:
     """Reset the current branch to a specific commit (with backup tag)."""
     _assert_git_repo(cwd)
+    _validate_ref_name(sha)
 
     branch = _get_current_branch(cwd)
     _assert_not_protected(branch)
 
-    # Validate the target SHA exists
-    ok, _ = _run_git_ok("cat-file", "-t", sha, cwd=cwd)
+    # Validate the target SHA exists — use '--' to separate the SHA
+    # from git options, preventing argument injection.
+    ok, _ = _run_git_ok("cat-file", "-t", "--", sha, cwd=cwd)
     if not ok:
         raise GitError(f"Commit '{sha}' not found.")
 
@@ -555,7 +577,10 @@ def revert_to(sha: str, cwd: Path | None = None) -> RevertResult:
     backup_tag = f"backup/{branch_slug}/{now}"
     _run_git("tag", backup_tag, "HEAD", cwd=cwd)
 
-    # Reset to the target commit
+    # Reset to the target commit.  The SHA is already validated by
+    # _validate_ref_name (rejects leading dashes), so no '--' needed.
+    # (git reset --hard treats '--' as a path separator, not an option
+    # terminator, so adding it would break the command.)
     _run_git("reset", "--hard", sha, cwd=cwd)
 
     # Force-push to sync the remote (safe: this is a personal branch)
@@ -655,6 +680,7 @@ def submit_for_review(cwd: Path | None = None) -> SubmitResult:
 def archive_branch(branch: str, cwd: Path | None = None) -> str:
     """Rename a branch to archive/<name>."""
     _assert_git_repo(cwd)
+    _validate_ref_name(branch)
     _assert_not_protected(branch)
 
     if branch.startswith(f"{_ARCHIVE_PREFIX}/"):
@@ -694,6 +720,7 @@ def archive_branch(branch: str, cwd: Path | None = None) -> str:
 def delete_branch(branch: str, cwd: Path | None = None) -> None:
     """Permanently delete a branch (local + remote)."""
     _assert_git_repo(cwd)
+    _validate_ref_name(branch)
     _assert_not_protected(branch)
 
     current = _get_current_branch(cwd)

@@ -406,3 +406,177 @@ class TestFetchProgressThreadSafety:
         t1.join()
         t2.join()
         assert errors == [], f"Thread safety errors: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# SQL injection prevention (_validate_select_clause)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSelectClause:
+    """Validate that _validate_select_clause blocks dangerous SQL."""
+
+    def test_valid_select_star(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        _validate_select_clause("SELECT *")
+
+    def test_valid_select_columns(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        _validate_select_clause("SELECT a, b, c")
+
+    def test_valid_select_with_where(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        _validate_select_clause("SELECT a, b WHERE a > 10")
+
+    def test_valid_select_case_insensitive(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        _validate_select_clause("select a, b")
+
+    def test_rejects_non_select(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="must start with SELECT"):
+            _validate_select_clause("DROP TABLE students; --")
+
+    def test_rejects_semicolon(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="semicolons"):
+            _validate_select_clause("SELECT *; DROP TABLE students")
+
+    def test_rejects_drop(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*DROP"):
+            _validate_select_clause("SELECT * FROM t UNION ALL SELECT DROP")
+
+    def test_rejects_delete(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*DELETE"):
+            _validate_select_clause("SELECT 1 WHERE DELETE FROM x")
+
+    def test_rejects_insert(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*INSERT"):
+            _validate_select_clause("SELECT 1 WHERE INSERT INTO x")
+
+    def test_rejects_update(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*UPDATE"):
+            _validate_select_clause("SELECT 1 WHERE UPDATE x SET a=1")
+
+    def test_rejects_alter(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*ALTER"):
+            _validate_select_clause("SELECT 1 WHERE ALTER TABLE x")
+
+    def test_rejects_truncate(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*TRUNCATE"):
+            _validate_select_clause("SELECT 1 WHERE TRUNCATE TABLE x")
+
+    def test_rejects_exec(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*EXEC"):
+            _validate_select_clause("SELECT 1 WHERE EXEC sp_evil")
+
+    def test_rejects_create(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*CREATE"):
+            _validate_select_clause("SELECT 1 WHERE CREATE TABLE x")
+
+    def test_rejects_grant(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*GRANT"):
+            _validate_select_clause("SELECT 1 WHERE GRANT ALL")
+
+    def test_rejects_revoke(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*REVOKE"):
+            _validate_select_clause("SELECT 1 WHERE REVOKE ALL")
+
+    def test_fetch_rejects_dangerous_query(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """fetch_and_cache validates query before executing SQL."""
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+
+        with pytest.raises(ValueError, match="semicolons"):
+            fetch_and_cache(
+                "cat.sch.tbl",
+                http_path="/path",
+                query="SELECT *; DROP TABLE students",
+                project_root=tmp_path,
+            )
+
+    def test_fetch_rejects_non_select_query(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """fetch_and_cache rejects queries that don't start with SELECT."""
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+
+        with pytest.raises(ValueError, match="must start with SELECT"):
+            fetch_and_cache(
+                "cat.sch.tbl",
+                http_path="/path",
+                query="DROP TABLE students",
+                project_root=tmp_path,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Path traversal prevention (_cache_path_for)
+# ---------------------------------------------------------------------------
+
+
+class TestCachePathTraversal:
+    """Verify _cache_path_for blocks path traversal attacks."""
+
+    def test_slashes_replaced(self, tmp_path: Path) -> None:
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("foo/bar/baz", project_root=tmp_path)
+        assert "foo_bar_baz.parquet" == p.name
+
+    def test_backslashes_replaced(self, tmp_path: Path) -> None:
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("foo\\bar\\baz", project_root=tmp_path)
+        assert "foo_bar_baz.parquet" == p.name
+
+    def test_dots_replaced(self, tmp_path: Path) -> None:
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("cat.schema.table", project_root=tmp_path)
+        assert "cat_schema_table.parquet" == p.name
+
+    def test_traversal_with_dotdot_blocked(self, tmp_path: Path) -> None:
+        """Dots in table name are replaced, so ../../etc/passwd becomes
+        safe; but even if they weren't, the is_relative_to check catches it."""
+        from haute._databricks_io import _cache_path_for
+
+        # After replacement, ".." becomes "__" so it stays in cache_dir
+        p = _cache_path_for("foo/../../../etc/passwd", project_root=tmp_path)
+        cache_dir = (tmp_path / ".haute_cache").resolve()
+        assert p.resolve().is_relative_to(cache_dir)
+
+    def test_mixed_separators(self, tmp_path: Path) -> None:
+        from haute._databricks_io import _cache_path_for
+
+        p = _cache_path_for("a/b\\c.d", project_root=tmp_path)
+        assert p.name == "a_b_c_d.parquet"

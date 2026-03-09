@@ -30,6 +30,12 @@ _TABLE_NAME_RE = re.compile(
     r"^`?[\w-]+`?\.`?[\w-]+`?\.`?[\w-]+`?$"
 )
 
+# Dangerous SQL keywords that must never appear in user-supplied SELECT clauses.
+_DANGEROUS_SQL_RE = re.compile(
+    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|EXEC|CREATE|GRANT|REVOKE)\b",
+    re.IGNORECASE,
+)
+
 CACHE_DIR = ".haute_cache"
 
 # Thread-safe progress tracking for active fetches, keyed by table name.
@@ -49,6 +55,31 @@ def _clear_fetch_progress() -> None:
     """Clear all fetch progress entries (test helper)."""
     with _fetch_lock:
         _fetch_progress.clear()
+
+
+def _validate_select_clause(query: str) -> None:
+    """Validate that *query* is a safe SELECT clause.
+
+    Since the ``query`` field comes from a GUI config (not arbitrary SQL),
+    we enforce that it:
+    1. Starts with ``SELECT`` (case-insensitive).
+    2. Contains no semicolons (statement terminators).
+    3. Contains no dangerous SQL keywords (DROP, DELETE, etc.).
+    """
+    stripped = query.strip()
+    if not stripped.upper().startswith("SELECT"):
+        raise ValueError(
+            f"Query must start with SELECT, got: {stripped[:40]!r}"
+        )
+    if ";" in stripped:
+        raise ValueError(
+            "Query must not contain semicolons."
+        )
+    match = _DANGEROUS_SQL_RE.search(stripped)
+    if match:
+        raise ValueError(
+            f"Query contains forbidden SQL keyword: {match.group()!r}"
+        )
 
 
 class DatabricksConfigError(HauteError):
@@ -107,10 +138,19 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
 
 
 def _cache_path_for(table: str, project_root: Path | None = None) -> Path:
-    """Return the parquet cache path for a fully-qualified table name."""
+    """Return the parquet cache path for a fully-qualified table name.
+
+    All path separators and dots are replaced with underscores, and the
+    result is verified to stay within the cache directory to prevent
+    path-traversal attacks.
+    """
     root = project_root or Path.cwd()
-    safe_name = table.replace(".", "_")
-    return root / CACHE_DIR / f"{safe_name}.parquet"
+    safe_name = table.replace(".", "_").replace("/", "_").replace("\\", "_")
+    cache_dir = (root / CACHE_DIR).resolve()
+    result = (cache_dir / f"{safe_name}.parquet").resolve()
+    if not result.is_relative_to(cache_dir):
+        raise ValueError(f"Invalid table name for caching: {table!r}")
+    return result
 
 
 def cached_path(
@@ -215,7 +255,11 @@ def fetch_and_cache(
             "Expected fully-qualified name like 'catalog.schema.table'."
         )
 
-    select_clause = query.strip().rstrip(";") if query else "SELECT *"
+    if query:
+        _validate_select_clause(query)
+        select_clause = query.strip().rstrip(";")
+    else:
+        select_clause = "SELECT *"
     sql_query = f"{select_clause} FROM {table}"  # noqa: S608
 
     out_path = _cache_path_for(table, project_root)
