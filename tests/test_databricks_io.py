@@ -452,7 +452,13 @@ class TestValidateSelectClause:
         from haute._databricks_io import _validate_select_clause
 
         with pytest.raises(ValueError, match="forbidden SQL keyword.*DROP"):
-            _validate_select_clause("SELECT * FROM t UNION ALL SELECT DROP")
+            _validate_select_clause("SELECT * FROM t WHERE DROP = 1")
+
+    def test_rejects_union(self) -> None:
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword.*UNION"):
+            _validate_select_clause("SELECT * UNION ALL SELECT * FROM secret")
 
     def test_rejects_delete(self) -> None:
         from haute._databricks_io import _validate_select_clause

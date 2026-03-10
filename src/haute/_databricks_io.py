@@ -32,7 +32,7 @@ _TABLE_NAME_RE = re.compile(
 
 # Dangerous SQL keywords that must never appear in user-supplied SELECT clauses.
 _DANGEROUS_SQL_RE = re.compile(
-    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|EXEC|CREATE|GRANT|REVOKE)\b",
+    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|EXEC|CREATE|GRANT|REVOKE|UNION)\b",
     re.IGNORECASE,
 )
 

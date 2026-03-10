@@ -286,7 +286,7 @@ def _validate_user_code_cached(
     _cache[cache_key] = True
 
 
-def _try_parse_code(code: str) -> ast.Module | None:
+def _try_parse_code(code: str) -> ast.Module:
     """Try to parse *code* as Python; return the AST or raise.
 
     If *code* is a fragment (e.g. chain syntax starting with ``"."`` or
