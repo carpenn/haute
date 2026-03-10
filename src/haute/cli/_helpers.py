@@ -12,6 +12,55 @@ from haute._logging import get_logger
 logger = get_logger(component="cli")
 
 
+# ---------------------------------------------------------------------------
+# Pipeline file resolution — single source of truth for all CLI commands
+# ---------------------------------------------------------------------------
+
+
+def resolve_pipeline_file(explicit_path: str | None = None) -> Path:
+    """Resolve the pipeline file to use.
+
+    Priority:
+
+    1. Explicit path from CLI argument
+    2. ``[project].pipeline`` from ``haute.toml``
+    3. Auto-discovery via :func:`~haute.discovery.discover_pipelines`
+    4. Default to ``main.py``
+
+    Raises :class:`SystemExit` if the resolved file doesn't exist.
+    """
+    if explicit_path:
+        p = Path(explicit_path)
+    else:
+        # Try haute.toml first
+        toml_path = Path.cwd() / "haute.toml"
+        if toml_path.exists():
+            import tomllib
+
+            with open(toml_path, "rb") as f:
+                data = tomllib.load(f)
+            configured = data.get("project", {}).get("pipeline")
+            if configured:
+                p = Path(configured)
+            else:
+                p = _discover_or_default()
+        else:
+            p = _discover_or_default()
+
+    if not p.exists():
+        click.echo(f"Error: Pipeline file not found: {p}", err=True)
+        raise SystemExit(1)
+    return p
+
+
+def _discover_or_default() -> Path:
+    """Try :func:`~haute.discovery.discover_pipelines`, fall back to ``main.py``."""
+    from haute.discovery import discover_pipelines
+
+    found = discover_pipelines()
+    return found[0] if found else Path("main.py")
+
+
 def _open_browser(url: str) -> None:
     """Open *url* in the default browser, suppressing noisy stderr from gio."""
     try:
@@ -93,14 +142,9 @@ def _load_deploy_config(
         click.echo("Error: No haute.toml found.", err=True)
         raise SystemExit(1)
 
-    if pipeline_file:
-        return DeployConfig(
-            pipeline_file=Path(pipeline_file),
-            model_name=model_name or Path(pipeline_file).stem,
-        )
-
-    click.echo(
-        "Error: No haute.toml found and no pipeline file specified.",
-        err=True,
+    # No haute.toml — resolve pipeline file using the shared strategy
+    resolved = resolve_pipeline_file(pipeline_file)
+    return DeployConfig(
+        pipeline_file=resolved,
+        model_name=model_name or resolved.stem,
     )
-    raise SystemExit(1)

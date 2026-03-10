@@ -9,6 +9,7 @@ import { useCallback, type MutableRefObject } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import useToastStore from "../stores/useToastStore"
 import useNodeResultsStore from "../stores/useNodeResultsStore"
+import useUIStore from "../stores/useUIStore"
 import { nodeData } from "../types/node"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { getLayoutedElements } from "../utils/layout"
@@ -39,6 +40,7 @@ export default function useNodeHandlers({
 }: UseNodeHandlersParams) {
   const addToast = useToastStore((s) => s.addToast)
   const clearNode = useNodeResultsStore((s) => s.clearNode)
+  const setRenameDialog = useUIStore((s) => s.setRenameDialog)
 
   const handleDeleteNode = useCallback((id: string) => {
     const { nodes: n, edges: e } = graphRef.current
@@ -96,11 +98,8 @@ export default function useNodeHandlers({
     const { nodes: n } = graphRef.current
     const node = n.find((nd) => nd.id === id)
     if (!node) return
-    const newLabel = prompt("Rename node:", String(node.data.label))
-    if (newLabel !== null && newLabel.trim()) {
-      onUpdateNode(id, { ...node.data, label: newLabel.trim() })
-    }
-  }, [graphRef, onUpdateNode])
+    setRenameDialog({ nodeId: id, currentLabel: String(node.data.label) })
+  }, [graphRef, setRenameDialog])
 
   const handleAutoLayout = useCallback(async () => {
     const { nodes: n, edges: e } = graphRef.current

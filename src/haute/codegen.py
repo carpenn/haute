@@ -774,6 +774,145 @@ def _emit_preserved_blocks(preserved_blocks: list[str]) -> list[str]:
     return lines
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers for graph_to_code_multi
+# ---------------------------------------------------------------------------
+
+
+def _build_id_to_func(sorted_nodes: list[GraphNode]) -> dict[str, str]:
+    """Map node.id → sanitized function name for sorted nodes."""
+    return {node.id: _sanitize_func_name(node.data.label) for node in sorted_nodes}
+
+
+def _build_node_sources(
+    edges: list[GraphEdge],
+    id_to_func: dict[str, str],
+) -> dict[str, list[str]]:
+    """Map target node ID → list of source function names."""
+    sources: dict[str, list[str]] = {}
+    for edge in edges:
+        src_name = id_to_func.get(edge.source, edge.source)
+        sources.setdefault(edge.target, []).append(src_name)
+    return sources
+
+
+def _build_instance_of_map(sorted_nodes: list[GraphNode]) -> dict[str, str]:
+    """Map instance node ID → original node ID for nodes with ``instanceOf``."""
+    result: dict[str, str] = {}
+    for node in sorted_nodes:
+        ref = node.data.config.get("instanceOf")
+        if ref:
+            result[node.id] = ref
+    return result
+
+
+#: Type alias for a function that generates code for a single node.
+_NodeCodeFn = Callable[[GraphNode, list[str] | None], str]
+
+
+def _generate_pipeline_lines(
+    *,
+    kind: str,
+    name: str,
+    description: str,
+    preamble: str,
+    sorted_nodes: list[GraphNode],
+    id_to_func: dict[str, str],
+    node_sources: dict[str, list[str]],
+    connect_pairs: list[tuple[str, str]],
+    preserved_blocks: list[str] | None = None,
+    submodel_imports: list[str] | None = None,
+    node_to_code_fn: _NodeCodeFn = _node_to_code,
+    dedup_connects: bool = False,
+    obj_name: str = "pipeline",
+) -> list[str]:
+    """Generate the body of a pipeline or submodel file as a list of lines.
+
+    Shared by the no-submodel and multi-submodel paths in
+    ``graph_to_code_multi`` to eliminate duplicated header / node / connect
+    generation logic.
+    """
+    # ── Header ────────────────────────────────────────────────────────
+    if kind == "submodel":
+        lines = [
+            f'"""Submodel: {name}"""',
+            "",
+            "import polars as pl",
+            "import haute",
+            "",
+            "",
+            f'{obj_name} = haute.Submodel("{name}")',
+            "",
+            "",
+        ]
+    else:
+        lines = [
+            f'"""Pipeline: {name}"""',
+            "",
+            "import polars as pl",
+            "import haute",
+        ]
+        if preamble.strip():
+            lines.append("")
+            lines.append(preamble.rstrip())
+        lines += [
+            "",
+            f'{obj_name} = haute.Pipeline("{name}", description={description!r})',
+            "",
+            "",
+        ]
+
+    # ── Preserved blocks ──────────────────────────────────────────────
+    if preserved_blocks:
+        lines.extend(_emit_preserved_blocks(preserved_blocks))
+        lines.append("")
+
+    # ── Nodes: originals then instances ───────────────────────────────
+    instance_of_map = _build_instance_of_map(sorted_nodes)
+    originals = [n for n in sorted_nodes if n.id not in instance_of_map]
+    instances = [n for n in sorted_nodes if n.id in instance_of_map]
+
+    for node in originals:
+        srcs = node_sources.get(node.id, [])
+        lines.append(node_to_code_fn(node, srcs))
+        lines.append("")
+
+    for node in instances:
+        srcs = node_sources.get(node.id, [])
+        orig_id = instance_of_map[node.id]
+        orig_func = id_to_func.get(orig_id, orig_id)
+        orig_src = node_sources.get(orig_id, [])
+        lines.append(_instance_to_code(
+            node, orig_func,
+            source_names=srcs,
+            orig_source_names=orig_src,
+        ))
+        lines.append("")
+
+    # ── Submodel imports (pipeline files only) ────────────────────────
+    if submodel_imports:
+        for imp in submodel_imports:
+            lines.append(imp)
+        lines.append("")
+
+    # ── Connect calls ─────────────────────────────────────────────────
+    if connect_pairs:
+        lines.append("")
+        lines.append("# Wire nodes together - edges define data flow")
+        if dedup_connects:
+            seen: set[tuple[str, str]] = set()
+            for src_func, tgt_func in connect_pairs:
+                if (src_func, tgt_func) not in seen:
+                    seen.add((src_func, tgt_func))
+                    lines.append(f'{obj_name}.connect("{src_func}", "{tgt_func}")')
+        else:
+            for src_func, tgt_func in connect_pairs:
+                lines.append(f'{obj_name}.connect("{src_func}", "{tgt_func}")')
+        lines.append("")
+
+    return lines
+
+
 def graph_to_code(
     graph: PipelineGraph,
     pipeline_name: str = "main",
@@ -825,76 +964,35 @@ def graph_to_code_multi(
     submodels = graph.submodels or {}
 
     if not submodels:
-        # No submodels — single-file output (inlined to avoid circular call)
+        # No submodels — single-file output
         main_key = source_file or f"{pipeline_name}.py"
         nodes = graph.nodes
         edges = graph.edges
         sorted_nodes = _topo_sort(nodes, edges)
 
-        id_to_func: dict[str, str] = {}
-        for node in sorted_nodes:
-            id_to_func[node.id] = _sanitize_func_name(node.data.label)
-
-        lines = [
-            f'"""Pipeline: {pipeline_name}"""',
-            "",
-            "import polars as pl",
-            "import haute",
-        ]
-        if preamble.strip():
-            lines.append("")
-            lines.append(preamble.rstrip())
-        lines += [
-            "",
-            f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
-            "",
-            "",
-        ]
+        id_to_func = _build_id_to_func(sorted_nodes)
+        node_sources = _build_node_sources(edges, id_to_func)
 
         all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
-        if all_preserved:
-            lines.extend(_emit_preserved_blocks(all_preserved))
-            lines.append("")
 
-        node_sources: dict[str, list[str]] = {}
-        for edge in edges:
-            src_name = id_to_func.get(edge.source, edge.source)
-            node_sources.setdefault(edge.target, []).append(src_name)
+        # Build connect pairs from edges
+        connect_pairs = [
+            (id_to_func.get(e.source, e.source), id_to_func.get(e.target, e.target))
+            for e in edges
+        ]
 
-        instance_of_map: dict[str, str] = {}
-        for node in sorted_nodes:
-            ref = node.data.config.get("instanceOf")
-            if ref:
-                instance_of_map[node.id] = ref
-
-        originals = [n for n in sorted_nodes if n.id not in instance_of_map]
-        instances = [n for n in sorted_nodes if n.id in instance_of_map]
-
-        for node in originals:
-            source_names = node_sources.get(node.id, [])
-            lines.append(_node_to_code(node, source_names=source_names))
-            lines.append("")
-
-        for node in instances:
-            source_names = node_sources.get(node.id, [])
-            orig_id = instance_of_map[node.id]
-            orig_func = id_to_func.get(orig_id, orig_id)
-            orig_src = node_sources.get(orig_id, [])
-            lines.append(_instance_to_code(
-                node, orig_func,
-                source_names=source_names,
-                orig_source_names=orig_src,
-            ))
-            lines.append("")
-
-        if edges:
-            lines.append("")
-            lines.append("# Wire nodes together - edges define data flow")
-            for edge in edges:
-                src_func = id_to_func.get(edge.source, edge.source)
-                tgt_func = id_to_func.get(edge.target, edge.target)
-                lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
-            lines.append("")
+        lines = _generate_pipeline_lines(
+            kind="pipeline",
+            name=pipeline_name,
+            description=description,
+            preamble=preamble,
+            sorted_nodes=sorted_nodes,
+            id_to_func=id_to_func,
+            node_sources=node_sources,
+            connect_pairs=connect_pairs,
+            preserved_blocks=all_preserved or None,
+            node_to_code_fn=_node_to_code,
+        )
 
         logger.info("code_generated", pipeline_name=pipeline_name, node_count=len(sorted_nodes))
         return {main_key: "\n".join(lines)}
@@ -919,9 +1017,7 @@ def graph_to_code_multi(
     root_node_ids = {n.id for n in root_nodes}
 
     # Build id → func_name for root nodes (needed by submodel cross-boundary resolution)
-    root_id_to_func: dict[str, str] = {}
-    for node in root_nodes:
-        root_id_to_func[node.id] = _sanitize_func_name(node.data.label)
+    root_id_to_func = _build_id_to_func(root_nodes)
 
     # ── Generate submodel files ──────────────────────────────────────
     files: dict[str, str] = {}
@@ -941,17 +1037,8 @@ def graph_to_code_multi(
         ]
 
         sorted_sm_nodes = _topo_sort(sm_nodes, sm_edges)
-
-        # Build id → func_name map for submodel nodes
-        sm_id_to_func: dict[str, str] = {}
-        for node in sorted_sm_nodes:
-            sm_id_to_func[node.id] = _sanitize_func_name(node.data.label)
-
-        # Build source names per node (internal edges)
-        sm_node_sources: dict[str, list[str]] = {}
-        for edge in sm_edges:
-            src_name = sm_id_to_func.get(edge.source, edge.source)
-            sm_node_sources.setdefault(edge.target, []).append(src_name)
+        sm_id_to_func = _build_id_to_func(sorted_sm_nodes)
+        sm_node_sources = _build_node_sources(sm_edges, sm_id_to_func)
 
         # Also include cross-boundary inputs from parent graph edges
         sm_node_id = f"submodel__{sm_name}"
@@ -963,31 +1050,24 @@ def graph_to_code_multi(
                     src_name = root_id_to_func.get(edge.source, _sanitize_func_name(edge.source))
                     sm_node_sources.setdefault(child_id, []).append(src_name)
 
-        sm_lines = [
-            f'"""Submodel: {sm_name}"""',
-            "",
-            "import polars as pl",
-            "import haute",
-            "",
-            "",
-            f'submodel = haute.Submodel("{sm_name}")',
-            "",
-            "",
+        # Build connect pairs from internal edges
+        sm_connect_pairs = [
+            (sm_id_to_func.get(e.source, e.source), sm_id_to_func.get(e.target, e.target))
+            for e in sm_edges
         ]
 
-        for node in sorted_sm_nodes:
-            source_names = sm_node_sources.get(node.id, [])
-            sm_lines.append(_submodel_node_to_code(node, source_names=source_names))
-            sm_lines.append("")
-
-        # Emit submodel.connect() calls for internal edges
-        if sm_edges:
-            sm_lines.append("")
-            for edge in sm_edges:
-                src_func = sm_id_to_func.get(edge.source, edge.source)
-                tgt_func = sm_id_to_func.get(edge.target, edge.target)
-                sm_lines.append(f'submodel.connect("{src_func}", "{tgt_func}")')
-            sm_lines.append("")
+        sm_lines = _generate_pipeline_lines(
+            kind="submodel",
+            name=sm_name,
+            description="",
+            preamble="",
+            sorted_nodes=sorted_sm_nodes,
+            id_to_func=sm_id_to_func,
+            node_sources=sm_node_sources,
+            connect_pairs=sm_connect_pairs,
+            node_to_code_fn=_submodel_node_to_code,
+            obj_name="submodel",
+        )
 
         files[sm_file] = "\n".join(sm_lines)
 
@@ -1004,30 +1084,6 @@ def graph_to_code_multi(
         for n in sm_graph.get("nodes", []):
             nd = GraphNode.model_validate(n) if isinstance(n, dict) else n
             root_id_to_func[nd.id] = _sanitize_func_name(nd.data.label)
-
-    main_lines = [
-        f'"""Pipeline: {pipeline_name}"""',
-        "",
-        "import polars as pl",
-        "import haute",
-    ]
-
-    if preamble.strip():
-        main_lines.append("")
-        main_lines.append(preamble.rstrip())
-
-    main_lines += [
-        "",
-        f'pipeline = haute.Pipeline("{pipeline_name}", description={description!r})',
-        "",
-        "",
-    ]
-
-    # Preserved blocks (user code that survives GUI regeneration)
-    all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
-    if all_preserved:
-        main_lines.extend(_emit_preserved_blocks(all_preserved))
-        main_lines.append("")
 
     # Build source names per root node from root-level edges AND
     # cross-boundary edges (resolving submodel handles to child node names).
@@ -1052,45 +1108,9 @@ def graph_to_code_multi(
         src_name = root_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
         root_node_sources.setdefault(actual_tgt, []).append(src_name)
 
-    # Partition: emit originals before instances
-    root_instance_of: dict[str, str] = {}
-    for node in sorted_root:
-        ref = node.data.config.get("instanceOf")
-        if ref:
-            root_instance_of[node.id] = ref
-
-    root_originals = [n for n in sorted_root if n.id not in root_instance_of]
-    root_instances = [n for n in sorted_root if n.id in root_instance_of]
-
-    for node in root_originals:
-        source_names = root_node_sources.get(node.id, [])
-        main_lines.append(_node_to_code(node, source_names=source_names))
-        main_lines.append("")
-
-    for node in root_instances:
-        source_names = root_node_sources.get(node.id, [])
-        orig_id = root_instance_of[node.id]
-        orig_func = root_id_to_func.get(orig_id, orig_id)
-        orig_src = root_node_sources.get(orig_id, [])
-        main_lines.append(_instance_to_code(
-            node, orig_func,
-            source_names=source_names,
-            orig_source_names=orig_src,
-        ))
-        main_lines.append("")
-
-    # Emit pipeline.submodel() imports
-    for sm_name, sm_meta in submodels.items():
-        sm_file = sm_meta.get("file", f"modules/{sm_name}.py")
-        main_lines.append(f'pipeline.submodel("{sm_file}")')
-    main_lines.append("")
-
-    # Emit pipeline.connect() calls for ALL edges (cross-boundary use real node names)
-    all_id_to_func = dict(root_id_to_func)
-    all_edges = edges
-    # Also include cross-boundary edges that reference submodel handles
+    # Build connect pairs for ALL edges (cross-boundary use real node names)
     connect_pairs: list[tuple[str, str]] = []
-    for edge in all_edges:
+    for edge in edges:
         src = edge.source
         tgt = edge.target
         sh = edge.sourceHandle or ""
@@ -1104,19 +1124,32 @@ def graph_to_code_multi(
         if tgt in submodel_node_ids and th:
             actual_tgt = th.removeprefix("in__")
 
-        src_func = all_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
-        tgt_func = all_id_to_func.get(actual_tgt, _sanitize_func_name(actual_tgt))
+        src_func = root_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
+        tgt_func = root_id_to_func.get(actual_tgt, _sanitize_func_name(actual_tgt))
         connect_pairs.append((src_func, tgt_func))
 
-    if connect_pairs:
-        main_lines.append("")
-        main_lines.append("# Wire nodes together - edges define data flow")
-        seen: set[tuple[str, str]] = set()
-        for src_func, tgt_func in connect_pairs:
-            if (src_func, tgt_func) not in seen:
-                seen.add((src_func, tgt_func))
-                main_lines.append(f'pipeline.connect("{src_func}", "{tgt_func}")')
-        main_lines.append("")
+    # Submodel import lines
+    sm_imports = [
+        f'pipeline.submodel("{sm_meta.get("file", f"modules/{sm_name}.py")}")'
+        for sm_name, sm_meta in submodels.items()
+    ]
+
+    all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
+
+    main_lines = _generate_pipeline_lines(
+        kind="pipeline",
+        name=pipeline_name,
+        description=description,
+        preamble=preamble,
+        sorted_nodes=sorted_root,
+        id_to_func=root_id_to_func,
+        node_sources=root_node_sources,
+        connect_pairs=connect_pairs,
+        preserved_blocks=all_preserved or None,
+        submodel_imports=sm_imports,
+        node_to_code_fn=_node_to_code,
+        dedup_connects=True,
+    )
 
     main_key = source_file or f"{pipeline_name}.py"
     files[main_key] = "\n".join(main_lines)

@@ -29,6 +29,7 @@ import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import BreadcrumbBar from "./components/BreadcrumbBar"
 import Toolbar from "./components/Toolbar"
 import SubmodelDialog from "./components/SubmodelDialog"
+import RenameDialog from "./components/RenameDialog"
 import UtilityPanel from "./panels/UtilityPanel"
 import ImportsPanel from "./panels/ImportsPanel"
 import GitPanel from "./panels/GitPanel"
@@ -105,6 +106,8 @@ function FlowEditor() {
   const setShortcutsOpen = useUIStore((s) => s.setShortcutsOpen)
   const submodelDialog = useUIStore((s) => s.submodelDialog)
   const setSubmodelDialog = useUIStore((s) => s.setSubmodelDialog)
+  const renameDialog = useUIStore((s) => s.renameDialog)
+  const setRenameDialog = useUIStore((s) => s.setRenameDialog)
   const syncBanner = useUIStore((s) => s.syncBanner)
   const setSyncBanner = useUIStore((s) => s.setSyncBanner)
   const dirty = useUIStore((s) => s.dirty)
@@ -456,6 +459,18 @@ function FlowEditor() {
           onSubmit={(name) => {
             handleCreateSubmodel(name, submodelDialog.nodeIds)
             setSubmodelDialog(null)
+          }}
+        />
+      )}
+
+      {renameDialog && (
+        <RenameDialog
+          defaultValue={renameDialog.currentLabel}
+          onCancel={() => setRenameDialog(null)}
+          onConfirm={(newName) => {
+            const node = graphRef.current.nodes.find((n) => n.id === renameDialog.nodeId)
+            if (node) onUpdateNode(renameDialog.nodeId, { ...node.data, label: newName })
+            setRenameDialog(null)
           }}
         />
       )}

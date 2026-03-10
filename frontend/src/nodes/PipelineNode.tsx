@@ -23,6 +23,20 @@ export type PipelineNodeData = {
   _traceValue?: unknown
 }
 
+/** Isolated component so only LiveSwitch nodes subscribe to the settings store. */
+function LiveSwitchBadge({ accent }: { accent: string }) {
+  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  if (activeScenario !== "live") return null
+  return (
+    <span
+      className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+      style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
+    >
+      LIVE
+    </span>
+  )
+}
+
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
   const nodeType = nodeData.nodeType || NODE_TYPES.TRANSFORM
@@ -31,8 +45,6 @@ function PipelineNode({ data, selected }: NodeProps) {
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = nodeType === NODE_TYPES.API_INPUT
   const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
-  const showLiveBadge = isLiveSwitch && activeScenario === "live"
   const isInstance = !!(nodeData.config?.instanceOf)
   const isSourceOnly = SOURCE_ONLY_TYPES.has(nodeType)
   const isSinkOnly = SINK_ONLY_TYPES.has(nodeType)
@@ -95,14 +107,7 @@ function PipelineNode({ data, selected }: NodeProps) {
               API
             </span>
           )}
-          {showLiveBadge && (
-            <span
-              className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
-              style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
-            >
-              LIVE
-            </span>
-          )}
+          {isLiveSwitch && <LiveSwitchBadge accent={accent} />}
           {nodeData._status && (
             <span
               className={`${isDeployInput ? "" : "ml-auto "} w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}

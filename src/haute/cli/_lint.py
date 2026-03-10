@@ -1,7 +1,5 @@
 """``haute lint`` command."""
 
-from pathlib import Path
-
 import click
 
 
@@ -13,23 +11,10 @@ def lint(pipeline_file: str | None) -> None:
     Parses the pipeline, checks for structural issues (orphan nodes,
     missing edges, syntax errors), and reports any problems found.
     """
+    from haute.cli._helpers import resolve_pipeline_file
     from haute.parser import parse_pipeline_file
 
-    if pipeline_file is None:
-        toml_path = Path.cwd() / "haute.toml"
-        if toml_path.exists():
-            import tomllib
-
-            with open(toml_path, "rb") as f:
-                data = tomllib.load(f)
-            pipeline_file = data.get("project", {}).get("pipeline", "main.py")
-        else:
-            pipeline_file = "main.py"
-
-    filepath = Path(pipeline_file)
-    if not filepath.exists():
-        click.echo(f"Error: Pipeline file not found: {filepath}", err=True)
-        raise SystemExit(1)
+    filepath = resolve_pipeline_file(pipeline_file)
 
     click.echo(f"Linting pipeline: {filepath}")
 

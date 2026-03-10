@@ -1,7 +1,5 @@
 """``haute run`` command."""
 
-from pathlib import Path
-
 import click
 
 
@@ -13,29 +11,12 @@ def run(pipeline_file: str | None) -> None:
     Uses the same parse -> execute_graph path as the GUI so both
     produce identical results from the same .py file.
     """
+    from haute.cli._helpers import resolve_pipeline_file
     from haute.executor import execute_graph
     from haute.parser import parse_pipeline_file
 
-    if pipeline_file is None:
-        from haute.discovery import discover_pipelines
-
-        found = discover_pipelines()
-        if found:
-            pipeline_file = str(found[0])
-
-    if not pipeline_file:
-        click.echo(
-            "Error: No pipeline file found. Pass a path or create main.py",
-            err=True,
-        )
-        raise SystemExit(1)
-
-    filepath = Path(pipeline_file)
+    filepath = resolve_pipeline_file(pipeline_file)
     click.echo(f"Running pipeline: {filepath}")
-
-    if not filepath.exists():
-        click.echo(f"Error: File not found: {filepath}", err=True)
-        raise SystemExit(1)
 
     try:
         graph = parse_pipeline_file(filepath)

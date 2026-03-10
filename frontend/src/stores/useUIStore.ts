@@ -21,6 +21,8 @@ interface UIState {
   setShortcutsOpen: (open: boolean | ((prev: boolean) => boolean)) => void
   submodelDialog: { nodeIds: string[] } | null
   setSubmodelDialog: (dialog: { nodeIds: string[] } | null) => void
+  renameDialog: { nodeId: string; currentLabel: string } | null
+  setRenameDialog: (dialog: { nodeId: string; currentLabel: string } | null) => void
 
   // Sync banner
   syncBanner: string | null
@@ -55,6 +57,8 @@ const useUIStore = create<UIState>()((set) => ({
   },
   submodelDialog: null,
   setSubmodelDialog: (dialog) => set({ submodelDialog: dialog }),
+  renameDialog: null,
+  setRenameDialog: (dialog) => set({ renameDialog: dialog }),
 
   // Sync banner
   syncBanner: null,

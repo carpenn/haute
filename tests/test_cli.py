@@ -315,8 +315,8 @@ class TestRun:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(cli, ["run"])
         assert result.exit_code == 1
-        assert "no pipeline file" in result.output.lower(), (
-            f"Expected 'no pipeline file' in output, got: {result.output!r}"
+        assert "pipeline file not found" in result.output.lower(), (
+            f"Expected 'pipeline file not found' in output, got: {result.output!r}"
         )
 
     def test_run_file_not_found(self, runner: CliRunner):
