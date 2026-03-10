@@ -48,9 +48,7 @@ def train_model(body: TrainRequest) -> TrainResponse:
 @router.get("/train/status/{job_id}", response_model=TrainStatusResponse)
 async def train_status(job_id: str) -> TrainStatusResponse:
     """Poll training job progress."""
-    job = _store.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    job = _store.require_job(job_id)
 
     return TrainStatusResponse(
         status=job.get("status", "unknown"),
@@ -162,9 +160,7 @@ async def mlflow_check() -> MlflowCheckResponse:
 @router.post("/mlflow/log", response_model=LogExperimentResponse)
 async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
     """Log a completed training job's results to MLflow."""
-    job = _store.get_job(body.job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    job = _store.require_job(body.job_id)
 
     if job.get("status") != "completed":
         raise HTTPException(

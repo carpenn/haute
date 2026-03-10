@@ -1,6 +1,7 @@
-import { X, Package } from "lucide-react"
+import { Package } from "lucide-react"
 import { CodeEditor } from "./editors"
 import PanelShell from "./PanelShell"
+import PanelHeader from "./PanelHeader"
 
 interface ImportsPanelProps {
   preamble: string
@@ -11,23 +12,16 @@ interface ImportsPanelProps {
 export default function ImportsPanel({ preamble, onPreambleChange, onClose }: ImportsPanelProps) {
   return (
     <PanelShell>
-      {/* Header */}
-      <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-        <Package size={14} style={{ color: 'var(--accent)' }} />
-        <div className="flex-1 min-w-0">
-          <span className="text-[13px] font-semibold block" style={{ color: 'var(--text-primary)' }}>Pipeline Imports</span>
+      <PanelHeader
+        title="Pipeline Imports"
+        onClose={onClose}
+        icon={<Package size={14} style={{ color: 'var(--accent)' }} />}
+        subtitle={
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
             Import statements for utility modules and third-party libraries.
           </span>
-        </div>
-        <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          title="Close"
-        >
-          <X size={14} />
-        </button>
-      </div>
+        }
+      />
 
       {/* Info */}
       <div className="px-3 py-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>

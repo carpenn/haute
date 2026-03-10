@@ -1,0 +1,198 @@
+"""Tests for haute._io — read_source and load_external_object."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import polars as pl
+import pytest
+
+from haute._io import _object_cache, load_external_object, read_source
+
+
+# ---------------------------------------------------------------------------
+# read_source
+# ---------------------------------------------------------------------------
+
+
+class TestReadSourceParquet:
+    def test_reads_parquet_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.parquet"
+        pl.DataFrame({"a": [1, 2, 3]}).write_parquet(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        result = lf.collect()
+        assert result["a"].to_list() == [1, 2, 3]
+
+    def test_parquet_returns_lazy(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [10]}).write_parquet(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+
+
+class TestReadSourceCSV:
+    def test_reads_csv_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.csv"
+        pl.DataFrame({"col": [4, 5]}).write_csv(str(path))
+        result = read_source(str(path)).collect()
+        assert result["col"].to_list() == [4, 5]
+
+    def test_csv_returns_lazy(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.csv"
+        pl.DataFrame({"x": [1]}).write_csv(str(path))
+        assert isinstance(read_source(str(path)), pl.LazyFrame)
+
+
+class TestReadSourceJSON:
+    def test_reads_json_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.json"
+        pl.DataFrame({"name": ["alice", "bob"]}).write_json(str(path))
+        result = read_source(str(path)).collect()
+        assert result["name"].to_list() == ["alice", "bob"]
+
+    def test_json_returns_lazy(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.json"
+        pl.DataFrame({"x": [1]}).write_json(str(path))
+        assert isinstance(read_source(str(path)), pl.LazyFrame)
+
+
+class TestReadSourceJSONL:
+    def test_reads_ndjson_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.jsonl"
+        pl.DataFrame({"v": [10, 20]}).write_ndjson(str(path))
+        result = read_source(str(path)).collect()
+        assert result["v"].to_list() == [10, 20]
+
+
+class TestReadSourceErrors:
+    def test_unsupported_extension_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported file type: .xlsx"):
+            read_source("/some/path/file.xlsx")
+
+    def test_no_extension_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            read_source("/some/path/noext")
+
+    def test_unknown_extension_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported file type: .txt"):
+            read_source("data.txt")
+
+
+# ---------------------------------------------------------------------------
+# load_external_object
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Ensure the object cache is empty before and after each test."""
+    _object_cache.clear()
+    yield
+    _object_cache.clear()
+
+
+@pytest.fixture()
+def _widen_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow loading files from tmp directories."""
+    from haute._sandbox import _get_project_root, set_project_root
+
+    original = _get_project_root()
+    set_project_root(Path("/"))
+    yield
+    set_project_root(original)
+
+
+class TestLoadExternalObjectJSON:
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_loads_json_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.json"
+        data = {"weights": [1, 2, 3]}
+        path.write_text(json.dumps(data))
+        result = load_external_object(str(path), "json")
+        assert result == data
+
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_json_caching(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.json"
+        path.write_text('{"x": 1}')
+        r1 = load_external_object(str(path), "json")
+        r2 = load_external_object(str(path), "json")
+        assert r1 == r2
+        # Cache should contain exactly one entry
+        assert len(_object_cache) == 1
+
+
+class TestLoadExternalObjectPickle:
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_delegates_to_safe_unpickle(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.pkl"
+        path.write_bytes(b"fake")
+        sentinel = object()
+        with patch("haute._sandbox.safe_unpickle", return_value=sentinel) as mock_unpickle:
+            result = load_external_object(str(path), "pickle")
+        mock_unpickle.assert_called_once_with(str(path))
+        assert result is sentinel
+
+
+class TestLoadExternalObjectJoblib:
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_delegates_to_safe_joblib_load(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.joblib"
+        path.write_bytes(b"fake")
+        sentinel = object()
+        with patch("haute._sandbox.safe_joblib_load", return_value=sentinel) as mock_load:
+            result = load_external_object(str(path), "joblib")
+        mock_load.assert_called_once_with(str(path))
+        assert result is sentinel
+
+
+class TestLoadExternalObjectCatboost:
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_classifier_by_default(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.cbm"
+        path.write_bytes(b"fake")
+        mock_model = MagicMock()
+        with patch("catboost.CatBoostClassifier", return_value=mock_model):
+            result = load_external_object(str(path), "catboost")
+        mock_model.load_model.assert_called_once_with(str(path))
+        assert result is mock_model
+
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_regressor_class(self, tmp_path: Path) -> None:
+        path = tmp_path / "model.cbm"
+        path.write_bytes(b"fake")
+        mock_model = MagicMock()
+        with patch("catboost.CatBoostRegressor", return_value=mock_model):
+            result = load_external_object(str(path), "catboost", model_class="regressor")
+        mock_model.load_model.assert_called_once_with(str(path))
+        assert result is mock_model
+
+
+class TestObjectCacheBehavior:
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_cache_invalidated_on_mtime_change(self, tmp_path: Path) -> None:
+        """Modifying the file changes the mtime, causing a cache miss."""
+        import os
+        import time
+
+        path = tmp_path / "data.json"
+        path.write_text('{"v": 1}')
+        r1 = load_external_object(str(path), "json")
+        assert r1 == {"v": 1}
+
+        # Ensure mtime changes (filesystem granularity)
+        time.sleep(0.05)
+        path.write_text('{"v": 2}')
+        os.utime(str(path), None)  # force mtime update
+        r2 = load_external_object(str(path), "json")
+        assert r2 == {"v": 2}
+
+    @pytest.mark.usefixtures("_widen_sandbox")
+    def test_missing_file_uses_mtime_zero(self, tmp_path: Path) -> None:
+        """When the file doesn't exist, mtime defaults to 0.0."""
+        path = tmp_path / "missing.json"
+        with pytest.raises(FileNotFoundError):
+            load_external_object(str(path), "json")

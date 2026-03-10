@@ -56,9 +56,7 @@ def solve(body: OptimiserSolveRequest) -> OptimiserSolveResponse:
 @router.get("/solve/status/{job_id}", response_model=OptimiserStatusResponse)
 async def solve_status(job_id: str) -> OptimiserStatusResponse:
     """Poll optimisation job progress."""
-    job = _store.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    job = _store.require_job(job_id)
 
     # Check for timeout on running jobs
     if job.get("status") == "running":
@@ -85,9 +83,7 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
 def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
     """Apply solved lambdas to the scored data."""
     logger.info("apply_requested", job_id=body.job_id)
-    job = _store.get_job(body.job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    job = _store.require_job(body.job_id)
     if job.get("status") != "completed":
         raise HTTPException(
             status_code=400,
@@ -115,9 +111,7 @@ def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
 @router.post("/frontier", response_model=OptimiserFrontierResponse)
 def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
     """Compute efficient frontier for a completed optimisation job."""
-    job = _store.get_job(body.job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    job = _store.require_job(body.job_id)
     if job.get("status") != "completed":
         raise HTTPException(
             status_code=400,
@@ -196,9 +190,7 @@ def _build_artifact_payload(
 @router.post("/save", response_model=OptimiserSaveResponse)
 def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     """Save the optimisation result to disk."""
-    job = _store.get_job(body.job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    job = _store.require_job(body.job_id)
     if job.get("status") != "completed":
         raise HTTPException(
             status_code=400,
@@ -243,9 +235,7 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
 @router.post("/mlflow/log", response_model=OptimiserMlflowLogResponse)
 def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
     """Log optimisation results to MLflow."""
-    job = _store.get_job(body.job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job '{body.job_id}' not found")
+    job = _store.require_job(body.job_id)
     if job.get("status") != "completed":
         raise HTTPException(
             status_code=400,

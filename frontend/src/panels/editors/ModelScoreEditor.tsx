@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { InputSourcesBar, CodeEditor, MlflowStatusBadge, SELECT_STYLE } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
+import { RegisteredModelPicker, ExperimentRunPicker } from "./MlflowModelPicker"
 import { useMlflowBrowser } from "../../hooks/useMlflowBrowser"
 import { configField } from "../../utils/configField"
 import ToggleButtonGroup from "../../components/ToggleButtonGroup"
@@ -25,15 +26,8 @@ export default function ModelScoreEditor({
   const task = configField(config, "task", "regression")
   const outputColumn = configField(config, "output_column", "prediction")
   const defaultCode = configField(config, "code", "")
-  const selectedModel = configField(config, "registered_model", "")
 
-  const {
-    experiments, runs, models, modelVersions,
-    loadingExperiments, loadingRuns, loadingModels,
-    errorExperiments, errorRuns, errorModels, errorVersions,
-    browseExpId, setBrowseExpId, setRuns, resetRunsGuard,
-    refreshExperiments, refreshRuns, refreshModels, refreshVersions,
-  } = useMlflowBrowser({ initialExpId: configField(config, "experiment_id", "") })
+  const mlflow = useMlflowBrowser({ initialExpId: configField(config, "experiment_id", "") })
 
   const [showCode, setShowCode] = useState(!!defaultCode)
 
@@ -62,129 +56,18 @@ export default function ModelScoreEditor({
 
       {/* Registered Model Selection */}
       {sourceType === "registered" && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Model Name</label>
-            <select
-              className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-              style={SELECT_STYLE}
-              value={selectedModel}
-              onFocus={refreshModels}
-              onChange={(e) => onUpdate({ registered_model: e.target.value, version: "latest" })}
-            >
-              <option value="">{loadingModels ? "Loading..." : "Select a model..."}</option>
-              {selectedModel && !models.some((m) => m.name === selectedModel) && (
-                <option value={selectedModel}>{selectedModel}</option>
-              )}
-              {models.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
-              ))}
-            </select>
-            {errorModels && <span className="text-[10px] mt-0.5" style={{ color: "#ef4444" }}>{errorModels}</span>}
-          </div>
-          {selectedModel && (
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Version</label>
-              <select
-                className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                style={SELECT_STYLE}
-                value={configField(config, "version", "latest")}
-                onFocus={() => refreshVersions(selectedModel)}
-                onChange={(e) => onUpdate("version", e.target.value)}
-              >
-                <option value="latest">latest</option>
-                {modelVersions.map((v) => (
-                  <option key={v.version} value={v.version}>v{v.version} — {v.status}{v.description ? ` (${v.description})` : ""}</option>
-                ))}
-              </select>
-              {errorVersions && <span className="text-[10px] mt-0.5" style={{ color: "#ef4444" }}>{errorVersions}</span>}
-            </div>
-          )}
-        </div>
+        <RegisteredModelPicker config={config} onUpdate={onUpdate} mlflow={mlflow} />
       )}
 
       {/* Run-based Selection */}
       {sourceType === "run" && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Experiment</label>
-            <select
-              className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-              style={SELECT_STYLE}
-              value={browseExpId}
-              onFocus={refreshExperiments}
-              onChange={(e) => {
-                const eid = e.target.value
-                const exp = experiments.find((x) => x.experiment_id === eid)
-                setBrowseExpId(eid)
-                onUpdate({ experiment_id: eid, experiment_name: exp?.name || eid })
-                setRuns([])
-                resetRunsGuard()
-                if (eid) refreshRuns(eid)
-              }}
-            >
-              <option value="">{loadingExperiments ? "Loading..." : "Select an experiment..."}</option>
-              {browseExpId && !experiments.some((e) => e.experiment_id === browseExpId) && (
-                <option value={browseExpId}>{configField(config, "experiment_name", "") || browseExpId}</option>
-              )}
-              {experiments.map((exp) => (
-                <option key={exp.experiment_id} value={exp.experiment_id}>{exp.name}</option>
-              ))}
-            </select>
-            {errorExperiments && <span className="text-[10px] mt-0.5" style={{ color: "#ef4444" }}>{errorExperiments}</span>}
-          </div>
-          {browseExpId && (
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Run</label>
-              <select
-                className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                style={SELECT_STYLE}
-                value={configField(config, "run_id", "")}
-                onFocus={() => refreshRuns(browseExpId)}
-                onChange={(e) => {
-                  const runId = e.target.value
-                  const run = runs.find((r) => r.run_id === runId)
-                  onUpdate({ run_id: runId, run_name: run?.run_name || "", artifact_path: run?.artifacts[0] || "" })
-                }}
-              >
-                <option value="">{loadingRuns ? "Loading..." : "Select a run..."}</option>
-                {configField(config, "run_id", "") && !runs.some((r) => r.run_id === config.run_id) && (
-                  <option value={configField(config, "run_id", "")}>{configField(config, "run_name", "") || configField(config, "run_id", "")}</option>
-                )}
-                {runs.map((r) => (
-                  <option key={r.run_id} value={r.run_id}>
-                    {r.run_name || r.run_id.slice(0, 8)}
-                    {Object.entries(r.metrics).slice(0, 2).map(([k, v]) => ` ${k}=${typeof v === "number" ? v.toFixed(4) : v}`).join("")}
-                  </option>
-                ))}
-              </select>
-              {errorRuns && <span className="text-[10px] mt-0.5" style={{ color: "#ef4444" }}>{errorRuns}</span>}
-            </div>
-          )}
-          {/* Persisted values -- always visible when set, editable directly */}
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Run ID</label>
-            <input
-              type="text"
-              className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg font-mono focus:outline-none focus:ring-2"
-              style={SELECT_STYLE}
-              value={configField(config, "run_id", "")}
-              onChange={(e) => onUpdate("run_id", e.target.value)}
-              placeholder="e.g. a1b2c3d4e5f6..."
-            />
-          </div>
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Artifact Path</label>
-            <input
-              type="text"
-              className="mt-1 w-full text-xs px-2.5 py-1.5 rounded-lg font-mono focus:outline-none focus:ring-2"
-              style={SELECT_STYLE}
-              value={configField(config, "artifact_path", "")}
-              onChange={(e) => onUpdate("artifact_path", e.target.value)}
-              placeholder="e.g. model.cbm"
-            />
-          </div>
-        </div>
+        <ExperimentRunPicker
+          config={config}
+          onUpdate={onUpdate}
+          mlflow={mlflow}
+          showArtifactPath
+          onRunSelected={(run) => ({ artifact_path: run.artifacts[0] || "" })}
+        />
       )}
 
       {/* Task and Output Column */}

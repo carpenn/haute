@@ -10,6 +10,8 @@ import time
 import uuid
 from typing import Any
 
+from fastapi import HTTPException
+
 _DEFAULT_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
 
@@ -68,6 +70,18 @@ class JobStore:
         Raises ``KeyError`` if *job_id* does not exist.
         """
         self._jobs[job_id].update(fields)
+
+    def require_job(self, job_id: str) -> dict[str, Any]:
+        """Return the job dict for *job_id*, or raise HTTP 404 if not found.
+
+        Convenience wrapper around :meth:`get_job` that eliminates the
+        repetitive ``if job is None: raise HTTPException(...)`` guard at
+        every call site.
+        """
+        job = self.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+        return job
 
     @property
     def jobs(self) -> dict[str, dict[str, Any]]:
