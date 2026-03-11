@@ -28,6 +28,18 @@ def competitor_insights() -> pl.LazyFrame:
     return pl.scan_parquet("data/competitor_insight.parquet")
 
 
+@pipeline.node(config="config/data_source/policy_data.json")
+def policy_data() -> pl.LazyFrame:
+    """policy_data node"""
+    return pl.scan_parquet("data/britsure_policies.parquet")
+
+
+@pipeline.node(config="config/data_source/quoted_premiums.json")
+def quoted_premiums() -> pl.LazyFrame:
+    """quoted_premiums node"""
+    return pl.scan_parquet("data/britsure_premiums.parquet")
+
+
 @pipeline.node(config="config/quote_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """quotes node"""
@@ -74,6 +86,16 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
     df
     df
+    df
+    df
+    df
+    df
+    df
+    df
+    df
+    df
+    df
+    df
     return df
 
 
@@ -100,13 +122,7 @@ def competitor_join(policies: pl.LazyFrame, competitor_insights: pl.LazyFrame) -
 @pipeline.node(config="config/model_training/avg_top_5.json")
 def avg_top_5(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
     """avg_top_5 node"""
-    return df
-
-
-@pipeline.node(config="config/model_training/avg_top_5_glm.json")
-def avg_top_5_glm(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
-    """avg_top_5_glm node"""
-    return df
+    return competitor_join
 
 
 @pipeline.node(config="config/model_scoring/competitor_scoring.json")
@@ -116,16 +132,48 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     return score_from_config(policies, config="config/model_scoring/competitor_scoring.json")
 
 
-@pipeline.node(config="config/model_training/Model_Training_11.json")
-def Model_Training_11(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
-    """Model Training 11 node"""
+@pipeline.node
+def policy_join(competitor_scoring: pl.LazyFrame, policy_data: pl.LazyFrame, policies: pl.LazyFrame, quoted_premiums: pl.LazyFrame) -> pl.LazyFrame:
+    """policy_join node"""
+    df = (
+    policies
+    .join(
+        competitor_scoring, 
+        on = 'quote_id', 
+        how = 'left'
+    )
+    .join(
+        policy_data, 
+        on = 'quote_id', 
+        how = 'left'
+    )
+    .join(
+        quoted_premiums, 
+        on = 'quote_id', 
+        how = 'left'
+    )
+    .with_columns(
+        sale_flag = pl.when(pl.col('policy_id').is_null()).then(pl.lit(0)).otherwise(pl.lit(1))
+    )
+    )
     return df
 
 
-@pipeline.node(config="config/quote_response/output.json")
-def output(competitor_scoring: pl.LazyFrame) -> pl.LazyFrame:
-    """output node"""
-    return competitor_scoring
+@pipeline.node
+def competitor_features(policy_join: pl.LazyFrame) -> pl.LazyFrame:
+    """competitor_features node"""
+    df = (
+    policy_join
+    .with_columns(difference_to_market = pl.col('premium')/pl.col('competitor_premium'))
+    )
+    return df
+
+
+@pipeline.node(config="config/data_sink/conversion_sink.json")
+def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
+    """Data Sink 9 node"""
+    competitor_features.collect().write_parquet("output/conversion_data.parquet")
+    return competitor_features
 
 
 
@@ -137,6 +185,9 @@ pipeline.connect("competitor_insights", "competitor_join")
 pipeline.connect("competitor_join", "avg_top_5")
 pipeline.connect("policies", "competitor_scoring")
 pipeline.connect("quotes", "feature_processing")
-pipeline.connect("competitor_scoring", "output")
-pipeline.connect("competitor_join", "avg_top_5_glm")
-pipeline.connect("competitor_join", "Model_Training_11")
+pipeline.connect("competitor_scoring", "policy_join")
+pipeline.connect("policy_data", "policy_join")
+pipeline.connect("policies", "policy_join")
+pipeline.connect("quoted_premiums", "policy_join")
+pipeline.connect("policy_join", "competitor_features")
+pipeline.connect("competitor_features", "conversion_sink")

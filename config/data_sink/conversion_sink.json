@@ -1,0 +1,4 @@
+{
+  "path": "output/conversion_data.parquet",
+  "format": "parquet"
+}

@@ -393,6 +393,14 @@ class TestLoadSamples:
         result = load_samples(p)
         assert len(result) == 2
 
+    def test_jsonl_max_samples_limits_rows(self, tmp_path: Path):
+        p = tmp_path / "big.jsonl"
+        p.write_text("".join(f'{{"i": {i}}}\n' for i in range(50)))
+        result = load_samples(p, max_samples=10)
+        assert len(result) == 10
+        assert result[0] == {"i": 0}
+        assert result[-1] == {"i": 9}
+
 
 # ---------------------------------------------------------------------------
 # flatten_to_frame

@@ -1,6 +1,5 @@
 {
   "path": "data/quotes_10m.jsonl",
-  "row_id_column": "IDpol",
   "flattenSchema": {
     "quote_metadata": {
       "quote_id": "str",
@@ -56,16 +55,31 @@
       "is_main_driver": "bool",
       "relationship_to_main_driver": "str",
       "claims": {
-        "$max": 0,
-        "$items": {}
+        "$max": 5,
+        "$items": {
+          "claim_date": "str",
+          "claim_type": "str",
+          "fault": "str",
+          "status": "str",
+          "amount_paid": "float",
+          "personal_injury_claimed": "bool",
+          "ncd_affected": "bool"
+        }
       },
       "convictions": {
-        "$max": 0,
-        "$items": {}
+        "$max": 3,
+        "$items": {
+          "conviction_code": "str",
+          "conviction_date": "str",
+          "points": "int",
+          "fine_amount": "int",
+          "ban_months": "str",
+          "is_disqualified": "bool"
+        }
       }
     },
     "additional_drivers": {
-      "$max": 1,
+      "$max": 4,
       "$items": {
         "title": "str",
         "first_name": "str",
@@ -89,12 +103,27 @@
         "uk_resident_since_birth": "bool",
         "uk_resident_since": "str",
         "claims": {
-          "$max": 0,
-          "$items": {}
+          "$max": 5,
+          "$items": {
+            "claim_date": "str",
+            "claim_type": "str",
+            "fault": "str",
+            "status": "str",
+            "amount_paid": "float",
+            "personal_injury_claimed": "bool",
+            "ncd_affected": "bool"
+          }
         },
         "convictions": {
-          "$max": 0,
-          "$items": {}
+          "$max": 3,
+          "$items": {
+            "conviction_code": "str",
+            "conviction_date": "str",
+            "points": "int",
+            "fine_amount": "int",
+            "ban_months": "str",
+            "is_disqualified": "bool"
+          }
         }
       }
     },
@@ -108,7 +137,7 @@
       "body_type": "str",
       "fuel_type": "str",
       "transmission": "str",
-      "engine_size_cc": "int",
+      "engine_size_cc": "str",
       "engine_power_bhp": "int",
       "number_of_doors": "int",
       "number_of_seats": "int",
@@ -119,8 +148,11 @@
       "is_right_hand_drive": "bool",
       "has_been_modified": "bool",
       "modifications": {
-        "$max": 0,
-        "$items": {}
+        "$max": 4,
+        "$items": {
+          "modification_type": "str",
+          "details": "str"
+        }
       },
       "security": {
         "alarm": "str",
@@ -144,7 +176,14 @@
       "years_at_address": "int",
       "months_at_address": "int"
     },
-    "previous_address": "str",
+    "previous_address": {
+      "house_number_or_name": "str",
+      "address_line_1": "str",
+      "address_line_2": "str",
+      "city": "str",
+      "county": "str",
+      "postcode": "str"
+    },
     "add_ons": {
       "breakdown_cover": {
         "selected": "bool",

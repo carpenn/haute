@@ -59,7 +59,8 @@ function renderPanel(overrides: Partial<Parameters<typeof NodePanel>[0]> = {}) {
 
 describe("NodePanel", () => {
   beforeEach(() => {
-    useUIStore.setState({ nodePanelWidth: 900 })
+    Object.defineProperty(window, "innerWidth", { value: 1920, writable: true, configurable: true })
+    useUIStore.setState({ nodePanelWidth: 600, paletteOpen: true })
   })
 
   afterEach(cleanup)
@@ -72,11 +73,6 @@ describe("NodePanel", () => {
   it("renders node label in the header", () => {
     renderPanel()
     expect(screen.getByDisplayValue("My Node")).toBeInTheDocument()
-  })
-
-  it("renders node id in the header", () => {
-    renderPanel()
-    expect(screen.getByText("node_1")).toBeInTheDocument()
   })
 
   it("close button calls onClose", () => {
@@ -388,18 +384,19 @@ describe("NodePanel", () => {
       expect(useUIStore.getState().nodePanelWidth).toBe(320)
     })
 
-    it("resize clamps to maximum width of 900", () => {
+    it("resize clamps to 75% of available space", () => {
       useUIStore.setState({ nodePanelWidth: 900 })
       const { container } = renderPanel()
       const panel = container.firstElementChild as HTMLElement
       const dragHandle = panel.querySelector(".cursor-col-resize") as HTMLElement
 
-      // Start drag at x=500, move left by 600 → delta = 600 → width = 900 + 600 = 1500 → clamped to 900
+      // Start drag at x=500, move left by 1000 → delta = 1000 → 900 + 1000 = 1900 → clamped to max
       fireEvent.mouseDown(dragHandle, { clientX: 500 })
-      fireEvent.mouseMove(window, { clientX: -100 })
+      fireEvent.mouseMove(window, { clientX: -500 })
       fireEvent.mouseUp(window)
 
-      expect(useUIStore.getState().nodePanelWidth).toBe(900)
+      // Max = floor((1920 - 180) * 0.75) = 1305
+      expect(useUIStore.getState().nodePanelWidth).toBe(1305)
     })
   })
 

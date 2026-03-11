@@ -1,9 +1,0 @@
-{
-  "algorithm": "glm",
-  "target": "avg_cheapest_5",
-  "terms": {
-    "proposer_age": {
-      "type": "linear"
-    }
-  }
-}

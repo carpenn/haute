@@ -4,7 +4,9 @@ import PanelShell from "../PanelShell"
 import useUIStore from "../../stores/useUIStore"
 
 beforeEach(() => {
-  useUIStore.setState({ nodePanelWidth: 600 })
+  // Simulate a 1920px-wide window so dynamic sizing is realistic
+  Object.defineProperty(window, "innerWidth", { value: 1920, writable: true, configurable: true })
+  useUIStore.setState({ nodePanelWidth: 600, paletteOpen: true })
 })
 
 afterEach(cleanup)
@@ -15,10 +17,26 @@ describe("PanelShell", () => {
     expect(screen.getByTestId("child")).toBeTruthy()
   })
 
-  it("uses panel width from store", () => {
+  it("uses panel width from store when explicitly set", () => {
     const { container } = render(<PanelShell><span>content</span></PanelShell>)
     const shell = container.firstElementChild as HTMLElement
     expect(shell.style.width).toBe("600px")
+  })
+
+  it("uses 50% of available space when store value is 0 (default)", () => {
+    useUIStore.setState({ nodePanelWidth: 0 })
+    const { container } = render(<PanelShell><span>content</span></PanelShell>)
+    const shell = container.firstElementChild as HTMLElement
+    // Available = 1920 - 180 (palette) = 1740; half = 870
+    expect(shell.style.width).toBe("870px")
+  })
+
+  it("accounts for collapsed palette in default width", () => {
+    useUIStore.setState({ nodePanelWidth: 0, paletteOpen: false })
+    const { container } = render(<PanelShell><span>content</span></PanelShell>)
+    const shell = container.firstElementChild as HTMLElement
+    // Available = 1920 - 40 (collapsed) = 1880; half = 940
+    expect(shell.style.width).toBe("940px")
   })
 
   it("applies background from CSS variable", () => {
@@ -65,16 +83,17 @@ describe("PanelShell", () => {
     expect(useUIStore.getState().nodePanelWidth).toBe(320)
   })
 
-  it("clamps width to maximum of 900", () => {
+  it("clamps width to 75% of available space", () => {
     useUIStore.setState({ nodePanelWidth: 800 })
     const { container } = render(<PanelShell><span>content</span></PanelShell>)
     const handle = container.querySelector(".cursor-col-resize") as HTMLElement
 
     fireEvent.mouseDown(handle, { clientX: 400 })
-    fireEvent.mouseMove(window, { clientX: -100 }) // delta = 500 → 800 + 500 = 1300 → clamped to 900
+    fireEvent.mouseMove(window, { clientX: -1000 }) // delta = 1400 → 800 + 1400 = 2200 → clamped
     fireEvent.mouseUp(window)
 
-    expect(useUIStore.getState().nodePanelWidth).toBe(900)
+    // Max = floor((1920 - 180) * 0.75) = 1305
+    expect(useUIStore.getState().nodePanelWidth).toBe(1305)
   })
 
   it("has slide-in animation class", () => {

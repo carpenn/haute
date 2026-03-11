@@ -1,12 +1,6 @@
 {
   "input_scenario_map": {
-    "quotes": "live",
-    "batch_quotes": "nb_batch",
-    "feature_processing": "live"
-  },
-  "inputs": [
-    "quotes",
-    "batch_quotes"
-  ],
-  "selected_columns": []
+    "feature_processing": "live",
+    "batch_quotes": "nb_batch"
+  }
 }

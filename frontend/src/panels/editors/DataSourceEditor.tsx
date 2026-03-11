@@ -50,6 +50,7 @@ export default function DataSourceEditor({
               onSelect={(path) => {
                 onUpdate("path", path)
                 fetchForPath(path)
+                onRefreshPreview?.()
               }}
             />
           </div>

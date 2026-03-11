@@ -18,7 +18,7 @@ function resetStore() {
     submodelDialog: null,
     syncBanner: null,
     dirty: false,
-    nodePanelWidth: 900,
+    nodePanelWidth: 0,
   })
 }
 
@@ -102,8 +102,8 @@ describe("useUIStore", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("nodePanelWidth", () => {
-    it("has a default value of 900", () => {
-      expect(useUIStore.getState().nodePanelWidth).toBe(900)
+    it("defaults to 0 (sentinel for dynamic sizing)", () => {
+      expect(useUIStore.getState().nodePanelWidth).toBe(0)
     })
 
     it("setNodePanelWidth updates the width", () => {

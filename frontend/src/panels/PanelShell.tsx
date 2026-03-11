@@ -2,7 +2,25 @@ import { useEffect, useRef, useCallback, type ReactNode } from "react"
 import useUIStore from "../stores/useUIStore"
 
 const MIN_PANEL_W = 320
-const MAX_PANEL_W = 900
+const LEFT_PALETTE_W = 180
+const LEFT_PALETTE_COLLAPSED_W = 40
+
+/** Available space = window width minus left palette. */
+function availableSpace(): number {
+  const paletteOpen = useUIStore.getState().paletteOpen
+  const leftW = paletteOpen ? LEFT_PALETTE_W : LEFT_PALETTE_COLLAPSED_W
+  return window.innerWidth - leftW
+}
+
+/** Default panel width: 50% of available space. */
+function defaultPanelWidth(): number {
+  return Math.max(MIN_PANEL_W, Math.floor(availableSpace() / 2))
+}
+
+/** Maximum panel width: 75% of available space so the graph stays usable. */
+function maxPanelWidth(): number {
+  return Math.max(MIN_PANEL_W, Math.floor(availableSpace() * 0.75))
+}
 
 interface PanelShellProps {
   children: ReactNode
@@ -19,8 +37,10 @@ interface PanelShellProps {
  * - Consistent background color
  */
 export default function PanelShell({ children, style }: PanelShellProps) {
-  const panelWidth = useUIStore((s) => s.nodePanelWidth)
+  const storedWidth = useUIStore((s) => s.nodePanelWidth)
   const setNodePanelWidth = useUIStore((s) => s.setNodePanelWidth)
+  // 0 = sentinel: use dynamic default (50% of available space)
+  const panelWidth = storedWidth > 0 ? storedWidth : defaultPanelWidth()
 
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -31,8 +51,9 @@ export default function PanelShell({ children, style }: PanelShellProps) {
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return
+      const maxW = maxPanelWidth()
       const delta = startX.current - e.clientX
-      const newW = Math.min(MAX_PANEL_W, Math.max(MIN_PANEL_W, startW.current + delta))
+      const newW = Math.min(maxW, Math.max(MIN_PANEL_W, startW.current + delta))
       widthRef.current = newW
       if (panelRef.current) {
         panelRef.current.style.width = `${newW}px`

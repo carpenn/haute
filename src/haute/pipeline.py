@@ -166,29 +166,35 @@ class Pipeline(NodeRegistry):
 
     def run(self) -> pl.DataFrame:
         """Execute the full pipeline, following edges for data flow."""
+        from haute._model_scorer import _scenario_ctx
+
         if not self._nodes:
             raise ValueError("Pipeline has no nodes")
 
-        order = self._topo_order()
-        outputs: dict[str, pl.DataFrame] = {}
+        _token = _scenario_ctx.set("batch")
+        try:
+            order = self._topo_order()
+            outputs: dict[str, pl.DataFrame] = {}
 
-        for n in order:
-            if n.is_source:
-                outputs[n.name] = n()
-            else:
-                input_names = self._get_inputs(n.name)
-                if input_names:
-                    input_dfs = [outputs[name] for name in input_names if name in outputs]
-                    outputs[n.name] = n(*input_dfs)
+            for n in order:
+                if n.is_source:
+                    outputs[n.name] = n()
                 else:
-                    # No explicit edges - use last available output (backward compat)
-                    last_df = list(outputs.values())[-1] if outputs else None
-                    if last_df is None:
-                        raise ValueError(f"Node '{n.name}' has no input")
-                    outputs[n.name] = n(last_df)
+                    input_names = self._get_inputs(n.name)
+                    if input_names:
+                        input_dfs = [outputs[name] for name in input_names if name in outputs]
+                        outputs[n.name] = n(*input_dfs)
+                    else:
+                        # No explicit edges - use last available output (backward compat)
+                        last_df = list(outputs.values())[-1] if outputs else None
+                        if last_df is None:
+                            raise ValueError(f"Node '{n.name}' has no input")
+                        outputs[n.name] = n(last_df)
 
-        # Return the output of the last node in topo order
-        return outputs[order[-1].name]
+            # Return the output of the last node in topo order
+            return outputs[order[-1].name]
+        finally:
+            _scenario_ctx.reset(_token)
 
     def score(self, df: pl.DataFrame) -> pl.DataFrame:
         """Run the pipeline on an input DataFrame, skipping source nodes.
@@ -198,32 +204,38 @@ class Pipeline(NodeRegistry):
         own loading logic (e.g. static rating tables).  When no node is
         marked, **all** sources are seeded (backward-compatible default).
         """
-        order = self._topo_order()
-        outputs: dict[str, pl.DataFrame] = {}
+        from haute._model_scorer import _scenario_ctx
 
-        deploy_inputs = [n for n in order if n.is_source and n.is_deploy_input]
-        seed_all = len(deploy_inputs) == 0  # fallback: seed every source
+        _token = _scenario_ctx.set("live")
+        try:
+            order = self._topo_order()
+            outputs: dict[str, pl.DataFrame] = {}
 
-        for n in order:
-            if n.is_source:
-                if seed_all or n.is_deploy_input:
-                    outputs[n.name] = df
+            deploy_inputs = [n for n in order if n.is_source and n.is_deploy_input]
+            seed_all = len(deploy_inputs) == 0  # fallback: seed every source
+
+            for n in order:
+                if n.is_source:
+                    if seed_all or n.is_deploy_input:
+                        outputs[n.name] = df
+                    else:
+                        # Not a deploy input - run its own load logic
+                        outputs[n.name] = n()
+
+            for n in order:
+                if n.is_source:
+                    continue
+                input_names = self._get_inputs(n.name)
+                if input_names:
+                    input_dfs = [outputs[name] for name in input_names if name in outputs]
+                    outputs[n.name] = n(*input_dfs)
                 else:
-                    # Not a deploy input - run its own load logic
-                    outputs[n.name] = n()
+                    outputs[n.name] = n(df)
+                    df = outputs[n.name]
 
-        for n in order:
-            if n.is_source:
-                continue
-            input_names = self._get_inputs(n.name)
-            if input_names:
-                input_dfs = [outputs[name] for name in input_names if name in outputs]
-                outputs[n.name] = n(*input_dfs)
-            else:
-                outputs[n.name] = n(df)
-                df = outputs[n.name]
-
-        return outputs[order[-1].name]
+            return outputs[order[-1].name]
+        finally:
+            _scenario_ctx.reset(_token)
 
     def to_graph(self) -> dict:
         """Convert the pipeline to a React Flow compatible graph."""

@@ -1365,8 +1365,9 @@ class TestExecuteGraphErrorPaths:
         assert results["src"].status == "ok"
         assert results["t"].status == "ok"
 
-    def test_broken_utility_import_errors_all_nodes(self, tmp_path, monkeypatch):
-        """A broken utility module should mark all nodes as errored, not 500."""
+    def test_broken_preamble_only_errors_preamble_nodes(self, tmp_path, monkeypatch):
+        """A broken preamble should only error transform/live-switch nodes,
+        not data sources that don't use preamble bindings."""
         monkeypatch.chdir(tmp_path)
 
         # Create a utility module with a NameError
@@ -1387,8 +1388,8 @@ class TestExecuteGraphErrorPaths:
             "preamble": "from utility.bad import *\n",
         })
         results = execute_graph(graph)
-        # Every node should show the preamble error, not a 500
-        assert results["src"].status == "error"
+        # Data source should succeed — it doesn't need the preamble
+        assert results["src"].status == "ok"
+        # Transform should show the preamble error
         assert results["t"].status == "error"
-        assert "undefined_var" in results["src"].error
-        assert "utility" in results["src"].error
+        assert "undefined_var" in results["t"].error

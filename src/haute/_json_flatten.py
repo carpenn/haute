@@ -1015,30 +1015,42 @@ def _polars_flatten_to_parquet(
 # ---------------------------------------------------------------------------
 
 
-def load_samples(path: str | Path) -> list[dict[str, Any]]:
+def load_samples(
+    path: str | Path,
+    *,
+    max_samples: int = 10_000,
+) -> list[dict[str, Any]]:
     """Load sample data from a ``.json`` or ``.jsonl`` file.
 
     - ``.json``:  a single object ``{…}`` or an array of objects ``[{…}, …]``.
-    - ``.jsonl``: one JSON object per line.
+    - ``.jsonl``: one JSON object per line — only the first *max_samples*
+      lines are read so that large files (tens of GB) don't blow up memory.
 
-    .. note::
-       For large files prefer :func:`_iter_json_records` which streams
-       records without holding the full file in memory.
+    Parameters
+    ----------
+    max_samples:
+        Maximum number of records to return.  Defaults to 10 000.
+        Only affects ``.jsonl`` files (streamed line-by-line).
+        ``.json`` files are always loaded in full since the format
+        requires parsing the entire document.
     """
     p = Path(path)
-    raw = p.read_bytes()
 
     if p.suffix == ".jsonl":
         samples: list[dict[str, Any]] = []
-        for line in raw.splitlines():
-            stripped = line.strip()
-            if stripped:
-                obj = orjson.loads(stripped)
-                if isinstance(obj, dict):
-                    samples.append(obj)
+        with p.open("rb") as fh:
+            for raw_line in fh:
+                stripped = raw_line.strip()
+                if stripped:
+                    obj = orjson.loads(stripped)
+                    if isinstance(obj, dict):
+                        samples.append(obj)
+                        if len(samples) >= max_samples:
+                            break
         logger.info("samples_loaded", path=str(p), count=len(samples))
         return samples
 
+    raw = p.read_bytes()
     data = orjson.loads(raw)
     if isinstance(data, list):
         result = [d for d in data if isinstance(d, dict)]

@@ -110,7 +110,7 @@ class SavePipelineService:
                 graph,
                 pipeline_name=body.name,
                 description=body.description,
-                preamble=body.preamble,
+                preamble=body.preamble or "",
                 source_file=body.source_file,
                 preserved_blocks=body.preserved_blocks or None,
             )
@@ -125,7 +125,7 @@ class SavePipelineService:
                 graph,
                 pipeline_name=body.name,
                 description=body.description,
-                preamble=body.preamble,
+                preamble=body.preamble or "",
                 preserved_blocks=body.preserved_blocks or None,
             )
             py_path.write_text(code)

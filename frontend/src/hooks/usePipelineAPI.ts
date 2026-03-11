@@ -32,11 +32,22 @@ export interface PipelineAPIReturn {
   setPreviewData: React.Dispatch<React.SetStateAction<PreviewData | null>>
   nodeStatuses: Record<string, "ok" | "error" | "running">
   fetchPreview: (node: Node) => void
+  /** Refresh: lazily preview upstream nodes missing _columns, then preview the target node. */
+  refreshPreview: (node: Node) => void
   handleSave: () => void
 }
 
 function nodeLabel(node: Node): string {
   return String(node.data.label || node.id)
+}
+
+type ColumnDef = { name: string; dtype: string }
+
+/** Compare two column arrays by name+dtype — returns true if identical. */
+function columnsEqual(a: ColumnDef[] | undefined, b: ColumnDef[] | undefined): boolean {
+  if (!a && !b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((col, i) => col.name === b[i].name && col.dtype === b[i].dtype)
 }
 
 function resultToPreview(nodeId: string, label: string, r: NodeResult): PreviewData {
@@ -80,6 +91,48 @@ export default function usePipelineAPI({
   rowLimitRef.current = rowLimit
   const activeScenarioRef = useRef(activeScenario)
   activeScenarioRef.current = activeScenario
+
+  // ─── Downstream column propagation ──────────────────────────────
+  // After a node's preview returns changed columns, cascade to downstream
+  // nodes so their _columns (and thus editor dropdowns) stay fresh.
+  const propagatingRef = useRef(new Set<string>())
+
+  const propagateDownstream = useCallback((changedNodeId: string) => {
+    const { edges, nodes } = graphRef.current
+    const downstreamIds = edges
+      .filter((e) => e.source === changedNodeId)
+      .map((e) => e.target)
+
+    if (downstreamIds.length === 0) return
+
+    const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
+
+    for (const dsId of downstreamIds) {
+      if (propagatingRef.current.has(dsId)) continue
+      propagatingRef.current.add(dsId)
+
+      const dsNode = nodes.find((n) => n.id === dsId)
+      const oldColumns = (dsNode?.data as Record<string, unknown>)?._columns as ColumnDef[] | undefined
+
+      previewNode(graph, dsId, rowLimitRef.current, activeScenarioRef.current)
+        .then((result) => {
+          if (result.columns) {
+            const newColumns = result.columns as ColumnDef[]
+            setNodes((nds) => nds.map((n) =>
+              n.id === dsId
+                ? { ...n, data: { ...n.data, _columns: newColumns, _availableColumns: result.available_columns ?? newColumns, _schemaWarnings: result.schema_warnings ?? [] } }
+                : n,
+            ))
+            if (!columnsEqual(oldColumns, newColumns)) {
+              propagateDownstream(dsId)
+            }
+          }
+        })
+        .catch(() => { /* propagation failure is non-fatal */ })
+        .finally(() => { propagatingRef.current.delete(dsId) })
+    }
+  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+
   // Initial pipeline load
   useEffect(() => {
     loadPipeline()
@@ -147,7 +200,13 @@ export default function usePipelineAPI({
           setNodeStatuses(result.node_statuses as Record<string, "ok" | "error" | "running">)
         }
         if (result.columns) {
-          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: result.columns, _availableColumns: result.available_columns ?? result.columns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
+          const oldColumns = (node.data as Record<string, unknown>)?._columns as ColumnDef[] | undefined
+          const newColumns = result.columns as ColumnDef[]
+          setNodes((nds) => nds.map((n) => n.id === node.id ? { ...n, data: { ...n.data, _columns: newColumns, _availableColumns: result.available_columns ?? newColumns, _schemaWarnings: result.schema_warnings ?? [] } } : n))
+          // Cascade to downstream nodes if columns changed
+          if (!columnsEqual(oldColumns, newColumns)) {
+            propagateDownstream(node.id)
+          }
         }
       })
       .catch((err) => {
@@ -156,7 +215,7 @@ export default function usePipelineAPI({
           setNodeStatuses({})
         }
       })
-  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes, propagateDownstream])
 
   const fetchPreview = useCallback((node: Node) => {
     if (previewDebounce.current) clearTimeout(previewDebounce.current)
@@ -169,6 +228,50 @@ export default function usePipelineAPI({
     }
     previewDebounce.current = setTimeout(() => fetchPreviewImmediate(node), 200)
   }, [fetchPreviewImmediate])
+
+  /** Lazily preview upstream nodes that are missing _columns, then preview the target node. */
+  const refreshPreview = useCallback((node: Node) => {
+    const { nodes, edges } = graphRef.current
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+    // Find direct upstream nodes that have never been previewed (no _columns)
+    const upstreamIds = edges
+      .filter((e) => e.target === node.id)
+      .map((e) => e.source)
+    const staleUpstream = upstreamIds
+      .map((id) => nodeMap.get(id))
+      .filter((n): n is Node => !!n && !(n.data as Record<string, unknown>)?._columns)
+
+    if (staleUpstream.length === 0) {
+      // No upstream gaps — just preview the selected node directly
+      fetchPreviewImmediate(node)
+      return
+    }
+
+    // Show loading state for the target node
+    setPreviewData(makePreviewData(node.id, nodeLabel(node), { status: "loading" }))
+
+    const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
+
+    // Preview stale upstream nodes in parallel, then the target node
+    Promise.all(
+      staleUpstream.map((upstream) =>
+        previewNode(graph, upstream.id, rowLimitRef.current, activeScenarioRef.current)
+          .then((result) => {
+            if (result.columns) {
+              setNodes((nds) => nds.map((n) =>
+                n.id === upstream.id
+                  ? { ...n, data: { ...n.data, _columns: result.columns, _availableColumns: result.available_columns ?? result.columns, _schemaWarnings: result.schema_warnings ?? [] } }
+                  : n,
+              ))
+            }
+          })
+          .catch(() => { /* upstream preview failure shouldn't block the target */ }),
+      ),
+    ).then(() => {
+      fetchPreviewImmediate(node)
+    })
+  }, [fetchPreviewImmediate, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
@@ -210,6 +313,6 @@ export default function usePipelineAPI({
     loading,
     previewData, setPreviewData,
     nodeStatuses,
-    fetchPreview, handleSave,
+    fetchPreview, refreshPreview, handleSave,
   }
 }

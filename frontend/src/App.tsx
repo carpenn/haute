@@ -169,7 +169,7 @@ function FlowEditor() {
   const {
     loading, previewData, setPreviewData,
     nodeStatuses,
-    fetchPreview, handleSave,
+    fetchPreview, refreshPreview, handleSave,
   } = usePipelineAPI({
     selectedNode,
     graphRef, parentGraphRef, submodelsRef, setNodes,
@@ -421,7 +421,7 @@ function FlowEditor() {
                 onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
                 onUpdateNode={onUpdateNode}
                 onDeleteEdge={handleDeleteEdge}
-                onRefreshPreview={() => { if (selectedNode) fetchPreview(selectedNode) }}
+                onRefreshPreview={() => { if (selectedNode) refreshPreview(selectedNode) }}
                 dimmed={!selectedNode && !!lastSelectedNodeRef.current}
                 errorLine={
                   previewData?.nodeId === (selectedNode ?? lastSelectedNodeRef.current)?.id

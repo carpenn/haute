@@ -90,7 +90,11 @@ export function MlflowStatusBadge() {
 // ─── FileBrowser ──────────────────────────────────────────────────
 
 export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath?: string; onSelect: (path: string) => void; extensions?: string }) {
-  const [dir, setDir] = useState(".")
+  const [dir, setDir] = useState(() => {
+    if (!currentPath) return "."
+    const lastSlash = currentPath.lastIndexOf("/")
+    return lastSlash > 0 ? currentPath.substring(0, lastSlash) : "."
+  })
   const [items, setItems] = useState<FileItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

@@ -68,8 +68,8 @@ const useUIStore = create<UIState>()((set) => ({
   dirty: false,
   setDirty: (dirty) => set({ dirty }),
 
-  // Node panel width
-  nodePanelWidth: 900,
+  // Node panel width (0 = use dynamic default: 50% of available space)
+  nodePanelWidth: 0,
   setNodePanelWidth: (width) => set({ nodePanelWidth: width }),
 }))
 

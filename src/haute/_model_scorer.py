@@ -6,6 +6,7 @@ while keeping behaviour identical.
 
 from __future__ import annotations
 
+import contextvars
 from typing import Any
 
 import numpy as np
@@ -15,6 +16,13 @@ from haute._logging import get_logger
 from haute._types import _Frame
 
 logger = get_logger(component="model_scorer")
+
+# Runtime scenario context — set by Pipeline.run() / Pipeline.score()
+# so that score_from_config (codegen path) can pick the right strategy.
+# "live" = eager in-memory scoring, anything else = disk-batched.
+_scenario_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "haute_scenario", default="batch",
+)
 
 _SCORE_BATCH_SIZE = 500_000
 
@@ -192,6 +200,7 @@ def score_from_config(
         version=cfg.get("version", "latest"),
         task=cfg.get("task", "regression"),
         output_col=cfg.get("output_column", "prediction"),
+        scenario=_scenario_ctx.get(),
     )
     return scorer.score(*dfs)
 

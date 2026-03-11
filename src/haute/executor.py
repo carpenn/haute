@@ -1072,20 +1072,16 @@ def _eager_execute(
     available_columns maps node_id → list of (name, dtype) pairs before
     any selected_columns filtering.
     """
+    preamble_error: str | None = None
     try:
         preamble_ns = _compile_preamble(graph.preamble or "")
     except PreambleError as exc:
-        # Preamble failed — mark every node in the graph as errored so the
-        # frontend shows the problem on every node rather than a raw 500.
-        order = [n.id for n in graph.nodes]
-        err_msg = str(exc)
-        errors = {nid: err_msg for nid in order}
-        empty: dict[str, pl.DataFrame | None] = {nid: None for nid in order}
-        no_timing: dict[str, float] = {}
-        no_mem: dict[str, int] = {}
-        no_lines: dict[str, int] = {}
-        no_avail: dict[str, list[tuple[str, str]]] = {}
-        return empty, order, errors, no_timing, no_mem, no_lines, no_avail
+        # Don't abort — let non-preamble nodes (data sources, model scoring,
+        # etc.) execute normally.  The error will surface on transform /
+        # source-switch nodes that actually need the preamble bindings.
+        logger.warning("preamble_failed", error=str(exc))
+        preamble_ns = {}
+        preamble_error = str(exc)
 
     result = _execute_eager_core(
         graph,
@@ -1096,8 +1092,18 @@ def _eager_execute(
         preamble_ns=preamble_ns or None,
         scenario=scenario,
     )
+    errors = result.errors
+    if preamble_error:
+        # Inject the preamble error only into nodes whose builders use it
+        # (transforms and live-switch nodes), not data sources / model scores.
+        _PREAMBLE_TYPES = {NodeType.TRANSFORM, NodeType.LIVE_SWITCH}
+        node_map = {n.id: n for n in graph.nodes}
+        for nid in result.order:
+            nd = node_map.get(nid)
+            if nd and nd.data.nodeType in _PREAMBLE_TYPES and nid not in errors:
+                errors[nid] = preamble_error
     return (
-        result.outputs, result.order, result.errors,
+        result.outputs, result.order, errors,
         result.timings, result.memory_bytes, result.error_lines,
         result.available_columns,
     )
@@ -1150,13 +1156,16 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
         else:
             lf.sink_parquet(out)
     except (pl.exceptions.ComputeError, pl.exceptions.InvalidOperationError):
-        # Fallback: collect with streaming hint, then write eagerly.
+        # Fallback: collect with streaming engine, then write eagerly.
+        # streaming engine processes in chunks internally, keeping memory
+        # lower than the default engine for large multi-join plans.
         logger.info("sink_streaming_fallback", path=path, format=fmt)
         df = lf.collect(engine="streaming")
         if fmt == "csv":
             df.write_csv(out)
         else:
             df.write_parquet(out)
+        del df
 
     # Read back row count cheaply from file metadata.
     if fmt == "csv":

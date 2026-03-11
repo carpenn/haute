@@ -44,18 +44,6 @@ type NodePanelProps = {
   errorLine?: number | null
 }
 
-// ─── Node types that show a refresh-preview button in the panel header ──
-
-const REFRESHABLE_TYPES = new Set<string>([
-  NODE_TYPES.CONSTANT,
-  NODE_TYPES.TRANSFORM,
-  NODE_TYPES.BANDING,
-  NODE_TYPES.SCENARIO_EXPANDER,
-  NODE_TYPES.RATING_STEP,
-  NODE_TYPES.MODEL_SCORE,
-  NODE_TYPES.OPTIMISER_APPLY,
-])
-
 // ─── Node types that do NOT show the Columns tab ──
 // Output already has its own field selection; submodels/ports are placeholders;
 // modelling nodes are sink-only (no outputs).
@@ -436,25 +424,25 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
           onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-soft)' }}
           onBlur={(e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.boxShadow = 'none' }}
         />
-        <span className="text-[11px] font-mono shrink-0" style={{ color: 'var(--text-muted)' }}>{node.id}</span>
-        {onRefreshPreview && REFRESHABLE_TYPES.has(nodeType) && (
+        {onRefreshPreview && (
           <button
             onClick={onRefreshPreview}
-            className="p-1 rounded shrink-0 transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+            className="px-2 py-1 rounded shrink-0 transition-colors flex items-center gap-1 text-[11px] font-medium"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
             title="Refresh preview"
           >
-            <RefreshCw size={13} />
+            <RefreshCw size={11} />
+            Refresh
           </button>
         )}
-        <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+        <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ background: '#dc2626', color: '#fff' }}
+          onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
+          onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
           title="Close"
         >
-          <X size={14} />
+          <X size={14} strokeWidth={2.5} />
         </button>
       </div>
 

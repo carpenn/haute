@@ -31,7 +31,7 @@ class SavePipelineRequest(BaseModel):
     name: str = "main"
     description: str = ""
     graph: Graph = Field(default_factory=Graph)
-    preamble: str = ""
+    preamble: str | None = ""
     preserved_blocks: list[str] = Field(default_factory=list)
     source_file: str = ""
     scenarios: list[str] = Field(default_factory=lambda: ["live"])
