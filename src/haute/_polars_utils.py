@@ -12,19 +12,35 @@ logger = get_logger(component="polars_utils")
 
 
 def _malloc_trim() -> None:
-    """Ask glibc to return free pages to the OS.
+    """Ask the OS to return freed heap pages.
 
     After ``del df; gc.collect()``, Python's allocator keeps the pages
     mapped — RSS stays high even though the memory is logically free.
-    ``malloc_trim(0)`` tells glibc to release them.  Linux-only; no-op
-    elsewhere.
-    """
-    try:
-        import ctypes
 
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except (OSError, AttributeError):
-        pass  # Linux-only; no-op elsewhere
+    Platform strategies:
+
+    - **Linux**: ``malloc_trim(0)`` via glibc forces arena release.
+    - **Windows**: ``_heapmin()`` via msvcrt compacts the CRT heap.
+    - **macOS**: no direct API — callers should ``gc.collect()`` beforehand.
+    """
+    import sys
+
+    platform = sys.platform
+    if platform == "linux":
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            logger.debug("malloc_trim_unavailable", platform=platform)
+    elif platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.cdll.msvcrt._heapmin()
+        except (OSError, AttributeError):
+            logger.debug("heapmin_unavailable", platform=platform)
+    # macOS / other: no native heap compaction API available
 
 
 def safe_sink(

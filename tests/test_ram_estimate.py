@@ -96,6 +96,43 @@ class TestAvailableRam:
             ram = available_ram_bytes()
             assert ram > 0
 
+    def test_windows_path_calls_global_memory_status(self, monkeypatch) -> None:
+        """On Windows, GlobalMemoryStatusEx is used to read available RAM."""
+        from unittest.mock import MagicMock
+
+        mock_windll = MagicMock()
+        # GlobalMemoryStatusEx populates the struct; simulate by returning True
+        # and patching ullAvailPhys via side_effect
+        mock_windll.kernel32.GlobalMemoryStatusEx.return_value = True
+
+        mock_ctypes = MagicMock()
+        mock_ctypes.windll = mock_windll
+        mock_ctypes.c_ulong = int
+        mock_ctypes.c_ulonglong = int
+
+        monkeypatch.setattr("sys.platform", "win32")
+
+        # Block /proc and sysconf so only the Windows path runs
+        with patch("builtins.open", side_effect=OSError):
+            with patch("os.sysconf", side_effect=AttributeError):
+                with patch.dict(
+                    "sys.modules",
+                    {"ctypes": mock_ctypes},
+                ):
+                    # The ctypes struct is defined inline; we can't easily
+                    # intercept field values. Verify the API was called.
+                    available_ram_bytes()
+
+        mock_windll.kernel32.GlobalMemoryStatusEx.assert_called_once()
+
+    def test_ultimate_fallback_returns_4gib(self, monkeypatch) -> None:
+        """When all platform methods fail, returns 4 GiB default."""
+        monkeypatch.setattr("sys.platform", "freebsd13")
+        with patch("builtins.open", side_effect=OSError):
+            with patch("os.sysconf", side_effect=AttributeError):
+                ram = available_ram_bytes()
+        assert ram == 4 * 1024**3
+
 
 # ---------------------------------------------------------------------------
 # Parquet/CSV row counts

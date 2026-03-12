@@ -170,7 +170,60 @@ def test_safe_sink_real_error_propagates(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_malloc_trim_is_noop_on_non_linux():
+def test_malloc_trim_does_not_raise():
     """_malloc_trim must never raise regardless of platform."""
-    # On Linux it calls malloc_trim; elsewhere it's a silent no-op.
     _malloc_trim()  # should not raise
+
+
+class TestMallocTrimDispatch:
+    """Verify _malloc_trim calls the correct platform API."""
+
+    def test_linux_calls_glibc_malloc_trim(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        mock_cdll = MagicMock()
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("ctypes.CDLL", mock_cdll)
+        _malloc_trim()
+        mock_cdll.assert_called_once_with("libc.so.6")
+        mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
+
+    def test_windows_calls_heapmin(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        mock_msvcrt = MagicMock()
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("ctypes.cdll", MagicMock(msvcrt=mock_msvcrt))
+        _malloc_trim()
+        mock_msvcrt._heapmin.assert_called_once()
+
+    def test_macos_is_noop(self, monkeypatch):
+        """macOS has no native heap compaction — verify no ctypes calls."""
+        from unittest.mock import MagicMock
+
+        mock_cdll_cls = MagicMock()
+        mock_cdll_inst = MagicMock()
+        monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr("ctypes.CDLL", mock_cdll_cls)
+        monkeypatch.setattr("ctypes.cdll", mock_cdll_inst)
+        _malloc_trim()
+        mock_cdll_cls.assert_not_called()
+        mock_cdll_inst.assert_not_called()
+
+    def test_linux_graceful_on_oserror(self, monkeypatch):
+        """If libc.so.6 can't be loaded, _malloc_trim must not raise."""
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("ctypes.CDLL", MagicMock(side_effect=OSError))
+        _malloc_trim()  # should not raise
+
+    def test_windows_graceful_on_attribute_error(self, monkeypatch):
+        """If msvcrt._heapmin is missing, _malloc_trim must not raise."""
+        from unittest.mock import MagicMock, PropertyMock
+
+        mock_cdll = MagicMock()
+        type(mock_cdll).msvcrt = PropertyMock(side_effect=AttributeError)
+        monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr("ctypes.cdll", mock_cdll)
+        _malloc_trim()  # should not raise

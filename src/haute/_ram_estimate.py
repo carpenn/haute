@@ -37,8 +37,10 @@ __all__ = [
 def available_ram_bytes() -> int:
     """Return available system RAM in bytes.
 
-    Reads ``/proc/meminfo`` on Linux.  Falls back to ``os.sysconf`` or
-    a conservative 4 GiB default on other platforms.
+    - **Linux**: reads ``/proc/meminfo`` (most accurate).
+    - **macOS / POSIX**: ``os.sysconf`` page-based query.
+    - **Windows**: ``GlobalMemoryStatusEx`` via ctypes.
+    - **Fallback**: conservative 4 GiB default.
     """
     # Linux: /proc/meminfo gives the most accurate available figure
     try:
@@ -53,12 +55,42 @@ def available_ram_bytes() -> int:
     # macOS / POSIX fallback
     try:
         import os
+
         pages = os.sysconf("SC_AVPHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")
         if pages > 0 and page_size > 0:
             return pages * page_size
     except (AttributeError, ValueError):
         pass
+
+    # Windows: GlobalMemoryStatusEx
+    import sys
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            mem = MemoryStatusEx()
+            mem.dwLength = ctypes.sizeof(MemoryStatusEx)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(  # type: ignore[attr-defined]
+                ctypes.byref(mem)
+            ):
+                return int(mem.ullAvailPhys)
+        except (OSError, AttributeError, ImportError):
+            pass
 
     # Last resort: assume 4 GiB
     return 4 * 1024**3

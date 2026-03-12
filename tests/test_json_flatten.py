@@ -853,9 +853,27 @@ class TestBuildJsonCache:
 
 
 class TestReleaseMemory:
-    """Verify _release_memory dispatches correctly per platform."""
+    """Verify _release_memory delegates to gc.collect + _malloc_trim."""
 
-    def test_linux_calls_malloc_trim(self, monkeypatch):
+    def test_delegates_gc_collect_then_malloc_trim(self):
+        """_release_memory must call gc.collect() then _malloc_trim() in order."""
+        from unittest.mock import MagicMock, patch
+
+        from haute import _json_flatten as mod
+
+        call_order: list[str] = []
+        mock_gc = MagicMock(side_effect=lambda: call_order.append("gc"))
+        mock_trim = MagicMock(side_effect=lambda: call_order.append("trim"))
+
+        with patch("gc.collect", mock_gc), patch.object(mod, "_malloc_trim", mock_trim):
+            mod._release_memory()
+
+        assert call_order == ["gc", "trim"]
+        mock_gc.assert_called_once()
+        mock_trim.assert_called_once()
+
+    def test_end_to_end_linux(self, monkeypatch):
+        """Full path: _release_memory → _malloc_trim → ctypes.CDLL on Linux."""
         from unittest.mock import MagicMock
 
         from haute import _json_flatten as mod
@@ -867,7 +885,8 @@ class TestReleaseMemory:
         mock_cdll.assert_called_once_with("libc.so.6")
         mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
 
-    def test_windows_calls_heapmin(self, monkeypatch):
+    def test_end_to_end_windows(self, monkeypatch):
+        """Full path: _release_memory → _malloc_trim → msvcrt._heapmin on Windows."""
         from unittest.mock import MagicMock
 
         from haute import _json_flatten as mod
@@ -878,7 +897,8 @@ class TestReleaseMemory:
         mod._release_memory()
         mock_msvcrt._heapmin.assert_called_once()
 
-    def test_macos_only_gc_collects(self, monkeypatch):
+    def test_end_to_end_macos(self, monkeypatch):
+        """On macOS, gc.collect runs but no ctypes heap compaction."""
         from unittest.mock import patch
 
         from haute import _json_flatten as mod
@@ -887,30 +907,6 @@ class TestReleaseMemory:
         with patch("gc.collect") as mock_gc:
             mod._release_memory()
             mock_gc.assert_called_once()
-
-    def test_linux_graceful_when_malloc_trim_unavailable(self, monkeypatch):
-        """If libc.so.6 can't be loaded, log and continue."""
-        from unittest.mock import MagicMock
-
-        from haute import _json_flatten as mod
-
-        monkeypatch.setattr("sys.platform", "linux")
-        monkeypatch.setattr("ctypes.CDLL", MagicMock(side_effect=OSError("not found")))
-        # Should not raise
-        mod._release_memory()
-
-    def test_windows_graceful_when_heapmin_unavailable(self, monkeypatch):
-        """If msvcrt._heapmin fails, log and continue."""
-        from unittest.mock import MagicMock, PropertyMock
-
-        from haute import _json_flatten as mod
-
-        mock_cdll = MagicMock()
-        type(mock_cdll).msvcrt = PropertyMock(side_effect=AttributeError("no msvcrt"))
-        monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.cdll", mock_cdll)
-        # Should not raise
-        mod._release_memory()
 
 
 # ---------------------------------------------------------------------------

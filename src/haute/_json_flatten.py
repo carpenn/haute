@@ -17,6 +17,7 @@ Array indices are **1-based** (e.g. ``additional_drivers.1.first_name``).
 
 from __future__ import annotations
 
+import gc
 import threading
 import time
 from collections.abc import Iterator
@@ -26,6 +27,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 import orjson
 
 from haute._logging import get_logger
+from haute._polars_utils import _malloc_trim
 
 if TYPE_CHECKING:
     import polars as pl
@@ -683,35 +685,12 @@ def _iter_line_chunks(path: Path, chunk_lines: int) -> Iterator[bytes]:
 def _release_memory() -> None:
     """Force the OS to reclaim freed pages.
 
-    Python and glibc both hold onto freed memory for reuse.  After
-    processing a large chunk we want that memory back *now* so RSS
-    stays flat across chunks.
-
-    Platform strategies:
-    - Linux: ``malloc_trim(0)`` via glibc forces arena release.
-    - Windows: ``_heapmin()`` via msvcrt compacts the CRT heap.
-    - macOS: no direct API — ``gc.collect()`` alone is the best we can do.
+    Runs ``gc.collect()`` then delegates to :func:`_malloc_trim` for
+    platform-specific heap compaction (Linux ``malloc_trim``, Windows
+    ``_heapmin``, macOS no-op).
     """
-    import ctypes
-    import gc
-    import sys
-
     gc.collect()
-
-    platform = sys.platform
-    if platform == "linux":
-        try:
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except (OSError, AttributeError):
-            logger.debug("malloc_trim_unavailable", platform=platform)
-    elif platform == "win32":
-        try:
-            ctypes.cdll.msvcrt._heapmin()
-        except (OSError, AttributeError):
-            logger.debug("heapmin_unavailable", platform=platform)
-    else:
-        # macOS / other — gc.collect() above is the best available option
-        logger.debug("no_native_heap_compaction", platform=platform)
+    _malloc_trim()
 
 
 def _iter_byte_chunks(path: Path, buffer_size: int) -> Iterator[bytes]:

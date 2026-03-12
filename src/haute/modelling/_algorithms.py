@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import os
+import sys
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -15,42 +16,99 @@ import numpy as np
 import polars as pl
 
 from haute._polars_utils import _malloc_trim  # noqa: F401 — re-exported for backward compat
+from haute._ram_estimate import available_ram_bytes
 
 _MEM_LOG = Path.home() / "training_mem.log"
+
+
+def _get_rss_mb() -> float:
+    """Return current-process RSS in MB.  Returns 0.0 if unavailable.
+
+    - **Linux**: reads ``/proc/self/status`` (current RSS, most accurate).
+    - **macOS**: ``resource.getrusage`` (reports max RSS in bytes).
+    - **Windows**: ``GetProcessMemoryInfo`` via ctypes (WorkingSetSize).
+    """
+    # Linux — /proc/self/status gives current (not peak) RSS
+    if sys.platform == "linux":
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1]) / 1024  # kB → MB
+        except OSError:
+            pass
+
+    # macOS — resource module reports max RSS in bytes
+    elif sys.platform == "darwin":
+        try:
+            import resource
+
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+        except (ImportError, AttributeError, ValueError):
+            pass
+
+    # Windows — kernel32 / psapi
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+            import ctypes.wintypes
+
+            class ProcessMemoryCounters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", ctypes.wintypes.DWORD),
+                    ("PageFaultCount", ctypes.wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            pmc = ProcessMemoryCounters()
+            pmc.cb = ctypes.sizeof(ProcessMemoryCounters)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()  # type: ignore[attr-defined]
+            if ctypes.windll.psapi.GetProcessMemoryInfo(  # type: ignore[attr-defined]
+                handle, ctypes.byref(pmc), pmc.cb
+            ):
+                return pmc.WorkingSetSize / (1024 * 1024)  # bytes → MB
+        except (OSError, AttributeError, ImportError):
+            pass
+
+    return 0.0
+
+
+def _get_available_mb() -> float:
+    """Return available system RAM in MB.  Returns 0.0 if unavailable.
+
+    Delegates to :func:`haute._ram_estimate.available_ram_bytes` for
+    cross-platform detection (Linux ``/proc``, macOS ``sysconf``,
+    Windows ``GlobalMemoryStatusEx``, 4 GiB fallback).
+    """
+    return available_ram_bytes() / (1024 * 1024)
 
 
 def _mem_checkpoint(label: str) -> None:
     """Write a memory checkpoint line to the persistent log.
 
-    Reads /proc/self/status for RSS and /proc/meminfo for MemAvailable.
-    Flushes immediately so the line survives a crash.
+    Cross-platform: uses ``/proc`` on Linux, ``resource`` on macOS,
+    and Win32 APIs on Windows.  Flushes immediately so the line
+    survives a crash.
     """
-    rss_mb = 0.0
-    try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("VmRSS:"):
-                    rss_mb = int(line.split()[1]) / 1024
-                    break
-    except OSError:
-        pass
-
-    avail_mb = 0.0
-    try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    avail_mb = int(line.split()[1]) / 1024
-                    break
-    except OSError:
-        pass
+    rss_mb = _get_rss_mb()
+    avail_mb = _get_available_mb()
 
     ts = time.strftime("%H:%M:%S")
     entry = f"[{ts}] {label:<45} RSS={rss_mb:>9.1f} MB   Avail={avail_mb:>9.1f} MB\n"
     with open(_MEM_LOG, "a") as f:
         f.write(entry)
         f.flush()
-        os.fsync(f.fileno())
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass  # exotic Windows builds may not support fsync on all handles
 
 
 # Callback type: (iteration, total_iterations, metrics_dict) -> None
