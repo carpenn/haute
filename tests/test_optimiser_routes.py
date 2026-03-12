@@ -1144,3 +1144,293 @@ class TestUnsupportedMode:
         resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
         assert resp.status_code == 400
         assert "quantum" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Issue 12: _execute_pipeline execution-path tests
+# ---------------------------------------------------------------------------
+
+
+class TestExecutePipelineArgs:
+    """Verify _execute_pipeline passes scenario, preamble_ns, and checkpoint_dir."""
+
+    def test_execute_pipeline_passes_scenario_and_checkpoint(self, scored_data, tmp_path):
+        """_execute_lazy receives scenario != 'live', the caller's checkpoint_dir, and preamble_ns."""
+        from pathlib import Path
+
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+        checkpoint_dir = tmp_path / "ckpt"
+        checkpoint_dir.mkdir()
+
+        # Capture the kwargs _execute_lazy is called with.
+        captured = {}
+
+        def fake_execute_lazy(*args, **kwargs):
+            captured.update(kwargs)
+            # Return (outputs_dict, exec_order, edge_map, label_map)
+            return ({"opt": MagicMock()}, [], {}, {})
+
+        with (
+            patch("haute.graph_utils._execute_lazy", side_effect=fake_execute_lazy),
+            patch(
+                "haute.executor._resolve_batch_scenario",
+                return_value="ism_scenario",
+            ),
+            patch(
+                "haute.executor._compile_preamble",
+                return_value={"helper": lambda x: x},
+            ),
+        ):
+            service._execute_pipeline(body, job_id, checkpoint_dir)
+
+        # scenario should come from _resolve_batch_scenario (not default "batch")
+        assert captured["scenario"] == "ism_scenario"
+        # checkpoint_dir is the one we passed in
+        assert captured["checkpoint_dir"] == checkpoint_dir
+        # preamble_ns is the dict returned by _compile_preamble
+        assert captured["preamble_ns"] is not None
+        assert "helper" in captured["preamble_ns"]
+
+    def test_execute_pipeline_defaults_to_batch_when_no_ism(self, scored_data, tmp_path):
+        """When _resolve_batch_scenario returns None, scenario defaults to 'batch'."""
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+        checkpoint_dir = tmp_path / "ckpt"
+        checkpoint_dir.mkdir()
+
+        captured = {}
+
+        def fake_execute_lazy(*args, **kwargs):
+            captured.update(kwargs)
+            return ({"opt": MagicMock()}, [], {}, {})
+
+        with (
+            patch("haute.graph_utils._execute_lazy", side_effect=fake_execute_lazy),
+            patch("haute.executor._resolve_batch_scenario", return_value=None),
+            patch("haute.executor._compile_preamble", return_value={}),
+        ):
+            service._execute_pipeline(body, job_id, checkpoint_dir)
+
+        assert captured["scenario"] == "batch"
+
+    def test_execute_pipeline_preamble_ns_none_for_empty_preamble(self, scored_data, tmp_path):
+        """When _compile_preamble returns empty/falsy, preamble_ns is None."""
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+        checkpoint_dir = tmp_path / "ckpt"
+        checkpoint_dir.mkdir()
+
+        captured = {}
+
+        def fake_execute_lazy(*args, **kwargs):
+            captured.update(kwargs)
+            return ({"opt": MagicMock()}, [], {}, {})
+
+        with (
+            patch("haute.graph_utils._execute_lazy", side_effect=fake_execute_lazy),
+            patch("haute.executor._resolve_batch_scenario", return_value=None),
+            patch("haute.executor._compile_preamble", return_value={}),
+        ):
+            service._execute_pipeline(body, job_id, checkpoint_dir)
+
+        # Empty dict from _compile_preamble is falsy → preamble_ns should be None
+        assert captured["preamble_ns"] is None
+
+
+class TestBuildGridSinkFallback:
+    """Verify _build_grid succeeds even when sink_parquet needs the fallback path."""
+
+    def test_build_grid_sink_fallback(self, tmp_path):
+        """When safe_sink_parquet's streaming sink raises ComputeError,
+        the fallback (collect+write) still produces a valid parquet and grid builds."""
+        from unittest.mock import call
+
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+
+        # Build a real scored LazyFrame
+        n_quotes, n_steps = 10, 3
+        scenario_values = np.linspace(0.8, 1.2, n_steps).astype(np.float32)
+        rows = []
+        for q in range(n_quotes):
+            for s, m in enumerate(scenario_values):
+                rows.append((f"q_{q:03d}", s, float(m), float(100 * m), float(1.5 * (2 - m))))
+        df = pl.DataFrame(
+            rows,
+            schema={
+                "quote_id": pl.Utf8,
+                "scenario_index": pl.Int32,
+                "scenario_value": pl.Float32,
+                "expected_income": pl.Float32,
+                "volume": pl.Float32,
+            },
+            orient="row",
+        )
+        scored_lf = df.lazy()
+
+        config = {
+            "objective": "expected_income",
+            "constraints": {"volume": {"min": 0.9}},
+            "quote_id": "quote_id",
+            "scenario_index": "scenario_index",
+            "scenario_value": "scenario_value",
+        }
+
+        def patched_safe_sink(lf, path, **kw):
+            """Force the streaming-sink exception to exercise the fallback path."""
+            # Simulate ComputeError on direct sink, then fall back to collect+write.
+            collected = lf.collect(engine="streaming")
+            collected.write_parquet(path)
+
+        mock_grid = MagicMock()
+        with (
+            patch(
+                "haute._polars_utils.safe_sink",
+                side_effect=patched_safe_sink,
+            ) as mock_sink,
+            patch(
+                "price_contour.build_grid_from_parquet",
+                return_value=mock_grid,
+            ) as mock_build,
+        ):
+            result = service._build_grid(scored_lf, ["volume"], config, "opt", job_id)
+
+        # safe_sink was called
+        assert mock_sink.call_count == 1
+        # build_grid_from_parquet was called with correct column mappings
+        assert mock_build.call_count == 1
+        build_kwargs = mock_build.call_args
+        assert build_kwargs.kwargs.get("objective") == "expected_income"
+        assert result is mock_grid
+
+
+class TestExecutePipelineCleanup:
+    """Verify checkpoint dir lifecycle: caller owns creation + cleanup."""
+
+    def test_execute_pipeline_uses_caller_checkpoint_dir(self, scored_data, tmp_path):
+        """_execute_pipeline passes the caller-provided checkpoint_dir to _execute_lazy."""
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+        checkpoint_dir = tmp_path / "ckpt"
+        checkpoint_dir.mkdir()
+
+        captured = {}
+
+        def fake_execute_lazy(*args, **kwargs):
+            captured.update(kwargs)
+            return ({"opt": MagicMock()}, [], {}, {})
+
+        with (
+            patch("haute.graph_utils._execute_lazy", side_effect=fake_execute_lazy),
+            patch("haute.executor._resolve_batch_scenario", return_value=None),
+            patch("haute.executor._compile_preamble", return_value={}),
+        ):
+            lazy_outputs = service._execute_pipeline(body, job_id, checkpoint_dir)
+
+        assert isinstance(lazy_outputs, dict)
+        assert captured["checkpoint_dir"] == checkpoint_dir
+
+    def test_execute_pipeline_error_does_not_leak_tmpdir(self, scored_data, tmp_path):
+        """When _execute_lazy raises, the caller's finally block cleans the checkpoint dir."""
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+
+        def failing_execute_lazy(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        # Simulate what start() does: create dir, call _execute_pipeline, cleanup in finally
+        import tempfile
+        from pathlib import Path
+
+        checkpoint_dir = Path(tempfile.mkdtemp(prefix="haute_test_"))
+        try:
+            with (
+                patch("haute.graph_utils._execute_lazy", side_effect=failing_execute_lazy),
+                patch("haute.executor._resolve_batch_scenario", return_value=None),
+                patch("haute.executor._compile_preamble", return_value={}),
+            ):
+                from fastapi import HTTPException
+
+                with pytest.raises(HTTPException):
+                    service._execute_pipeline(body, job_id, checkpoint_dir)
+        finally:
+            import shutil
+
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+
+        # Checkpoint dir should be gone after caller cleanup
+        assert not checkpoint_dir.exists()
+
+    def test_execute_pipeline_error_raises_http_exception(self, scored_data, tmp_path):
+        """Pipeline execution errors are wrapped in HTTPException(500)."""
+        from fastapi import HTTPException
+
+        from haute.routes._job_store import JobStore
+        from haute.routes._optimiser_service import OptimiserSolveService
+        from haute.schemas import OptimiserSolveRequest
+
+        graph_dict = _make_optimiser_graph(scored_data)
+        body = OptimiserSolveRequest(graph=graph_dict, node_id="opt")
+
+        store = JobStore()
+        service = OptimiserSolveService(store)
+        job_id = store.create_job({"status": "running"})
+        checkpoint_dir = tmp_path / "ckpt"
+        checkpoint_dir.mkdir()
+
+        def failing_execute_lazy(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        with (
+            patch("haute.graph_utils._execute_lazy", side_effect=failing_execute_lazy),
+            patch("haute.executor._resolve_batch_scenario", return_value=None),
+            patch("haute.executor._compile_preamble", return_value={}),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                service._execute_pipeline(body, job_id, checkpoint_dir)
+            assert exc_info.value.status_code == 500

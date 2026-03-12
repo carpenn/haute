@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from haute._polars_utils import _malloc_trim  # noqa: F401 — re-exported for backward compat
+
 _MEM_LOG = Path.home() / "training_mem.log"
 
 
@@ -49,20 +51,6 @@ def _mem_checkpoint(label: str) -> None:
         f.write(entry)
         f.flush()
         os.fsync(f.fileno())
-
-def _malloc_trim() -> None:
-    """Ask glibc to return free pages to the OS.
-
-    After ``del df; gc.collect()``, Python's allocator keeps the pages
-    mapped — RSS stays high even though the memory is logically free.
-    ``malloc_trim(0)`` tells glibc to release them.  Linux-only; no-op
-    elsewhere.
-    """
-    try:
-        import ctypes
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except (OSError, AttributeError):
-        pass  # Linux-only; no-op elsewhere
 
 
 # Callback type: (iteration, total_iterations, metrics_dict) -> None

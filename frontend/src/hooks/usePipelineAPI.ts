@@ -128,7 +128,7 @@ export default function usePipelineAPI({
             }
           }
         })
-        .catch(() => { /* propagation failure is non-fatal */ })
+        .catch((e) => console.warn("propagation_failed", dsId, e))
         .finally(() => { propagatingRef.current.delete(dsId) })
     }
   }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
@@ -266,7 +266,7 @@ export default function usePipelineAPI({
               ))
             }
           })
-          .catch(() => { /* upstream preview failure shouldn't block the target */ }),
+          .catch((e) => console.warn("upstream_preview_failed", upstream.id, e)),
       ),
     ).then(() => {
       fetchPreviewImmediate(node)

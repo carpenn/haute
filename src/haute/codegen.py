@@ -156,7 +156,7 @@ _SINK_PARQUET = '''\
 @pipeline.node(sink="{path}", format="parquet")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    {first}.collect().write_parquet("{path}")
+    {first}.collect(engine="streaming").write_parquet("{path}")
     return {first}
 '''
 
@@ -164,7 +164,7 @@ _SINK_CSV = '''\
 @pipeline.node(sink="{path}", format="csv")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    {first}.collect().write_csv("{path}")
+    {first}.collect(engine="streaming").write_csv("{path}")
     return {first}
 '''
 

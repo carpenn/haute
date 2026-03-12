@@ -85,17 +85,6 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
     df
-    df
-    df
-    df
-    df
-    df
-    df
-    df
-    df
-    df
-    df
-    df
     return df
 
 
@@ -133,23 +122,41 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
 
 
 @pipeline.node
-def policy_join(competitor_scoring: pl.LazyFrame, policy_data: pl.LazyFrame, policies: pl.LazyFrame, quoted_premiums: pl.LazyFrame) -> pl.LazyFrame:
-    """policy_join node"""
+def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl.LazyFrame:
+    """Join competitor scoring onto policies"""
     df = (
     policies
     .join(
-        competitor_scoring, 
-        on = 'quote_id', 
+        competitor_scoring,
+        on = 'quote_id',
         how = 'left'
     )
+    )
+    return df
+
+
+@pipeline.node
+def join_policy_data(join_scoring: pl.LazyFrame, policy_data: pl.LazyFrame) -> pl.LazyFrame:
+    """Join policy data"""
+    df = (
+    join_scoring
     .join(
-        policy_data, 
-        on = 'quote_id', 
+        policy_data,
+        on = 'quote_id',
         how = 'left'
     )
+    )
+    return df
+
+
+@pipeline.node
+def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame) -> pl.LazyFrame:
+    """Join quoted premiums and derive sale_flag"""
+    df = (
+    join_policy_data
     .join(
-        quoted_premiums, 
-        on = 'quote_id', 
+        quoted_premiums,
+        on = 'quote_id',
         how = 'left'
     )
     .with_columns(
@@ -160,10 +167,10 @@ def policy_join(competitor_scoring: pl.LazyFrame, policy_data: pl.LazyFrame, pol
 
 
 @pipeline.node
-def competitor_features(policy_join: pl.LazyFrame) -> pl.LazyFrame:
+def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
     df = (
-    policy_join
+    join_premiums
     .with_columns(difference_to_market = pl.col('premium')/pl.col('competitor_premium'))
     )
     return df
@@ -185,9 +192,11 @@ pipeline.connect("competitor_insights", "competitor_join")
 pipeline.connect("competitor_join", "avg_top_5")
 pipeline.connect("policies", "competitor_scoring")
 pipeline.connect("quotes", "feature_processing")
-pipeline.connect("competitor_scoring", "policy_join")
-pipeline.connect("policy_data", "policy_join")
-pipeline.connect("policies", "policy_join")
-pipeline.connect("quoted_premiums", "policy_join")
-pipeline.connect("policy_join", "competitor_features")
+pipeline.connect("policies", "join_scoring")
+pipeline.connect("competitor_scoring", "join_scoring")
+pipeline.connect("join_scoring", "join_policy_data")
+pipeline.connect("policy_data", "join_policy_data")
+pipeline.connect("join_policy_data", "join_premiums")
+pipeline.connect("quoted_premiums", "join_premiums")
+pipeline.connect("join_premiums", "competitor_features")
 pipeline.connect("competitor_features", "conversion_sink")

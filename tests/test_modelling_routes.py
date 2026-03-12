@@ -11,7 +11,7 @@ import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 
-from haute.routes._train_service import _clamp_row_limit, _friendly_error
+from haute.routes._train_service import TrainService, _clamp_row_limit, _friendly_error
 from haute.server import app
 from tests.conftest import make_edge, make_graph
 
@@ -698,3 +698,54 @@ class TestBackgroundThreadErrors:
             status = _poll_until_done(client, data["job_id"])
             # RAM warning should be suppressed since user limit (30) < RAM limit (50)
             assert status.get("warning") is None
+
+
+# ---------------------------------------------------------------------------
+# TrainService._execute_and_sink checkpoint cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteAndSinkCheckpointCleanup:
+    """Verify checkpoint_dir is cleaned up even when _execute_lazy raises."""
+
+    def test_checkpoint_dir_cleaned_on_error(self, tmp_path):
+        """If _execute_lazy raises, checkpoint_dir must still be cleaned up."""
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from haute.routes._job_store import JobStore
+        from haute.schemas import TrainRequest
+
+        store = JobStore()
+        service = TrainService(store)
+
+        graph = make_graph({
+            "nodes": [{"id": "n", "data": {"label": "n", "nodeType": "dataSource", "config": {"path": "x.parquet"}}}],
+            "edges": [],
+        })
+        body = TrainRequest(graph=graph, node_id="n")
+        job_id = store.create_job({"status": "running"})
+
+        created_dirs: list[Path] = []
+
+        def failing_execute_lazy(*args, **kwargs):
+            cp_dir = kwargs.get("checkpoint_dir")
+            if cp_dir is not None:
+                created_dirs.append(cp_dir)
+            raise RuntimeError("boom")
+
+        from fastapi import HTTPException
+
+        with (
+            patch("haute._execute_lazy._execute_lazy", side_effect=failing_execute_lazy),
+            patch("haute.executor._build_node_fn", return_value=None),
+            patch("haute.modelling._algorithms._mem_checkpoint"),
+            patch("haute.modelling._algorithms._MEM_LOG", MagicMock(write_text=MagicMock())),
+            patch("haute.executor._preview_cache", MagicMock()),
+        ):
+            with pytest.raises(HTTPException):
+                service._execute_and_sink(body, preamble_ns=None, row_limit=None, job_id=job_id)
+
+        # Checkpoint dir should have been created and then cleaned up
+        assert len(created_dirs) == 1
+        assert not created_dirs[0].exists(), "checkpoint_dir should be cleaned up after error"

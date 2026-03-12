@@ -216,14 +216,13 @@ def _sink_to_temp(lf: pl.LazyFrame) -> str:
     import os
     import tempfile
 
+    from haute._polars_utils import safe_sink
+
     fd, path = tempfile.mkstemp(
         suffix=".parquet", prefix="haute_score_in_",
     )
     os.close(fd)
-    try:
-        lf.sink_parquet(path)
-    except Exception:
-        lf.collect(engine="streaming").write_parquet(path)
+    safe_sink(lf, path)
     return path
 
 

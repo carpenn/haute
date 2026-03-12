@@ -225,12 +225,18 @@ def score_graph(
         NodeBuildHooks(before_build=_intercept),
     )
 
+    # Compile preamble so utility imports are available in transform nodes.
+    from haute.executor import _compile_preamble
+
+    preamble_ns = _compile_preamble(graph.preamble or "") or None
+
     # Deployed API always runs in "live" scenario — eager scoring, live
     # switch routes to the live input.
     lazy_outputs, order, _parents, _names = _execute_lazy(
         graph,
         builder,
         target_node_id=output_node_id,
+        preamble_ns=preamble_ns,
         scenario="live",
     )
 

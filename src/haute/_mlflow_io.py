@@ -482,7 +482,7 @@ def _score_eager(
 
     Shared between the dev executor and the deploy scorer.
     """
-    df_eager = lf.collect()
+    df_eager = lf.collect(engine="streaming")
     x_data = _prepare_predict_frame(
         df_eager, features,
         cat_feature_names=scoring_model.cat_feature_names,

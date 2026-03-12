@@ -6,10 +6,13 @@ The route handler becomes a thin adapter that delegates to
 
 from __future__ import annotations
 
+import gc
 import os
+import shutil
 import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -290,17 +293,22 @@ class OptimiserSolveService:
         })
         logger.info("solve_started", node_id=body.node_id, mode=mode, job_id=job_id)
 
-        lazy_outputs = self._execute_pipeline(body, job_id)
-        source_lf = self._resolve_data_source(lazy_outputs, config, body.node_id, job_id)
-        constraint_cols, scored_lf = self._validate_and_project(
-            source_lf, config, job_id,
-        )
-        factors_df = self._extract_factors(lazy_outputs, config, mode)
-        del lazy_outputs
+        checkpoint_dir = Path(tempfile.mkdtemp(prefix="haute_opt_"))
+        try:
+            lazy_outputs = self._execute_pipeline(body, job_id, checkpoint_dir)
+            source_lf = self._resolve_data_source(lazy_outputs, config, body.node_id, job_id)
+            constraint_cols, scored_lf = self._validate_and_project(
+                source_lf, config, job_id,
+            )
+            factors_df = self._extract_factors(lazy_outputs, config, mode)
+            del lazy_outputs
+            gc.collect()
 
-        quote_grid = self._build_grid(
-            scored_lf, constraint_cols, config, body.node_id, job_id,
-        )
+            quote_grid = self._build_grid(
+                scored_lf, constraint_cols, config, body.node_id, job_id,
+            )
+        finally:
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
         self._launch_background(job_id, body.node_id, config, mode, quote_grid, factors_df)
         return OptimiserSolveResponse(status="started", job_id=job_id)
 
@@ -346,17 +354,31 @@ class OptimiserSolveService:
 
     def _execute_pipeline(
         self, body: OptimiserSolveRequest, job_id: str,
+        checkpoint_dir: Path,
     ) -> dict[str, Any]:
-        """Execute the pipeline lazily up to the optimiser node."""
+        """Execute the pipeline lazily up to the optimiser node.
+
+        The caller owns *checkpoint_dir* lifecycle (creation + cleanup).
+        """
         try:
-            from haute.executor import _build_node_fn
+            from haute.executor import _build_node_fn, _compile_preamble, _resolve_batch_scenario
             from haute.graph_utils import _execute_lazy
+
+            # Resolve scenario: optimiser runs on batch data, not live.
+            scenario = _resolve_batch_scenario(body.graph) or "batch"
+
+            preamble_ns = _compile_preamble(body.graph.preamble or "") or None
 
             lazy_outputs, *_ = _execute_lazy(
                 body.graph, _build_node_fn,
                 target_node_id=body.node_id,
+                preamble_ns=preamble_ns,
+                scenario=scenario,
+                checkpoint_dir=checkpoint_dir,
             )
             return lazy_outputs
+        except HTTPException:
+            raise
         except Exception as exc:
             error_msg = f"Pipeline execution failed: {exc}"
             logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
@@ -469,10 +491,12 @@ class OptimiserSolveService:
         mult_col = config.get("scenario_value", "scenario_value")
         step_col = config.get("scenario_index", "scenario_index")
 
+        from haute._polars_utils import safe_sink
+
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
         os.close(tmp_fd)
         try:
-            scored_lf.sink_parquet(tmp_path)
+            safe_sink(scored_lf, tmp_path)
             del scored_lf
 
             quote_grid = build_grid_from_parquet(

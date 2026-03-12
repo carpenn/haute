@@ -244,9 +244,9 @@ class TestSinkToTemp:
             os.unlink(path)
 
     def test_fallback_on_sink_failure(self):
-        """If sink_parquet fails, fallback to collect+write_parquet."""
+        """If sink_parquet fails with a Polars error, fallback to collect+write_parquet."""
         lf = MagicMock(spec=pl.LazyFrame)
-        lf.sink_parquet.side_effect = Exception("sink failed")
+        lf.sink_parquet.side_effect = pl.exceptions.ComputeError("sink failed")
 
         # Set up the fallback path
         mock_df = pl.DataFrame({"x": [1]})

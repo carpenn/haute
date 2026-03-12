@@ -12,6 +12,7 @@ from haute.executor import (
     _build_node_fn,
     _compile_preamble,
     _exec_user_code,
+    _resolve_batch_scenario,
     execute_graph,
     execute_sink,
 )
@@ -700,6 +701,29 @@ class TestExecuteGraph:
 # execute_sink
 # ---------------------------------------------------------------------------
 
+
+def _make_sink_graph(tmp_path, *, src_data=None):
+    """Build a minimal src→sink graph and return (graph, out_path)."""
+    src_path = tmp_path / "in.parquet"
+    out_path = tmp_path / "out.parquet"
+    pl.DataFrame(src_data or {"x": [1]}).write_parquet(src_path)
+    graph = _g({
+        "nodes": [
+            _source_node("src", str(src_path)),
+            _n({
+                "id": "sink",
+                "data": {
+                    "label": "sink",
+                    "nodeType": "dataSink",
+                    "config": {"path": str(out_path), "format": "parquet"},
+                },
+            }),
+        ],
+        "edges": [_edge("src", "sink")],
+    })
+    return graph, out_path
+
+
 class TestExecuteSink:
     def test_writes_parquet(self, tmp_path):
         src_path = tmp_path / "in.parquet"
@@ -755,6 +779,41 @@ class TestExecuteSink:
         with pytest.raises(ValueError, match="not.*found"):
             execute_sink(graph, sink_node_id="nope")
 
+    def test_live_scenario_coerced_to_batch(self, tmp_path):
+        """Sinks are never live — scenario='live' must be coerced to 'batch'
+        so model scoring uses the disk-batched path instead of OOM-prone eager."""
+        graph, _ = _make_sink_graph(tmp_path, src_data={"x": [1, 2]})
+
+        captured_scenarios: list[str] = []
+        from haute._execute_lazy import _execute_lazy as original_execute_lazy
+        from unittest.mock import patch
+
+        def spy(*args, **kwargs):
+            captured_scenarios.append(kwargs.get("scenario", "???"))
+            return original_execute_lazy(*args, **kwargs)
+
+        with patch("haute.executor._execute_lazy", side_effect=spy):
+            execute_sink(graph, sink_node_id="sink", scenario="live")
+
+        assert captured_scenarios == ["batch"]
+
+    def test_custom_scenario_preserved_for_sink(self, tmp_path):
+        """Non-live scenarios are passed through unchanged for source-switch routing."""
+        graph, _ = _make_sink_graph(tmp_path)
+
+        captured_scenarios: list[str] = []
+        from haute._execute_lazy import _execute_lazy as original_execute_lazy
+        from unittest.mock import patch
+
+        def spy(*args, **kwargs):
+            captured_scenarios.append(kwargs.get("scenario", "???"))
+            return original_execute_lazy(*args, **kwargs)
+
+        with patch("haute.executor._execute_lazy", side_effect=spy):
+            execute_sink(graph, sink_node_id="sink", scenario="my_custom")
+
+        assert captured_scenarios == ["my_custom"]
+
     def test_no_path_raises(self, tmp_path):
         src = tmp_path / "in.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(src)
@@ -774,6 +833,147 @@ class TestExecuteSink:
         })
         with pytest.raises(ValueError, match="no.*output path"):
             execute_sink(graph, sink_node_id="sink")
+
+    def test_sink_with_multi_input_join(self, tmp_path):
+        """execute_sink checkpoints multi-input nodes and produces correct output."""
+        src1 = tmp_path / "s1.parquet"
+        src2 = tmp_path / "s2.parquet"
+        out = tmp_path / "out.parquet"
+        pl.DataFrame({"key": [1, 2], "a": [10, 20]}).write_parquet(src1)
+        pl.DataFrame({"key": [1, 2], "b": [30, 40]}).write_parquet(src2)
+
+        graph = _g({
+            "nodes": [
+                _source_node("s1", str(src1)),
+                _source_node("s2", str(src2)),
+                _n({
+                    "id": "join",
+                    "data": {
+                        "label": "join",
+                        "nodeType": "transform",
+                        "config": {"code": "s1.join(s2, on='key', how='left')"},
+                    },
+                }),
+                _n({
+                    "id": "sink",
+                    "data": {
+                        "label": "sink",
+                        "nodeType": "dataSink",
+                        "config": {"path": str(out), "format": "parquet"},
+                    },
+                }),
+            ],
+            "edges": [
+                _edge("s1", "join"),
+                _edge("s2", "join"),
+                _edge("join", "sink"),
+            ],
+        })
+        result = execute_sink(graph, sink_node_id="sink")
+        assert result.status == "ok"
+        assert result.row_count == 2
+        df = pl.read_parquet(out)
+        assert set(df.columns) >= {"key", "a", "b"}
+
+    def test_sink_passes_checkpoint_dir(self, tmp_path):
+        """execute_sink must pass a checkpoint_dir to _execute_lazy."""
+        graph, _ = _make_sink_graph(tmp_path)
+
+        from pathlib import Path
+        from unittest.mock import patch
+        from haute._execute_lazy import _execute_lazy as original
+
+        captured_kwargs: list[dict] = []
+
+        def spy(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return original(*args, **kwargs)
+
+        with patch("haute.executor._execute_lazy", side_effect=spy):
+            execute_sink(graph, sink_node_id="sink")
+
+        assert len(captured_kwargs) == 1
+        cp_dir = captured_kwargs[0].get("checkpoint_dir")
+        assert cp_dir is not None
+        assert isinstance(cp_dir, Path)
+
+    def test_sink_cleans_up_checkpoint_dir(self, tmp_path):
+        """Checkpoint temp directory should be removed after sink completes."""
+        graph, _ = _make_sink_graph(tmp_path)
+
+        from pathlib import Path
+        from unittest.mock import patch
+        from haute._execute_lazy import _execute_lazy as original
+
+        created_dirs: list[Path] = []
+
+        def spy(*args, **kwargs):
+            cp_dir = kwargs.get("checkpoint_dir")
+            if cp_dir is not None:
+                created_dirs.append(cp_dir)
+            return original(*args, **kwargs)
+
+        with patch("haute.executor._execute_lazy", side_effect=spy):
+            execute_sink(graph, sink_node_id="sink")
+
+        assert len(created_dirs) == 1
+        assert not created_dirs[0].exists(), "checkpoint dir should be cleaned up"
+
+    def test_live_scenario_resolves_batch_from_ism(self, tmp_path):
+        """When scenario='live', execute_sink resolves the batch scenario
+        from the graph's live_switch ISM instead of hardcoding 'batch'."""
+        live_src = tmp_path / "live.parquet"
+        batch_src = tmp_path / "batch.parquet"
+        out_path = tmp_path / "out.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(live_src)
+        pl.DataFrame({"x": [2]}).write_parquet(batch_src)
+
+        graph = _g({
+            "nodes": [
+                _source_node("live_src", str(live_src)),
+                _source_node("batch_src", str(batch_src)),
+                _n({
+                    "id": "sw",
+                    "data": {
+                        "label": "sw",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {
+                                "live_src": "live",
+                                "batch_src": "nb_batch",
+                            },
+                        },
+                    },
+                }),
+                _n({
+                    "id": "sink",
+                    "data": {
+                        "label": "sink",
+                        "nodeType": "dataSink",
+                        "config": {"path": str(out_path), "format": "parquet"},
+                    },
+                }),
+            ],
+            "edges": [
+                _edge("live_src", "sw"),
+                _edge("batch_src", "sw"),
+                _edge("sw", "sink"),
+            ],
+        })
+
+        captured_scenarios: list[str] = []
+        from haute._execute_lazy import _execute_lazy as original_execute_lazy
+        from unittest.mock import patch
+
+        def spy(*args, **kwargs):
+            captured_scenarios.append(kwargs.get("scenario", "???"))
+            return original_execute_lazy(*args, **kwargs)
+
+        with patch("haute.executor._execute_lazy", side_effect=spy):
+            execute_sink(graph, sink_node_id="sink", scenario="live")
+
+        # Should resolve to "nb_batch" from the ISM, not generic "batch"
+        assert captured_scenarios == ["nb_batch"]
 
 
 # ---------------------------------------------------------------------------
@@ -1393,3 +1593,94 @@ class TestExecuteGraphErrorPaths:
         # Transform should show the preamble error
         assert results["t"].status == "error"
         assert "undefined_var" in results["t"].error
+
+
+# ---------------------------------------------------------------------------
+# _resolve_batch_scenario
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBatchScenario:
+    """Edge-case tests for _resolve_batch_scenario."""
+
+    def test_no_live_switch_returns_none(self):
+        """Graph with no live_switch nodes returns None."""
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _transform_node("t"),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+        assert _resolve_batch_scenario(graph) is None
+
+    def test_all_live_returns_none(self):
+        """live_switch with ISM where all values are 'live' returns None."""
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _n({
+                    "id": "sw",
+                    "data": {
+                        "label": "sw",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"a": "live", "b": "live"},
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sw")],
+        })
+        assert _resolve_batch_scenario(graph) is None
+
+    def test_returns_first_non_live(self):
+        """live_switch with ISM containing a non-live value returns it."""
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _n({
+                    "id": "sw",
+                    "data": {
+                        "label": "sw",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"a": "live", "b": "nb_batch"},
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sw")],
+        })
+        assert _resolve_batch_scenario(graph) == "nb_batch"
+
+    def test_conflicting_non_live_raises(self):
+        """Two live_switch nodes with different non-live scenarios raise ValueError."""
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _n({
+                    "id": "sw1",
+                    "data": {
+                        "label": "sw1",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"a": "live", "b": "batch_A"},
+                        },
+                    },
+                }),
+                _n({
+                    "id": "sw2",
+                    "data": {
+                        "label": "sw2",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"c": "live", "d": "batch_B"},
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
+        })
+        with pytest.raises(ValueError, match="Conflicting batch scenarios"):
+            _resolve_batch_scenario(graph)

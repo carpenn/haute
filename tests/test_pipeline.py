@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 import polars as pl
 
+from haute._model_scorer import _scenario_ctx
 from haute.pipeline import Node, Pipeline
 
 
@@ -230,6 +231,68 @@ class TestPipeline:
         edge_pairs = [(e["source"], e["target"]) for e in g["edges"]]
         assert ("a", "b") in edge_pairs
         assert ("b", "c") in edge_pairs
+
+    def test_run_sets_scenario_ctx_to_batch(self):
+        """Pipeline.run() must set _scenario_ctx to 'batch' during execution."""
+        captured: list[str] = []
+        p = Pipeline("ctx_batch")
+
+        @p.node
+        def source() -> pl.DataFrame:
+            captured.append(_scenario_ctx.get())
+            return pl.DataFrame({"x": [1]})
+
+        @p.node
+        def transform(df: pl.DataFrame) -> pl.DataFrame:
+            captured.append(_scenario_ctx.get())
+            return df
+
+        p.connect("source", "transform")
+        p.run()
+        assert captured == ["batch", "batch"]
+        # Context must be reset after run() completes
+        assert _scenario_ctx.get() == "batch"  # default
+
+    def test_score_sets_scenario_ctx_to_live(self):
+        """Pipeline.score() must set _scenario_ctx to 'live' during execution.
+
+        Note: score() seeds source nodes directly with the input df —
+        the source function is NOT called — so we capture from transforms only.
+        """
+        captured: list[str] = []
+        p = Pipeline("ctx_live")
+
+        @p.node
+        def source() -> pl.DataFrame:
+            return pl.DataFrame({"x": [1]})
+
+        @p.node
+        def transform(df: pl.DataFrame) -> pl.DataFrame:
+            captured.append(_scenario_ctx.get())
+            return df
+
+        p.connect("source", "transform")
+        p.score(pl.DataFrame({"x": [5]}))
+        assert captured == ["live"]
+        # Context must be reset after score() completes
+        assert _scenario_ctx.get() == "batch"  # default
+
+    def test_scenario_ctx_reset_on_error(self):
+        """_scenario_ctx must be reset even if a node raises."""
+        p = Pipeline("ctx_err")
+
+        @p.node
+        def source() -> pl.DataFrame:
+            return pl.DataFrame({"x": [1]})
+
+        @p.node
+        def boom(df: pl.DataFrame) -> pl.DataFrame:
+            raise RuntimeError("kaboom")
+
+        p.connect("source", "boom")
+        with pytest.raises(RuntimeError, match="kaboom"):
+            p.run()
+        assert _scenario_ctx.get() == "batch"  # reset despite error
 
     def test_to_graph_positions_spaced(self):
         """Nodes should be positioned with x_spacing."""

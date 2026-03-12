@@ -22,15 +22,26 @@ PIPELINE_FILE = FIXTURE_DIR / "pipeline.py"
 
 @pytest.fixture(autouse=True)
 def _isolate_json_cache(tmp_path, monkeypatch):
-    """Redirect the JSON parquet cache to a temp dir.
+    """Redirect the JSON parquet cache to a temp dir and pre-populate it.
 
     Without this, a stale .haute_cache/ in the working directory (from a
     previous real-data run) can poison the fixture pipeline's api-input node
     with columns from a completely different schema.
+
+    The fixture also pre-caches the api_input.json file as parquet so that
+    e2e tests don't hit the "JSON data has not been cached yet" error —
+    the same step a user performs by clicking "Cache as Parquet" in the GUI.
     """
     import haute._json_flatten as jf
 
-    monkeypatch.setattr(jf, "_CACHE_DIR", str(tmp_path / "json_cache"))
+    cache_dir = str(tmp_path / "json_cache")
+    monkeypatch.setattr(jf, "_CACHE_DIR", cache_dir)
+
+    # Pre-cache the fixture JSON file as parquet
+    data_path = "tests/fixtures/data/api_input.json"
+    cache_path = jf._json_cache_path(data_path)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    pl.read_json(data_path).write_parquet(cache_path)
 
 
 class TestEndToEnd:

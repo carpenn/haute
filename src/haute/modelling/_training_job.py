@@ -393,11 +393,9 @@ class TrainingJob:
                 suffix=".parquet", prefix="haute_clean_", delete=False,
             ) as f:
                 clean_path = f.name
-            try:
-                clean_lf.sink_parquet(clean_path)
-            except Exception as sink_exc:
-                logger.info("sink_streaming_fallback", step="null_clean", reason=str(sink_exc))
-                clean_lf.collect(engine="streaming").write_parquet(clean_path)
+            from haute._polars_utils import safe_sink
+
+            safe_sink(clean_lf, clean_path)
             # Swap: delete old temp, use new one
             if owns_tmp:
                 os.unlink(data_path)

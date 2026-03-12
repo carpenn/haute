@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import gc
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import polars as pl
 
 from haute._logging import get_logger
+from haute._polars_utils import _malloc_trim, safe_sink
 from haute._topo import ancestors, topo_sort_ids
 from haute._types import (
     GraphEdge,
@@ -120,6 +123,7 @@ def _execute_lazy(
     target_node_id: str | None = None,
     preamble_ns: dict | None = None,
     scenario: str = "live",
+    checkpoint_dir: Path | None = None,
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:
     """Execute a graph lazily and return per-node LazyFrames.
 
@@ -133,6 +137,12 @@ def _execute_lazy(
         build_node_fn: Function (node_dict, source_names) -> (name, fn, is_source).
         target_node_id: If set, only execute ancestors of this node.
         scenario: Active execution scenario (``"live"`` = eager scoring).
+        checkpoint_dir: If set, multi-input nodes (joins) and fan-out
+            nodes (>1 downstream consumer) are checkpointed to parquet
+            files in this directory and replaced with ``scan_parquet``
+            references.  This breaks both chained-join memory
+            accumulation and plan duplication across branches
+            (GitHub pola-rs/polars#24206).
 
     Returns:
         (lazy_outputs, order, parents_of, id_to_name)
@@ -163,6 +173,23 @@ def _execute_lazy(
     # Execute - all intermediate results stay lazy
     lazy_outputs: dict[str, _Frame] = {}
 
+    # Count downstream consumers per node so we can checkpoint fan-out
+    # points (nodes whose output feeds >1 consumer).  Without this,
+    # Polars duplicates the entire upstream plan for each branch —
+    # e.g. a 38 GB JSONL scan runs twice when two siblings share a parent.
+    children_count: dict[str, int] = {nid: 0 for nid in order}
+    children_of: dict[str, list[str]] = {nid: [] for nid in order}
+    for nid, pids in parents_of.items():
+        for pid in pids:
+            if pid in children_count:
+                children_count[pid] += 1
+                children_of[pid].append(nid)
+
+    # Separate mutable counter for tracking remaining downstream consumers.
+    # Decremented at checkpoint time so we know when a parent's LazyFrame
+    # can be safely deleted (freeing Polars/Rust Arrow buffers).
+    remaining: dict[str, int] = dict(children_count)
+
     for nid in order:
         fn, is_source = funcs[nid]
         if is_source:
@@ -184,6 +211,51 @@ def _execute_lazy(
             valid = [c for c in sel_cols if c in schema_names]
             if valid and len(valid) < len(schema_names):
                 lf = lf.select(valid)
+
+        # Checkpoint to break Polars plan duplication and chained-join
+        # memory accumulation (pola-rs/polars#24206).  Three triggers:
+        #   1. Multi-input nodes (joins) — each join materialises both
+        #      sides; checkpointing isolates each join step.
+        #   2. Fan-out nodes (>1 downstream consumer) — without a
+        #      checkpoint Polars re-executes the full upstream plan once
+        #      per consumer branch, duplicating I/O and memory.
+        #   3. Nodes that feed into a join — when a compute-heavy node
+        #      (e.g. model scoring) feeds a join, the join's sink would
+        #      re-execute the full upstream plan.  Checkpointing the
+        #      feeder ensures the join reads from parquet instead.
+        # Sink to a temp parquet file and replace with scan_parquet so
+        # Polars sees an independent query plan per segment.
+        n_parents = len(parents_of.get(nid, []))
+        n_children = children_count.get(nid, 0)
+        feeds_join = any(
+            len(parents_of.get(cid, [])) > 1
+            for cid in children_of.get(nid, [])
+        )
+        if (
+            checkpoint_dir is not None
+            and not is_source
+            and (n_parents > 1 or n_children > 1 or feeds_join)
+        ):
+            tmp = checkpoint_dir / f"{nid}.parquet"
+            safe_sink(lf, tmp)
+
+            # Drop the old LazyFrame (and any cached Arrow buffers it
+            # holds) before replacing with a fresh scan reference.
+            del lf
+            # Drop parent LazyFrame refs that have no remaining consumers
+            # downstream — lets Polars/Rust release the backing buffers.
+            # Source nodes are kept: they hold cheap scan_* references and
+            # callers may need them (e.g. optimiser extracting banding factors).
+            for pid in parents_of.get(nid, []):
+                remaining[pid] -= 1
+                _, pid_is_source = funcs.get(pid, (None, False))
+                if remaining[pid] <= 0 and pid in lazy_outputs and not pid_is_source:
+                    del lazy_outputs[pid]
+            gc.collect()
+            _malloc_trim()
+
+            lf = pl.scan_parquet(tmp)
+            logger.info("checkpoint_written", node_id=nid, path=str(tmp))
 
         lazy_outputs[nid] = lf
 

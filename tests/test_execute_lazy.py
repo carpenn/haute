@@ -572,3 +572,285 @@ class TestEagerCoreErrorLines:
         )
         result = _execute_eager_core(g, _simple_build_fn)
         assert result.error_lines == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Checkpoint multi-input nodes (joins) — Polars pola-rs/polars#24206
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _join_build_fn(node: GraphNode, source_names=None, **kwargs):
+    """Build function that supports multi-input (join) nodes."""
+    nid = node.id
+    if node.data.nodeType == NodeType.DATA_SOURCE:
+        data = {"s1": {"key": [1, 2], "a": [10, 20]},
+                "s2": {"key": [1, 2], "b": [30, 40]},
+                "s3": {"key": [1, 2], "c": [50, 60]}}
+        return nid, lambda d=data.get(nid, {"key": [1]}): pl.DataFrame(d).lazy(), True
+
+    def join_fn(*dfs):
+        result = dfs[0]
+        for df in dfs[1:]:
+            result = result.join(df, on="key", how="left")
+        return result
+
+    return nid, join_fn, False
+
+
+class TestCheckpointing:
+    """Tests for checkpoint_dir parameter on _execute_lazy."""
+
+    def test_checkpoint_creates_file_for_multi_input(self, tmp_path):
+        """Multi-input (join) nodes produce checkpoint parquet files."""
+        g = PipelineGraph(
+            nodes=[_source_node("s1"), _source_node("s2"), _transform_node("j")],
+            edges=[_e("s1", "j"), _e("s2", "j")],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        assert (tmp_path / "j.parquet").exists()
+        df = outputs["j"].collect()
+        assert set(df.columns) >= {"key", "a", "b"}
+        assert len(df) == 2
+
+    def test_no_checkpoint_for_single_input(self, tmp_path):
+        """Single-input transform nodes are NOT checkpointed."""
+        g = PipelineGraph(
+            nodes=[_source_node("s1"), _transform_node("t")],
+            edges=[_e("s1", "t")],
+        )
+        _execute_lazy(g, _simple_build_fn, checkpoint_dir=tmp_path)
+
+        assert not list(tmp_path.glob("*.parquet"))
+
+    def test_no_checkpoint_without_dir(self):
+        """Without checkpoint_dir, multi-input nodes stay lazy (no files)."""
+        g = PipelineGraph(
+            nodes=[_source_node("s1"), _source_node("s2"), _transform_node("j")],
+            edges=[_e("s1", "j"), _e("s2", "j")],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn)  # no checkpoint_dir
+
+        df = outputs["j"].collect()
+        assert set(df.columns) >= {"key", "a", "b"}
+
+    def test_source_nodes_not_checkpointed(self, tmp_path):
+        """Source nodes are never checkpointed."""
+        g = PipelineGraph(
+            nodes=[_source_node("s1")],
+            edges=[],
+        )
+        _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        assert not list(tmp_path.glob("*.parquet"))
+
+    def test_chained_joins_all_checkpointed(self, tmp_path):
+        """Both join nodes in s1+s2→j1, j1+s3→j2 should be checkpointed."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"), _source_node("s2"), _source_node("s3"),
+                _transform_node("j1"), _transform_node("j2"),
+            ],
+            edges=[
+                _e("s1", "j1"), _e("s2", "j1"),
+                _e("j1", "j2"), _e("s3", "j2"),
+            ],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        checkpoint_names = sorted(f.name for f in tmp_path.glob("*.parquet"))
+        assert checkpoint_names == ["j1.parquet", "j2.parquet"]
+
+        df = outputs["j2"].collect()
+        assert set(df.columns) >= {"key", "a", "b", "c"}
+        assert len(df) == 2
+
+    def test_checkpoint_with_selected_columns(self, tmp_path):
+        """selected_columns filtering should apply before checkpointing."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"), _source_node("s2"),
+                _transform_node("j", selected_columns=["key", "a"]),
+            ],
+            edges=[_e("s1", "j"), _e("s2", "j")],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        df = outputs["j"].collect()
+        assert df.columns == ["key", "a"]
+
+    def test_live_switch_multi_parent_checkpointed(self, tmp_path):
+        """live_switch with 2 parents IS checkpointed (multi-input trigger).
+
+        Uses a scenario not in the ISM so edge pruning keeps both parents.
+        """
+        def build_fn(node, **kwargs):
+            if node.data.nodeType == NodeType.DATA_SOURCE:
+                return node.id, lambda: pl.DataFrame({"x": [1, 2]}).lazy(), True
+            return node.id, lambda *dfs: dfs[0], False
+
+        g = PipelineGraph(
+            nodes=[
+                _source_node("live_in"),
+                _source_node("batch_in"),
+                _live_switch_node("sw", {"live_in": "live", "batch_in": "batch"}),
+            ],
+            edges=[_e("live_in", "sw"), _e("batch_in", "sw")],
+        )
+        # scenario="unknown" keeps both edges (ISM fallback)
+        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, scenario="unknown")
+
+        assert (tmp_path / "sw.parquet").exists()
+
+    def test_live_switch_single_parent_single_child_not_checkpointed(self, tmp_path):
+        """live_switch with 1 parent and 1 child — NOT checkpointed."""
+        def build_fn(node, **kwargs):
+            if node.data.nodeType == NodeType.DATA_SOURCE:
+                return node.id, lambda: pl.DataFrame({"x": [1, 2]}).lazy(), True
+            return node.id, lambda *dfs: dfs[0], False
+
+        g = PipelineGraph(
+            nodes=[
+                _source_node("live_in"),
+                _live_switch_node("sw", {"live_in": "live"}, inputs=["live_in"]),
+                _transform_node("t"),
+            ],
+            edges=[_e("live_in", "sw"), _e("sw", "t")],
+        )
+        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, scenario="live")
+
+        assert not list(tmp_path.glob("*.parquet"))
+
+    def test_fanout_node_checkpointed(self, tmp_path):
+        """A node with 1 parent but 2+ children is checkpointed (fan-out)."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"),
+                _transform_node("mid"),
+                _transform_node("c1"),
+                _transform_node("c2"),
+            ],
+            edges=[_e("s1", "mid"), _e("mid", "c1"), _e("mid", "c2")],
+        )
+        _execute_lazy(g, _simple_build_fn, checkpoint_dir=tmp_path)
+
+        # mid has 2 children → checkpointed
+        assert (tmp_path / "mid.parquet").exists()
+        # c1 and c2 have 1 parent, 0 children → NOT checkpointed
+        assert not (tmp_path / "c1.parquet").exists()
+        assert not (tmp_path / "c2.parquet").exists()
+
+    def test_fanout_data_preserved(self, tmp_path):
+        """Fan-out checkpoint preserves correct data for all children."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"),
+                _transform_node("mid"),
+                _transform_node("c1"),
+                _transform_node("c2"),
+            ],
+            edges=[_e("s1", "mid"), _e("mid", "c1"), _e("mid", "c2")],
+        )
+        outputs, *_ = _execute_lazy(g, _simple_build_fn, checkpoint_dir=tmp_path)
+
+        df_c1 = outputs["c1"].collect()
+        df_c2 = outputs["c2"].collect()
+        # Both children should see the same data from mid's checkpoint
+        assert df_c1["y"].to_list() == df_c2["y"].to_list()
+
+    def test_feeds_join_node_checkpointed(self, tmp_path):
+        """A node that feeds into a multi-input (join) node is checkpointed.
+
+        Graph: s1 → t → join ← s2
+        t has 1 parent, 1 child, but that child is a join → checkpoint t.
+        """
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"), _source_node("s2"),
+                _transform_node("t"),
+                _transform_node("join"),
+            ],
+            edges=[_e("s1", "t"), _e("t", "join"), _e("s2", "join")],
+        )
+        _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        # t feeds a join → checkpointed
+        assert (tmp_path / "t.parquet").exists()
+        # join is multi-input → checkpointed
+        assert (tmp_path / "join.parquet").exists()
+
+    def test_feeds_join_data_correct(self, tmp_path):
+        """Checkpoint of join-feeder preserves correct results."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"), _source_node("s2"),
+                _transform_node("t"),
+                _transform_node("join"),
+            ],
+            edges=[_e("s1", "t"), _e("t", "join"), _e("s2", "join")],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        df = outputs["join"].collect()
+        assert "key" in df.columns
+        assert len(df) == 2
+
+    def test_no_checkpoint_for_leaf_single_parent(self, tmp_path):
+        """A leaf node with 1 parent, no children, not feeding a join → NOT checkpointed."""
+        g = PipelineGraph(
+            nodes=[_source_node("s1"), _transform_node("t"), _transform_node("leaf")],
+            edges=[_e("s1", "t"), _e("t", "leaf")],
+        )
+        _execute_lazy(g, _simple_build_fn, checkpoint_dir=tmp_path)
+
+        assert not list(tmp_path.glob("*.parquet"))
+
+    def test_parent_lazyframe_cleaned_up_after_all_consumers_checkpointed(self, tmp_path):
+        """After both children of S are checkpointed, S should be removed from lazy_outputs.
+
+        Graph:  S → J1 ← s2
+                S → J2 ← s3
+
+        S has 2 children (fan-out) so it is checkpointed.  Then J1 and J2
+        are both multi-input nodes (joins) so they are also checkpointed.
+        Once both J1 and J2 have been checkpointed, S's remaining consumer
+        count hits 0 — its LazyFrame reference should be dropped from
+        lazy_outputs to free Polars/Rust Arrow buffers.
+        """
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s1"),
+                _source_node("s2"),
+                _source_node("s3"),
+                _transform_node("mid"),   # fan-out: feeds both j1 and j2
+                _transform_node("j1"),    # join: mid + s2
+                _transform_node("j2"),    # join: mid + s3
+            ],
+            edges=[
+                _e("s1", "mid"),
+                _e("mid", "j1"), _e("s2", "j1"),
+                _e("mid", "j2"), _e("s3", "j2"),
+            ],
+        )
+        outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
+
+        # mid is a fan-out node (2 children, both joins) → checkpointed
+        assert (tmp_path / "mid.parquet").exists()
+        # j1 and j2 are multi-input → checkpointed
+        assert (tmp_path / "j1.parquet").exists()
+        assert (tmp_path / "j2.parquet").exists()
+
+        # After both consumers of mid have been checkpointed, mid's
+        # LazyFrame should have been evicted from lazy_outputs.
+        assert "mid" not in outputs, (
+            "Parent LazyFrame 'mid' should be cleaned up after all consumers "
+            "have been checkpointed"
+        )
+
+        # The final outputs (j1, j2) should still be present and correct
+        df_j1 = outputs["j1"].collect()
+        df_j2 = outputs["j2"].collect()
+        assert set(df_j1.columns) >= {"key", "a", "b"}
+        assert set(df_j2.columns) >= {"key", "a", "c"}
+        assert len(df_j1) == 2
+        assert len(df_j2) == 2

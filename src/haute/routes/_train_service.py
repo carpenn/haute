@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import gc
 import os
+import shutil
 import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -364,14 +366,18 @@ class TrainService:
         tmp_fd, tmp_parquet = tempfile.mkstemp(suffix=".parquet", prefix="haute_train_")
         os.close(tmp_fd)
 
+        checkpoint_dir: Path | None = None
         try:
             self._store.update_job(job_id, message="Executing pipeline")
             _mem_checkpoint("before _execute_lazy")
+
+            checkpoint_dir = Path(tempfile.mkdtemp(prefix="haute_train_ckpt_"))
             lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
                 body.graph, _build_node_fn,
                 target_node_id=body.node_id,
                 preamble_ns=preamble_ns,
                 scenario=body.scenario,
+                checkpoint_dir=checkpoint_dir,
             )
 
             target_lf = lazy_outputs.get(body.node_id)
@@ -384,22 +390,13 @@ class TrainService:
             if row_limit:
                 target_lf = target_lf.head(row_limit)
 
+            from haute._polars_utils import _malloc_trim, safe_sink
+
             _mem_checkpoint("before sink_parquet")
-            try:
-                target_lf.sink_parquet(tmp_parquet)
-            except Exception as sink_exc:
-                logger.info(
-                    "sink_streaming_fallback",
-                    node_id=body.node_id, reason=str(sink_exc),
-                )
-                _mem_checkpoint("sink_parquet failed, collecting")
-                df = target_lf.collect()
-                df.write_parquet(tmp_parquet)
-                del df
+            safe_sink(target_lf, tmp_parquet)
 
             del lazy_outputs, target_lf
             gc.collect()
-            from haute.modelling._algorithms import _malloc_trim
             _malloc_trim()
             _mem_checkpoint("sunk to temp parquet")
         except Exception as exc:
@@ -409,6 +406,9 @@ class TrainService:
             logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
             self._store.update_job(job_id, status="error", message=error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
+        finally:
+            if checkpoint_dir and checkpoint_dir.exists():
+                shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
         return tmp_parquet
 

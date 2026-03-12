@@ -12,9 +12,13 @@ can optimise the full plan end-to-end.
 
 from __future__ import annotations
 
+import gc
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import polars as pl
@@ -764,7 +768,7 @@ def _apply_online(
     for c in constraints:
         cast_exprs.append(pl.col(c).cast(pl.Float32))
 
-    df_eager = lf.with_columns(cast_exprs).collect()
+    df_eager = lf.with_columns(cast_exprs).collect(engine="streaming")
 
     applier = ApplyOptimiser(
         lambdas=artifact["lambdas"],
@@ -1109,8 +1113,39 @@ def _eager_execute(
     )
 
 
+def _resolve_batch_scenario(graph: PipelineGraph) -> str | None:
+    """Find the non-live scenario from the graph's live_switch ISM values.
+
+    Returns ``None`` if no live_switch nodes exist or all mapped scenarios
+    are ``"live"``.
+
+    Raises ``ValueError`` if multiple live_switch nodes define different
+    non-live scenario names (ambiguous routing).
+    """
+    batch_scenario: str | None = None
+    for node in graph.nodes:
+        if node.data.nodeType != NodeType.LIVE_SWITCH:
+            continue
+        ism: dict[str, str] = node.data.config.get("input_scenario_map", {})
+        for scn in ism.values():
+            if scn != "live":
+                if batch_scenario is not None and scn != batch_scenario:
+                    raise ValueError(
+                        f"Conflicting batch scenarios across live_switch nodes: "
+                        f"'{batch_scenario}' vs '{scn}'. "
+                        f"All live_switch nodes must use the same non-live scenario name."
+                    )
+                batch_scenario = scn
+    return batch_scenario
+
+
 def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live") -> SinkResponse:
     """Execute the pipeline up to a sink node and write its input to disk.
+
+    Sinks are batch-only — they always run with a non-``"live"`` scenario
+    so that model scoring uses the disk-batched path, keeping memory bounded.
+    The *scenario* parameter is still accepted (and passed through for
+    source-switch routing) but is coerced away from ``"live"`` for scoring.
 
     Uses Polars streaming sinks (``sink_parquet`` / ``sink_csv``) so the
     full dataset is never materialised in memory at once.  Falls back to
@@ -1121,8 +1156,6 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
     This is called on-demand (not during normal run/preview).
     Returns a ``SinkResponse`` with row count and output path.
     """
-    from pathlib import Path
-
     sink_node = graph.node_map.get(sink_node_id)
     if not sink_node:
         raise ValueError(f"Sink node '{sink_node_id}' not found")
@@ -1134,49 +1167,81 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
     if not path:
         raise ValueError("Sink node has no output path configured")
 
-    preamble_ns = _compile_preamble(graph.preamble or "")
-    lazy_outputs, _order, _parents, _names = _execute_lazy(
-        graph,
-        _build_node_fn,
-        target_node_id=sink_node_id,
-        preamble_ns=preamble_ns or None,
-        scenario=scenario,
-    )
+    # Sinks are never used in live serving — model scoring must use the
+    # disk-batched path (any scenario != "live").  But the scenario name
+    # must match a value in the source-switch ISM so edge pruning routes
+    # to the correct branch.  Resolve the first non-live ISM value from
+    # the graph; fall back to "batch" if there are no live_switch nodes.
+    if scenario == "live":
+        sink_scenario = _resolve_batch_scenario(graph) or "batch"
+    else:
+        sink_scenario = scenario
 
-    lf = lazy_outputs.get(sink_node_id)
-    if lf is None:
-        raise RuntimeError("Failed to compute sink input")
+    from haute._polars_utils import _malloc_trim, safe_sink
 
-    out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    # Create a temp directory for join checkpoints.  Multi-input nodes
+    # are sunk to parquet here so Polars sees each join as an independent
+    # plan, avoiding chained-join memory accumulation (#24206).
+    # The directory (and all checkpoint files) is cleaned up in finally.
+    tmp_dir = tempfile.mkdtemp(prefix="haute_sink_")
+    checkpoint_path = Path(tmp_dir)
+
+    # Reduce streaming chunk size for sink operations to lower per-step
+    # peak memory.  The default is auto-sized and can be too aggressive
+    # for wide schemas (100+ columns).
+    # NOTE: pl.Config is process-global — not thread-safe for concurrent
+    # sinks.  This is acceptable because sinks run sequentially (GUI is
+    # single-user, CLI `run` is sequential, background jobs don't use
+    # execute_sink).
+    _prev_chunk_size = pl.Config.state().get("POLARS_STREAMING_CHUNK_SIZE")
+    pl.Config.set_streaming_chunk_size(50_000)
 
     try:
-        if fmt == "csv":
-            lf.sink_csv(out)
-        else:
-            lf.sink_parquet(out)
-    except (pl.exceptions.ComputeError, pl.exceptions.InvalidOperationError):
-        # Fallback: collect with streaming engine, then write eagerly.
-        # streaming engine processes in chunks internally, keeping memory
-        # lower than the default engine for large multi-join plans.
-        logger.info("sink_streaming_fallback", path=path, format=fmt)
-        df = lf.collect(engine="streaming")
-        if fmt == "csv":
-            df.write_csv(out)
-        else:
-            df.write_parquet(out)
-        del df
+        preamble_ns = _compile_preamble(graph.preamble or "")
+        lazy_outputs, _order, _parents, _names = _execute_lazy(
+            graph,
+            _build_node_fn,
+            target_node_id=sink_node_id,
+            preamble_ns=preamble_ns or None,
+            scenario=sink_scenario,
+            checkpoint_dir=checkpoint_path,
+        )
 
-    # Read back row count cheaply from file metadata.
-    if fmt == "csv":
-        row_count = pl.scan_csv(out).select(pl.len()).collect().item()
-    else:
-        row_count = pl.scan_parquet(out).select(pl.len()).collect().item()
+        lf = lazy_outputs.get(sink_node_id)
+        if lf is None:
+            raise RuntimeError("Failed to compute sink input")
 
-    return SinkResponse(
-        status="ok",
-        message=f"Wrote {row_count:,} rows to {path}",
-        row_count=row_count,
-        path=path,
-        format=fmt,
-    )
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        # Log the lazy plan so we can diagnose streaming failures.
+        try:
+            plan = lf.explain()
+            logger.info("sink_plan", path=path, plan=plan)
+        except Exception:
+            logger.debug("explain_failed", path=path)
+
+        safe_sink(lf, out, fmt=fmt)
+        logger.info("sink_written", path=path, format=fmt)
+        del lf
+        gc.collect()
+        _malloc_trim()
+
+        # Read back row count cheaply from file metadata.
+        if fmt == "csv":
+            row_count = pl.scan_csv(out).select(pl.len()).collect().item()
+        else:
+            row_count = pl.scan_parquet(out).select(pl.len()).collect().item()
+
+        return SinkResponse(
+            status="ok",
+            message=f"Wrote {row_count:,} rows to {path}",
+            row_count=row_count,
+            path=path,
+            format=fmt,
+        )
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Restore previous streaming chunk size.
+        if _prev_chunk_size is not None:
+            pl.Config.set_streaming_chunk_size(int(_prev_chunk_size))
