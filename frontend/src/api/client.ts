@@ -231,7 +231,8 @@ export function trainModel(
   payload: { graph: GraphPayload; node_id: string; scenario?: string },
   options?: { signal?: AbortSignal },
 ): Promise<Record<string, unknown>> {
-  return post("/api/modelling/train", { ...payload, scenario: payload.scenario ?? "live" }, options)
+  // Pipeline execution can take minutes for large datasets — use a 10-minute timeout
+  return post("/api/modelling/train", { ...payload, scenario: payload.scenario ?? "live" }, { ...options, timeout: 600_000 })
 }
 
 export type TrainEstimate = {

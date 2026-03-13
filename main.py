@@ -85,6 +85,9 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
     df
+    df
+    df
+    df
     return df
 
 
@@ -126,6 +129,7 @@ def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl
     """Join competitor scoring onto policies"""
     df = (
     policies
+    .limit(1000000)
     .join(
         competitor_scoring,
         on = 'quote_id',
@@ -166,7 +170,7 @@ def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame)
     return df
 
 
-@pipeline.node
+@pipeline.node(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type'])
 def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
     df = (
@@ -176,11 +180,30 @@ def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
+@pipeline.node(config="config/model_training/conversion.json")
+def conversion(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
+    """conversion node"""
+    return competitor_features
+
+
+@pipeline.node(config="config/model_scoring/conversion_scoring.json")
+def conversion_scoring(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
+    """conversion_scoring node"""
+    from haute.graph_utils import score_from_config
+    return score_from_config(competitor_features, config="config/model_scoring/conversion_scoring.json")
+
+
 @pipeline.node(config="config/data_sink/conversion_sink.json")
 def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """Data Sink 9 node"""
-    competitor_features.collect().write_parquet("output/conversion_data.parquet")
+    competitor_features.collect(engine="streaming").write_parquet("output/conversion_data.parquet")
     return competitor_features
+
+
+@pipeline.node(config="config/expander/premium.json")
+def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
+    """premium node"""
+    return join_premiums
 
 
 
@@ -200,3 +223,6 @@ pipeline.connect("join_policy_data", "join_premiums")
 pipeline.connect("quoted_premiums", "join_premiums")
 pipeline.connect("join_premiums", "competitor_features")
 pipeline.connect("competitor_features", "conversion_sink")
+pipeline.connect("join_premiums", "premium")
+pipeline.connect("competitor_features", "conversion")
+pipeline.connect("competitor_features", "conversion_scoring")

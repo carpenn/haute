@@ -590,6 +590,8 @@ def _build_node_config(
     else:
         # transform
         config["code"] = _extract_user_code(body, param_names) if body else ""
+        if "selected_columns" in decorator_kwargs:
+            config["selected_columns"] = decorator_kwargs["selected_columns"]
     # Instance reference (works for any node type)
     if "instance_of" in decorator_kwargs:
         config["instanceOf"] = decorator_kwargs["instance_of"]

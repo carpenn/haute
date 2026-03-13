@@ -33,6 +33,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const cachedResult = useNodeResultsStore((s) => s.trainResults[nodeId])
   const startTrainJob = useNodeResultsStore((s) => s.startTrainJob)
 
+  const [submitting, setSubmitting] = useState(false)
   const training = !!trainJob
   const trainProgress: TrainProgress | null = trainJob?.progress ?? null
   const trainResult: TrainResult | null = cachedResult?.result ?? null
@@ -106,6 +107,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
   const handleTrain = useCallback(async () => {
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
+    setSubmitting(true)
     try {
       const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario })
 
@@ -124,6 +126,8 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         status: "error", metrics: {}, feature_importance: [],
         model_path: "", train_rows: 0, test_rows: 0, error: String(e),
       })
+    } finally {
+      setSubmitting(false)
     }
   }, [nodeId, allNodes, buildGraphCb, currentConfigHash, startTrainJob])
 
@@ -203,6 +207,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
           ramEstimate={ramEstimate}
           ramEstimateLoading={ramEstimateLoading}
           rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
+          submitting={submitting}
           onTrain={handleTrain}
         />
       </div>
@@ -257,6 +262,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         ramEstimate={ramEstimate}
         ramEstimateLoading={ramEstimateLoading}
         rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
+        submitting={submitting}
         onTrain={handleTrain}
       />
     </div>

@@ -1,6 +1,6 @@
 """MLflow discovery endpoints for the Model Score node.
 
-Lists experiments, runs (with .cbm artifacts), registered models,
+Lists experiments, runs (with model artifacts), registered models,
 and model versions so the frontend can populate dropdowns.
 """
 
@@ -78,10 +78,10 @@ def list_runs(
     experiment_id: str = Query(..., description="MLflow experiment ID"),
     max_results: int = Query(20, ge=1, le=100),
     artifact_filter: str = Query(
-        "cbm",
+        "model",
         description=(
             "Filter runs by artifact type: "
-            "'cbm' for CatBoost models (.cbm), "
+            "'model' for any model artifact (.cbm, .rsglm), "
             "'optimiser' for optimiser results (optimiser_result.json)"
         ),
     ),
@@ -104,10 +104,12 @@ def list_runs(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
 
+    _MODEL_EXTENSIONS = (".cbm", ".rsglm")
+
     def _match(path: str) -> bool:
         if artifact_filter == "optimiser":
             return path == "optimiser_result.json"
-        return path.endswith(".cbm")
+        return any(path.endswith(ext) for ext in _MODEL_EXTENSIONS)
 
     results: list[MlflowRunSummary] = []
     for run in runs:

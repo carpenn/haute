@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { Play, Loader2, AlertTriangle, RefreshCw, CheckCircle2 } from "lucide-react"
+import { Play, Loader2, AlertTriangle, RefreshCw, CheckCircle2, Database } from "lucide-react"
 import type { TrainResult, TrainProgress } from "../../stores/useNodeResultsStore"
 import type { TrainEstimate } from "../../api/client"
 import { TrainingProgress as TrainingProgressPanel } from "./TrainingProgress"
@@ -20,6 +20,8 @@ export type TrainingActionsAndResultsProps = {
   ramEstimate: TrainEstimate | null
   ramEstimateLoading: boolean
   rowLimit: number | null
+  /** True while the initial POST /api/modelling/train is in flight (pipeline executing). */
+  submitting?: boolean
   onTrain: () => void
 }
 
@@ -32,6 +34,7 @@ export function TrainingActionsAndResults({
   ramEstimate,
   ramEstimateLoading,
   rowLimit,
+  submitting = false,
   onTrain,
 }: TrainingActionsAndResultsProps) {
   // Recalculate training MB and GPU VRAM reactively as row_limit changes
@@ -68,6 +71,18 @@ export function TrainingActionsAndResults({
     return { rows, trainingMb, wasDownsampled, isLimited, gpuVramMb }
   }, [ramEstimate, rowLimit])
 
+  const busy = submitting || training
+  const trainIcon = submitting
+    ? <Database size={14} className="animate-pulse" />
+    : training
+      ? <Loader2 size={14} className="animate-spin" />
+      : <Play size={14} />
+  const trainLabel = submitting
+    ? "Preparing training data..."
+    : training
+      ? (trainProgress?.message || "Training...")
+      : "Train Model"
+
   return (
     <>
       {/* Staleness indicator */}
@@ -77,7 +92,7 @@ export function TrainingActionsAndResults({
           <span style={{ color: "#fbbf24" }}>Config changed since last training</span>
           <button
             onClick={onTrain}
-            disabled={training || !target}
+            disabled={training || submitting || !target}
             className="ml-auto px-2 py-0.5 rounded text-[11px] font-medium"
             style={{ background: "rgba(168,85,247,.15)", color: "#a855f7" }}
           >
@@ -149,16 +164,16 @@ export function TrainingActionsAndResults({
       <div className="pt-2" style={{ borderTop: "1px solid var(--border)" }}>
         <button
           onClick={onTrain}
-          disabled={training || !target}
+          disabled={busy || !target}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
           style={{
-            background: training ? "var(--chrome-hover)" : "#a855f7",
-            color: training ? "var(--text-muted)" : "#fff",
+            background: busy ? "var(--chrome-hover)" : "#a855f7",
+            color: busy ? "var(--text-muted)" : "#fff",
             opacity: !target ? 0.5 : 1,
           }}
         >
-          {training ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {training ? "Training..." : "Train Model"}
+          {trainIcon}
+          {trainLabel}
         </button>
       </div>
 
@@ -166,7 +181,7 @@ export function TrainingActionsAndResults({
       {trainProgress && <TrainingProgressPanel trainProgress={trainProgress} />}
 
       {/* Completion badge — results are in the preview panel below */}
-      {trainResult && trainResult.status !== "error" && !training && (
+      {trainResult && trainResult.status !== "error" && !training && !submitting && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.2)" }}>
           <CheckCircle2 size={12} style={{ color: "#22c55e" }} className="shrink-0" />
           <span style={{ color: "#22c55e" }}>

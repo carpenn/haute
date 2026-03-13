@@ -352,6 +352,20 @@ class TestBuildNodeConfig:
         config = _build_node_config("transform", {}, body, ["df"])
         assert "code" in config
 
+    def test_transform_with_selected_columns(self):
+        """selected_columns in decorator kwargs must round-trip through the parser."""
+        body = '    """doc"""\n    return df'
+        sel = ["quote_id", "premium", "sale_flag"]
+        config = _build_node_config("transform", {"selected_columns": sel}, body, ["df"])
+        assert config["selected_columns"] == sel
+        assert "code" in config
+
+    def test_transform_without_selected_columns(self):
+        """When no selected_columns kwarg, config should not contain the key."""
+        body = '    """doc"""\n    return df'
+        config = _build_node_config("transform", {}, body, ["df"])
+        assert "selected_columns" not in config
+
 
 # ---------------------------------------------------------------------------
 # _extract_preamble
@@ -550,3 +564,98 @@ pipeline.connect("transform", "output")
 
         # Pipeline name preserved
         assert graph1.pipeline_name == graph2.pipeline_name
+
+    def test_roundtrip_selected_columns_on_transform(self, tmp_path):
+        """selected_columns on a transform node must survive parse → codegen → parse."""
+        from haute.codegen import graph_to_code
+
+        code = '''\
+import polars as pl
+import haute
+
+pipeline = haute.Pipeline("sel_test")
+
+
+@pipeline.node(path="data.parquet")
+def source() -> pl.LazyFrame:
+    """source node"""
+    return pl.scan_parquet("data.parquet")
+
+
+@pipeline.node(selected_columns=['quote_id', 'premium', 'sale_flag'])
+def features(source: pl.LazyFrame) -> pl.LazyFrame:
+    """features node"""
+    return source
+
+
+pipeline.connect("source", "features")
+'''
+        p = tmp_path / "sel.py"
+        p.write_text(code)
+        graph1 = parse_pipeline_file(p)
+
+        feat1 = next(n for n in graph1.nodes if n.id == "features")
+        assert feat1.data.config.get("selected_columns") == [
+            "quote_id", "premium", "sale_flag",
+        ]
+
+        # Generate code from the parsed graph, then re-parse
+        generated = graph_to_code(
+            graph1,
+            pipeline_name=graph1.pipeline_name,
+            description=graph1.pipeline_description or "",
+            preamble=graph1.preamble or "",
+        )
+        p2 = tmp_path / "sel_gen.py"
+        p2.write_text(generated)
+        graph2 = parse_pipeline_file(p2)
+
+        feat2 = next(n for n in graph2.nodes if n.id == "features")
+        assert feat2.data.config.get("selected_columns") == [
+            "quote_id", "premium", "sale_flag",
+        ]
+
+    def test_roundtrip_transform_without_selected_columns(self, tmp_path):
+        """A transform with no selected_columns should not gain one after round-trip."""
+        from haute.codegen import graph_to_code
+
+        code = '''\
+import polars as pl
+import haute
+
+pipeline = haute.Pipeline("plain_test")
+
+
+@pipeline.node(path="data.parquet")
+def source() -> pl.LazyFrame:
+    """source node"""
+    return pl.scan_parquet("data.parquet")
+
+
+@pipeline.node
+def clean(source: pl.LazyFrame) -> pl.LazyFrame:
+    """clean node"""
+    return source
+
+
+pipeline.connect("source", "clean")
+'''
+        p = tmp_path / "plain.py"
+        p.write_text(code)
+        graph1 = parse_pipeline_file(p)
+
+        clean1 = next(n for n in graph1.nodes if n.id == "clean")
+        assert "selected_columns" not in clean1.data.config
+
+        generated = graph_to_code(
+            graph1,
+            pipeline_name=graph1.pipeline_name,
+            description=graph1.pipeline_description or "",
+            preamble=graph1.preamble or "",
+        )
+        p2 = tmp_path / "plain_gen.py"
+        p2.write_text(generated)
+        graph2 = parse_pipeline_file(p2)
+
+        clean2 = next(n for n in graph2.nodes if n.id == "clean")
+        assert "selected_columns" not in clean2.data.config

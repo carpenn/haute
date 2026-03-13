@@ -293,6 +293,53 @@ class TestListRuns:
         assert data["params"]["epochs"] == "100"
         assert data["artifacts"] == ["best.cbm"]
 
+    def test_rsglm_artifact_included(self, client):
+        """Runs with .rsglm artifacts are included (regression: was .cbm only)."""
+        run = _make_run(run_id="glm_run", run_name="glm-run")
+
+        rsglm_art = MagicMock(path="fitted.rsglm")
+        mock_mlflow = MagicMock()
+        mock_mlflow.search_runs.return_value = [run]
+        mock_client = MagicMock()
+        mock_client.list_artifacts.return_value = [rsglm_art]
+
+        with _mock_tracking(mlflow=mock_mlflow, client=mock_client):
+            resp = client.get("/api/mlflow/runs?experiment_id=1")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["run_id"] == "glm_run"
+        assert "fitted.rsglm" in data[0]["artifacts"]
+
+    def test_model_filter_matches_cbm_and_rsglm_excludes_other(self, client):
+        """Default model filter includes .cbm and .rsglm runs, excludes others.
+
+        Regression test: the _match() helper in list_runs() must accept
+        both .cbm and .rsglm extensions.  Previously only .cbm was matched.
+        """
+        run_cbm = _make_run(run_id="cbm_run", run_name="cbm")
+        run_rsglm = _make_run(run_id="rsglm_run", run_name="rsglm")
+        run_txt = _make_run(run_id="txt_run", run_name="txt")
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.search_runs.return_value = [run_cbm, run_rsglm, run_txt]
+        mock_client = MagicMock()
+        mock_client.list_artifacts.side_effect = [
+            [MagicMock(path="model.cbm")],
+            [MagicMock(path="model.rsglm")],
+            [MagicMock(path="notes.txt")],
+        ]
+
+        with _mock_tracking(mlflow=mock_mlflow, client=mock_client):
+            resp = client.get("/api/mlflow/runs?experiment_id=1")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        returned_ids = {d["run_id"] for d in data}
+        assert returned_ids == {"cbm_run", "rsglm_run"}
+        assert "txt_run" not in returned_ids
+
     def test_max_results_forwarded(self, client):
         """max_results query param is forwarded to search_runs."""
         mock_mlflow = MagicMock()

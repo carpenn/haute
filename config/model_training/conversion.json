@@ -1,0 +1,26 @@
+{
+  "algorithm": "glm",
+  "target": "sale_flag",
+  "family": "binomial",
+  "link": "log",
+  "metrics": [
+    "auc",
+    "logloss"
+  ],
+  "terms": {
+    "premium": {
+      "type": "bs",
+      "monotonicity": "decreasing"
+    },
+    "difference_to_market": {
+      "type": "bs",
+      "monotonicity": "decreasing"
+    }
+  },
+  "split": {
+    "strategy": "random",
+    "validation_size": 0,
+    "holdout_size": 0,
+    "seed": 42
+  }
+}
