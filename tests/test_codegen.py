@@ -87,6 +87,53 @@ class TestNodeToCode:
             assert s in code, f"Expected {s!r} in generated code"
         _compile_node_code(code)
 
+    @pytest.mark.parametrize(
+        "label, config, expected_strings",
+        [
+            pytest.param(
+                "Load Data",
+                {"path": "data/input.parquet", "code": ".filter(pl.col('x') > 0)"},
+                ["df = pl.scan_parquet", "# -- user code --", "filter", "return df"],
+                id="parquet_with_code",
+            ),
+            pytest.param(
+                "CSV Source",
+                {"path": "data/input.csv", "code": "df = df.select('a', 'b')"},
+                ["df = pl.scan_csv", "# -- user code --", "select", "return df"],
+                id="csv_with_code",
+            ),
+            pytest.param(
+                "DB Source",
+                {"sourceType": "databricks", "table": "cat.sch.tbl", "code": ".limit(100)"},
+                ["read_cached_table", "# -- user code --", "limit", "return df"],
+                id="databricks_with_code",
+            ),
+        ],
+    )
+    def test_data_source_with_code(self, label, config, expected_strings):
+        """DataSource with user code emits sentinel pattern."""
+        node = _n({
+            "id": "src",
+            "data": {"label": label, "nodeType": "dataSource", "config": config},
+        })
+        code = _node_to_code(node)
+        for s in expected_strings:
+            assert s in code, f"Expected {s!r} in generated code"
+        # No function parameters (still a source node)
+        assert "() -> pl.LazyFrame" in code
+        _compile_node_code(code)
+
+    def test_data_source_without_code_unchanged(self):
+        """DataSource without code still uses simple return template."""
+        node = _n({
+            "id": "src",
+            "data": {"label": "Load Data", "nodeType": "dataSource", "config": {"path": "data/input.parquet"}},
+        })
+        code = _node_to_code(node)
+        assert "return pl.scan_parquet" in code
+        assert "# -- user code --" not in code
+        _compile_node_code(code)
+
     def test_transform_with_code(self):
         node = _n({
             "id": "t",

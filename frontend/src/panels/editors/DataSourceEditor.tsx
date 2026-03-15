@@ -1,9 +1,8 @@
-import { FileText, Database } from "lucide-react"
-import { FileBrowser, SchemaPreview } from "./_shared"
+import { useState } from "react"
+import { FileText, Database, Check } from "lucide-react"
+import { FileBrowser, CodeEditor } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
 import ToggleButtonGroup from "../../components/ToggleButtonGroup"
-import { useSchemaFetch } from "../../hooks/useSchemaFetch"
-import { fetchDatabricksSchema } from "../../api/client"
 import { WarehousePicker, CatalogTablePicker, DatabricksFetchButton } from "./_DatabricksSelector"
 import { configField } from "../../utils/configField"
 
@@ -12,14 +11,18 @@ export default function DataSourceEditor({
   onUpdate,
   onRefreshPreview,
   accentColor,
+  errorLine,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   onRefreshPreview?: () => void
   accentColor: string
+  errorLine?: number | null
 }) {
   const sourceType = configField(config, "sourceType", "flat_file")
-  const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(configField<string | undefined>(config, "path", undefined))
+  const currentPath = configField<string | undefined>(config, "path", undefined)
+  const hasFile = sourceType === "flat_file" && !!currentPath
+  const [fileExpanded, setFileExpanded] = useState(false)
 
   return (
     <>
@@ -44,14 +47,32 @@ export default function DataSourceEditor({
             <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
               File
             </label>
-            <FileBrowser
-              currentPath={configField<string | undefined>(config, "path", undefined)}
-              onSelect={(path) => {
-                onUpdate("path", path)
-                fetchForPath(path)
-                onRefreshPreview?.()
-              }}
-            />
+            {hasFile && (
+              <div className="px-2.5 py-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(34,197,94,.1)', border: '1px solid rgba(34,197,94,.2)' }}>
+                <Check size={14} style={{ color: '#22c55e' }} className="shrink-0" />
+                <span className="text-xs font-mono truncate flex-1" style={{ color: '#4ade80' }}>{currentPath}</span>
+                <button
+                  data-testid="file-change-btn"
+                  onClick={() => setFileExpanded(!fileExpanded)}
+                  className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded transition-colors"
+                  style={{ color: '#4ade80' }}
+                >
+                  {fileExpanded ? "close" : "change"}
+                </button>
+              </div>
+            )}
+            {(!hasFile || fileExpanded) && (
+              <div className="mt-2">
+                <FileBrowser
+                  currentPath={undefined}
+                  onSelect={(path) => {
+                    onUpdate("path", path)
+                    setFileExpanded(false)
+                    setTimeout(() => onRefreshPreview?.(), 50)
+                  }}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -88,26 +109,29 @@ export default function DataSourceEditor({
               table={configField(config, "table", "")}
               httpPath={configField(config, "http_path", "")}
               query={configField(config, "query", "")}
-              onFetched={() => {
-                const tbl = configField(config, "table", "")
-                if (tbl) {
-                  fetchDatabricksSchema(tbl)
-                    .then((data) => { setSchema(data); onRefreshPreview?.() })
-                    .catch((err: unknown) => { console.warn("Databricks schema fetch failed:", err); setSchema(null) })
-                }
-              }}
+              onFetched={() => onRefreshPreview?.()}
             />
           </div>
         )}
       </div>
 
-      {loadingSchema && (
-        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading schema...</span>
+      <div className="px-3 py-2 flex flex-col gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between shrink-0">
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+            Polars Code
+            <span className="ml-1.5 normal-case tracking-normal font-normal">(optional)</span>
+          </label>
+          <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+            use <code className="px-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>df</code> for loaded data
+          </span>
         </div>
-      )}
-
-      <SchemaPreview schema={schema} />
+        <CodeEditor
+          defaultValue={configField(config, "code", "")}
+          onChange={(val) => onUpdate("code", val)}
+          errorLine={errorLine}
+          placeholder={'.filter(pl.col("status") == "active")\n.select("policy_id", "claim_amount")'}
+        />
+      </div>
     </>
   )
 }

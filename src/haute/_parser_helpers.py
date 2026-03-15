@@ -248,9 +248,10 @@ def _dedent(code: str) -> str:
 def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     """Extract the meaningful user code from a function body.
 
-    Strips the docstring. For codegen-style bodies (df = (...)\nreturn df)
-    it unwraps the assignment. For hand-written code (return expr) it
-    preserves the expression.
+    Strips the docstring and the codegen-appended ``return df``.
+    For codegen chain style ``df = (...)`` it unwraps the inner expression.
+    For hand-written ``return expr`` it strips the ``return`` keyword.
+    For multi-statement bodies (assignments, comments) it returns as-is.
     """
     lines = body_source.strip().splitlines()
     cleaned = _strip_docstring(lines)
@@ -260,31 +261,32 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
 
     code = _dedent("\n".join(cleaned)).strip()
 
-    # Pattern 1: codegen style  "df = (\n...\n)\nreturn df"
+    # Strip codegen-appended "return df" and trailing blank lines.
+    # _wrap_user_code always appends "return df"; leaving it causes a
+    # bare "df" to accumulate on each save/reload roundtrip.
+    code_lines = code.splitlines()
+    while code_lines and code_lines[-1].strip() in ("return df", ""):
+        code_lines.pop()
+    if not code_lines:
+        return ""
+    code = "\n".join(code_lines).strip()
+
+    # Pattern 1: codegen chain style "df = (\n...\n)" — unwrap to inner
     if code.startswith("df = (") or code.startswith("df=("):
         inner = code.split("(", 1)[1]
-        # Find the matching close of the assignment (before 'return df')
-        # Remove trailing 'return df' first
-        for suffix in ("\nreturn df", "\n    return df"):
-            if inner.endswith(suffix):
-                inner = inner[: -len(suffix)]
-                break
         if inner.rstrip().endswith(")"):
             inner = inner.rstrip()[:-1]
         return _dedent(inner).strip()
 
-    # Pattern 2: single "return <expr>" (hand-written)
-    # Rejoin as a single return expression
+    # Pattern 2: hand-written "return <expr>" — strip "return " prefix
     stripped_lines = []
     in_return = False
-    for line in cleaned:
+    for line in code.splitlines():
         s = line.strip()
         if s.startswith("return ") and not in_return:
-            # Strip 'return ' prefix, keep the rest
             stripped_lines.append(line.replace("return ", "", 1))
             in_return = True
         elif in_return:
-            # continuation of the return expression
             stripped_lines.append(line)
         elif not s.startswith("return"):
             stripped_lines.append(line)
@@ -292,13 +294,14 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     return _dedent("\n".join(stripped_lines)).strip()
 
 
-def _extract_model_score_user_code(body_source: str) -> str:
-    """Extract user post-processing code from a MODEL_SCORE function body.
+def _extract_sentinel_user_code(body_source: str, return_var: str = "result") -> str:
+    """Extract user code between ``# -- user code --`` sentinel and trailing return.
 
-    The codegen template wraps user code after a ``# -- user code --``
-    sentinel comment.  Everything between that sentinel and the trailing
-    ``return result`` is genuine user code.  If no sentinel is found the
-    body is entirely auto-generated and we return an empty string.
+    Used by MODEL_SCORE (``return result``), DATA_SOURCE (``return df``),
+    and any other node type that uses the sentinel pattern.
+
+    If no sentinel is found the body is entirely auto-generated and we
+    return an empty string.
     """
     sentinel = "# -- user code --"
     if sentinel not in body_source:
@@ -310,14 +313,19 @@ def _extract_model_score_user_code(body_source: str) -> str:
     if not lines:
         return ""
 
-    # Strip trailing "return result" (auto-generated)
-    while lines and lines[-1].strip() in ("return result", ""):
+    # Strip trailing auto-generated return
+    while lines and lines[-1].strip() in (f"return {return_var}", ""):
         lines.pop()
 
     if not lines:
         return ""
 
     return _dedent("\n".join(lines)).strip()
+
+
+def _extract_model_score_user_code(body_source: str) -> str:
+    """Extract user post-processing code from a MODEL_SCORE function body."""
+    return _extract_sentinel_user_code(body_source, "result")
 
 
 def _extract_external_user_code(body_source: str, param_names: list[str]) -> str:
@@ -834,6 +842,8 @@ def _resolve_node_config(
             config["code"] = _extract_external_user_code(body, param_names) if body else ""
         elif node_type == NodeType.TRANSFORM:
             config["code"] = _extract_user_code(body, param_names) if body else ""
+        elif node_type == NodeType.DATA_SOURCE:
+            config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
     else:
         node_type = _infer_node_type(decorator_kwargs, n_params)
         config = _build_node_config(node_type, decorator_kwargs, body, param_names)

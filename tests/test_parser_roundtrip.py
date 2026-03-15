@@ -1144,6 +1144,73 @@ class TestEdgeCases:
         parsed = _parse_roundtrip(graph, tmp_path)
         _assert_structural_equivalence(graph, parsed)
 
+    def test_data_source_with_code_roundtrip(self, tmp_path: Path) -> None:
+        """DataSource with user code round-trips through codegen→parse."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="src",
+                    data=NodeData(
+                        label="src",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={
+                            "path": "data/input.parquet",
+                            "sourceType": "flat_file",
+                            "code": ".filter(pl.col('x') > 0)",
+                        },
+                    ),
+                ),
+                GraphNode(
+                    id="out",
+                    data=NodeData(
+                        label="out",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["x"]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="src", target="out")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+        # Verify the user code was preserved
+        src_node = next(n for n in parsed.nodes if n.data.nodeType == NodeType.DATA_SOURCE)
+        assert "filter" in src_node.data.config.get("code", "")
+
+    def test_data_source_with_assignment_code_roundtrip(self, tmp_path: Path) -> None:
+        """DataSource with df= assignment code round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="src",
+                    data=NodeData(
+                        label="src",
+                        nodeType=NodeType.DATA_SOURCE,
+                        config={
+                            "path": "data/input.csv",
+                            "sourceType": "flat_file",
+                            "code": "df = df.select('a', 'b')",
+                        },
+                    ),
+                ),
+                GraphNode(
+                    id="out",
+                    data=NodeData(
+                        label="out",
+                        nodeType=NodeType.OUTPUT,
+                        config={"fields": ["a"]},
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="src", target="out")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+        src_node = next(n for n in parsed.nodes if n.data.nodeType == NodeType.DATA_SOURCE)
+        assert "select" in src_node.data.config.get("code", "")
+
     def test_multiple_constants_roundtrip(self, tmp_path: Path) -> None:
         """Multiple constant values with numeric and string coercion."""
         graph = PipelineGraph(

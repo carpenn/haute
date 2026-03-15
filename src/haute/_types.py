@@ -70,6 +70,7 @@ class DataSourceConfig(TypedDict, total=False):
     table: str
     http_path: str
     query: str
+    code: str
 
 
 class TransformConfig(TypedDict, total=False):

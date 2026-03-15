@@ -273,6 +273,57 @@ class TestBuildNodeFn:
         with pytest.raises(CacheNotFoundError, match="not.*fetched"):
             fn()
 
+    def test_data_source_with_code(self, tmp_path):
+        """DataSource with user code applies code after loading data."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]}).write_parquet(p)
+        node = _n({
+            "id": "src",
+            "data": {
+                "label": "src",
+                "nodeType": "dataSource",
+                "config": {"path": str(p), "code": ".filter(pl.col('x') > 1)"},
+            },
+        })
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True  # still a source node
+        df = fn().collect()
+        assert df["x"].to_list() == [2, 3]
+
+    def test_data_source_with_code_chain_syntax(self, tmp_path):
+        """DataSource code supports chain syntax (starting with '.')."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"a": [1, 2, 3]}).write_parquet(p)
+        node = _n({
+            "id": "src",
+            "data": {
+                "label": "src",
+                "nodeType": "dataSource",
+                "config": {"path": str(p), "code": ".select('a')"},
+            },
+        })
+        _, fn, _ = _build_node_fn(node)
+        df = fn().collect()
+        assert df.columns == ["a"]
+        assert len(df) == 3
+
+    def test_data_source_with_empty_code_no_change(self, tmp_path):
+        """DataSource with empty code behaves like no code."""
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+        node = _n({
+            "id": "src",
+            "data": {
+                "label": "src",
+                "nodeType": "dataSource",
+                "config": {"path": str(p), "code": ""},
+            },
+        })
+        _, fn, is_source = _build_node_fn(node)
+        assert is_source is True
+        df = fn().collect()
+        assert df["x"].to_list() == [1]
+
     def test_transform_with_code(self):
         node = _transform_node("t", code=".with_columns(y=pl.col('x') + 1)")
         _, fn, is_source = _build_node_fn(node, source_names=["df"])
@@ -1261,12 +1312,13 @@ class TestBuildNodeFnErrorPaths:
     """Error paths in _build_node_fn — missing config, bad source refs, etc."""
 
     def test_data_source_missing_path(self):
-        """Data source with empty path should fail when the function is called."""
+        """Data source with empty path returns an empty LazyFrame."""
         node = _source_node("src", "")
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
-        with pytest.raises(ValueError, match="[Uu]nsupported file"):
-            fn()
+        result = fn()
+        assert isinstance(result, pl.LazyFrame)
+        assert len(result.collect()) == 0
 
     def test_data_source_nonexistent_file(self):
         """Data source pointing to a file that doesn't exist should raise at collect."""

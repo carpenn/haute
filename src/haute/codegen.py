@@ -144,42 +144,6 @@ def {func_name}({params}) -> pl.LazyFrame:
     return {active_param}
 '''
 
-_SOURCE_FLAT_FILE = '''\
-@pipeline.node(path="{path}")
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.scan_parquet("{path}")
-'''
-
-_SOURCE_CSV = '''\
-@pipeline.node(path="{path}")
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.scan_csv("{path}")
-'''
-
-_SOURCE_JSON = '''\
-@pipeline.node(path="{path}")
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.read_json("{path}").lazy()
-'''
-
-_SOURCE_JSONL = '''\
-@pipeline.node(path="{path}")
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    return pl.scan_ndjson("{path}")
-'''
-
-_SOURCE_DATABRICKS = '''\
-@pipeline.node(table="{table}"{http_path_kw}{query_kw})
-def {func_name}() -> pl.LazyFrame:
-    """{description}"""
-    from haute._databricks_io import read_cached_table
-    return read_cached_table("{table}")
-'''
-
 _MODEL_SCORE = '''\
 @pipeline.node({decorator_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
@@ -190,7 +154,48 @@ def {func_name}({params}) -> pl.LazyFrame:
     return score_from_config({first_param}, config="{config_path}", base_dir=base)
 '''
 
-_MODEL_SCORE_USER_CODE_SENTINEL = "# -- user code --"
+_USER_CODE_SENTINEL = "# -- user code --"
+
+
+def _data_source_parts(config: dict) -> tuple[str, str, str]:
+    """Return (decorator, imports, load_expr) for a DataSource node.
+
+    *imports* is empty for flat files, non-empty for Databricks.
+    *load_expr* is the bare expression (e.g. ``pl.scan_parquet("path")``).
+    """
+    source_type = config.get("sourceType", "flat_file")
+    path = config.get("path", "")
+
+    if source_type == "databricks":
+        table = config.get("table", "catalog.schema.table")
+        http_path = config.get("http_path", "")
+        query = config.get("query", "")
+        parts = [f'table="{table}"']
+        if http_path:
+            parts.append(f'http_path="{http_path}"')
+        if query:
+            parts.append(f'query="{query}"')
+        decorator = f"@pipeline.node({', '.join(parts)})"
+        imports = "    from haute._databricks_io import read_cached_table\n"
+        load_expr = f'read_cached_table("{table}")'
+    elif path.lower().endswith(".csv"):
+        decorator = f'@pipeline.node(path="{path}")'
+        imports = ""
+        load_expr = f'pl.scan_csv("{path}")'
+    elif path.lower().endswith(".jsonl"):
+        decorator = f'@pipeline.node(path="{path}")'
+        imports = ""
+        load_expr = f'pl.scan_ndjson("{path}")'
+    elif path.lower().endswith(".json"):
+        decorator = f'@pipeline.node(path="{path}")'
+        imports = ""
+        load_expr = f'pl.read_json("{path}").lazy()'
+    else:
+        decorator = f'@pipeline.node(path="{path}")'
+        imports = ""
+        load_expr = f'pl.scan_parquet("{path}")'
+
+    return decorator, imports, load_expr
 
 _BANDING_SINGLE = '''\
 @pipeline.node(banding="{banding}", column="{column}",
@@ -406,45 +411,28 @@ def _gen_live_switch(node: GraphNode, source_names: list[str]) -> str:
 @_register_codegen(NodeType.DATA_SOURCE)
 def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
     func_name, description, config = _common_node_fields(node)
-    path = config.get("path", "")
-    source_type = config.get("sourceType", "flat_file")
-    if source_type == "databricks":
-        table = config.get("table", "catalog.schema.table")
-        http_path = config.get("http_path", "")
-        http_path_kw = f', http_path="{http_path}"' if http_path else ""
-        query = config.get("query", "")
-        query_kw = f', query="{query}"' if query else ""
-        return _SOURCE_DATABRICKS.format(
-            func_name=func_name,
-            description=description,
-            table=table,
-            http_path_kw=http_path_kw,
-            query_kw=query_kw,
+    code = (config.get("code") or "").strip()
+    decorator, imports, load_expr = _data_source_parts(config)
+
+    if not code:
+        return (
+            f"{decorator}\n"
+            f"def {func_name}() -> pl.LazyFrame:\n"
+            f'    """{description}"""\n'
+            f"{imports}"
+            f"    return {load_expr}\n"
         )
-    elif path.lower().endswith(".csv"):
-        return _SOURCE_CSV.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-        )
-    elif path.lower().endswith(".jsonl"):
-        return _SOURCE_JSONL.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-        )
-    elif path.lower().endswith(".json"):
-        return _SOURCE_JSON.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-        )
-    else:
-        return _SOURCE_FLAT_FILE.format(
-            func_name=func_name,
-            description=description,
-            path=path,
-        )
+
+    user_body = _wrap_user_code(code, ["df"])
+    return (
+        f"{decorator}\n"
+        f"def {func_name}() -> pl.LazyFrame:\n"
+        f'    """{description}"""\n'
+        f"{imports}"
+        f"    df = {load_expr}\n"
+        f"    {_USER_CODE_SENTINEL}\n"
+        f"{user_body}\n"
+    )
 
 
 @_register_codegen(NodeType.CONSTANT)
@@ -524,7 +512,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
             f'    from haute.graph_utils import score_from_config\n'
             f'    base = str(Path(__file__).parent)\n'
             f'    result = score_from_config({first_param}, config="{cfg_path}", base_dir=base)\n'
-            f'    {_MODEL_SCORE_USER_CODE_SENTINEL}\n'
+            f'    {_USER_CODE_SENTINEL}\n'
             f'{indented}\n'
             f'    return result\n'
         )

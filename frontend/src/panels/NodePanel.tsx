@@ -288,7 +288,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
         return <LiveSwitchEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} accentColor={accentColor} />
 
       case NODE_TYPES.DATA_SOURCE:
-        return <DataSourceEditor config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} accentColor={accentColor} />
+        return <DataSourceEditor config={config} onUpdate={handleConfigUpdate} onRefreshPreview={onRefreshPreview} accentColor={accentColor} errorLine={errorLine} />
 
       case NODE_TYPES.DATA_SINK:
         return <SinkEditor config={config} onUpdate={handleConfigUpdate} nodeId={node.id} allNodes={allNodes} edges={edges} submodels={submodels} preamble={preamble} accentColor={accentColor} />

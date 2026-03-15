@@ -146,6 +146,8 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     path = config.get("path", "")
     source_type = config.get("sourceType", "flat_file")
+    code = (config.get("code") or "").strip()
+    _preamble = dict(ctx.preamble_ns) if ctx.preamble_ns else None
 
     if source_type == "databricks":
         table = config.get("table", "")
@@ -155,12 +157,25 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
             return read_cached_table(_table)
 
-        return ctx.func_name, _databricks_source, True
+        base_fn = _databricks_source
+    else:
+        def source_fn() -> _Frame:
+            if not path:
+                return pl.LazyFrame()
+            return read_source(path)
 
-    def source_fn() -> _Frame:
-        return read_source(path)
+        base_fn = source_fn
 
-    return ctx.func_name, source_fn, True
+    if not code:
+        return ctx.func_name, base_fn, True
+
+    def source_with_code() -> _Frame:
+        from haute.executor import _exec_user_code
+
+        raw = base_fn()
+        return _exec_user_code(code, ["df"], (raw,), extra_ns=_preamble)
+
+    return ctx.func_name, source_with_code, True
 
 
 @_register(NodeType.CONSTANT)

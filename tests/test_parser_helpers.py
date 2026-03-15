@@ -41,6 +41,7 @@ from haute._parser_helpers import (
     _extract_pipeline_meta,
     _extract_preamble,
     _extract_preserved_blocks,
+    _extract_sentinel_user_code,
     _extract_submodel_meta,
     _extract_user_code,
     _get_decorator_kwargs,
@@ -886,6 +887,49 @@ class TestResolveNodeConfig:
         assert node_type == NodeType.DATA_SOURCE
         assert loaded["path"] == "data.csv"
 
+    def test_data_source_extracts_code_from_sentinel(self, tmp_path):
+        """DataSource with sentinel extracts user code from function body."""
+        cfg = {"path": "data.parquet", "sourceType": "flat_file"}
+        cfg_dir = tmp_path / "config" / "data_source"
+        cfg_dir.mkdir(parents=True)
+        cfg_file = cfg_dir / "my_source.json"
+        cfg_file.write_text(json.dumps(cfg))
+
+        body = (
+            '    """Load data."""\n'
+            '    df = pl.scan_parquet("data.parquet")\n'
+            "    # -- user code --\n"
+            "    df = df.filter(pl.col('x') > 0)\n"
+            "    return df"
+        )
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            node_type, loaded = _resolve_node_config(
+                {"config": "config/data_source/my_source.json"},
+                body, [], 0, tmp_path,
+            )
+        assert node_type == NodeType.DATA_SOURCE
+        assert "filter" in loaded.get("code", "")
+
+    def test_data_source_no_sentinel_gives_empty_code(self, tmp_path):
+        """DataSource without sentinel has empty code (backward compat)."""
+        cfg = {"path": "data.parquet", "sourceType": "flat_file"}
+        cfg_dir = tmp_path / "config" / "data_source"
+        cfg_dir.mkdir(parents=True)
+        cfg_file = cfg_dir / "my_source.json"
+        cfg_file.write_text(json.dumps(cfg))
+
+        body = (
+            '    """Load data."""\n'
+            '    return pl.scan_parquet("data.parquet")'
+        )
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            node_type, loaded = _resolve_node_config(
+                {"config": "config/data_source/my_source.json"},
+                body, [], 0, tmp_path,
+            )
+        assert node_type == NodeType.DATA_SOURCE
+        assert loaded.get("code", "") == ""
+
     def test_external_config_file_not_found(self, tmp_path):
         """Missing config file falls back gracefully to empty config."""
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
@@ -993,6 +1037,58 @@ class TestDedentEdgeCases:
 # ===========================================================================
 
 
+class TestExtractSentinelUserCode:
+    def test_extracts_code_between_sentinel_and_return_df(self):
+        body = (
+            '    df = pl.scan_parquet("data.parquet")\n'
+            "    # -- user code --\n"
+            "    df = df.filter(pl.col('x') > 0)\n"
+            "    return df"
+        )
+        result = _extract_sentinel_user_code(body, "df")
+        assert "filter" in result
+        assert "return" not in result
+
+    def test_no_sentinel_returns_empty(self):
+        body = '    return pl.scan_parquet("data.parquet")'
+        assert _extract_sentinel_user_code(body, "df") == ""
+
+    def test_sentinel_with_no_code_returns_empty(self):
+        body = (
+            '    df = pl.scan_parquet("data.parquet")\n'
+            "    # -- user code --\n"
+            "    return df"
+        )
+        assert _extract_sentinel_user_code(body, "df") == ""
+
+    def test_model_score_compat_return_result(self):
+        """Works with return_var='result' for MODEL_SCORE backward compat."""
+        body = (
+            "    result = score(df)\n"
+            "    # -- user code --\n"
+            "    result = result.with_columns(x=1)\n"
+            "    return result"
+        )
+        result = _extract_sentinel_user_code(body, "result")
+        assert "with_columns" in result
+        assert "return" not in result
+
+    def test_multiline_code(self):
+        body = (
+            '    df = pl.scan_parquet("data.parquet")\n'
+            "    # -- user code --\n"
+            "    df = (\n"
+            "        df\n"
+            "        .filter(pl.col('x') > 0)\n"
+            "        .select('x', 'y')\n"
+            "    )\n"
+            "    return df"
+        )
+        result = _extract_sentinel_user_code(body, "df")
+        assert "filter" in result
+        assert "select" in result
+
+
 class TestExtractUserCodeEdgeCases:
     def test_whitespace_only_body(self):
         assert _extract_user_code("   \n   \n", []) == ""
@@ -1008,6 +1104,29 @@ class TestExtractUserCodeEdgeCases:
         result = _extract_user_code(body, ["source"])
         assert "source" in result
         assert "filter" in result
+
+    def test_multi_statement_no_bare_df_leak(self):
+        """Regression: codegen 'return df' must not leak as bare 'df'."""
+        body = (
+            '    """desc"""\n'
+            "    df = df.rename({'a': 'b'})\n"
+            "    df = df.select('b')\n"
+            "    return df"
+        )
+        result = _extract_user_code(body, ["quotes"])
+        assert result == "df = df.rename({'a': 'b'})\ndf = df.select('b')"
+        assert "return" not in result
+
+    def test_multi_statement_roundtrip_stable(self):
+        """Regression: repeated wrap→extract must not accumulate bare 'df'."""
+        from haute.codegen import _wrap_user_code
+
+        code = "df = df.rename({'a': 'b'})\ndf = df.select('b')"
+        for _ in range(5):
+            wrapped = _wrap_user_code(code, ["quotes"])
+            body = '    """desc"""\n' + wrapped
+            code = _extract_user_code(body, ["quotes"])
+        assert code == "df = df.rename({'a': 'b'})\ndf = df.select('b')"
 
 
 # ===========================================================================
