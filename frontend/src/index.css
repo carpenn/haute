@@ -101,6 +101,13 @@ html, body, #root {
 .react-flow__edge-path {
   stroke-width: 1.5 !important;
 }
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgba(255,255,255,.45) !important;
+  stroke-width: 2.5 !important;
+}
+.react-flow__edge.selected marker path {
+  fill: rgba(255,255,255,.45) !important;
+}
 /* Selection rectangle styling */
 .react-flow__selection {
   background: rgba(96,165,250,.08) !important;

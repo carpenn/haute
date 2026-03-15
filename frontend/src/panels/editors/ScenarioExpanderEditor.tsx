@@ -28,10 +28,10 @@ export default function ScenarioExpanderEditor({
     <div className="px-4 py-3 space-y-4">
       <InputSourcesBar inputSources={inputSources} onDeleteInput={onDeleteInput} />
 
-      {/* Quote ID column */}
+      {/* Row key */}
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-          Quote ID Column
+          Row Key
         </label>
         {upstreamColumns.length > 0 ? (
           <select
@@ -56,7 +56,7 @@ export default function ScenarioExpanderEditor({
           />
         )}
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-          Column that identifies each quote / row-group
+          Column that uniquely identifies each input row
         </p>
       </div>
 

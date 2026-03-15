@@ -1,7 +1,7 @@
 /**
  * Render tests for ScenarioExpanderEditor.
  *
- * Tests: quote id label, select vs text input, value column, range section,
+ * Tests: row key label, select vs text input, value column, range section,
  * default values, editing min, editing steps with clamping, step column,
  * preview line, selecting a column, InputSourcesBar rendering.
  */
@@ -33,7 +33,7 @@ const DEFAULT_PROPS = {
 describe("ScenarioExpanderEditor", () => {
   it("renders all form fields with default config values", () => {
     render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
-    expect(screen.getByText("Quote ID Column")).toBeTruthy()
+    expect(screen.getByText("Row Key")).toBeTruthy()
     expect(screen.getByText("Value Column")).toBeTruthy()
     expect(screen.getByText("Range")).toBeTruthy()
     expect(screen.getByText("Min")).toBeTruthy()
@@ -163,7 +163,7 @@ describe("ScenarioExpanderEditor", () => {
     expect(screen.getByTestId("input-sources").textContent).toContain("0 inputs")
   })
 
-  it("selecting a quote_id column calls onUpdate", () => {
+  it("selecting a row key column calls onUpdate", () => {
     const onUpdate = vi.fn()
     const columns = [
       { name: "quote_id", dtype: "Utf8" },

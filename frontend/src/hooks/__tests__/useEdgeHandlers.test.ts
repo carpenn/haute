@@ -99,6 +99,70 @@ describe("useEdgeHandlers", () => {
     expect(newEdges[0]).toHaveProperty("targetHandle", null)
   })
 
+  it("onConnect blocks when target node has reached maxInputs", () => {
+    const params = makeParams()
+    const expanderNode = {
+      id: "exp1",
+      data: { label: "Expander", nodeType: NODE_TYPES.SCENARIO_EXPANDER },
+    } as unknown as Node
+    params.graphRef.current.nodes = [expanderNode]
+    params.graphRef.current.edges = [
+      { id: "e1", source: "a", target: "exp1" } as Edge,
+    ]
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "b",
+        target: "exp1",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).not.toHaveBeenCalled()
+  })
+
+  it("onConnect allows connection when target has not reached maxInputs", () => {
+    const params = makeParams()
+    const expanderNode = {
+      id: "exp1",
+      data: { label: "Expander", nodeType: NODE_TYPES.SCENARIO_EXPANDER },
+    } as unknown as Node
+    params.graphRef.current.nodes = [expanderNode]
+    params.graphRef.current.edges = []
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "a",
+        target: "exp1",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).toHaveBeenCalledOnce()
+  })
+
+  it("onConnect allows multiple inputs for nodes without maxInputs", () => {
+    const params = makeParams()
+    const transformNode = {
+      id: "t1",
+      data: { label: "Transform", nodeType: NODE_TYPES.TRANSFORM },
+    } as unknown as Node
+    params.graphRef.current.nodes = [transformNode]
+    params.graphRef.current.edges = [
+      { id: "e1", source: "a", target: "t1" } as Edge,
+    ]
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onConnect({
+        source: "b",
+        target: "t1",
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+    expect(params.setEdges).toHaveBeenCalledOnce()
+  })
+
   it("onSelectionChange with single node does NOT open panel (drag-safe)", () => {
     const params = makeParams()
     const node = { id: "n1", position: { x: 0, y: 0 }, data: { label: "A" } } as Node

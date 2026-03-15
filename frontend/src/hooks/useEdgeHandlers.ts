@@ -17,6 +17,20 @@ import {
 import { nodeData } from "../types/node"
 import { NODE_TYPES, NODE_TYPE_META, type NodeTypeValue } from "../utils/nodeTypes"
 
+/** Check whether the target node has reached its maxInputs limit. */
+function wouldExceedMaxInputs(
+  targetNodeId: string,
+  currentNodes: Node[],
+  currentEdges: Edge[],
+): boolean {
+  const targetNode = currentNodes.find((n) => n.id === targetNodeId)
+  if (!targetNode) return false
+  const meta = NODE_TYPE_META[nodeData(targetNode).nodeType as NodeTypeValue]
+  if (!meta?.maxInputs) return false
+  const incomingCount = currentEdges.filter((e) => e.target === targetNodeId).length
+  return incomingCount >= meta.maxInputs
+}
+
 type ContextMenuData = {
   x: number
   y: number
@@ -58,6 +72,7 @@ export default function useEdgeHandlers({
         (e) => e.source === params.source && e.target === params.target
       )
       if (exists) return
+      if (wouldExceedMaxInputs(params.target!, currentNodes, currentEdges)) return
 
       const targetNode = currentNodes.find((n) => n.id === params.target)
       if (targetNode && nodeData(targetNode).nodeType === NODE_TYPES.SUBMODEL && params.targetHandle) {
