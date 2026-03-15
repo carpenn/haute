@@ -75,21 +75,23 @@ export default function ScenarioExpanderEditor({
         />
       </div>
 
-      {/* Steps (always visible) */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-          Steps
-          <span className="ml-1.5 normal-case tracking-normal font-normal">rows generated per input row</span>
-        </label>
-        <input
-          type="number"
-          min={1}
-          className="w-full px-2.5 py-1.5 rounded-md text-[12px] font-mono"
-          style={INPUT_STYLE}
-          value={steps}
-          onChange={(e) => onUpdate("steps", Math.max(1, parseInt(e.target.value) || 1))}
-        />
-      </div>
+      {/* Steps — shown standalone when no value column is set */}
+      {!columnName && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
+            Steps
+            <span className="ml-1.5 normal-case tracking-normal font-normal">rows generated per input row</span>
+          </label>
+          <input
+            type="number"
+            min={1}
+            className="w-full px-2.5 py-1.5 rounded-md text-[12px] font-mono"
+            style={INPUT_STYLE}
+            value={steps}
+            onChange={(e) => onUpdate("steps", Math.max(1, parseInt(e.target.value) || 1))}
+          />
+        </div>
+      )}
 
       {/* Value column (optional) */}
       <div>
@@ -112,7 +114,7 @@ export default function ScenarioExpanderEditor({
           <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
             Value Range
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <div>
               <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Min</label>
               <input
@@ -133,6 +135,17 @@ export default function ScenarioExpanderEditor({
                 style={INPUT_STYLE}
                 value={maxValue}
                 onChange={(e) => onUpdate("max_value", parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Steps</label>
+              <input
+                type="number"
+                min={1}
+                className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
+                style={INPUT_STYLE}
+                value={steps}
+                onChange={(e) => onUpdate("steps", Math.max(1, parseInt(e.target.value) || 1))}
               />
             </div>
             <div>

@@ -19,7 +19,13 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 @pipeline.node(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    return pl.scan_parquet("data/batch_quotes.parquet")
+    df = pl.scan_parquet("data/batch_quotes.parquet")
+    # -- user code --
+    df = (
+        df
+        .filter(pl.col('quote_id') == 'QUO-2026-000000001')
+    )
+    return df
 
 
 @pipeline.node(config="config/data_source/competitor_insights.json")
@@ -190,15 +196,6 @@ def conversion(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     return competitor_features
 
 
-@pipeline.node(config="config/model_scoring/conversion_scoring.json")
-def conversion_scoring(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
-    """conversion_scoring node"""
-    from pathlib import Path
-    from haute.graph_utils import score_from_config
-    base = str(Path(__file__).parent)
-    return score_from_config(competitor_features, config="config/model_scoring/conversion_scoring.json", base_dir=base)
-
-
 @pipeline.node(config="config/data_sink/conversion_sink.json")
 def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """Data Sink 9 node"""
@@ -210,7 +207,38 @@ def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 @pipeline.node(config="config/expander/premium.json")
 def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """premium node"""
-    return join_premiums
+    df = join_premiums
+    # -- user code --
+    df = (
+        df
+        .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
+    )
+    return df
+
+
+@pipeline.node(config="config/model_scoring/conversion_scoring.json")
+def conversion_scoring(competitor_features_scenarios: pl.LazyFrame) -> pl.LazyFrame:
+    """conversion_scoring node"""
+    from pathlib import Path
+    from haute.graph_utils import score_from_config
+    base = str(Path(__file__).parent)
+    return score_from_config(competitor_features_scenarios, config="config/model_scoring/conversion_scoring.json", base_dir=base)
+
+
+@pipeline.node
+def Polars_8(conversion_scoring: pl.LazyFrame) -> pl.LazyFrame:
+    """Polars 8 node"""
+    df = (
+        conversion_scoring
+        .with_columns(prediction = pl.col('prediction') * 1000)
+    )
+    return df
+
+
+@pipeline.node(instance_of="competitor_features")
+def competitor_features_scenarios(premium: pl.LazyFrame) -> pl.LazyFrame:
+    """Instance of competitor_features"""
+    return competitor_features(join_premiums=premium)
 
 
 
@@ -232,4 +260,6 @@ pipeline.connect("join_premiums", "competitor_features")
 pipeline.connect("competitor_features", "conversion_sink")
 pipeline.connect("join_premiums", "premium")
 pipeline.connect("competitor_features", "conversion")
-pipeline.connect("competitor_features", "conversion_scoring")
+pipeline.connect("premium", "competitor_features_scenarios")
+pipeline.connect("competitor_features_scenarios", "conversion_scoring")
+pipeline.connect("conversion_scoring", "Polars_8")
