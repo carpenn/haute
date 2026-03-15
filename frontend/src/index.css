@@ -75,8 +75,8 @@ html, body, #root {
   transition: filter 0.2s ease, box-shadow 0.15s ease !important;
 }
 .react-flow__node:hover:not(.selected) > div {
-  border-color: rgba(255,255,255,.20) !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06) !important;
+  border-color: rgba(255,255,255,.25) !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.08) !important;
 }
 .react-flow__node-output {
   background: transparent !important;

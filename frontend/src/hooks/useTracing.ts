@@ -18,6 +18,7 @@ interface TracingParams {
   submodelsRef: React.MutableRefObject<Record<string, unknown>>
   preambleRef: React.MutableRefObject<string>
   nodeStatuses: Record<string, "ok" | "error" | "running">
+  hoveredNodeId: string | null
 }
 
 export interface TracingReturn {
@@ -34,6 +35,7 @@ export default function useTracing({
   graphRef, parentGraphRef, submodelsRef,
   preambleRef,
   nodeStatuses,
+  hoveredNodeId,
 }: TracingParams): TracingReturn {
   const addToast = useToastStore((s) => s.addToast)
   const rowLimit = useSettingsStore((s) => s.rowLimit)
@@ -126,19 +128,33 @@ export default function useTracing({
     return { traceValueMap: valMap, relevantNodeIds: relIds }
   }, [traceResult, resolveTraceId])
 
+  // Hover highlight: set of node IDs connected to the hovered node (including itself)
+  const hoverConnectedIds = useMemo(() => {
+    if (!hoveredNodeId) return null
+    const ids = new Set<string>([hoveredNodeId])
+    for (const e of edges) {
+      if (e.source === hoveredNodeId) ids.add(e.target)
+      if (e.target === hoveredNodeId) ids.add(e.source)
+    }
+    return ids
+  }, [hoveredNodeId, edges])
+
   const nodesWithStatus = useMemo(() => {
     const hasTrace = traceResult !== null
     return nodes.map((n) => {
       const status = nodeStatuses[n.id]
       const inTrace = allTraceNodeIds.has(n.id)
-      const dimmed = hasTrace && !inTrace
+      const traceDimmed = hasTrace && !inTrace
+      // Hover dim: when hovering a node and no trace is active, dim unconnected nodes
+      const hoverDimmed = !hasTrace && hoverConnectedIds !== null && !hoverConnectedIds.has(n.id)
       return {
         ...n,
         data: {
           ...n.data,
           _status: status,
           _traceActive: hasTrace && relevantNodeIds.has(n.id),
-          _traceDimmed: dimmed,
+          _traceDimmed: traceDimmed,
+          _hoverDimmed: hoverDimmed,
           _traceValue: traceValueMap.get(n.id),
         },
         style: {
@@ -147,28 +163,51 @@ export default function useTracing({
         },
       }
     })
-  }, [nodes, nodeStatuses, traceResult, allTraceNodeIds, relevantNodeIds, traceValueMap])
+  }, [nodes, nodeStatuses, traceResult, allTraceNodeIds, relevantNodeIds, traceValueMap, hoverConnectedIds])
 
   const edgesWithTrace = useMemo(() => {
-    if (!traceResult) return edges
-    return edges.map((e) => {
-      const srcInTrace = allTraceNodeIds.has(e.source)
-      const tgtInTrace = allTraceNodeIds.has(e.target)
-      if (srcInTrace && tgtInTrace) {
+    // Trace styling takes priority over hover styling
+    if (traceResult) {
+      return edges.map((e) => {
+        const srcInTrace = allTraceNodeIds.has(e.source)
+        const tgtInTrace = allTraceNodeIds.has(e.target)
+        if (srcInTrace && tgtInTrace) {
+          return {
+            ...e,
+            style: { stroke: 'var(--accent)', strokeWidth: 2.5, filter: 'drop-shadow(0 0 4px var(--accent))' },
+            markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'var(--accent)' },
+            animated: true,
+          }
+        }
         return {
           ...e,
-          style: { stroke: 'var(--accent)', strokeWidth: 2.5, filter: 'drop-shadow(0 0 4px var(--accent))' },
-          markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'var(--accent)' },
-          animated: true,
+          style: { stroke: 'rgba(255,255,255,.05)', strokeWidth: 1 },
+          markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.05)' },
         }
-      }
-      return {
-        ...e,
-        style: { stroke: 'rgba(255,255,255,.05)', strokeWidth: 1 },
-        markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.05)' },
-      }
-    })
-  }, [edges, traceResult, allTraceNodeIds])
+      })
+    }
+
+    // Hover highlighting: when hovering a node, brighten connected edges, dim others
+    if (hoveredNodeId) {
+      return edges.map((e) => {
+        const connected = e.source === hoveredNodeId || e.target === hoveredNodeId
+        if (connected) {
+          return {
+            ...e,
+            style: { stroke: 'rgba(255,255,255,.55)', strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.55)' },
+          }
+        }
+        return {
+          ...e,
+          style: { stroke: 'rgba(255,255,255,.06)', strokeWidth: 1 },
+          markerEnd: { type: MarkerType.ArrowClosed as const, width: 14, height: 14, color: 'rgba(255,255,255,.06)' },
+        }
+      })
+    }
+
+    return edges
+  }, [edges, traceResult, allTraceNodeIds, hoveredNodeId])
 
   return {
     traceResult, tracedCell,

@@ -112,6 +112,8 @@ function FlowEditor() {
   const setSyncBanner = useUIStore((s) => s.setSyncBanner)
   const dirty = useUIStore((s) => s.dirty)
   const setDirty = useUIStore((s) => s.setDirty)
+  const hoveredNodeId = useUIStore((s) => s.hoveredNodeId)
+  const setHoveredNodeId = useUIStore((s) => s.setHoveredNodeId)
 
   // Fetch MLflow status once on startup (shared by all panels)
   useEffect(() => { fetchMlflow() }, [fetchMlflow])
@@ -196,6 +198,7 @@ function FlowEditor() {
     graphRef, parentGraphRef, submodelsRef,
     preambleRef,
     nodeStatuses,
+    hoveredNodeId,
   })
 
   const {
@@ -326,6 +329,8 @@ function FlowEditor() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onSelectionChange={onSelectionChange}
+                onNodeMouseEnter={(_event, node) => setHoveredNodeId(node.id)}
+                onNodeMouseLeave={() => setHoveredNodeId(null)}
                 onNodeClick={(event, node) => { setUtilityOpen(false); setImportsOpen(false); setGitOpen(false); onNodeClick(event, node) }}
                 onNodeContextMenu={onNodeContextMenu}
                 onNodeDoubleClick={(_event, node) => {
@@ -347,7 +352,7 @@ function FlowEditor() {
                 fitViewOptions={{ padding: 0.15 }}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
-                  type: "default",
+                  type: "smoothstep",
                   animated: false,
                   style: { stroke: 'rgba(255,255,255,.25)', strokeWidth: 1.5 },
                   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.28)' },

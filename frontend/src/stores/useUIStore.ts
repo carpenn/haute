@@ -35,6 +35,10 @@ interface UIState {
   // Node panel width (persisted across selection changes)
   nodePanelWidth: number
   setNodePanelWidth: (width: number) => void
+
+  // Hover highlight — when set, connected edges glow and unconnected nodes/edges dim
+  hoveredNodeId: string | null
+  setHoveredNodeId: (id: string | null) => void
 }
 
 const useUIStore = create<UIState>()((set) => ({
@@ -71,6 +75,10 @@ const useUIStore = create<UIState>()((set) => ({
   // Node panel width (0 = use dynamic default: 50% of available space)
   nodePanelWidth: 0,
   setNodePanelWidth: (width) => set({ nodePanelWidth: width }),
+
+  // Hover highlight
+  hoveredNodeId: null,
+  setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
 }))
 
 export default useUIStore

@@ -100,3 +100,4 @@ export const nodeTypeColors: Record<string, string> =
 
 export const nodeTypeLabels: Record<string, string> =
   Object.fromEntries(Object.entries(NODE_TYPE_META).map(([k, v]) => [k, v.label]))
+

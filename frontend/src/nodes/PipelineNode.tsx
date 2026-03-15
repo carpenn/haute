@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { Handle, Position, useStore, type NodeProps } from "@xyflow/react"
 import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 import { NODE_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
@@ -29,6 +29,14 @@ function LiveSwitchBadge({ accent }: { accent: string }) {
   )
 }
 
+/** Zoom-level selector — only re-renders when crossing a threshold, not on every pixel. */
+const zoomSelector = (s: { transform: [number, number, number] }) => {
+  const z = s.transform[2]
+  if (z > 0.55) return "full"
+  if (z > 0.3) return "medium"
+  return "compact"
+}
+
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
   const nodeType = nodeData.nodeType || NODE_TYPES.TRANSFORM
@@ -42,41 +50,115 @@ function PipelineNode({ data, selected }: NodeProps) {
   const isSinkOnly = SINK_ONLY_TYPES.has(nodeType)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
+  const hoverDimmed = !!nodeData._hoverDimmed
   const traceValue = nodeData._traceValue
+  const zoomLevel = useStore(zoomSelector)
 
+  const dimmed = traceDimmed || hoverDimmed
+
+  // Compact mode: just a colored pill with icon — readable at far zoom
+  if (zoomLevel === "compact") {
+    return (
+      <div
+        className="relative rounded-lg min-w-[120px] max-w-[160px] cursor-pointer"
+        style={{
+          background: `linear-gradient(${accent}18, ${accent}10), var(--bg-elevated)`,
+          border: selected ? `2px solid ${accent}` : `1.5px solid ${accent}30`,
+          boxShadow: "var(--node-shadow)",
+          opacity: dimmed ? 0.25 : 1,
+          transition: "opacity 0.2s ease",
+        }}
+      >
+        <div
+          className="absolute left-0 top-1.5 bottom-1.5 w-[4px] rounded-full"
+          style={{ backgroundColor: accent }}
+        />
+        {!isSourceOnly && <Handle type="target" position={Position.Left} />}
+        <div className="flex items-center gap-2 pl-3.5 pr-2.5 py-2">
+          <Icon size={16} style={{ color: accent }} className="shrink-0" />
+          <div className="font-bold text-[12px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
+            {nodeData.label}
+          </div>
+        </div>
+        {!isSinkOnly && <Handle type="source" position={Position.Right} />}
+      </div>
+    )
+  }
+
+  // Medium mode: icon + label + type badge, no extra badges/status
+  if (zoomLevel === "medium") {
+    return (
+      <div
+        className="relative rounded-xl min-w-[180px] max-w-[260px] cursor-pointer"
+        style={{
+          background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
+          border: traceActive || selected
+            ? `1.5px solid ${accent}`
+            : isInstance
+              ? `1.5px dashed ${accent}60`
+              : `1px solid ${accent}20`,
+          boxShadow: traceActive
+            ? `0 0 12px ${accent}40, var(--node-shadow)`
+            : "var(--node-shadow)",
+          opacity: dimmed ? 0.25 : 1,
+          transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
+        }}
+      >
+        <div
+          className="absolute left-0 top-2 bottom-2 w-[4px] rounded-full"
+          style={{ backgroundColor: accent, opacity: selected || traceActive ? 1 : 0.7 }}
+        />
+        {!isSourceOnly && <Handle type="target" position={Position.Left} />}
+        <div className="pl-4 pr-3 py-2">
+          <div className="flex items-center gap-2 mb-0.5">
+            <Icon size={14} style={{ color: accent }} className="shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0" style={{ color: accent }}>
+              {typeLabel}
+            </span>
+          </div>
+          <div className="font-semibold text-[13px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
+            {nodeData.label}
+          </div>
+        </div>
+        {!isSinkOnly && <Handle type="source" position={Position.Right} />}
+      </div>
+    )
+  }
+
+  // Full mode: all details visible
   return (
     <div
       className="relative rounded-xl min-w-[180px] max-w-[260px] cursor-pointer"
       style={{
-        background: "var(--bg-elevated)",
+        background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
         border: traceActive
           ? `1.5px solid ${accent}`
           : selected
             ? `1.5px solid ${accent}`
             : isInstance
               ? `1.5px dashed ${accent}60`
-              : "1px solid var(--border-bright)",
+              : `1px solid ${accent}20`,
         boxShadow: traceActive
           ? `0 0 12px ${accent}40, var(--node-shadow)`
           : "var(--node-shadow)",
-        opacity: traceDimmed ? 0.3 : 1,
+        opacity: dimmed ? 0.25 : 1,
         transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
       }}
     >
       {/* Left accent stripe */}
       <div
-        className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
-        style={{ backgroundColor: accent, opacity: selected ? 1 : 0.6, transition: "opacity 0.2s ease" }}
+        className="absolute left-0 top-2 bottom-2 w-[4px] rounded-full"
+        style={{ backgroundColor: accent, opacity: selected || traceActive ? 1 : 0.7, transition: "opacity 0.2s ease" }}
       />
 
       {!isSourceOnly && <Handle type="target" position={Position.Left} />}
 
       <div className="pl-4 pr-3 py-2.5">
         <div className="flex items-center gap-2 mb-1">
-          <Icon size={12} style={{ color: accent }} className="shrink-0 opacity-80" />
+          <Icon size={14} style={{ color: accent }} className="shrink-0" />
           <span
             className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0"
-            style={{ color: accent, opacity: 0.8 }}
+            style={{ color: accent }}
           >
             {typeLabel}
           </span>
@@ -92,7 +174,7 @@ function PipelineNode({ data, selected }: NodeProps) {
           )}
           {isDeployInput && (
             <span
-              className={`ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0`}
+              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
               style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
             >
               <Radio size={8} />

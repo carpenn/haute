@@ -157,7 +157,9 @@ describe("PipelineNode", () => {
     )
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
     const rawStyle = nodeEl.getAttribute("style") || ""
-    expect(rawStyle).toContain("var(--border-bright)")
+    // Default border uses accent-tinted color (e.g. #06b6d420) not plain var(--border-bright)
+    expect(rawStyle).toContain("1px solid")
+    expect(rawStyle).not.toContain("1.5px solid")
   })
 
   // ── Node label ─────────────────────────────────────────────────────
@@ -264,7 +266,7 @@ describe("PipelineNode", () => {
     })
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
     const rawStyle = nodeEl.getAttribute("style") || ""
-    expect(rawStyle).toContain("opacity: 0.3")
+    expect(rawStyle).toContain("opacity: 0.25")
   })
 
   it("shows trace value when _traceActive and _traceValue are set", () => {
