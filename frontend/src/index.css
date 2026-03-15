@@ -86,12 +86,13 @@ html, body, #root {
   box-shadow: none !important;
 }
 .react-flow__handle {
-  width: 10px !important;
-  height: 10px !important;
-  background: var(--text-muted) !important;
-  border: 2px solid var(--bg-elevated) !important;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease !important;
+  width: 2px !important;
+  height: 2px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  opacity: 1;
 }
 /* Invisible hit area — 28px around the visual 10px handle */
 .react-flow__handle::after {
@@ -104,13 +105,11 @@ html, body, #root {
   transform: translate(-50%, -50%);
   border-radius: 50%;
 }
-.react-flow__node:hover .react-flow__handle,
-.react-flow__node.selected .react-flow__handle {
-  opacity: 1;
-}
 .react-flow__handle:hover {
+  width: 10px !important;
+  height: 10px !important;
   background: var(--accent) !important;
-  opacity: 1 !important;
+  border: 2px solid var(--bg-elevated) !important;
 }
 /* Edge default + transitions */
 .react-flow__edge-path {

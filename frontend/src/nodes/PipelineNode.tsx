@@ -2,7 +2,7 @@ import { memo } from "react"
 import { Handle, Position, useStore, type NodeProps } from "@xyflow/react"
 import { Radio, Link2 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
-import { NODE_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
+import { NODE_TYPES, NODE_TYPE_META, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, PILL_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels, type NodeTypeValue } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
 import useSettingsStore from "../stores/useSettingsStore"
 import type { HauteNodeData } from "../types/node"
@@ -48,6 +48,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const isInstance = !!(nodeData.config?.instanceOf)
   const isSourceOnly = SOURCE_ONLY_TYPES.has(nodeType)
   const isSinkOnly = SINK_ONLY_TYPES.has(nodeType)
+  const isPill = PILL_TYPES.has(nodeType)
   const traceActive = !!nodeData._traceActive
   const traceDimmed = !!nodeData._traceDimmed
   const hoverDimmed = !!nodeData._hoverDimmed
@@ -56,11 +57,18 @@ function PipelineNode({ data, selected }: NodeProps) {
 
   const dimmed = traceDimmed || hoverDimmed
 
+  // Accessible label: "{Type} node: {label}" + status
+  const typeName = NODE_TYPE_META[nodeType as NodeTypeValue]?.name || typeLabel
+  const statusText = nodeData._status ? `, status: ${nodeData._status}` : ""
+  const ariaLabel = `${typeName} node: ${nodeData.label}${statusText}${isInstance ? ", instance" : ""}${traceActive ? ", trace active" : ""}`
+
   // Compact mode: just a colored pill with icon — readable at far zoom
   if (zoomLevel === "compact") {
     return (
       <div
-        className="relative rounded-lg min-w-[120px] max-w-[160px] cursor-pointer"
+        aria-label={ariaLabel}
+        role="button"
+        className={`relative min-w-[120px] max-w-[160px] cursor-pointer ${isPill ? "rounded-full" : "rounded-lg"}`}
         style={{
           background: `linear-gradient(${accent}18, ${accent}10), var(--bg-elevated)`,
           border: selected ? `2px solid ${accent}` : `1.5px solid ${accent}30`,
@@ -89,7 +97,9 @@ function PipelineNode({ data, selected }: NodeProps) {
   if (zoomLevel === "medium") {
     return (
       <div
-        className="relative rounded-xl min-w-[180px] max-w-[260px] cursor-pointer"
+        aria-label={ariaLabel}
+        role="button"
+        className={`relative min-w-[180px] max-w-[260px] cursor-pointer ${isPill ? "rounded-2xl" : "rounded-xl"}`}
         style={{
           background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
           border: traceActive || selected
@@ -128,7 +138,9 @@ function PipelineNode({ data, selected }: NodeProps) {
   // Full mode: all details visible
   return (
     <div
-      className="relative rounded-xl min-w-[180px] max-w-[260px] cursor-pointer"
+      aria-label={ariaLabel}
+      role="button"
+      className={`relative min-w-[180px] max-w-[260px] cursor-pointer ${isPill ? "rounded-2xl" : "rounded-xl"}`}
       style={{
         background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
         border: traceActive
@@ -186,6 +198,8 @@ function PipelineNode({ data, selected }: NodeProps) {
             <span
               className={`${isDeployInput ? "" : "ml-auto "} w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}
               style={{ backgroundColor: statusColors[nodeData._status] }}
+              role="status"
+              aria-label={`Node ${nodeData._status}`}
             />
           )}
         </div>

@@ -41,12 +41,14 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
   description: string
   defaultConfig: Record<string, unknown>
   maxInputs?: number
+  /** Shape variant for color-blind differentiation: "pill" = more rounded (entry/exit nodes). */
+  shape?: "pill"
 }> = {
   // Entry group (emerald) — pipeline starts here
-  [NODE_TYPES.API_INPUT]:          { icon: Radio,              color: "#10b981", label: "QUOTE IN",       name: "Quote Input",          description: "Live API input for deployment (max 1)",                       defaultConfig: { path: "" } },
-  [NODE_TYPES.LIVE_SWITCH]:        { icon: ToggleLeft,         color: "#34d399", label: "SWITCH",         name: "Source Switch",        description: "Switch between live API and batch data",                      defaultConfig: { mode: "live" } },
+  [NODE_TYPES.API_INPUT]:          { icon: Radio,              color: "#10b981", label: "QUOTE IN",       name: "Quote Input",          description: "Live API input for deployment (max 1)",                       defaultConfig: { path: "" }, shape: "pill" },
+  [NODE_TYPES.LIVE_SWITCH]:        { icon: ToggleLeft,         color: "#34d399", label: "SWITCH",         name: "Source Switch",        description: "Switch between live API and batch data",                      defaultConfig: { mode: "live" }, shape: "pill" },
   // Exit (rose) — pipeline destination
-  [NODE_TYPES.OUTPUT]:             { icon: CircleDot,          color: "#f43f5e", label: "QUOTE OUT",      name: "Quote Response",       description: "Final price / prediction",                                    defaultConfig: { fields: [] } },
+  [NODE_TYPES.OUTPUT]:             { icon: CircleDot,          color: "#f43f5e", label: "QUOTE OUT",      name: "Quote Response",       description: "Final price / prediction",                                    defaultConfig: { fields: [] }, shape: "pill" },
   // Data group (blue) — read/write external data
   [NODE_TYPES.DATA_SOURCE]:        { icon: Database,           color: "#3b82f6", label: "SOURCE",         name: "Data Source",          description: "Read from parquet, CSV, or Databricks table",                 defaultConfig: { path: "" } },
   [NODE_TYPES.DATA_SINK]:          { icon: HardDriveDownload,  color: "#60a5fa", label: "SINK",           name: "Data Sink",            description: "Write to parquet, CSV, or directory",                         defaultConfig: { path: "", format: "parquet" }, maxInputs: 1 },
@@ -100,4 +102,9 @@ export const nodeTypeColors: Record<string, string> =
 
 export const nodeTypeLabels: Record<string, string> =
   Object.fromEntries(Object.entries(NODE_TYPE_META).map(([k, v]) => [k, v.label]))
+
+/** Node types that use pill shape (more rounded) — visually distinct for entry/exit nodes. */
+export const PILL_TYPES = new Set<string>(
+  Object.entries(NODE_TYPE_META).filter(([, v]) => v.shape === "pill").map(([k]) => k)
+)
 

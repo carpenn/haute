@@ -95,6 +95,8 @@ export default function NodeSearch({ onClose, onSelectNode }: NodeSearchProps) {
 
       {/* Search panel */}
       <div
+        role="dialog"
+        aria-label="Search pipeline nodes"
         className="relative w-full max-w-md rounded-xl shadow-2xl overflow-hidden animate-fade-in"
         style={{ background: "var(--bg-panel)", border: "1px solid var(--border-bright)" }}
       >
@@ -117,7 +119,7 @@ export default function NodeSearch({ onClose, onSelectNode }: NodeSearchProps) {
         </div>
 
         {/* Results list */}
-        <div ref={listRef} className="max-h-[85vh] overflow-y-auto py-1">
+        <div ref={listRef} role="listbox" aria-label="Node results" className="max-h-[85vh] overflow-y-auto py-1">
           {results.length === 0 ? (
             <div className="px-4 py-6 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
               No matching nodes
@@ -129,6 +131,9 @@ export default function NodeSearch({ onClose, onSelectNode }: NodeSearchProps) {
               return (
                 <button
                   key={item.id}
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  aria-label={`${item.meta?.name || "Node"}: ${item.label}`}
                   className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
                   style={{
                     background: i === activeIndex ? "var(--bg-hover)" : "transparent",

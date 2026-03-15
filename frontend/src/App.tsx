@@ -355,10 +355,9 @@ function FlowEditor() {
                 fitViewOptions={{ padding: 0.15 }}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
-                  type: "smoothstep",
+                  type: "default",
                   animated: false,
                   style: { stroke: 'rgba(255,255,255,.25)', strokeWidth: 1.5 },
-                  markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgba(255,255,255,.28)' },
                 }}
                 connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2, strokeDasharray: '6 3' }}
               >
