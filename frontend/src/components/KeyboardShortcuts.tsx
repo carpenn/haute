@@ -11,6 +11,7 @@ const shortcuts = [
   { keys: `${mod}+V`, label: "Paste nodes" },
   { keys: `${mod}+A`, label: "Select all nodes" },
   { keys: `${mod}+S`, label: "Save pipeline" },
+  { keys: `${mod}+K`, label: "Search nodes" },
   { keys: `${mod}+1`, label: "Fit view" },
   { keys: "Delete / Backspace", label: "Delete selected" },
   { keys: "?", label: "Show this help" },

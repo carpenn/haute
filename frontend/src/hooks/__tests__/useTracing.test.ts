@@ -6,6 +6,11 @@ import useToastStore from "../../stores/useToastStore"
 import useSettingsStore from "../../stores/useSettingsStore"
 import { makeNode, makeEdge } from "../../test-utils/factories"
 
+vi.mock("@xyflow/react", async () => {
+  const actual = await vi.importActual("@xyflow/react")
+  return { ...actual, useStore: (selector: (s: { transform: [number, number, number] }) => unknown) => selector({ transform: [0, 0, 1] }) }
+})
+
 vi.mock("../../api/client", () => ({
   traceCell: vi.fn(),
 }))
@@ -27,6 +32,7 @@ function makeParams(overrides: Partial<Parameters<typeof useTracing>[0]> = {}) {
     submodelsRef: { current: {} },
     preambleRef: { current: "" },
     nodeStatuses: {} as Record<string, "ok" | "error" | "running">,
+    hoveredNodeId: null,
     ...overrides,
   }
 }

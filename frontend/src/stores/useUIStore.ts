@@ -39,6 +39,10 @@ interface UIState {
   // Hover highlight — when set, connected edges glow and unconnected nodes/edges dim
   hoveredNodeId: string | null
   setHoveredNodeId: (id: string | null) => void
+
+  // Node search (Ctrl+K)
+  nodeSearchOpen: boolean
+  setNodeSearchOpen: (open: boolean | ((prev: boolean) => boolean)) => void
 }
 
 const useUIStore = create<UIState>()((set) => ({
@@ -79,6 +83,16 @@ const useUIStore = create<UIState>()((set) => ({
   // Hover highlight
   hoveredNodeId: null,
   setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
+
+  // Node search
+  nodeSearchOpen: false,
+  setNodeSearchOpen: (open) => {
+    if (typeof open === "function") {
+      set((s) => ({ nodeSearchOpen: open(s.nodeSearchOpen) }))
+    } else {
+      set({ nodeSearchOpen: open })
+    }
+  },
 }))
 
 export default useUIStore

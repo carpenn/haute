@@ -33,6 +33,7 @@ import RenameDialog from "./components/RenameDialog"
 import UtilityPanel from "./panels/UtilityPanel"
 import ImportsPanel from "./panels/ImportsPanel"
 import GitPanel from "./panels/GitPanel"
+import NodeSearch from "./components/NodeSearch"
 
 import useUndoRedo from "./hooks/useUndoRedo"
 import useWebSocketSync from "./hooks/useWebSocketSync"
@@ -114,6 +115,8 @@ function FlowEditor() {
   const setDirty = useUIStore((s) => s.setDirty)
   const hoveredNodeId = useUIStore((s) => s.hoveredNodeId)
   const setHoveredNodeId = useUIStore((s) => s.setHoveredNodeId)
+  const nodeSearchOpen = useUIStore((s) => s.nodeSearchOpen)
+  const setNodeSearchOpen = useUIStore((s) => s.setNodeSearchOpen)
 
   // Fetch MLflow status once on startup (shared by all panels)
   useEffect(() => { fetchMlflow() }, [fetchMlflow])
@@ -488,6 +491,22 @@ function FlowEditor() {
             const node = graphRef.current.nodes.find((n) => n.id === renameDialog.nodeId)
             if (node) onUpdateNode(renameDialog.nodeId, { ...node.data, label: newName })
             setRenameDialog(null)
+          }}
+        />
+      )}
+
+      {nodeSearchOpen && (
+        <NodeSearch
+          onClose={() => setNodeSearchOpen(false)}
+          onSelectNode={(nodeId) => {
+            const node = graphRef.current.nodes.find((n) => n.id === nodeId) ?? null
+            if (node) {
+              setSelectedNode(node)
+              lastSelectedNodeRef.current = node
+              setUtilityOpen(false)
+              setImportsOpen(false)
+              setGitOpen(false)
+            }
           }}
         />
       )}

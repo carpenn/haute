@@ -24,7 +24,7 @@ export default function useKeyboardShortcuts({
   setSelectedNode, setPreviewData, clearTrace,
 }: KeyboardShortcutsParams) {
   const { addToast } = useToastStore()
-  const { setShortcutsOpen, setSubmodelDialog } = useUIStore()
+  const { setShortcutsOpen, setSubmodelDialog, setNodeSearchOpen } = useUIStore()
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
@@ -115,6 +115,13 @@ export default function useKeyboardShortcuts({
         return
       }
 
+      // Ctrl+K → open node search
+      if (mod && e.key === "k") {
+        e.preventDefault()
+        setNodeSearchOpen((prev) => !prev)
+        return
+      }
+
       // Escape → clear trace
       if (e.key === "Escape") {
         clearTrace()
@@ -163,6 +170,6 @@ export default function useKeyboardShortcuts({
     handleSave, setNodes, setEdges, undo, redo, fitView,
     graphRef, clipboard, nodeIdCounter,
     setSelectedNode, setPreviewData, clearTrace,
-    addToast, setShortcutsOpen, setSubmodelDialog,
+    addToast, setShortcutsOpen, setSubmodelDialog, setNodeSearchOpen,
   ])
 }

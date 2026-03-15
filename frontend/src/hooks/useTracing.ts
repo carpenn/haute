@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
-import { MarkerType } from "@xyflow/react"
+import { MarkerType, useStore } from "@xyflow/react"
 import type { TraceResult } from "../types/trace"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { nodeData } from "../types/node"
@@ -40,6 +40,8 @@ export default function useTracing({
   const addToast = useToastStore((s) => s.addToast)
   const rowLimit = useSettingsStore((s) => s.rowLimit)
   const activeScenario = useSettingsStore((s) => s.activeScenario)
+  // Boost edge contrast at low zoom — only re-renders on threshold change
+  const zoomedOut = useStore((s) => s.transform[2] < 0.45)
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null)
   const [tracedCell, setTracedCell] = useState<{ rowIndex: number; column: string } | null>(null)
 
@@ -206,8 +208,17 @@ export default function useTracing({
       })
     }
 
+    // At low zoom, boost edge contrast so connections remain visible
+    if (zoomedOut) {
+      return edges.map((e) => ({
+        ...e,
+        style: { stroke: 'rgba(255,255,255,.38)', strokeWidth: 2 },
+        markerEnd: { type: MarkerType.ArrowClosed as const, width: 16, height: 16, color: 'rgba(255,255,255,.38)' },
+      }))
+    }
+
     return edges
-  }, [edges, traceResult, allTraceNodeIds, hoveredNodeId])
+  }, [edges, traceResult, allTraceNodeIds, hoveredNodeId, zoomedOut])
 
   return {
     traceResult, tracedCell,
