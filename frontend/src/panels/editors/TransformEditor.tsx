@@ -16,7 +16,6 @@ export default function TransformEditor({
   errorLine?: number | null
 }) {
   const defaultCode = configField(config, "code", "")
-  const isMultiInput = inputSources.length > 1
   const hasInput = inputSources.length > 0
 
   return (
@@ -34,13 +33,7 @@ export default function TransformEditor({
         defaultValue={defaultCode}
         onChange={(val) => onUpdate("code", val)}
         errorLine={errorLine}
-        placeholder={
-          isMultiInput
-            ? `${inputSources[0].varName}.join(${inputSources[1]?.varName || "other"}, on="key", how="left")`
-            : hasInput
-              ? `${inputSources[0].varName}\n.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
-              : `.with_columns(\n    age=pl.col("YOA") - pl.col("DOB")\n)\n.select("age", "NCD")`
-        }
+        placeholder=""
       />
     </div>
   )

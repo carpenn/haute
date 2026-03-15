@@ -21,23 +21,6 @@ export default function ExternalFileEditor({
   const fileType = configField(config, "fileType", "pickle")
   const modelClass = configField(config, "modelClass", "classifier")
   const defaultCode = configField(config, "code", "")
-  const hasInput = inputSources.length > 0
-
-  const firstInput = inputSources.length > 0 ? inputSources[0].varName : "df"
-  const placeholders: Record<string, string> = {
-    pickle: hasInput
-      ? `df = ${firstInput}.with_columns(\n    prediction=pl.Series(obj.predict(${firstInput}.to_numpy()))\n)`
-      : `# obj is the loaded pickle\ndf = pl.DataFrame({"result": [obj]})`,
-    json: hasInput
-      ? `df = ${firstInput}.with_columns(\n    lookup=${firstInput}["key"].map_elements(lambda k: obj.get(k))\n)`
-      : `# obj is the loaded JSON dict/list\ndf = pl.DataFrame(obj)`,
-    joblib: hasInput
-      ? `df = ${firstInput}.with_columns(\n    prediction=pl.Series(obj.predict(${firstInput}.to_numpy()))\n)`
-      : `# obj is the loaded joblib object\ndf = pl.DataFrame({"result": [str(obj)]})`,
-    catboost: hasInput
-      ? `X = ${firstInput}.select(obj.feature_names_).collect().to_numpy()\npreds = obj.predict(X)\ndf = ${firstInput}.select("id").with_columns(prediction=pl.Series(preds))`
-      : `# obj is the loaded CatBoost model\ndf = pl.DataFrame({"prediction": obj.predict([[1, 2, 3]])})`,
-  }
 
   return (
     <div className="flex-1 flex flex-col min-h-0 px-3 py-2 gap-2">
@@ -100,7 +83,7 @@ export default function ExternalFileEditor({
         defaultValue={defaultCode}
         onChange={(val) => onUpdate("code", val)}
         errorLine={errorLine}
-        placeholder={placeholders[fileType] || placeholders.pickle}
+        placeholder=""
       />
     </div>
   )

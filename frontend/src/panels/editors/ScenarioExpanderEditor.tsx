@@ -164,7 +164,7 @@ export default function ScenarioExpanderEditor({
         defaultValue={configField(config, "code", "")}
         onChange={(val) => onUpdate("code", val)}
         errorLine={errorLine}
-        placeholder={'.filter(pl.col("scenario_value") > 0.9)\n.with_columns(pl.col("scenario_value").alias("factor"))'}
+        placeholder=""
       />
     </div>
     </>

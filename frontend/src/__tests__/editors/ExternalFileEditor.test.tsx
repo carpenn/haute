@@ -132,52 +132,10 @@ describe("ExternalFileEditor", () => {
     expect(editor.defaultValue).toBe("df = pl.DataFrame()")
   })
 
-  it("shows pickle placeholder when no input sources and default file type", () => {
+  it("shows empty placeholder for code editor", () => {
     render(<ExternalFileEditor {...DEFAULT_PROPS} />)
     const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("obj is the loaded pickle")
-  })
-
-  it("shows json placeholder when json file type is selected", () => {
-    render(<ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "json" }} />)
-    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("obj is the loaded JSON")
-  })
-
-  it("shows input-aware placeholder when input sources are present (pickle)", () => {
-    const inputSources = [{ varName: "input_df", sourceLabel: "upstream_node", edgeId: "e1" }]
-    render(<ExternalFileEditor {...DEFAULT_PROPS} inputSources={inputSources} />)
-    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("input_df")
-    expect(editor.placeholder).toContain("obj.predict")
-  })
-
-  it("shows input-aware placeholder when input sources are present (json)", () => {
-    const inputSources = [{ varName: "lookup_df", sourceLabel: "data_source", edgeId: "e2" }]
-    render(<ExternalFileEditor {...DEFAULT_PROPS} inputSources={inputSources} config={{ fileType: "json" }} />)
-    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("lookup_df")
-    expect(editor.placeholder).toContain("obj.get")
-  })
-
-  it("shows catboost-specific placeholder with feature_names_ reference", () => {
-    render(<ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "catboost" }} />)
-    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("CatBoost model")
-  })
-
-  it("shows catboost input-aware placeholder when input sources are present", () => {
-    const inputSources = [{ varName: "df_in", sourceLabel: "source", edgeId: "e3" }]
-    render(
-      <ExternalFileEditor
-        {...DEFAULT_PROPS}
-        inputSources={inputSources}
-        config={{ fileType: "catboost" }}
-      />,
-    )
-    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
-    expect(editor.placeholder).toContain("df_in")
-    expect(editor.placeholder).toContain("feature_names_")
+    expect(editor.placeholder).toBe("")
   })
 
   it("reflects external fileType config changes (B22 fix)", () => {

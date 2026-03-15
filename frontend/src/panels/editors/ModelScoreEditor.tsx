@@ -119,7 +119,7 @@ export default function ModelScoreEditor({
           defaultValue={defaultCode}
           onChange={(val) => onUpdate("code", val)}
           errorLine={errorLine}
-          placeholder={`# df has the prediction column already\n# model is the loaded CatBoost model\ndf = df.with_columns(\n    risk_band=pl.when(pl.col("${outputColumn}") > 0.5).then(pl.lit("high")).otherwise(pl.lit("low"))\n)`}
+          placeholder=""
         />
       )}
     </div>

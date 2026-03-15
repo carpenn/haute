@@ -129,7 +129,7 @@ export default function DataSourceEditor({
           defaultValue={configField(config, "code", "")}
           onChange={(val) => onUpdate("code", val)}
           errorLine={errorLine}
-          placeholder={'.filter(pl.col("status") == "active")\n.select("policy_id", "claim_amount")'}
+          placeholder=""
         />
       </div>
     </>
