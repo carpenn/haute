@@ -106,7 +106,7 @@ export default function useNodeHandlers({
     if (n.length === 0) return
     const layouted = await getLayoutedElements(n, e)
     setNodes(() => layouted)
-    setTimeout(() => fitView({ padding: 0.8 }), 50)
+    setTimeout(() => fitView({ padding: 0.15 }), 50)
     addToast("info", "Auto-layout applied")
   }, [graphRef, setNodes, fitView, addToast])
 

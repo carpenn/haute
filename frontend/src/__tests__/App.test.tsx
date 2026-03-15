@@ -183,8 +183,11 @@ vi.mock("../components/Toolbar", () => ({
       <button data-testid="git-btn" onClick={props.onOpenGit}>
         Git
       </button>
-      <button data-testid="shortcuts-btn" onClick={props.onShowShortcuts}>
-        Shortcuts
+      <button data-testid="zoom-in-btn" onClick={props.onZoomIn}>
+        Zoom In
+      </button>
+      <button data-testid="zoom-out-btn" onClick={props.onZoomOut}>
+        Zoom Out
       </button>
     </div>
   ),
@@ -383,9 +386,9 @@ describe("App", () => {
     expect(screen.queryByTestId("shortcuts")).toBeNull()
   })
 
-  it("clicking shortcuts button opens shortcuts panel", () => {
+  it("KeyboardShortcuts shown when shortcutsOpen is true", () => {
+    useUIStore.setState({ shortcutsOpen: true })
     render(<App />)
-    fireEvent.click(screen.getByTestId("shortcuts-btn"))
     expect(screen.getByTestId("shortcuts")).toBeTruthy()
   })
 

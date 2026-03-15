@@ -11,7 +11,8 @@ function makeProps(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
     canRedo: false,
     onUndo: vi.fn(),
     onRedo: vi.fn(),
-    onShowShortcuts: vi.fn(),
+    onZoomIn: vi.fn(),
+    onZoomOut: vi.fn(),
     onOpenUtility: vi.fn(),
     onOpenImports: vi.fn(),
     onOpenGit: vi.fn(),
@@ -134,12 +135,20 @@ describe("Toolbar", () => {
     expect(input.value).toBe("2000")
   })
 
-  it("keyboard shortcuts button calls onShowShortcuts", () => {
+  it("zoom in button calls onZoomIn", () => {
     const props = makeProps()
     render(<Toolbar {...props} />)
-    const kbBtn = screen.getByLabelText("Keyboard shortcuts")
-    fireEvent.click(kbBtn)
-    expect(props.onShowShortcuts).toHaveBeenCalledOnce()
+    const btn = screen.getByLabelText("Zoom in")
+    fireEvent.click(btn)
+    expect(props.onZoomIn).toHaveBeenCalledOnce()
+  })
+
+  it("zoom out button calls onZoomOut", () => {
+    const props = makeProps()
+    render(<Toolbar {...props} />)
+    const btn = screen.getByLabelText("Zoom out")
+    fireEvent.click(btn)
+    expect(props.onZoomOut).toHaveBeenCalledOnce()
   })
 
   it("undo button is disabled when canUndo is false", () => {

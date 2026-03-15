@@ -137,7 +137,7 @@ describe("useNodeHandlers", () => {
     const toasts = useToastStore.getState().toasts
     expect(toasts[toasts.length - 1]).toMatchObject({ type: "info", text: "Auto-layout applied" })
     act(() => { vi.advanceTimersByTime(100) })
-    expect(params.fitView).toHaveBeenCalledWith({ padding: 0.8 })
+    expect(params.fitView).toHaveBeenCalledWith({ padding: 0.15 })
     vi.useRealTimers()
   })
 

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react"
-import { Undo2, Redo2, Keyboard, Timer, HardDrive, ChevronDown, Plus, Trash2, FileCode2, Package, GitFork } from "lucide-react"
+import { Undo2, Redo2, ZoomIn, ZoomOut, Timer, HardDrive, ChevronDown, Plus, Trash2, FileCode2, Package, GitFork } from "lucide-react"
 import type { WsStatus } from "../hooks/useWebSocketSync"
 import type { NodeTiming, NodeMemory } from "../api/types"
 import BreakdownDropdown, { type BreakdownItem } from "./BreakdownDropdown"
@@ -36,7 +36,8 @@ interface ToolbarProps {
   canRedo: boolean
   onUndo: () => void
   onRedo: () => void
-  onShowShortcuts: () => void
+  onZoomIn: () => void
+  onZoomOut: () => void
   onOpenUtility: () => void
   onOpenImports: () => void
   onOpenGit: () => void
@@ -51,7 +52,7 @@ interface ToolbarProps {
 export default function Toolbar({
   nodeCount, dirty,
   canUndo, canRedo, onUndo, onRedo,
-  onShowShortcuts,
+  onZoomIn, onZoomOut,
   onOpenUtility, onOpenImports, onOpenGit,
   onCentre, onAutoLayout,
   onSave,
@@ -252,14 +253,22 @@ export default function Toolbar({
           <Package size={13} />
           Imports
         </button>
-        {/* Keyboard shortcuts */}
+        {/* Zoom */}
         <button
-          onClick={onShowShortcuts}
-          aria-label="Keyboard shortcuts"
+          onClick={onZoomOut}
+          aria-label="Zoom out"
           className="p-1.5 rounded-md hover-chrome"
-          title="Keyboard shortcuts (?)"
+          title="Zoom out"
         >
-          <Keyboard size={14} aria-hidden="true" />
+          <ZoomOut size={14} aria-hidden="true" />
+        </button>
+        <button
+          onClick={onZoomIn}
+          aria-label="Zoom in"
+          className="p-1.5 rounded-md hover-chrome"
+          title="Zoom in"
+        >
+          <ZoomIn size={14} aria-hidden="true" />
         </button>
         <div className="w-px h-4 mx-0.5" style={{ background: 'var(--chrome-border)' }} />
         <button

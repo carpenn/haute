@@ -88,7 +88,7 @@ function FlowEditor() {
     onNodesChange, onEdgesChange,
     undo, redo, canUndo, canRedo,
   } = useUndoRedo()
-  const { screenToFlowPosition, fitView } = useReactFlow()
+  const { screenToFlowPosition, fitView, zoomIn, zoomOut } = useReactFlow()
 
   // UI state from Zustand store (leaf-subscribed values live in their own components)
   // Settings store
@@ -274,11 +274,12 @@ function FlowEditor() {
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
-        onShowShortcuts={() => setShortcutsOpen(true)}
+        onZoomIn={() => zoomIn()}
+        onZoomOut={() => zoomOut()}
         onOpenUtility={() => { setUtilityOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
         onOpenImports={() => { setImportsOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
         onOpenGit={() => { setGitOpen(true); setSelectedNode(null); lastSelectedNodeRef.current = null }}
-        onCentre={() => fitView({ padding: 0.8 })}
+        onCentre={() => fitView({ padding: 0.15 })}
         onAutoLayout={handleAutoLayout}
         onSave={handleSave}
         wsStatus={wsStatus}
@@ -341,8 +342,9 @@ function FlowEditor() {
                 selectNodesOnDrag
                 selectionMode={SelectionMode.Partial}
                 selectionKeyCode={null}
+                minZoom={0.1}
                 fitView
-                fitViewOptions={{ padding: 0.8 }}
+                fitViewOptions={{ padding: 0.15 }}
                 proOptions={{ hideAttribution: true }}
                 defaultEdgeOptions={{
                   type: "default",
