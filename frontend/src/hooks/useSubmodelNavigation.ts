@@ -3,6 +3,7 @@ import type { Node, Edge } from "@xyflow/react"
 import type { ViewLevel } from "../components/BreadcrumbBar"
 import { NODE_TYPES } from "../utils/nodeTypes"
 import { getLayoutedElements } from "../utils/layout"
+import { normalizeEdges } from "../utils/graphHelpers"
 import { nodeData } from "../types/node"
 import { createSubmodel, loadSubmodel, dissolveSubmodel } from "../api/client"
 import useToastStore from "../stores/useToastStore"
@@ -28,10 +29,6 @@ export interface SubmodelNavReturn {
   handleBreadcrumbNavigate: (depth: number) => void
   handleCreateSubmodel: (name: string, nodeIds: string[]) => Promise<void>
   handleDissolveSubmodel: (smName: string) => Promise<void>
-}
-
-function normalizeEdges(edges: Edge[]): Edge[] {
-  return edges.map((e) => ({ ...e, type: "default", animated: false }))
 }
 
 export default function useSubmodelNavigation({

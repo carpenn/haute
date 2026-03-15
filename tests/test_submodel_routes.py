@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 
@@ -15,13 +18,6 @@ from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, Pipeline
 def _isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test in a temporary directory."""
     monkeypatch.chdir(tmp_path)
-
-
-@pytest.fixture()
-def client() -> TestClient:
-    from haute.server import app
-
-    return TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------

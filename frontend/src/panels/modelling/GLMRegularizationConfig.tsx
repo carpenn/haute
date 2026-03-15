@@ -69,7 +69,7 @@ export function GLMRegularizationConfig({ config, onUpdate }: GLMRegularizationC
                   value={alpha}
                   onChange={(e) => onUpdate("alpha", parseFloat(e.target.value) || 0)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   min={0}
                   step={0.01}
                   placeholder="0 = auto (CV)"
@@ -84,7 +84,7 @@ export function GLMRegularizationConfig({ config, onUpdate }: GLMRegularizationC
                   value={cvFolds}
                   onChange={(e) => onUpdate("cv_folds", parseInt(e.target.value) || 5)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   min={2}
                   max={20}
                 />

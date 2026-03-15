@@ -43,10 +43,23 @@ class TestExtractSubmodelCalls:
     def test_ignores_non_pipeline_submodel(self) -> None:
         source = 'other.submodel("path.py")\n'
         tree = ast.parse(source)
-        # The function checks isinstance(func.value, ast.Name) but doesn't check
-        # the specific name — it returns any <name>.submodel() call
         paths = extract_submodel_calls(tree)
-        assert paths == ["path.py"]
+        assert paths == []
+
+    def test_ignores_chained_receiver_submodel(self) -> None:
+        """module.pipeline.submodel("path") should not be picked up."""
+        source = 'module.pipeline.submodel("path.py")\n'
+        tree = ast.parse(source)
+        paths = extract_submodel_calls(tree)
+        assert paths == []
+
+    def test_various_non_pipeline_receivers_rejected(self) -> None:
+        """Ensure several different receiver names are all rejected."""
+        for receiver in ["other", "submodel", "config", "self"]:
+            source = f'{receiver}.submodel("path.py")\n'
+            tree = ast.parse(source)
+            paths = extract_submodel_calls(tree)
+            assert paths == [], f"Expected empty for receiver={receiver}"
 
     def test_ignores_method_call_without_arg(self) -> None:
         source = "pipeline.submodel()\n"

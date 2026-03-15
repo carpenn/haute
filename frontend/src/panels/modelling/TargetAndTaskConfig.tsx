@@ -44,7 +44,7 @@ export function TargetAndTaskConfig({ config, onUpdate, columns, target, weight,
             value={target}
             onChange={(e) => onUpdate("target", e.target.value)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">Select target...</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
@@ -56,7 +56,7 @@ export function TargetAndTaskConfig({ config, onUpdate, columns, target, weight,
             value={weight}
             onChange={(e) => onUpdate("weight", e.target.value)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">None</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -68,7 +68,7 @@ export function TargetAndTaskConfig({ config, onUpdate, columns, target, weight,
             value={configField(config, "offset", "")}
             onChange={(e) => onUpdate("offset", e.target.value || null)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">None</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -89,7 +89,7 @@ export function TargetAndTaskConfig({ config, onUpdate, columns, target, weight,
                 }}
                 className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
                 style={{
-                  background: task === t ? "var(--accent-soft)" : "var(--input-bg)",
+                  background: task === t ? "var(--accent-soft)" : "var(--bg-input)",
                   color: task === t ? "var(--accent)" : "var(--text-secondary)",
                   border: `1px solid ${task === t ? "var(--accent)" : "var(--border)"}`,
                 }}

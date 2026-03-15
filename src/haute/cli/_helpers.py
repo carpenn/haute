@@ -94,6 +94,60 @@ def _find_frontend_dir() -> Path | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Transport dispatch helper — shared by ``smoke`` and ``impact`` commands
+# ---------------------------------------------------------------------------
+
+
+class TransportInfo:
+    """Result of :func:`resolve_transport` — describes the transport layer."""
+
+    __slots__ = ("kind", "staging_url", "prod_url")
+
+    def __init__(
+        self,
+        kind: str,
+        staging_url: str = "",
+        prod_url: str = "",
+    ) -> None:
+        self.kind = kind
+        self.staging_url = staging_url
+        self.prod_url = prod_url
+
+
+def resolve_transport(config: "DeployConfig") -> TransportInfo:  # noqa: F821
+    """Determine the transport layer from *config.target*.
+
+    Returns a :class:`TransportInfo` with ``kind`` set to one of:
+
+    - ``"databricks"`` — Databricks Model Serving
+    - ``"http"`` — container-based HTTP endpoint
+    - ``"unsupported"`` — target has no transport implementation yet
+
+    For ``"http"`` targets the ``staging_url`` (and ``prod_url`` when
+    available) are populated from ``config.ci``.  Raises ``SystemExit``
+    if the staging URL is required but missing.
+    """
+    from haute.deploy._container import _CONTAINER_BASED_TARGETS
+
+    if config.target == "databricks":
+        return TransportInfo(kind="databricks")
+
+    if config.target in _CONTAINER_BASED_TARGETS:
+        staging_url = config.ci.staging_endpoint_url
+        if not staging_url:
+            click.echo(
+                "Error: No staging endpoint URL configured.\n"
+                "  Set [ci.staging] endpoint_url in haute.toml.",
+                err=True,
+            )
+            raise SystemExit(1)
+        prod_url = config.ci.production_endpoint_url
+        return TransportInfo(kind="http", staging_url=staging_url, prod_url=prod_url)
+
+    return TransportInfo(kind="unsupported")
+
+
 def _load_deploy_config(
     *,
     pipeline_file: str | None = None,

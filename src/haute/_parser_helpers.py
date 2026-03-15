@@ -441,7 +441,7 @@ def _extract_connect_calls(
         func = call.func
         if not isinstance(func, ast.Attribute) or func.attr != "connect":
             continue
-        if isinstance(func.value, ast.Name) and func.value.id != receiver:
+        if not (isinstance(func.value, ast.Name) and func.value.id == receiver):
             continue
 
         args = call.args
@@ -504,10 +504,10 @@ def _build_node_config(
         config["inputs"] = param_names
     elif node_type == NodeType.MODEL_SCORE:
         for key in MODEL_SCORE_CONFIG_KEYS:
-            if key in decorator_kwargs:
-                # Map snake_case decorator key to camelCase config key where needed
-                config_key = "sourceType" if key == "source_type" else key
-                config[config_key] = decorator_kwargs[key]
+            # Decorator uses snake_case "source_type"; config uses camelCase "sourceType"
+            decorator_key = "source_type" if key == "sourceType" else key
+            if decorator_key in decorator_kwargs:
+                config[key] = decorator_kwargs[decorator_key]
         # Only extract user post-processing code (after sentinel), not the
         # auto-generated scoring scaffolding that codegen produces.
         config["code"] = _extract_model_score_user_code(body) if body else ""
@@ -814,6 +814,8 @@ def _resolve_node_config(
 
     Returns ``(node_type, config_dict)``.
     """
+    # Work on a copy to avoid mutating the caller's dict.
+    decorator_kwargs = dict(decorator_kwargs)
     config_ref = decorator_kwargs.pop("config", None)
     if config_ref:
         node_type_hint = infer_node_type_from_config_path(config_ref)

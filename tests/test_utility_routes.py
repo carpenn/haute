@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
 def _isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test in a temporary directory so utility/ is fresh."""
     monkeypatch.chdir(tmp_path)
-
-
-@pytest.fixture()
-def client() -> TestClient:
-    from haute.server import app
-
-    return TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +125,10 @@ class TestCreateUtilityFile:
             "name": "bad",
             "content": "def foo(\n",
         })
-        body = res.json()
-        assert body["status"] == "error"
-        assert body["error_line"] is not None
-        assert body["error"] is not None
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert detail["error_line"] is not None
+        assert detail["error"] is not None
 
     def test_rejects_duplicate(self, client: TestClient, tmp_path: Path) -> None:
         d = tmp_path / "utility"
@@ -182,9 +178,10 @@ class TestUpdateUtilityFile:
         (d / "helpers.py").write_text("x = 1\n")
 
         res = client.put("/api/utility/helpers", json={"content": "def foo(\n"})
-        body = res.json()
-        assert body["status"] == "error"
-        assert body["error_line"] is not None
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert detail["error_line"] is not None
+        assert detail["error"] is not None
         # Original file should be unchanged
         assert (d / "helpers.py").read_text() == "x = 1\n"
 
@@ -278,3 +275,46 @@ class TestPathTraversalSecurity:
     def test_read_blocked(self, client: TestClient, module: str) -> None:
         res = client.get(f"/api/utility/{module}")
         assert res.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# E4: Syntax errors must return 400, not 200
+# ---------------------------------------------------------------------------
+
+
+class TestSyntaxErrorReturns400:
+    """Verify syntax errors produce HTTP 400 with structured error detail."""
+
+    def test_create_syntax_error_returns_400(self, client: TestClient, tmp_path: Path) -> None:
+        res = client.post("/api/utility", json={
+            "name": "broken",
+            "content": "def foo(\n",
+        })
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert "error" in detail
+        assert "error_line" in detail
+        assert detail["error_line"] is not None
+        # File must NOT have been written
+        assert not (tmp_path / "utility" / "broken.py").exists()
+
+    def test_update_syntax_error_returns_400(self, client: TestClient, tmp_path: Path) -> None:
+        d = tmp_path / "utility"
+        d.mkdir()
+        (d / "mymod.py").write_text("x = 1\n")
+
+        res = client.put("/api/utility/mymod", json={"content": "if True\n"})
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert detail["error"] is not None
+        assert detail["error_line"] is not None
+        # Original file must be unchanged
+        assert (d / "mymod.py").read_text() == "x = 1\n"
+
+    def test_create_valid_content_still_returns_200(self, client: TestClient) -> None:
+        res = client.post("/api/utility", json={
+            "name": "good",
+            "content": "x = 1\n",
+        })
+        assert res.status_code == 200
+        assert res.json()["status"] == "ok"

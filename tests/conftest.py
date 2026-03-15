@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
 from haute._sandbox import _get_project_root, set_project_root
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, PipelineGraph
@@ -66,3 +67,46 @@ def make_node(d: dict) -> GraphNode:
 def make_graph(d: dict) -> PipelineGraph:
     """Build a PipelineGraph from a raw dict (model_validate shorthand)."""
     return PipelineGraph.model_validate(d)
+
+
+def compile_node_code(code: str) -> None:
+    """Verify generated node code compiles inside a pipeline context.
+
+    Shared by test_codegen.py and test_codegen_builders.py.
+    """
+    wrapper = (
+        "import polars as pl\nimport haute\n"
+        "pipeline = haute.Pipeline('test')\n\n"
+        f"{code}\n"
+    )
+    compile(wrapper, "<test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# CLI runner fixture — shared across all test_cli_*.py files
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def runner() -> CliRunner:
+    """Provide a Click CLI test runner."""
+    return CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# FastAPI TestClient fixtures — shared across route test files
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def client():
+    """TestClient with ``raise_server_exceptions=False``.
+
+    Most route tests assert on HTTP status codes, so server exceptions are
+    translated to responses rather than raised.
+    """
+    from fastapi.testclient import TestClient
+
+    from haute.server import app
+
+    return TestClient(app, raise_server_exceptions=False)

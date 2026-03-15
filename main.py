@@ -88,6 +88,7 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     df
     df
     df
+    df
     return df
 
 
@@ -120,8 +121,10 @@ def avg_top_5(competitor_join: pl.LazyFrame) -> pl.LazyFrame:
 @pipeline.node(config="config/model_scoring/competitor_scoring.json")
 def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_scoring node"""
+    from pathlib import Path
     from haute.graph_utils import score_from_config
-    return score_from_config(policies, config="config/model_scoring/competitor_scoring.json")
+    base = str(Path(__file__).parent)
+    return score_from_config(policies, config="config/model_scoring/competitor_scoring.json", base_dir=base)
 
 
 @pipeline.node
@@ -189,14 +192,17 @@ def conversion(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 @pipeline.node(config="config/model_scoring/conversion_scoring.json")
 def conversion_scoring(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """conversion_scoring node"""
+    from pathlib import Path
     from haute.graph_utils import score_from_config
-    return score_from_config(competitor_features, config="config/model_scoring/conversion_scoring.json")
+    base = str(Path(__file__).parent)
+    return score_from_config(competitor_features, config="config/model_scoring/conversion_scoring.json", base_dir=base)
 
 
 @pipeline.node(config="config/data_sink/conversion_sink.json")
 def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """Data Sink 9 node"""
-    competitor_features.collect(engine="streaming").write_parquet("output/conversion_data.parquet")
+    from haute._polars_utils import safe_sink
+    safe_sink(competitor_features, "output/conversion_data.parquet")
     return competitor_features
 
 

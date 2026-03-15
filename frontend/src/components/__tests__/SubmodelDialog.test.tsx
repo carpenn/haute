@@ -45,4 +45,24 @@ describe("SubmodelDialog", () => {
     fireEvent.click(screen.getByText("Create"))
     expect(props.onSubmit).toHaveBeenCalledWith("my_submodel")
   })
+
+  it("Escape key calls onClose", () => {
+    const { props } = renderDialog()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(props.onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("non-Escape keys do NOT call onClose", () => {
+    const { props } = renderDialog()
+    fireEvent.keyDown(document, { key: "Enter" })
+    fireEvent.keyDown(document, { key: "a" })
+    expect(props.onClose).not.toHaveBeenCalled()
+  })
+
+  it("Escape handler is cleaned up on unmount", () => {
+    const { props, unmount } = renderDialog()
+    unmount()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(props.onClose).not.toHaveBeenCalled()
+  })
 })

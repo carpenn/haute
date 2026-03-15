@@ -80,8 +80,8 @@ def infer_output_schema(
             if cached.get("fingerprint") == fp:
                 logger.info("output_schema_cache_hit", fingerprint=fp[:8])
                 return cached["schema"]
-        except Exception:
-            pass  # corrupt cache — recompute
+        except Exception as exc:
+            logger.warning("corrupt_schema_cache", path=str(cache_path), error=str(exc))
 
     from haute.deploy._scorer import score_graph
 

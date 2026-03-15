@@ -148,7 +148,7 @@ function PdpLineChart({ grid }: { grid: PdpGridPoint[] }) {
 
   return (
     <>
-      <svg width={width} height={height} style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={width} height={height} style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         {/* Grid */}
         {gridYValues.map((v, i) => {
           const y = yScale(v)
@@ -231,7 +231,7 @@ function PdpBarChart({ grid }: { grid: PdpGridPoint[] }) {
 
   return (
     <>
-      <svg width={width} height={height} style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={width} height={height} style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         {/* Grid */}
         {gridYValues.map((v, i) => {
           const y = yScale(v)

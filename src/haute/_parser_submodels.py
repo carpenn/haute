@@ -23,7 +23,12 @@ from haute._parser_helpers import (
     _extract_submodel_meta,
     _is_submodel_node_decorator,
 )
-from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
+from haute._submodel_graph import (
+    build_submodel_placeholder,
+    classify_ports,
+    rewire_edges,
+)
+from haute.graph_utils import GraphEdge, GraphNode, PipelineGraph
 
 logger = get_logger(component="parser.submodels")
 
@@ -42,6 +47,7 @@ def extract_submodel_calls(tree: ast.Module) -> list[str]:
             isinstance(func, ast.Attribute)
             and func.attr == "submodel"
             and isinstance(func.value, ast.Name)
+            and func.value.id == "pipeline"
         ):
             if call.args and isinstance(call.args[0], ast.Constant):
                 paths.append(str(call.args[0].value))
@@ -138,68 +144,23 @@ def merge_submodels(
         child_node_ids = [n.id for n in sm_graph.nodes]
         child_node_names = set(child_node_ids)
 
-        # Determine input and output ports from cross-boundary edges
-        input_ports: list[str] = []
-        output_ports: list[str] = []
-
-        for src, tgt in parent_edges:
-            if tgt in child_node_names and src not in child_node_names:
-                if tgt not in input_ports:
-                    input_ports.append(tgt)
-            if src in child_node_names and tgt not in child_node_names:
-                if src not in output_ports:
-                    output_ports.append(src)
-
-        sm_node_id = f"submodel__{sm_name}"
         sm_file = submodel_files.get(sm_name, "")
 
+        # Determine input and output ports from cross-boundary edges
+        input_ports, output_ports = classify_ports(parent_edges, child_node_names)
+
         # Build the submodel placeholder node
-        sm_node = GraphNode(
-            id=sm_node_id,
-            type=NodeType.SUBMODEL,
-            position={"x": 0, "y": 0},
-            data=NodeData(
-                label=sm_name,
-                description=sm_graph.pipeline_description or "",
-                nodeType=NodeType.SUBMODEL,
-                config={
-                    "file": sm_file,
-                    "childNodeIds": child_node_ids,
-                    "inputPorts": input_ports,
-                    "outputPorts": output_ports,
-                },
-            ),
+        sm_node = build_submodel_placeholder(
+            sm_name, sm_file, child_node_ids,
+            input_ports, output_ports,
+            description=sm_graph.pipeline_description or "",
         )
         parent_nodes.append(sm_node)
 
-        # Rewire edges: replace references to internal child nodes
-        # with references to the submodel node (using handles)
-        new_edges: list[GraphEdge] = []
-        for edge in parent_edge_list:
-            src = edge.source
-            tgt = edge.target
-            if src in child_node_names and tgt not in child_node_names:
-                # Internal → external: source becomes submodel node
-                new_edges.append(GraphEdge(
-                    id=f"e_{sm_node_id}_{tgt}__{src}",
-                    source=sm_node_id,
-                    sourceHandle=f"out__{src}",
-                    target=tgt,
-                ))
-            elif tgt in child_node_names and src not in child_node_names:
-                # External → internal: target becomes submodel node
-                new_edges.append(GraphEdge(
-                    id=f"e_{src}_{sm_node_id}__{tgt}",
-                    source=src,
-                    target=sm_node_id,
-                    targetHandle=f"in__{tgt}",
-                ))
-            elif src in child_node_names and tgt in child_node_names:
-                # Fully internal: skip (lives inside submodel)
-                continue
-            else:
-                new_edges.append(edge)
-        parent_edge_list = new_edges
+        # Rewire edges via shared helper
+        parent_edge_list = rewire_edges(
+            parent_edge_list, sm_node.id, child_node_names,
+        )
 
         submodels_meta[sm_name] = {
             "file": sm_file,

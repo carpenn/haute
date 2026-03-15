@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from haute._logging import get_logger
 from haute.graph_utils import PipelineGraph
 from haute.routes._helpers import (
+    _INTERNAL_ERROR_DETAIL,
     discover_pipelines,
     lookup_pipeline_by_name,
     parse_pipeline_to_graph,
@@ -168,7 +169,8 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("trace_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/pipeline/preview", response_model=PreviewNodeResponse)
@@ -272,7 +274,8 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("preview_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/pipeline/sink", response_model=SinkResponse)
@@ -304,4 +307,5 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("sink_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)

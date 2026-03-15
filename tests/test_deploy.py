@@ -20,6 +20,7 @@ from haute.parser import parse_pipeline_file
 
 if TYPE_CHECKING:
     from haute.deploy._config import DeployConfig, ResolvedDeploy
+from tests._deploy_helpers import make_resolved_deploy as _make_resolved
 from tests.conftest import make_graph as _g
 
 # ---------------------------------------------------------------------------
@@ -88,36 +89,6 @@ def mock_mlflow_deploy():
             create_or_update_endpoint=m_ep,
         )
 
-
-def _make_resolved(
-    config: DeployConfig | None = None, **overrides: object,
-) -> ResolvedDeploy:
-    """Build a lightweight ResolvedDeploy with sensible defaults.
-
-    Accepts either a pre-built DeployConfig or keyword overrides applied to a
-    minimal config.  All graph/schema fields default to empty so tests that
-    only exercise the MLflow API layer don't need to build real graphs.
-    """
-    from haute.deploy._config import DeployConfig, ResolvedDeploy
-
-    if config is None:
-        config = DeployConfig(
-            pipeline_file=PIPELINE_FILE,
-            model_name="test-model",
-        )
-
-    defaults = dict(
-        config=config,
-        full_graph=PipelineGraph(),
-        pruned_graph=PipelineGraph(),
-        input_node_ids=["policies"],
-        output_node_id="output",
-        artifacts={},
-        input_schema={"col": "Int64"},
-        output_schema={"col": "Int64"},
-    )
-    defaults.update(overrides)
-    return ResolvedDeploy(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +339,459 @@ class TestBundler:
         name = next(iter(artifacts))
         assert name == "static_ds__lookup.csv"
         assert artifacts[name].is_file()
+
+    # -- Registered model tests (B1 fix) ------------------------------------
+
+    def test_registered_model_resolved_and_bundled(self, tmp_path, monkeypatch):
+        """MODEL_SCORE with sourceType='registered' resolves via MLflow and bundles."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        # Pre-populate the disk cache so _download_model_artifact succeeds
+        cache_dir = tmp_path / ".cache" / "models" / "resolved_run_123"
+        cache_dir.mkdir(parents=True)
+        cbm_file = cache_dir / "model.cbm"
+        cbm_file.write_bytes(b"fake registered model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_reg",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "my-prod-model",
+                            "version": "3",
+                        },
+                    },
+                },
+            ],
+        })
+
+        with patch(
+            "haute.deploy._bundler._resolve_registered_model",
+            return_value=("resolved_run_123", "model.cbm"),
+        ) as mock_resolve:
+            artifacts = collect_artifacts(graph, [], tmp_path)
+
+        mock_resolve.assert_called_once_with("my-prod-model", "3")
+        assert len(artifacts) == 1
+        name = next(iter(artifacts))
+        assert name == "ms_reg__model.cbm"
+        assert artifacts[name].is_file()
+
+    def test_registered_model_latest_version(self, tmp_path, monkeypatch):
+        """sourceType='registered' with version='latest' resolves correctly."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        cache_dir = tmp_path / ".cache" / "models" / "run_latest"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "model.cbm").write_bytes(b"latest model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_latest",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "my-model",
+                            "version": "latest",
+                        },
+                    },
+                },
+            ],
+        })
+
+        with patch(
+            "haute.deploy._bundler._resolve_registered_model",
+            return_value=("run_latest", "model.cbm"),
+        ) as mock_resolve:
+            artifacts = collect_artifacts(graph, [], tmp_path)
+
+        mock_resolve.assert_called_once_with("my-model", "latest")
+        assert len(artifacts) == 1
+
+    def test_registered_model_empty_version(self, tmp_path, monkeypatch):
+        """sourceType='registered' with empty version (defaults to latest)."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        cache_dir = tmp_path / ".cache" / "models" / "run_empty_ver"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "model.cbm").write_bytes(b"model data")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_empty_ver",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "my-model",
+                            "version": "",
+                        },
+                    },
+                },
+            ],
+        })
+
+        with patch(
+            "haute.deploy._bundler._resolve_registered_model",
+            return_value=("run_empty_ver", "model.cbm"),
+        ) as mock_resolve:
+            artifacts = collect_artifacts(graph, [], tmp_path)
+
+        mock_resolve.assert_called_once_with("my-model", "")
+        assert len(artifacts) == 1
+
+    def test_registered_model_skipped_without_model_name(self):
+        """sourceType='registered' with no registered_model is silently skipped."""
+        from haute.deploy._bundler import collect_artifacts
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_no_name",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "",
+                            "version": "1",
+                        },
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], Path("."))
+        assert len(artifacts) == 0
+
+    def test_registered_model_resolve_error_propagates(self):
+        """Errors from _resolve_registered_model propagate to caller."""
+        from haute.deploy._bundler import collect_artifacts
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_err",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "nonexistent-model",
+                            "version": "1",
+                        },
+                    },
+                },
+            ],
+        })
+
+        with patch(
+            "haute.deploy._bundler._resolve_registered_model",
+            side_effect=ValueError("No versions found for registered model 'nonexistent-model'."),
+        ):
+            with pytest.raises(ValueError, match="No versions found"):
+                collect_artifacts(graph, [], Path("."))
+
+    def test_mixed_run_and_registered_models(self, tmp_path, monkeypatch):
+        """Pipeline with both run-based and registered MODEL_SCORE nodes."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        # Cache for run-based model
+        cache_run = tmp_path / ".cache" / "models" / "run_direct"
+        cache_run.mkdir(parents=True)
+        (cache_run / "direct.cbm").write_bytes(b"direct model")
+
+        # Cache for registered model (resolved to run_resolved)
+        cache_reg = tmp_path / ".cache" / "models" / "run_resolved"
+        cache_reg.mkdir(parents=True)
+        (cache_reg / "registered.cbm").write_bytes(b"registered model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_run",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "run",
+                            "run_id": "run_direct",
+                            "artifact_path": "direct.cbm",
+                        },
+                    },
+                },
+                {
+                    "id": "ms_reg",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "registered",
+                            "registered_model": "prod-model",
+                            "version": "2",
+                        },
+                    },
+                },
+            ],
+        })
+
+        with patch(
+            "haute.deploy._bundler._resolve_registered_model",
+            return_value=("run_resolved", "registered.cbm"),
+        ):
+            artifacts = collect_artifacts(graph, [], tmp_path)
+
+        assert len(artifacts) == 2
+        assert "ms_run__direct.cbm" in artifacts
+        assert "ms_reg__registered.cbm" in artifacts
+        assert artifacts["ms_run__direct.cbm"].is_file()
+        assert artifacts["ms_reg__registered.cbm"].is_file()
+
+    def test_run_based_model_still_works_with_explicit_source_type(self, tmp_path, monkeypatch):
+        """sourceType='run' explicitly set still works (no regression)."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        cache_dir = tmp_path / ".cache" / "models" / "run_explicit"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "model.cbm").write_bytes(b"explicit run model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_explicit_run",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "sourceType": "run",
+                            "run_id": "run_explicit",
+                            "artifact_path": "model.cbm",
+                        },
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], tmp_path)
+        assert len(artifacts) == 1
+        assert "ms_explicit_run__model.cbm" in artifacts
+
+    def test_model_score_defaults_to_run_source_type(self, tmp_path, monkeypatch):
+        """MODEL_SCORE without sourceType defaults to 'run' (backward compat)."""
+        from haute.deploy._bundler import collect_artifacts
+
+        monkeypatch.chdir(tmp_path)
+
+        cache_dir = tmp_path / ".cache" / "models" / "run_default"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "model.cbm").write_bytes(b"default model")
+
+        graph = _g({
+            "nodes": [
+                {
+                    "id": "ms_default",
+                    "data": {
+                        "nodeType": "modelScore",
+                        "config": {
+                            "run_id": "run_default",
+                            "artifact_path": "model.cbm",
+                        },
+                    },
+                },
+            ],
+        })
+
+        artifacts = collect_artifacts(graph, [], tmp_path)
+        assert len(artifacts) == 1
+        assert "ms_default__model.cbm" in artifacts
+
+
+class TestResolveRegisteredModel:
+    """Tests for _resolve_registered_model helper function."""
+
+    def _make_mock_mv(self, run_id: str = "run_abc"):
+        """Create a mock ModelVersion with the given run_id."""
+        mv = MagicMock()
+        mv.run_id = run_id
+        return mv
+
+    def _mock_context(self, mock_client, resolve_version_rv=None, resolve_version_se=None,
+                      find_artifact_rv=("model.cbm", "catboost"), find_artifact_se=None):
+        """Build a combined patch context for _resolve_registered_model tests.
+
+        Mocks: mlflow.set_tracking_uri, mlflow.tracking.MlflowClient,
+        resolve_tracking_backend, resolve_version, _find_model_artifact.
+        """
+        from contextlib import ExitStack
+        stack = ExitStack()
+        patches = [
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.tracking.MlflowClient", return_value=mock_client),
+            patch("haute.modelling._mlflow_log.resolve_tracking_backend",
+                  return_value=("http://tracking", "local")),
+        ]
+        if resolve_version_se is not None:
+            patches.append(
+                patch("haute._mlflow_utils.resolve_version", side_effect=resolve_version_se)
+            )
+        elif resolve_version_rv is not None:
+            patches.append(
+                patch("haute._mlflow_utils.resolve_version", return_value=resolve_version_rv)
+            )
+        if find_artifact_se is not None:
+            patches.append(
+                patch("haute._mlflow_io._find_model_artifact", side_effect=find_artifact_se)
+            )
+        elif find_artifact_rv is not None:
+            patches.append(
+                patch("haute._mlflow_io._find_model_artifact", return_value=find_artifact_rv)
+            )
+        for p in patches:
+            stack.enter_context(p)
+        return stack
+
+    def test_resolves_specific_version(self):
+        """Specific version number resolves correctly."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_for_v2")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(mock_client, resolve_version_rv="2"):
+            run_id, artifact_path = _resolve_registered_model("my-model", "2")
+
+        assert run_id == "run_for_v2"
+        assert artifact_path == "model.cbm"
+        mock_client.get_model_version.assert_called_once_with("my-model", "2")
+
+    def test_resolves_latest_version(self):
+        """'latest' version resolves to highest version number."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_for_latest")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(mock_client, resolve_version_rv="5"):
+            run_id, artifact_path = _resolve_registered_model("my-model", "latest")
+
+        assert run_id == "run_for_latest"
+        assert artifact_path == "model.cbm"
+
+    def test_resolves_empty_version_as_latest(self):
+        """Empty version string resolves as latest."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_for_empty")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(mock_client, resolve_version_rv="3"):
+            run_id, artifact_path = _resolve_registered_model("my-model", "")
+
+        assert run_id == "run_for_empty"
+
+    def test_no_versions_raises_value_error(self):
+        """Raises ValueError when no versions exist for the model."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_client = MagicMock()
+
+        with self._mock_context(
+            mock_client,
+            resolve_version_se=ValueError("No versions found"),
+        ):
+            with pytest.raises(ValueError, match="No versions found"):
+                _resolve_registered_model("nonexistent-model", "latest")
+
+    def test_no_run_id_on_model_version_raises(self):
+        """Raises ValueError when the model version has no associated run."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("")  # empty run_id
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(mock_client, resolve_version_rv="1"):
+            with pytest.raises(ValueError, match="has no associated run_id"):
+                _resolve_registered_model("my-model", "1")
+
+    def test_no_run_id_none_on_model_version_raises(self):
+        """Raises ValueError when run_id is None (not just empty string)."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = MagicMock()
+        mock_mv.run_id = None
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(mock_client, resolve_version_rv="1"):
+            with pytest.raises(ValueError, match="has no associated run_id"):
+                _resolve_registered_model("my-model", "1")
+
+    def test_find_artifact_error_propagates(self):
+        """FileNotFoundError from _find_model_artifact propagates."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_no_artifact")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(
+            mock_client,
+            resolve_version_rv="1",
+            find_artifact_se=FileNotFoundError("No .cbm artifact found"),
+        ):
+            with pytest.raises(FileNotFoundError, match="No .cbm artifact found"):
+                _resolve_registered_model("my-model", "1")
+
+    def test_pyfunc_artifact_resolved(self):
+        """Registered model with pyfunc artifact is resolved correctly."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_pyfunc")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(
+            mock_client,
+            resolve_version_rv="1",
+            find_artifact_rv=("model", "pyfunc"),
+        ):
+            run_id, artifact_path = _resolve_registered_model("pyfunc-model", "1")
+
+        assert run_id == "run_pyfunc"
+        assert artifact_path == "model"
+
+    def test_rsglm_artifact_resolved(self):
+        """Registered model with .rsglm artifact is resolved correctly."""
+        from haute.deploy._bundler import _resolve_registered_model
+
+        mock_mv = self._make_mock_mv("run_glm")
+        mock_client = MagicMock()
+        mock_client.get_model_version.return_value = mock_mv
+
+        with self._mock_context(
+            mock_client,
+            resolve_version_rv="1",
+            find_artifact_rv=("model.rsglm", "rustystats"),
+        ):
+            run_id, artifact_path = _resolve_registered_model("glm-model", "1")
+
+        assert run_id == "run_glm"
+        assert artifact_path == "model.rsglm"
 
 
 # ---------------------------------------------------------------------------

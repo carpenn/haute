@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
+from haute.routes._helpers import _INTERNAL_ERROR_DETAIL
 from haute.schemas import (
     JsonCacheBuildRequest,
     JsonCacheBuildResponse,
@@ -49,7 +50,8 @@ async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildRespons
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("json_cache_build_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/cancel", response_model=JsonCacheCancelResponse)

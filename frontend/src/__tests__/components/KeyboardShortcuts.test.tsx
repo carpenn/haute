@@ -44,7 +44,7 @@ describe("KeyboardShortcuts", () => {
     const onClose = vi.fn()
     render(<KeyboardShortcuts onClose={onClose} />)
 
-    fireEvent.keyDown(window, { key: "Escape" })
+    fireEvent.keyDown(document, { key: "Escape" })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -52,7 +52,7 @@ describe("KeyboardShortcuts", () => {
     const onClose = vi.fn()
     render(<KeyboardShortcuts onClose={onClose} />)
 
-    fireEvent.keyDown(window, { key: "?" })
+    fireEvent.keyDown(document, { key: "?" })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 

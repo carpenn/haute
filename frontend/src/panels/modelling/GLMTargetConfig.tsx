@@ -66,7 +66,7 @@ export function GLMTargetConfig({ config, onUpdate, columns }: GLMTargetConfigPr
             value={target}
             onChange={(e) => onUpdate("target", e.target.value)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">Select target...</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
@@ -80,7 +80,7 @@ export function GLMTargetConfig({ config, onUpdate, columns }: GLMTargetConfigPr
             value={weight}
             onChange={(e) => onUpdate("weight", e.target.value)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">None</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -94,7 +94,7 @@ export function GLMTargetConfig({ config, onUpdate, columns }: GLMTargetConfigPr
             value={configField(config, "offset", "")}
             onChange={(e) => onUpdate("offset", e.target.value || null)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">None</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}

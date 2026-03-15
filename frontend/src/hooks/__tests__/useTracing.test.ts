@@ -132,7 +132,7 @@ describe("useTracing", () => {
     expect(statusMap.n2).toBe("error")
   })
 
-  it("nodesWithStatus dims nodes not in trace", async () => {
+  it("nodesWithStatus dims nodes not in trace via _traceDimmed data flag only", async () => {
     const trace = {
       steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
       target_node_id: "n2",
@@ -151,8 +151,64 @@ describe("useTracing", () => {
       result.current.handleCellClick(0, "price")
     })
     await waitFor(() => expect(result.current.traceResult).not.toBeNull())
-    const n2style = result.current.nodesWithStatus.find((n) => n.id === "n2")?.style
-    expect(n2style?.opacity).toBe(0.4)
+    // Dimmed node should have _traceDimmed in data, NOT style.opacity
+    // (PipelineNode handles opacity via _traceDimmed to avoid double-opacity)
+    const dimmedNode = result.current.nodesWithStatus.find((n) => n.id === "n2")!
+    expect(dimmedNode.data._traceDimmed).toBe(true)
+    expect(dimmedNode.style?.opacity).toBeUndefined()
+  })
+
+  it("nodesWithStatus does not set style.opacity on traced nodes either", async () => {
+    const trace = {
+      steps: [
+        { node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+        { node_id: "n2", node_name: "N2", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+      ],
+      target_node_id: "n2",
+      row_index: 0,
+      column: "price",
+      output_value: 1,
+      total_nodes_in_pipeline: 2,
+      nodes_in_trace: 2,
+      execution_ms: 10,
+      row_id_column: null,
+      row_id_value: null,
+    }
+    mockTraceCell.mockResolvedValue({ status: "ok", trace })
+    const { result } = renderHook(() => useTracing(makeParams()))
+    await act(async () => {
+      result.current.handleCellClick(0, "price")
+    })
+    await waitFor(() => expect(result.current.traceResult).not.toBeNull())
+    // Traced (non-dimmed) nodes should also have no style.opacity
+    const tracedNode = result.current.nodesWithStatus.find((n) => n.id === "n1")!
+    expect(tracedNode.data._traceDimmed).toBe(false)
+    expect(tracedNode.style?.opacity).toBeUndefined()
+  })
+
+  it("nodesWithStatus preserves transition on style", async () => {
+    const trace = {
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      target_node_id: "n2",
+      row_index: 0,
+      column: "price",
+      output_value: 1,
+      total_nodes_in_pipeline: 2,
+      nodes_in_trace: 1,
+      execution_ms: 10,
+      row_id_column: null,
+      row_id_value: null,
+    }
+    mockTraceCell.mockResolvedValue({ status: "ok", trace })
+    const { result } = renderHook(() => useTracing(makeParams()))
+    await act(async () => {
+      result.current.handleCellClick(0, "price")
+    })
+    await waitFor(() => expect(result.current.traceResult).not.toBeNull())
+    // Both dimmed and non-dimmed nodes should have the transition style
+    for (const n of result.current.nodesWithStatus) {
+      expect(n.style?.transition).toBe("opacity 0.2s ease")
+    }
   })
 
   it("edgesWithTrace highlights edges between traced nodes", async () => {

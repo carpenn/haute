@@ -28,15 +28,16 @@ def read_source(path: str) -> pl.LazyFrame:
     Raises:
         ValueError: If the file extension is not supported.
     """
-    if path.endswith(".csv"):
+    lower = path.lower()
+    if lower.endswith(".csv"):
         return pl.scan_csv(path)
-    if path.endswith(".json"):
+    if lower.endswith(".json"):
         # No scan_json in Polars — read eagerly.  Callers should prefer
         # the JSON flatten/cache path (read_json_flat) for large files.
         return pl.read_json(path).lazy()
-    if path.endswith(".jsonl"):
+    if lower.endswith(".jsonl"):
         return pl.scan_ndjson(path)
-    if path.endswith(".parquet"):
+    if lower.endswith(".parquet"):
         return pl.scan_parquet(path)
     suffix = path.rsplit(".", 1)[-1] if "." in path else ""
     logger.error("unsupported_file_type", path=path, suffix=suffix)
@@ -74,9 +75,8 @@ def load_external_object(path: str, file_type: str, model_class: str = "classifi
         mtime = 0.0
     key = (path, mtime, file_type, model_class)
 
-    cached = _object_cache.get(key)
-    if cached is not None:
-        return cached
+    if key in _object_cache:
+        return _object_cache.get(key)
 
     obj = _load_external_object_uncached(path, file_type, model_class)
     _object_cache.put(key, obj)

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import HTTPException, WebSocket
 
 from haute._logging import get_logger
-from haute.graph_utils import PipelineGraph, _sanitize_func_name
+from haute.graph_utils import GraphNode, NodeType, PipelineGraph, _sanitize_func_name
 
 logger = get_logger(component="server")
 
@@ -33,6 +33,12 @@ def validate_safe_path(base: Path, user_provided: str | Path) -> Path:
         )
     return target
 
+
+# ---------------------------------------------------------------------------
+# Safe error detail — prevents leaking internal exception strings (E3)
+# ---------------------------------------------------------------------------
+
+_INTERNAL_ERROR_DETAIL = "Operation failed. Check the server logs for details."
 
 # ---------------------------------------------------------------------------
 # HTTP error helpers (DRY structured-logging + HTTPException raising)
@@ -64,6 +70,37 @@ def raise_validation_error(detail: str) -> None:
     """Raise 400 for a validation failure, with structured logging."""
     logger.warning("validation_error", detail=detail)
     raise HTTPException(status_code=400, detail=detail)
+
+
+def find_typed_node(
+    graph: PipelineGraph,
+    node_id: str,
+    expected_type: NodeType,
+    type_label: str,
+) -> GraphNode:
+    """Find a node by ID and verify its ``nodeType``.
+
+    Raises ``HTTPException(404)`` if the node is missing, or
+    ``HTTPException(400)`` if it has the wrong type.
+
+    Parameters
+    ----------
+    graph:
+        The pipeline graph to search.
+    node_id:
+        Node identifier.
+    expected_type:
+        The :class:`NodeType` value the node must match (e.g.
+        ``NodeType.MODELLING``).
+    type_label:
+        Human-readable label used in the error message (e.g. ``"modelling"``).
+    """
+    node: GraphNode | None = graph.node_map.get(node_id)
+    if node is None:
+        raise_node_not_found(node_id)
+    if node.data.nodeType != expected_type:
+        raise_node_type_error(node_id, type_label, str(node.data.nodeType))
+    return node
 
 
 # ---------------------------------------------------------------------------

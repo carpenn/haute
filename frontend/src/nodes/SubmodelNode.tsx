@@ -2,20 +2,15 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Package } from "lucide-react"
 import { nodeTypeColors } from "../utils/nodeTypes"
+import type { HauteNodeData } from "../types/node"
 
-export type SubmodelNodeData = {
-  label: string
-  description: string
-  nodeType: string
+export interface SubmodelNodeData extends HauteNodeData {
   config?: {
     file?: string
     childNodeIds?: string[]
     inputPorts?: string[]
     outputPorts?: string[]
   }
-  _status?: "ok" | "error" | "running"
-  _traceActive?: boolean
-  _traceDimmed?: boolean
 }
 
 const accent = nodeTypeColors.submodel || "#64748b"

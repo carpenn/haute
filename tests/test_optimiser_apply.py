@@ -512,6 +512,53 @@ class TestApplyRatebookHelper:
         assert "optimised_factor" in result.columns
         assert "__ver__" in result.columns
 
+    def test_missing_factor_group_logs_warning(self):
+        """Entries without __factor_group__ are skipped and a warning is logged."""
+        from unittest.mock import patch
+
+        artifact = {
+            "version": "v1",
+            "mode": "ratebook",
+            "factor_tables": {
+                "area": [
+                    {"__factor_group__": "London", "optimal_scenario_value": 1.1},
+                    # Missing __factor_group__ key:
+                    {"optimal_scenario_value": 0.9},
+                    {"bad_key": "X", "optimal_scenario_value": 0.8},
+                ],
+            },
+        }
+        df = pl.DataFrame({"area": ["London"]})
+
+        with patch("haute._builders.logger") as mock_logger:
+            result = _apply_ratebook(df.lazy(), artifact, "v1", "__ver__").collect()
+
+        mock_logger.warning.assert_any_call(
+            "ratebook_entries_missing_factor_group",
+            factor="area",
+            skipped=2,
+            total=3,
+        )
+        # The one valid entry should still produce results
+        assert "area_optimised_factor" in result.columns
+
+    def test_all_entries_valid_no_warning(self):
+        """When all entries have __factor_group__, no warning is logged."""
+        from unittest.mock import patch
+
+        artifact = _make_ratebook_artifact()
+        df = pl.DataFrame({
+            "region": ["London", "Manchester"],
+            "price": [100.0, 200.0],
+        })
+
+        with patch("haute._builders.logger") as mock_logger:
+            _apply_ratebook(df.lazy(), artifact, "v1", "__ver__").collect()
+
+        # No call to warning with the skipped-entries event
+        for call in mock_logger.warning.call_args_list:
+            assert call[0][0] != "ratebook_entries_missing_factor_group"
+
 
 # ---------------------------------------------------------------------------
 # Deploy: bundler

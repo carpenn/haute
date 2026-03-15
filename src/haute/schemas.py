@@ -92,21 +92,17 @@ class SchemaWarning(BaseModel):
     status: str
 
 
-class PreviewNodeResponse(BaseModel):
+class PreviewNodeResponse(NodeResult):
+    """Full preview response — extends ``NodeResult`` with graph-wide metadata.
+
+    Inherits all per-node fields (status, row_count, columns, preview, etc.)
+    and adds ``node_id``, ``timings``, ``memory``, and ``node_statuses`` for
+    the full graph context.
+    """
+
     node_id: str
-    status: str
-    row_count: int = 0
-    column_count: int = 0
-    columns: list[ColumnInfo] = Field(default_factory=list)
-    available_columns: list[ColumnInfo] = Field(default_factory=list)
-    preview: list[dict[str, Any]] = Field(default_factory=list)
-    error: str | None = None
-    error_line: int | None = None
-    timing_ms: float = 0
-    memory_bytes: int = 0
     timings: list[NodeTimingInfo] = Field(default_factory=list)
     memory: list[NodeMemoryInfo] = Field(default_factory=list)
-    schema_warnings: list[SchemaWarning] = Field(default_factory=list)
     node_statuses: dict[str, str] = Field(default_factory=dict)
 
 
@@ -517,14 +513,25 @@ class LogExperimentRequest(BaseModel):
     model_name: str | None = None
 
 
-class LogExperimentResponse(BaseModel):
+class MlflowLogResponse(BaseModel):
+    """Shared base for MLflow experiment-logging responses.
+
+    Used by both training (``LogExperimentResponse``) and optimisation
+    (``OptimiserMlflowLogResponse``) to avoid duplicating the identical
+    seven fields.
+    """
+
     status: str  # "ok" | "error"
     backend: str = ""
     experiment_name: str = ""
-    run_id: str = ""
+    run_id: str | None = None
     run_url: str | None = None
     tracking_uri: str = ""
     error: str | None = None
+
+
+class LogExperimentResponse(MlflowLogResponse):
+    pass
 
 
 class MlflowCheckResponse(BaseModel):
@@ -640,14 +647,8 @@ class OptimiserMlflowLogRequest(BaseModel):
     model_name: str | None = None
 
 
-class OptimiserMlflowLogResponse(BaseModel):
-    status: str
-    backend: str = ""
-    experiment_name: str = ""
-    run_id: str | None = None
-    run_url: str | None = None
-    tracking_uri: str = ""
-    error: str | None = None
+class OptimiserMlflowLogResponse(MlflowLogResponse):
+    pass
 
 
 # ---------------------------------------------------------------------------

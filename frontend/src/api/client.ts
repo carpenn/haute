@@ -8,7 +8,6 @@
  * - Consistent error handling via ApiError
  */
 
-import type { Node, Edge } from "@xyflow/react"
 import type {
   PipelineGraph,
   SavePipelineResponse,
@@ -19,7 +18,38 @@ import type {
   SubmodelGraphResponse,
   DissolveSubmodelResponse,
   SchemaResult,
+  GraphPayload,
+  MlflowCheckResponse,
+  TrainEstimate,
+  MlflowLogResponse,
+  SolveOptimiserResponse,
+  ApplyOptimiserResponse,
+  SaveOptimiserResponse,
+  FrontierResponse,
+  DatabricksWarehouse,
+  DatabricksCatalog,
+  DatabricksSchema,
+  DatabricksTable,
+  CacheStatusResponse,
+  FetchProgressResponse,
+  JsonCacheProgressResponse,
+  JsonCacheStatusResponse,
+  MlflowExperiment,
+  MlflowRun,
+  MlflowModel,
+  MlflowModelVersion,
+  FileListItem,
+  UtilityFile,
+  UtilityWriteResult,
+  GitStatus,
+  GitBranchInfo,
+  GitHistoryEntry,
 } from "./types"
+
+// Re-export types so existing consumers importing from client.ts still work
+export type { TrainEstimate, UtilityFile, UtilityWriteResult, GitStatus, GitHistoryEntry } from "./types"
+/** @deprecated Import GitBranchInfo from api/types instead. */
+export type GitBranch = GitBranchInfo
 
 export class ApiError extends Error {
   status: number
@@ -57,7 +87,8 @@ async function request<T>(
       let detail: string | undefined
       try {
         const body = await res.json()
-        detail = body.detail || JSON.stringify(body)
+        const raw = body.detail ?? body
+        detail = typeof raw === "string" ? raw : JSON.stringify(raw)
       } catch {
         detail = res.statusText
       }
@@ -81,9 +112,6 @@ function post<T>(url: string, body: unknown, options: { signal?: AbortSignal; ti
 function del<T>(url: string, options: { signal?: AbortSignal; timeout?: number } = {}): Promise<T> {
   return request<T>(url, { method: "DELETE", ...options })
 }
-
-/** Graph payload accepted by most pipeline endpoints. */
-type GraphPayload = { nodes: Node[]; edges: Edge[]; submodels?: Record<string, unknown>; preamble?: string }
 
 // ---------------------------------------------------------------------------
 // Pipeline endpoints
@@ -216,7 +244,7 @@ export function fetchDatabricksSchema(
 
 export function checkMlflow(
   options?: { signal?: AbortSignal },
-): Promise<{ mlflow_installed?: boolean; backend?: string; databricks_host?: string }> {
+): Promise<MlflowCheckResponse> {
   return request("/api/modelling/mlflow/check", options)
 }
 
@@ -235,21 +263,6 @@ export function trainModel(
   return post("/api/modelling/train", { ...payload, scenario: payload.scenario ?? "live" }, { ...options, timeout: 600_000 })
 }
 
-export type TrainEstimate = {
-  total_rows?: number | null
-  safe_row_limit?: number | null
-  estimated_mb: number
-  training_mb: number
-  available_mb: number
-  bytes_per_row: number
-  was_downsampled: boolean
-  warning?: string | null
-  // GPU VRAM estimation (only populated when task_type is GPU)
-  gpu_vram_estimated_mb?: number | null
-  gpu_vram_available_mb?: number | null
-  gpu_warning?: string | null
-}
-
 export function estimateTrainingRam(
   payload: { graph: GraphPayload; node_id: string },
   options?: { signal?: AbortSignal },
@@ -260,7 +273,7 @@ export function estimateTrainingRam(
 export function logToMlflow(
   payload: { job_id: string; experiment_name?: string | null; model_name?: string | null },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string }> {
+): Promise<MlflowLogResponse> {
   return post("/api/modelling/mlflow/log", payload, { timeout: 120_000, ...options })
 }
 
@@ -271,7 +284,7 @@ export function logToMlflow(
 export function solveOptimiser(
   payload: { graph: GraphPayload; node_id: string },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; job_id?: string; error?: string }> {
+): Promise<SolveOptimiserResponse> {
   return post("/api/optimiser/solve", payload, { timeout: 300_000, ...options })
 }
 
@@ -285,28 +298,28 @@ export function getOptimiserStatus<T = unknown>(
 export function applyOptimiser(
   payload: { job_id: string },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; total_objective?: number; constraints?: Record<string, number>; preview?: Record<string, unknown>[]; row_count?: number; error?: string }> {
+): Promise<ApplyOptimiserResponse> {
   return post("/api/optimiser/apply", payload, { timeout: 120_000, ...options })
 }
 
 export function saveOptimiser(
   payload: { job_id: string; output_path: string },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; path?: string; message?: string }> {
+): Promise<SaveOptimiserResponse> {
   return post("/api/optimiser/save", payload, options)
 }
 
 export function logOptimiserToMlflow(
   payload: { job_id: string; experiment_name?: string; model_name?: string | null },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string }> {
+): Promise<MlflowLogResponse> {
   return post("/api/optimiser/mlflow/log", payload, options)
 }
 
 export function runFrontier(
   payload: { job_id: string; threshold_ranges: Record<string, [number, number]>; n_points_per_dim?: number },
   options?: { signal?: AbortSignal },
-): Promise<{ status: string; points: Record<string, unknown>[]; n_points: number; constraint_names: string[] }> {
+): Promise<FrontierResponse> {
   return post("/api/optimiser/frontier", payload, { timeout: 120_000, ...options })
 }
 
@@ -316,20 +329,20 @@ export function runFrontier(
 
 export function getWarehouses(
   options?: { signal?: AbortSignal },
-): Promise<{ warehouses?: { id: string; name: string; http_path: string; state: string; size: string }[] }> {
+): Promise<{ warehouses?: DatabricksWarehouse[] }> {
   return request("/api/databricks/warehouses", options)
 }
 
 export function getCatalogs(
   options?: { signal?: AbortSignal },
-): Promise<{ catalogs?: { name: string; comment: string }[] }> {
+): Promise<{ catalogs?: DatabricksCatalog[] }> {
   return request("/api/databricks/catalogs", options)
 }
 
 export function getSchemas(
   catalog: string,
   options?: { signal?: AbortSignal },
-): Promise<{ schemas?: { name: string; comment: string }[] }> {
+): Promise<{ schemas?: DatabricksSchema[] }> {
   return request(`/api/databricks/schemas?catalog=${encodeURIComponent(catalog)}`, options)
 }
 
@@ -337,21 +350,21 @@ export function getTables(
   catalog: string,
   schema: string,
   options?: { signal?: AbortSignal },
-): Promise<{ tables?: { name: string; full_name: string; table_type: string; comment: string }[] }> {
+): Promise<{ tables?: DatabricksTable[] }> {
   return request(`/api/databricks/tables?catalog=${encodeURIComponent(catalog)}&schema=${encodeURIComponent(schema)}`, options)
 }
 
 export function getCacheStatus(
   table: string,
   options?: { signal?: AbortSignal },
-): Promise<{ cached: boolean; path?: string; table: string; row_count: number; column_count: number; size_bytes: number; fetched_at: number }> {
+): Promise<CacheStatusResponse> {
   return request(`/api/databricks/cache?table=${encodeURIComponent(table)}`, options)
 }
 
 export function getFetchProgress(
   table: string,
   options?: { signal?: AbortSignal },
-): Promise<{ active: boolean; rows?: number; elapsed?: number }> {
+): Promise<FetchProgressResponse> {
   return request(`/api/databricks/fetch/progress?table=${encodeURIComponent(table)}`, options)
 }
 
@@ -365,7 +378,7 @@ export function fetchDatabricksData(
 export function deleteCache(
   table: string,
   options?: { signal?: AbortSignal },
-): Promise<{ cached: boolean; path?: string; table: string; row_count: number; column_count: number; size_bytes: number; fetched_at: number }> {
+): Promise<CacheStatusResponse> {
   return del(`/api/databricks/cache?table=${encodeURIComponent(table)}`, options)
 }
 
@@ -390,14 +403,14 @@ export function cancelJsonCache(
 export function getJsonCacheProgress(
   path: string,
   options?: { signal?: AbortSignal },
-): Promise<{ active: boolean; rows?: number; elapsed?: number; phase?: string }> {
+): Promise<JsonCacheProgressResponse> {
   return request(`/api/json-cache/progress?path=${encodeURIComponent(path)}`, options)
 }
 
 export function getJsonCacheStatus(
   path: string,
   options?: { signal?: AbortSignal },
-): Promise<{ cached: boolean; path?: string; data_path: string; row_count: number; column_count: number; size_bytes: number; cached_at: number }> {
+): Promise<JsonCacheStatusResponse> {
   return request(`/api/json-cache/status?path=${encodeURIComponent(path)}`, options)
 }
 
@@ -414,7 +427,7 @@ export function deleteJsonCache(
 
 export function getExperiments(
   options?: { signal?: AbortSignal },
-): Promise<{ experiment_id: string; name: string }[]> {
+): Promise<MlflowExperiment[]> {
   return request("/api/mlflow/experiments", options)
 }
 
@@ -422,7 +435,7 @@ export function getRuns(
   experimentId: string,
   artifactFilter?: string,
   options?: { signal?: AbortSignal },
-): Promise<{ run_id: string; run_name: string; metrics: Record<string, number>; artifacts: string[] }[]> {
+): Promise<MlflowRun[]> {
   const params = new URLSearchParams({ experiment_id: experimentId })
   if (artifactFilter) params.set("artifact_filter", artifactFilter)
   return request(`/api/mlflow/runs?${params.toString()}`, options)
@@ -430,14 +443,14 @@ export function getRuns(
 
 export function getModels(
   options?: { signal?: AbortSignal },
-): Promise<{ name: string; latest_versions: { version: string; status: string; run_id: string }[] }[]> {
+): Promise<MlflowModel[]> {
   return request("/api/mlflow/models", options)
 }
 
 export function getModelVersions(
   modelName: string,
   options?: { signal?: AbortSignal },
-): Promise<{ version: string; run_id: string; status: string; description: string }[]> {
+): Promise<MlflowModelVersion[]> {
   return request(`/api/mlflow/model-versions?model_name=${encodeURIComponent(modelName)}`, options)
 }
 
@@ -448,17 +461,6 @@ export function getModelVersions(
 // ---------------------------------------------------------------------------
 // Utility endpoints
 // ---------------------------------------------------------------------------
-
-export type UtilityFile = { name: string; module: string }
-
-export type UtilityWriteResult = {
-  status: string
-  name: string
-  module: string
-  import_line: string
-  error?: string | null
-  error_line?: number | null
-}
 
 export function listUtilityFiles(
   options?: { signal?: AbortSignal },
@@ -508,7 +510,7 @@ export function listFiles(
   dir: string,
   extensions?: string,
   options?: { signal?: AbortSignal },
-): Promise<{ items?: { name: string; path: string; type: "file" | "directory"; size?: number }[] }> {
+): Promise<{ items?: FileListItem[] }> {
   const params = new URLSearchParams({ dir })
   if (extensions) params.set("extensions", extensions)
   return request(`/api/files?${params.toString()}`, options)
@@ -518,33 +520,6 @@ export function listFiles(
 // Git endpoints
 // ---------------------------------------------------------------------------
 
-export type GitStatus = {
-  branch: string
-  is_main: boolean
-  is_read_only: boolean
-  changed_files: string[]
-  main_ahead: boolean
-  main_ahead_by: number
-  main_last_updated: string | null
-}
-
-export type GitBranch = {
-  name: string
-  is_yours: boolean
-  is_current: boolean
-  is_archived: boolean
-  last_commit_time: string
-  commit_count: number
-}
-
-export type GitHistoryEntry = {
-  sha: string
-  short_sha: string
-  message: string
-  timestamp: string
-  files_changed: string[]
-}
-
 export function getGitStatus(
   options?: { signal?: AbortSignal },
 ): Promise<GitStatus> {
@@ -553,7 +528,7 @@ export function getGitStatus(
 
 export function listGitBranches(
   options?: { signal?: AbortSignal },
-): Promise<{ current: string; branches: GitBranch[] }> {
+): Promise<{ current: string; branches: GitBranchInfo[] }> {
   return request("/api/git/branches", options)
 }
 

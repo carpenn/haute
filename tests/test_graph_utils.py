@@ -109,12 +109,14 @@ class TestTopoSort:
                 f"{e.source} should come before {e.target}"
             )
 
-    def test_cycle_drops_nodes(self):
-        """Cycle nodes never reach in-degree 0, so they're silently dropped."""
+    def test_cycle_raises_error(self):
+        """Cycle nodes raise CycleError instead of being silently dropped."""
+        from haute._topo import CycleError
+
         ids = ["a", "b", "c"]
         edges = [_e("a", "b"), _e("b", "c"), _e("c", "a")]
-        result = topo_sort_ids(ids, edges)
-        assert len(result) < len(ids)  # cycle members dropped
+        with pytest.raises(CycleError, match="Cycle detected"):
+            topo_sort_ids(ids, edges)
 
     def test_edges_referencing_unknown_nodes(self):
         """Edges referencing non-existent IDs should be ignored."""

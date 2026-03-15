@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react"
 import { X, Folder, FileText, ChevronLeft, Check, Table2, Loader2, AlertTriangle } from "lucide-react"
-import { getDtypeColor } from "../../utils/dtypeColors"
 import type { ColumnInfo } from "../../types/node"
 import { listFiles } from "../../api/client"
+import ColumnTable from "../../components/ColumnTable"
 import useSettingsStore, { useMlflowStatus } from "../../stores/useSettingsStore"
 import { EditorView, placeholder as cmPlaceholder, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection } from "@codemirror/view"
 import { EditorState, Compartment } from "@codemirror/state"
@@ -245,28 +245,7 @@ export function SchemaPreview({ schema }: { schema: SchemaInfo }) {
       </div>
 
       <div className="px-4 pb-3">
-        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
-                <th className="text-left px-2.5 py-1.5 font-semibold" style={{ color: 'var(--text-muted)' }}>Column</th>
-                <th className="text-left px-2.5 py-1.5 font-semibold" style={{ color: 'var(--text-muted)' }}>Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              {schema.columns.map((col) => (
-                <tr key={col.name} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td className="px-2.5 py-1.5 font-mono" style={{ color: 'var(--text-primary)' }}>{col.name}</td>
-                  <td className="px-2.5 py-1.5">
-                    <span className={`text-[11px] font-medium ${getDtypeColor(col.dtype)}`}>
-                      {col.dtype}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ColumnTable columns={schema.columns} />
 
         {showPreview && schema.preview.length > 0 && (
           <div className="mt-2 rounded-lg overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-input)' }}>

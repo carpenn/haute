@@ -8,11 +8,11 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
 from haute.deploy._mlflow import DeployResult
+from haute.deploy._utils import build_manifest
 
 logger = get_logger(component="deploy.container")
 
@@ -75,7 +75,7 @@ def build_and_push_image(
 
     # 2. Build deployment manifest
     _log("Building deployment manifest...")
-    manifest = _build_manifest(resolved)
+    manifest = build_manifest(resolved)
 
     # Remap artifact paths to container-relative paths
     container_artifacts: dict[str, str] = {}
@@ -385,31 +385,7 @@ def _docker_push(image_tag: str) -> None:
         raise RuntimeError(f"Docker push failed:\n{result.stderr}")
 
 
-# ── Manifest ────────────────────────────────────────────────────────
-
-
-def _build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
-    """Build the deployment manifest dict."""
-    from haute.deploy._utils import build_manifest
-
-    return build_manifest(resolved)
-
-
 # ── Helpers ─────────────────────────────────────────────────────────
-
-
-def _get_haute_version() -> str:
-    """Get the installed haute version."""
-    from haute.deploy._utils import get_haute_version
-
-    return get_haute_version()
-
-
-def _safe_user() -> str:
-    """Get username without raising."""
-    from haute.deploy._utils import get_user
-
-    return get_user()
 
 
 def _git_sha_short() -> str:

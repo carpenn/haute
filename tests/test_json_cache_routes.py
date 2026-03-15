@@ -84,7 +84,7 @@ class TestBuildJsonCache:
         )
 
     def test_build_internal_error_returns_500(self, client: TestClient) -> None:
-        """Internal build failures return 500."""
+        """Internal build failures return 500 without leaking details."""
         with patch(
             "haute._json_flatten.build_json_cache",
             side_effect=RuntimeError("disk full"),
@@ -92,7 +92,8 @@ class TestBuildJsonCache:
             resp = client.post("/api/json-cache/build", json={"path": "data.jsonl"})
 
         assert resp.status_code == 500
-        assert "disk full" in resp.json()["detail"]
+        assert "disk full" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_build_timeout_returns_504(self, client: TestClient) -> None:
         """Build exceeding timeout returns 504."""

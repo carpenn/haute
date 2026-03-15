@@ -430,3 +430,89 @@ class TestScoreFromConfig:
             version="latest",
             task="regression",
         )
+
+    # ---------------------------------------------------------------
+    # B18: base_dir parameter — resolve config relative to caller
+    # ---------------------------------------------------------------
+
+    @patch("haute._mlflow_io.load_mlflow_model")
+    def test_base_dir_resolves_relative_config(self, mock_load, tmp_path):
+        """With base_dir, a relative config path is resolved against base_dir, not CWD."""
+        sm = _make_scoring_model(predictions=np.array([0.5]))
+        mock_load.return_value = sm
+
+        # Create config in tmp_path/config/model_scoring/test.json
+        config_rel = "config/model_scoring/test.json"
+        config_abs = tmp_path / config_rel
+        config_abs.parent.mkdir(parents=True)
+        config_abs.write_text(json.dumps({
+            "sourceType": "run",
+            "run_id": "r1",
+            "artifact_path": "model.cbm",
+            "task": "regression",
+            "output_column": "pred",
+        }))
+
+        lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
+        # Call with base_dir pointing to tmp_path — even if CWD is different
+        result = score_from_config(lf, config=config_rel, base_dir=str(tmp_path))
+        collected = result.collect()
+        assert "pred" in collected.columns
+
+    @patch("haute._mlflow_io.load_mlflow_model")
+    def test_base_dir_none_falls_back_to_cwd(self, mock_load, tmp_path, monkeypatch):
+        """Without base_dir, config is resolved relative to CWD (backward compat)."""
+        sm = _make_scoring_model(predictions=np.array([0.5]))
+        mock_load.return_value = sm
+
+        # Put config in tmp_path and chdir there
+        config_rel = "config/model_scoring/test.json"
+        config_abs = tmp_path / config_rel
+        config_abs.parent.mkdir(parents=True)
+        config_abs.write_text(json.dumps({
+            "sourceType": "run",
+            "run_id": "r2",
+            "artifact_path": "model",
+            "task": "regression",
+            "output_column": "pred",
+        }))
+
+        monkeypatch.chdir(tmp_path)
+        lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
+        result = score_from_config(lf, config=config_rel)
+        collected = result.collect()
+        assert "pred" in collected.columns
+
+    @patch("haute._mlflow_io.load_mlflow_model")
+    def test_base_dir_ignored_for_absolute_config(self, mock_load, tmp_path):
+        """base_dir is ignored when config is an absolute path."""
+        sm = _make_scoring_model(predictions=np.array([0.5]))
+        mock_load.return_value = sm
+
+        config_abs = tmp_path / "config" / "model_scoring" / "test.json"
+        config_abs.parent.mkdir(parents=True)
+        config_abs.write_text(json.dumps({
+            "sourceType": "run",
+            "run_id": "r3",
+            "artifact_path": "model",
+            "task": "regression",
+            "output_column": "pred",
+        }))
+
+        lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
+        # Pass absolute path + a bogus base_dir — should still work
+        result = score_from_config(
+            lf, config=str(config_abs), base_dir="/nonexistent",
+        )
+        collected = result.collect()
+        assert "pred" in collected.columns
+
+    def test_base_dir_with_missing_config_raises(self, tmp_path):
+        """FileNotFoundError when base_dir + config doesn't exist."""
+        import pytest as pt
+
+        lf = pl.DataFrame({"a": [1.0]}).lazy()
+        with pt.raises(FileNotFoundError):
+            score_from_config(
+                lf, config="config/missing.json", base_dir=str(tmp_path),
+            )

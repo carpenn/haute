@@ -141,7 +141,7 @@ function AveChart({ data }: { data: AveFeature }) {
         {data.feature}
         <span className="ml-2 text-[10px]" style={{ color: "var(--text-muted)" }}>({data.type})</span>
       </div>
-      <svg width={width} height={height} style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={width} height={height} style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         {/* Horizontal grid lines + left y-axis labels */}
         {gridYValues.map((v, i) => {
           const y = yScale(v)

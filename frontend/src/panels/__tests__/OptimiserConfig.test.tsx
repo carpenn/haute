@@ -534,20 +534,94 @@ describe("OptimiserConfig", () => {
       expect(screen.getByRole("button", { name: /Save Result/ })).toBeInTheDocument()
     })
 
-    it("save button calls saveOptimiser API", async () => {
+    it("save button calls saveOptimiser API with node-label-based path", async () => {
       mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
       useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
       render(
         <OptimiserConfig
           {...makeProps({
             config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            allNodes: [
+              { id: "input_1", data: { label: "Data Input", description: "", nodeType: "dataSource", config: {} } },
+              { id: "opt_1", data: { label: "My Optimiser", description: "", nodeType: "optimiser", config: {} } },
+            ],
           })}
         />,
       )
       fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
       await waitFor(() => {
         expect(mockSaveOptimiser).toHaveBeenCalledWith(
-          expect.objectContaining({ job_id: "job_42" }),
+          expect.objectContaining({
+            job_id: "job_42",
+            output_path: "output/optimiser_my_optimiser.json",
+          }),
+        )
+      })
+    })
+
+    it("save path falls back to 'result' when node label is not found", async () => {
+      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
+      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
+      render(
+        <OptimiserConfig
+          {...makeProps({
+            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            allNodes: [], // no matching node
+          })}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
+      await waitFor(() => {
+        expect(mockSaveOptimiser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            output_path: "output/optimiser_result.json",
+          }),
+        )
+      })
+    })
+
+    it("save path slugifies special characters in node label", async () => {
+      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
+      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
+      render(
+        <OptimiserConfig
+          {...makeProps({
+            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            allNodes: [
+              { id: "opt_1", data: { label: "  My Fancy Optimiser!! ", description: "", nodeType: "optimiser", config: {} } },
+            ],
+          })}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
+      await waitFor(() => {
+        expect(mockSaveOptimiser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            output_path: "output/optimiser_my_fancy_optimiser.json",
+          }),
+        )
+      })
+    })
+
+    it("save path falls back to 'result' when label slugifies to empty (e.g. Unicode-only)", async () => {
+      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
+      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
+      render(
+        <OptimiserConfig
+          {...makeProps({
+            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            allNodes: [
+              { id: "opt_1", data: { label: "!!!@@@", description: "", nodeType: "optimiser", config: {} } },
+            ],
+          })}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
+      await waitFor(() => {
+        expect(mockSaveOptimiser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            output_path: "output/optimiser_result.json",
+          }),
         )
       })
     })

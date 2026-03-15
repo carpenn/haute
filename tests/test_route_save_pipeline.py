@@ -18,9 +18,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from haute._types import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
+from haute._types import GraphNode, NodeData, NodeType, PipelineGraph
 from haute.routes._save_pipeline import SavePipelineService
 from haute.schemas import SavePipelineRequest
+
+from tests.conftest import make_edge as _make_edge
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,11 +41,7 @@ def _make_node(
     )
 
 
-def _make_edge(src: str, tgt: str) -> GraphEdge:
-    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
-
-
-def _make_graph(*nodes: GraphNode, edges: list[GraphEdge] | None = None) -> PipelineGraph:
+def _make_graph(*nodes: GraphNode, edges: list | None = None) -> PipelineGraph:
     return PipelineGraph(nodes=list(nodes), edges=edges or [])
 
 

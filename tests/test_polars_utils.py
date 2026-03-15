@@ -1,4 +1,4 @@
-"""Tests for haute._polars_utils (safe_sink & _malloc_trim)."""
+"""Tests for haute._polars_utils (safe_sink, _malloc_trim, atomic_write, read_parquet_metadata)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from haute._polars_utils import _malloc_trim, safe_sink
+from haute._polars_utils import _malloc_trim, atomic_write, read_parquet_metadata, safe_sink
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -227,3 +227,99 @@ class TestMallocTrimDispatch:
         monkeypatch.setattr("sys.platform", "win32")
         monkeypatch.setattr("ctypes.cdll", mock_cdll)
         _malloc_trim()  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# atomic_write
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicWrite:
+    """Tests for the atomic_write context manager."""
+
+    def test_happy_path_creates_file(self, tmp_path: Path):
+        """On success, the destination file exists and temp file does not."""
+        dest = tmp_path / "out.parquet"
+        with atomic_write(dest) as tmp:
+            pl.DataFrame({"x": [1, 2, 3]}).write_parquet(tmp, compression="zstd")
+
+        assert dest.exists()
+        assert not tmp.exists()
+        result = pl.read_parquet(dest)
+        assert result["x"].to_list() == [1, 2, 3]
+
+    def test_creates_parent_dirs(self, tmp_path: Path):
+        """Parent directories are created automatically."""
+        dest = tmp_path / "sub" / "dir" / "out.parquet"
+        with atomic_write(dest) as tmp:
+            pl.DataFrame({"a": [1]}).write_parquet(tmp)
+        assert dest.exists()
+
+    def test_cleans_up_on_error(self, tmp_path: Path):
+        """On exception, temp file is removed and destination does not exist."""
+        dest = tmp_path / "out.parquet"
+        with pytest.raises(ValueError, match="boom"):
+            with atomic_write(dest) as tmp:
+                pl.DataFrame({"a": [1]}).write_parquet(tmp)
+                raise ValueError("boom")
+
+        assert not dest.exists()
+        assert not tmp.exists()
+
+    def test_temp_suffix(self, tmp_path: Path):
+        """The temp path has .parquet.tmp suffix."""
+        dest = tmp_path / "out.parquet"
+        with atomic_write(dest) as tmp:
+            assert tmp.suffix == ".tmp"
+            assert tmp.stem == "out.parquet"
+            pl.DataFrame({"a": [1]}).write_parquet(tmp)
+
+    def test_overwrite_existing(self, tmp_path: Path):
+        """atomic_write can overwrite an existing destination file."""
+        dest = tmp_path / "out.parquet"
+        pl.DataFrame({"old": [1]}).write_parquet(dest)
+
+        with atomic_write(dest) as tmp:
+            pl.DataFrame({"new": [99]}).write_parquet(tmp)
+
+        result = pl.read_parquet(dest)
+        assert "new" in result.columns
+        assert result["new"].to_list() == [99]
+
+
+# ---------------------------------------------------------------------------
+# read_parquet_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestReadParquetMetadata:
+    """Tests for the read_parquet_metadata helper."""
+
+    def test_returns_correct_metadata(self, tmp_path: Path):
+        """Metadata matches the written file's schema and row count."""
+        p = tmp_path / "test.parquet"
+        df = pl.DataFrame({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+        df.write_parquet(p, compression="zstd")
+
+        meta = read_parquet_metadata(p)
+        assert meta["row_count"] == 3
+        assert meta["column_count"] == 2
+        assert "x" in meta["columns"]
+        assert "y" in meta["columns"]
+        assert meta["size_bytes"] > 0
+        assert meta["mtime"] > 0
+
+    def test_empty_dataframe(self, tmp_path: Path):
+        """Works for an empty parquet file."""
+        p = tmp_path / "empty.parquet"
+        pl.DataFrame({"a": pl.Series([], dtype=pl.Int64)}).write_parquet(p)
+
+        meta = read_parquet_metadata(p)
+        assert meta["row_count"] == 0
+        assert meta["column_count"] == 1
+        assert "a" in meta["columns"]
+
+    def test_nonexistent_file_raises(self, tmp_path: Path):
+        """FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            read_parquet_metadata(tmp_path / "nope.parquet")

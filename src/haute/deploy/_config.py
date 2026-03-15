@@ -372,7 +372,7 @@ def _load_env(project_root: Path) -> None:
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip()
+            value = value.strip().strip("'\"")
             if key:
                 os.environ.setdefault(key, value)
 

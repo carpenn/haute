@@ -261,7 +261,7 @@ export default function OptimiserPreview({ data }: OptimiserPreviewProps) {
               return (
                 <div className="min-w-[200px]">
                   <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Scenario Value Distribution</label>
-                  <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                  <svg width={w} height={h} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
                     {counts.map((c, i) => {
                       const barH = maxCount > 0 ? (c / maxCount) * chartH : 0
                       return (
@@ -371,7 +371,7 @@ export default function OptimiserPreview({ data }: OptimiserPreviewProps) {
                 return (
                   <div>
                     <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Efficient Frontier</label>
-                    <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                    <svg width={w} height={h} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
                       <text x={px + chartW / 2} y={h - 1} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{constraintNames[0]}</text>
                       <text x={4} y={py + chartH / 2} textAnchor="middle" fontSize={9} fill="var(--text-muted)" transform={`rotate(-90,4,${py + chartH / 2})`}>objective</text>
                       <path d={linePath} fill="none" stroke="#a855f7" strokeWidth={1.5} opacity={0.6} />
@@ -438,7 +438,7 @@ export default function OptimiserPreview({ data }: OptimiserPreviewProps) {
             <div className="flex gap-6 flex-wrap">
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Convergence</label>
-                <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                <svg width={w} height={h} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
                   <path d={objPath} fill="none" stroke="#f59e0b" strokeWidth={1.5} />
                   <path d={lcPath} fill="none" stroke="#3b82f6" strokeWidth={1.5} />
                 </svg>

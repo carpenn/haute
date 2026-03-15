@@ -15,27 +15,7 @@ import {
   type OnSelectionChangeFunc,
 } from "@xyflow/react"
 import { nodeData } from "../types/node"
-import { NODE_TYPES } from "../utils/nodeTypes"
-
-const labelMap: Record<string, string> = {
-  [NODE_TYPES.API_INPUT]: "Quote Input",
-  [NODE_TYPES.DATA_SOURCE]: "Data Source",
-  [NODE_TYPES.TRANSFORM]: "Polars",
-  [NODE_TYPES.MODEL_SCORE]: "Model Scoring",
-  [NODE_TYPES.RATING_STEP]: "Rating Step",
-  [NODE_TYPES.BANDING]: "Banding",
-  [NODE_TYPES.OUTPUT]: "Quote Response",
-  [NODE_TYPES.DATA_SINK]: "Data Sink",
-  [NODE_TYPES.EXTERNAL_FILE]: "Load File",
-  [NODE_TYPES.LIVE_SWITCH]: "Source Switch",
-  [NODE_TYPES.MODELLING]: "Model Training",
-  [NODE_TYPES.OPTIMISER]: "Optimisation",
-  [NODE_TYPES.OPTIMISER_APPLY]: "Apply Optimisation",
-  [NODE_TYPES.SCENARIO_EXPANDER]: "Expander",
-  [NODE_TYPES.CONSTANT]: "Constant",
-  [NODE_TYPES.SUBMODEL]: "Submodel",
-  [NODE_TYPES.SUBMODEL_PORT]: "Port",
-}
+import { NODE_TYPES, NODE_TYPE_META, type NodeTypeValue } from "../utils/nodeTypes"
 
 type ContextMenuData = {
   x: number
@@ -151,7 +131,7 @@ export default function useEdgeHandlers({
         type,
         position,
         data: {
-          label: `${labelMap[type] || "Node"} ${nodeIdCounter.current}`,
+          label: `${NODE_TYPE_META[type as NodeTypeValue]?.name || "Node"} ${nodeIdCounter.current}`,
           description: "",
           nodeType: type,
           config,

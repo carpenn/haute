@@ -8,22 +8,12 @@ verify the generated code compiles and contains expected fragments.
 from __future__ import annotations
 
 from haute.codegen import _build_extra_kwargs, _node_to_code, graph_to_code
-from tests.conftest import make_graph as _g
+from tests.conftest import compile_node_code as _compile_node_code, make_graph as _g
 from tests.conftest import make_node as _n
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _compile_node_code(code: str) -> None:
-    """Verify generated node code compiles inside a pipeline context."""
-    wrapper = (
-        "import polars as pl\nimport haute\n"
-        "pipeline = haute.Pipeline('test')\n\n"
-        f"{code}\n"
-    )
-    compile(wrapper, "<test>", "exec")
 
 
 def _make_codegen_node(node_type: str, config: dict, label: str = "TestNode"):
@@ -811,3 +801,75 @@ class TestCodegenExecValidation:
         collected = result.collect()
         assert "doubled" in collected.columns
         assert collected["doubled"].to_list() == [2.0, 4.0, 6.0]
+
+
+# ---------------------------------------------------------------------------
+# B19: Sink templates use safe_sink instead of hardcoded collect+write
+# ---------------------------------------------------------------------------
+
+
+class TestGenDataSink:
+    """Tests for data sink code generation — must delegate to safe_sink."""
+
+    def test_parquet_sink_uses_safe_sink(self) -> None:
+        """Parquet sink template should import and call safe_sink."""
+        node = _make_codegen_node(
+            "dataSink",
+            {"path": "output/results.parquet", "format": "parquet"},
+            label="WriteResults",
+        )
+        code = _node_to_code(node, source_names=["scored"])
+        assert "from haute._polars_utils import safe_sink" in code
+        assert 'safe_sink(scored, "output/results.parquet")' in code
+        # Must NOT contain the old hardcoded pattern
+        assert ".collect(engine=" not in code
+        assert ".write_parquet(" not in code
+        _compile_node_code(code)
+
+    def test_csv_sink_uses_safe_sink(self) -> None:
+        """CSV sink template should import and call safe_sink with fmt='csv'."""
+        node = _make_codegen_node(
+            "dataSink",
+            {"path": "output/report.csv", "format": "csv"},
+            label="WriteCSV",
+        )
+        code = _node_to_code(node, source_names=["data"])
+        assert "from haute._polars_utils import safe_sink" in code
+        assert 'safe_sink(data, "output/report.csv", fmt="csv")' in code
+        assert ".write_csv(" not in code
+        _compile_node_code(code)
+
+    def test_sink_default_format_is_parquet(self) -> None:
+        """When no format is specified, default to parquet safe_sink call."""
+        node = _make_codegen_node(
+            "dataSink",
+            {"path": "out.parquet"},
+            label="DefaultSink",
+        )
+        code = _node_to_code(node, source_names=["df"])
+        assert "safe_sink" in code
+        # Default parquet call should not have fmt= kwarg
+        assert 'fmt="csv"' not in code
+        _compile_node_code(code)
+
+    def test_sink_returns_first_source(self) -> None:
+        """Sink should return the input LazyFrame for downstream chaining."""
+        node = _make_codegen_node(
+            "dataSink",
+            {"path": "out.parquet", "format": "parquet"},
+            label="SinkNode",
+        )
+        code = _node_to_code(node, source_names=["input_df"])
+        assert "return input_df" in code
+
+    def test_sink_with_multiple_sources(self) -> None:
+        """Sink with multiple sources uses the first one."""
+        node = _make_codegen_node(
+            "dataSink",
+            {"path": "combined.parquet", "format": "parquet"},
+            label="MultiSink",
+        )
+        code = _node_to_code(node, source_names=["a", "b", "c"])
+        assert "safe_sink(a," in code
+        assert "return a" in code
+        _compile_node_code(code)

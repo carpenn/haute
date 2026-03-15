@@ -139,10 +139,19 @@ function FlowEditor() {
   const sourceFileRef = useRef("")
   const nodeIdCounter = useRef(0)
 
-  // Keep graphRef in sync so callbacks never see stale state
+  // Keep graphRef in sync so callbacks never see stale state.
+  // Only bump graphVersion for structural changes (add/remove/data), not position-only drags.
+  const prevStructureRef = useRef<string>("")
   useEffect(() => {
     graphRef.current = { nodes, edges }
-    bumpGraphVersion()
+    // Build a fingerprint that ignores position — includes node ids, data, and edge list
+    const nodeFingerprint = nodes.map((n) => `${n.id}:${JSON.stringify(n.data)}`).join("|")
+    const edgeFingerprint = edges.map((e) => `${e.id}:${e.source}:${e.target}`).join("|")
+    const fingerprint = `${nodeFingerprint}||${edgeFingerprint}`
+    if (fingerprint !== prevStructureRef.current) {
+      prevStructureRef.current = fingerprint
+      bumpGraphVersion()
+    }
   }, [nodes, edges, bumpGraphVersion])
 
   // Track dirty state via reference equality (avoids JSON.stringify overhead)

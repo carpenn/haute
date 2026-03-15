@@ -1,10 +1,45 @@
+import { useRef, useEffect } from "react"
 import { Trash } from "lucide-react"
 import type { BandingFactor, ContinuousRule, CategoricalRule } from "../../../types/banding"
 
 const OPS = ["<", "<=", ">", ">=", "="]
 
+/** Generate a short unique key for a rule row. */
+let _ruleIdSeq = 0
+export function nextRuleId(): string {
+  return `rule_${++_ruleIdSeq}_${Date.now().toString(36)}`
+}
+
+/** Ensure every rule has a stable `_id` key. */
+function ensureRuleIds(rules: (ContinuousRule | CategoricalRule)[]): (ContinuousRule | CategoricalRule)[] {
+  let changed = false
+  const result = rules.map((r) => {
+    if ((r as Record<string, unknown>)._id) return r
+    changed = true
+    return { ...r, _id: nextRuleId() }
+  })
+  return changed ? result : rules
+}
+
+/** Extract the stable key from a rule (falls back to index). */
+function ruleKey(rule: ContinuousRule | CategoricalRule, index: number): string {
+  return (rule as Record<string, unknown>)._id as string || `fallback_${index}`
+}
+
 export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFactor; onUpdateFactor: (patch: Partial<BandingFactor>) => void }) {
-  const rules = factor.rules || []
+  const rawRules = factor.rules || []
+
+  // Ensure rules have stable _id keys (assign on first render, persist via onUpdateFactor)
+  const didAssignIds = useRef(false)
+  const rules = ensureRuleIds(rawRules)
+  useEffect(() => {
+    if (rules !== rawRules && !didAssignIds.current) {
+      didAssignIds.current = true
+      // Persist the assigned ids back so subsequent renders have them
+      onUpdateFactor({ rules })
+    }
+  }) // intentionally no deps — runs on every render to catch first assignment
+
   const bt = factor.banding || "continuous"
 
   const setRules = (r: (ContinuousRule | CategoricalRule)[]) => onUpdateFactor({ rules: r })
@@ -31,7 +66,7 @@ export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFa
             {rules.length === 0 ? (
               <tr><td colSpan={6} className="px-2 py-3 text-center" style={{ color: 'var(--text-muted)' }}>No rules yet</td></tr>
             ) : (rules as ContinuousRule[]).map((rule, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+              <tr key={ruleKey(rule, i)} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="px-1 py-1">
                   <select value={rule.op1 || ""} onChange={(e) => updateRule(i, "op1", e.target.value)}
                     className="w-full px-1 py-1 rounded text-[11px] font-mono appearance-none"
@@ -85,7 +120,7 @@ export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFa
             {rules.length === 0 ? (
               <tr><td colSpan={3} className="px-2 py-3 text-center" style={{ color: 'var(--text-muted)' }}>No rules yet</td></tr>
             ) : (rules as CategoricalRule[]).map((rule, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+              <tr key={ruleKey(rule, i)} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="px-1 py-1">
                   <input type="text" value={rule.value ?? ""} onChange={(e) => updateRule(i, "value", e.target.value)}
                     className="w-full px-1.5 py-1 rounded text-[11px] font-mono focus:outline-none"

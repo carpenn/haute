@@ -7,6 +7,7 @@ import { withAlpha } from "../../utils/color"
 import ToggleButtonGroup from "../../components/ToggleButtonGroup"
 import { buildGraph } from "../../utils/buildGraph"
 import useSettingsStore from "../../stores/useSettingsStore"
+import { EditorLabel } from "../../components/form"
 
 export default function SinkEditor({
   config,
@@ -54,7 +55,7 @@ export default function SinkEditor({
   return (
     <div className="px-4 py-3 space-y-3">
       <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Format</label>
+        <EditorLabel>Format</EditorLabel>
         <div className="mt-1">
           <ToggleButtonGroup
             value={format}
@@ -69,9 +70,7 @@ export default function SinkEditor({
       </div>
 
       <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-          Output Path
-        </label>
+        <EditorLabel className="mb-1.5 block">Output Path</EditorLabel>
         <input
           type="text"
           placeholder={format === "csv" ? "output/results.csv" : "output/results.parquet"}

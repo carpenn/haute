@@ -1,6 +1,7 @@
 import { Package } from "lucide-react"
 import { configField } from "../../utils/configField"
 import { withAlpha } from "../../utils/color"
+import { EditorLabel } from "../../components/form"
 
 export default function SubmodelEditor({
   config,
@@ -24,7 +25,7 @@ export default function SubmodelEditor({
 
       {file && (
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>File</label>
+          <EditorLabel>File</EditorLabel>
           <div className="mt-1 text-xs font-mono px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
             {file}
           </div>
@@ -33,7 +34,7 @@ export default function SubmodelEditor({
 
       {inputPorts.length > 0 && (
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Inputs</label>
+          <EditorLabel>Inputs</EditorLabel>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {inputPorts.map((port) => (
               <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
@@ -46,7 +47,7 @@ export default function SubmodelEditor({
 
       {outputPorts.length > 0 && (
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>Outputs</label>
+          <EditorLabel>Outputs</EditorLabel>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {outputPorts.map((port) => (
               <span key={port} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono" style={{ background: withAlpha(accentColor, 0.1), color: accentColor }}>

@@ -268,7 +268,7 @@ export function GLMFactorConfig({
                       onChange={(e) => updateTerm(col.name, cleanTermForType(spec, e.target.value))}
                       className="px-1.5 py-0.5 rounded text-[10px] font-mono"
                       style={{
-                        background: "var(--input-bg)",
+                        background: "var(--bg-input)",
                         border: "1px solid var(--border)",
                         color: "var(--text-primary)",
                         minWidth: "85px",
@@ -287,7 +287,7 @@ export function GLMFactorConfig({
                         onChange={(e) => updateTermField(col.name, "df", e.target.value ? parseInt(e.target.value) : undefined)}
                         placeholder="df"
                         className="w-10 px-1 py-0.5 rounded text-[10px] font-mono text-center"
-                        style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                        style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                         min={2}
                         max={20}
                         title="Degrees of freedom"
@@ -300,7 +300,7 @@ export function GLMFactorConfig({
                         value={spec.prior_weight ?? 1.0}
                         onChange={(e) => updateTermField(col.name, "prior_weight", parseFloat(e.target.value) || 1.0)}
                         className="w-10 px-1 py-0.5 rounded text-[10px] font-mono text-center"
-                        style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                        style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                         step={0.5}
                         min={0}
                         title="Prior weight"
@@ -347,7 +347,7 @@ export function GLMFactorConfig({
                   value=""
                   onChange={(e) => { if (e.target.value) addFactor(e.target.value) }}
                   className="w-full px-1.5 py-1 rounded text-[10px] font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value="">Add factor...</option>
                   {availableColumns.map(c => (
@@ -377,7 +377,7 @@ export function GLMFactorConfig({
               rows={Math.min(20, Math.max(6, jsonDraft.split("\n").length + 1))}
               className="w-full px-2.5 py-2 rounded-lg text-xs font-mono"
               style={{
-                background: "var(--input-bg)",
+                background: "var(--bg-input)",
                 border: `1px solid ${jsonError ? "#ef4444" : "var(--border)"}`,
                 color: "var(--text-primary)",
                 resize: "vertical",
@@ -414,7 +414,7 @@ export function GLMFactorConfig({
                   value={interaction.factors[0] || ""}
                   onChange={(e) => updateInteractionFactor(idx, 0, e.target.value)}
                   className="flex-1 px-1.5 py-1 rounded text-[10px] font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value="">Select...</option>
                   {includedFeatures.map(f => <option key={f} value={f}>{f}</option>)}
@@ -424,7 +424,7 @@ export function GLMFactorConfig({
                   value={interaction.factors[1] || ""}
                   onChange={(e) => updateInteractionFactor(idx, 1, e.target.value)}
                   className="flex-1 px-1.5 py-1 rounded text-[10px] font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value="">Select...</option>
                   {includedFeatures.filter(f => f !== interaction.factors[0]).map(f => (

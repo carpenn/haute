@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { X } from "lucide-react"
+import { hoverBg } from "../utils/hoverHandlers"
 
 export interface PanelHeaderProps {
   title: string | ReactNode
@@ -52,12 +53,7 @@ export default function PanelHeader({
         onClick={onClose}
         className="p-1 rounded shrink-0 transition-colors"
         style={{ color: "var(--text-muted)" }}
-        onMouseEnter={(e) =>
-          (e.currentTarget.style.background = "var(--bg-hover)")
-        }
-        onMouseLeave={(e) =>
-          (e.currentTarget.style.background = "transparent")
-        }
+        {...hoverBg("var(--bg-hover)")}
         title="Close"
       >
         <X size={14} />

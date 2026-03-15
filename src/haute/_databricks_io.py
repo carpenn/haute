@@ -184,23 +184,20 @@ def cache_info(
     table: str, project_root: Path | None = None,
 ) -> CacheInfoDict | None:
     """Return metadata about a cached table, or ``None`` if not cached."""
-    import pyarrow.parquet as pq
+    from haute._polars_utils import read_parquet_metadata
 
     p = cached_path(table, project_root)
     if p is None:
         return None
-    stat = p.stat()
-    meta = pq.read_metadata(str(p))
-    arrow_schema = pq.read_schema(str(p))
-    columns = {name: str(arrow_schema.field(name).type) for name in arrow_schema.names}
+    meta = read_parquet_metadata(p)
     return {
         "path": str(p),
         "table": table,
-        "row_count": meta.num_rows,
-        "column_count": meta.num_columns,
-        "columns": columns,
-        "size_bytes": stat.st_size,
-        "fetched_at": stat.st_mtime,
+        "row_count": meta["row_count"],
+        "column_count": meta["column_count"],
+        "columns": meta["columns"],
+        "size_bytes": meta["size_bytes"],
+        "fetched_at": meta["mtime"],
     }
 
 
@@ -324,17 +321,17 @@ def fetch_and_cache(
     elapsed = time.monotonic() - t0
 
     # Read back lightweight schema info from the written file
-    arrow_schema = pq.read_schema(str(out_path))
-    schema = {name: str(arrow_schema.field(name).type) for name in arrow_schema.names}
+    from haute._polars_utils import read_parquet_metadata
 
+    meta = read_parquet_metadata(out_path)
     return {
         "path": str(out_path),
         "table": table,
         "row_count": row_count,
-        "column_count": len(schema),
-        "columns": schema,
-        "size_bytes": out_path.stat().st_size,
-        "fetched_at": out_path.stat().st_mtime,
+        "column_count": meta["column_count"],
+        "columns": meta["columns"],
+        "size_bytes": meta["size_bytes"],
+        "fetched_at": meta["mtime"],
         "fetch_seconds": round(elapsed, 2),
     }
 

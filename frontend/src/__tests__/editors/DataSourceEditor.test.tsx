@@ -84,8 +84,8 @@ describe("DataSourceEditor", () => {
   })
 
   it("switching to databricks shows Databricks controls", () => {
-    render(<DataSourceEditor {...DEFAULT_PROPS} />)
-    fireEvent.click(screen.getByText("Databricks"))
+    // Since sourceType is now read from config (B22 fix), we render with databricks config
+    render(<DataSourceEditor {...DEFAULT_PROPS} config={{ sourceType: "databricks" }} />)
     expect(screen.getByTestId("warehouse-picker")).toBeTruthy()
     expect(screen.getByTestId("catalog-picker")).toBeTruthy()
     expect(screen.getByText("SQL Query")).toBeTruthy()
@@ -158,5 +158,17 @@ describe("DataSourceEditor", () => {
   it("shows query helper text in databricks mode", () => {
     render(<DataSourceEditor {...DEFAULT_PROPS} config={{ sourceType: "databricks" }} />)
     expect(screen.getByText("Combined with table above as: query FROM table")).toBeTruthy()
+  })
+
+  it("reflects external sourceType config changes (B22 fix)", () => {
+    // Render with flat_file, then re-render with databricks config
+    const { rerender } = render(<DataSourceEditor {...DEFAULT_PROPS} config={{ sourceType: "flat_file" }} />)
+    expect(screen.getByTestId("file-browser")).toBeTruthy()
+    expect(screen.queryByTestId("warehouse-picker")).toBeNull()
+
+    // Simulate external config change to databricks
+    rerender(<DataSourceEditor {...DEFAULT_PROPS} config={{ sourceType: "databricks" }} />)
+    expect(screen.getByTestId("warehouse-picker")).toBeTruthy()
+    expect(screen.queryByTestId("file-browser")).toBeNull()
   })
 })

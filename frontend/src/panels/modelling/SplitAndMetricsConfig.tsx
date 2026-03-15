@@ -46,7 +46,7 @@ export function SplitAndMetricsConfig({
                 onClick={() => onSplitUpdate("strategy", s)}
                 className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
                 style={{
-                  background: split.strategy === s ? "var(--accent-soft)" : "var(--input-bg)",
+                  background: split.strategy === s ? "var(--accent-soft)" : "var(--bg-input)",
                   color: split.strategy === s ? "var(--accent)" : "var(--text-secondary)",
                   border: `1px solid ${split.strategy === s ? "var(--accent)" : "var(--border)"}`,
                 }}
@@ -65,7 +65,7 @@ export function SplitAndMetricsConfig({
                     value={(split.validation_size as number) ?? (split.test_size as number) ?? 0.2}
                     onChange={(e) => onSplitUpdate("validation_size", parseFloat(e.target.value) || 0)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
                 <div>
@@ -75,7 +75,7 @@ export function SplitAndMetricsConfig({
                     value={(split.holdout_size as number) ?? 0}
                     onChange={(e) => onSplitUpdate("holdout_size", parseFloat(e.target.value) || 0)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
                 <div>
@@ -85,7 +85,7 @@ export function SplitAndMetricsConfig({
                     value={(split.seed as number) ?? 42}
                     onChange={(e) => onSplitUpdate("seed", parseInt(e.target.value) || 42)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
               </div>
@@ -111,7 +111,7 @@ export function SplitAndMetricsConfig({
                   value={configField(split, "date_column", "")}
                   onChange={(e) => onSplitUpdate("date_column", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value="">Select...</option>
                   {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -124,7 +124,7 @@ export function SplitAndMetricsConfig({
                   value={configField(split, "cutoff_date", "")}
                   onChange={(e) => onSplitUpdate("cutoff_date", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 />
               </div>
             </div>
@@ -137,7 +137,7 @@ export function SplitAndMetricsConfig({
                   value={configField(split, "group_column", "")}
                   onChange={(e) => onSplitUpdate("group_column", e.target.value)}
                   className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value="">Select...</option>
                   {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -151,7 +151,7 @@ export function SplitAndMetricsConfig({
                     value={(split.validation_size as number) ?? (split.test_size as number) ?? 0.2}
                     onChange={(e) => onSplitUpdate("validation_size", parseFloat(e.target.value) || 0)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
                 <div>
@@ -161,7 +161,7 @@ export function SplitAndMetricsConfig({
                     value={(split.holdout_size as number) ?? 0}
                     onChange={(e) => onSplitUpdate("holdout_size", parseFloat(e.target.value) || 0)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
               </div>
@@ -185,7 +185,7 @@ export function SplitAndMetricsConfig({
                   value={configField(config, "cv_folds", 5)}
                   onChange={(e) => onUpdate("cv_folds", parseInt(e.target.value) || 5)}
                   className="w-14 px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 />
               </div>
             )}
@@ -205,7 +205,7 @@ export function SplitAndMetricsConfig({
                   }}
                   placeholder="All rows"
                   className="w-32 px-2 py-0.5 rounded text-xs font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 />
                 {rowLimit != null && rowLimit > 0 && (
                   <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
@@ -238,7 +238,7 @@ export function SplitAndMetricsConfig({
                 value={configField(config, "mlflow_experiment", "")}
                 onChange={(e) => onUpdate("mlflow_experiment", e.target.value)}
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
             </div>
             <div>
@@ -249,7 +249,7 @@ export function SplitAndMetricsConfig({
                 value={configField(config, "model_name", "")}
                 onChange={(e) => onUpdate("model_name", e.target.value)}
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
             </div>
           </div>

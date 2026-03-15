@@ -31,7 +31,7 @@ from haute._types import (
     SolveResultLike,
 )
 from haute.graph_utils import NodeType
-from haute.routes._helpers import raise_node_not_found, raise_node_type_error
+from haute.routes._helpers import find_typed_node
 from haute.routes._job_store import JobStore
 from haute.schemas import OptimiserSolveRequest, OptimiserSolveResponse
 
@@ -49,12 +49,7 @@ _DEFAULT_CD_TOLERANCE = 1e-3  # coordinate-descent convergence tolerance (ratebo
 
 def _find_optimiser_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find and validate an optimiser node in the graph."""
-    node = graph.node_map.get(node_id)
-    if node is None:
-        raise_node_not_found(node_id)
-    if node.data.nodeType != NodeType.OPTIMISER:
-        raise_node_type_error(node_id, "optimiser", str(node.data.nodeType))
-    return node
+    return find_typed_node(graph, node_id, NodeType.OPTIMISER, "optimiser")
 
 
 def _compute_scenario_value_stats(
@@ -92,10 +87,82 @@ def _compute_scenario_value_stats(
     return stats, histogram
 
 
+def _finalize_solve_result(
+    solve_result: SolveResultLike,
+    *,
+    mode: str,
+    solver: Any,
+    quote_grid: QuoteGrid,
+    store: JobStore,
+    job_id: str,
+    elapsed: float,
+    extra_fields: dict[str, Any] | None = None,
+) -> None:
+    """Build the result dict and update the job with the solve outcome.
+
+    Shared by ``_solve_online`` and ``_solve_ratebook`` to avoid duplicating
+    the ~30 lines of result-dict construction, convergence warning, and
+    store update boilerplate.
+
+    Parameters
+    ----------
+    solve_result:
+        The solver result object (online or ratebook).
+    mode:
+        ``"online"`` or ``"ratebook"``.
+    solver:
+        The solver instance (stored on the job for later use).
+    quote_grid:
+        The QuoteGrid (stored on the job for apply/frontier operations).
+    store:
+        The job store — updates are applied atomically via dict replacement.
+    job_id:
+        The job ID to update in the store.
+    elapsed:
+        Wall-clock seconds since the solve started.
+    extra_fields:
+        Mode-specific keys to merge into the result dict (e.g.
+        ``iterations``, ``factor_tables``).
+    """
+    scenario_value_stats, scenario_value_histogram = _compute_scenario_value_stats(solve_result)
+
+    result_dict: dict[str, Any] = {
+        "mode": mode,
+        "total_objective": solve_result.total_objective,
+        "baseline_objective": solve_result.baseline_objective,
+        "constraints": solve_result.total_constraints,
+        "baseline_constraints": solve_result.baseline_constraints,
+        "lambdas": solve_result.lambdas,
+        "converged": solve_result.converged,
+        "scenario_value_stats": scenario_value_stats,
+        "scenario_value_histogram": scenario_value_histogram,
+    }
+    if extra_fields:
+        result_dict.update(extra_fields)
+    if not solve_result.converged:
+        result_dict["warning"] = (
+            "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
+        )
+
+    # P7: Atomic update — replace the entire dict to avoid races with
+    # status-polling reads on the main thread.
+    store.atomic_update(job_id, {
+        "status": "completed",
+        "progress": 1.0,
+        "message": "Completed",
+        "elapsed_seconds": elapsed,
+        "solver": solver,
+        "solve_result": solve_result,
+        "quote_grid": quote_grid,
+        "result": result_dict,
+    })
+
+
 def _solve_online(
     quote_grid: QuoteGrid,
     config: dict[str, Any],
-    job: dict[str, Any],
+    store: JobStore,
+    job_id: str,
     start_time: float,
 ) -> None:
     """Run the online optimiser solver on a pre-built QuoteGrid."""
@@ -111,48 +178,34 @@ def _solve_online(
     )
     solve_result: OnlineSolveResultLike = solver.solve(quote_grid)
     elapsed = time.monotonic() - start_time
-    converged = solve_result.converged
-    logger.info("solve_completed", mode="online", elapsed=f"{elapsed:.2f}s", converged=converged)
+    logger.info(
+        "solve_completed", mode="online",
+        elapsed=f"{elapsed:.2f}s", converged=solve_result.converged,
+    )
 
-    scenario_value_stats, scenario_value_histogram = _compute_scenario_value_stats(solve_result)
-
-    result_dict: dict[str, Any] = {
-        "mode": "online",
-        "total_objective": solve_result.total_objective,
-        "baseline_objective": solve_result.baseline_objective,
-        "constraints": solve_result.total_constraints,
-        "baseline_constraints": solve_result.baseline_constraints,
-        "lambdas": solve_result.lambdas,
-        "converged": solve_result.converged,
-        "iterations": solve_result.iterations,
-        "n_quotes": solve_result.n_quotes,
-        "n_steps": solve_result.n_steps,
-        "history": solve_result.history if config.get("record_history") else None,
-        "scenario_value_stats": scenario_value_stats,
-        "scenario_value_histogram": scenario_value_histogram,
-    }
-    if not solve_result.converged:
-        result_dict["warning"] = (
-            "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
-        )
-
-    job.update({
-        "status": "completed",
-        "progress": 1.0,
-        "message": "Completed",
-        "elapsed_seconds": elapsed,
-        "solver": solver,
-        "solve_result": solve_result,
-        "quote_grid": solve_result.grid,
-        "result": result_dict,
-    })
+    _finalize_solve_result(
+        solve_result,
+        mode="online",
+        solver=solver,
+        quote_grid=solve_result.grid,
+        store=store,
+        job_id=job_id,
+        elapsed=elapsed,
+        extra_fields={
+            "iterations": solve_result.iterations,
+            "n_quotes": solve_result.n_quotes,
+            "n_steps": solve_result.n_steps,
+            "history": solve_result.history if config.get("record_history") else None,
+        },
+    )
 
 
 def _solve_ratebook(
     quote_grid: QuoteGrid,
     config: dict[str, Any],
     factors_df: pl.DataFrame | None,
-    job: dict[str, Any],
+    store: JobStore,
+    job_id: str,
     start_time: float,
 ) -> None:
     """Run the ratebook optimiser solver on a pre-built QuoteGrid."""
@@ -223,38 +276,21 @@ def _solve_ratebook(
             for level, sv in table.items()
         ]
 
-    scenario_value_stats, scenario_value_histogram = _compute_scenario_value_stats(solve_result)
-
-    result_dict: dict[str, Any] = {
-        "mode": "ratebook",
-        "total_objective": solve_result.total_objective,
-        "baseline_objective": solve_result.baseline_objective,
-        "constraints": solve_result.total_constraints,
-        "baseline_constraints": solve_result.baseline_constraints,
-        "lambdas": solve_result.lambdas,
-        "converged": solve_result.converged,
-        "cd_iterations": solve_result.cd_iterations,
-        "factor_tables": factor_tables_serialised,
-        "clamp_rate": getattr(solve_result, "clamp_rate", None),
-        "history": None,
-        "scenario_value_stats": scenario_value_stats,
-        "scenario_value_histogram": scenario_value_histogram,
-    }
-    if not solve_result.converged:
-        result_dict["warning"] = (
-            "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
-        )
-
-    job.update({
-        "status": "completed",
-        "progress": 1.0,
-        "message": "Completed",
-        "elapsed_seconds": elapsed,
-        "solver": solver,
-        "solve_result": solve_result,
-        "quote_grid": quote_grid,
-        "result": result_dict,
-    })
+    _finalize_solve_result(
+        solve_result,
+        mode="ratebook",
+        solver=solver,
+        quote_grid=quote_grid,
+        store=store,
+        job_id=job_id,
+        elapsed=elapsed,
+        extra_fields={
+            "cd_iterations": solve_result.cd_iterations,
+            "factor_tables": factor_tables_serialised,
+            "clamp_rate": getattr(solve_result, "clamp_rate", None),
+            "history": None,
+        },
+    )
 
 
 class OptimiserSolveService:
@@ -382,8 +418,11 @@ class OptimiserSolveService:
         except Exception as exc:
             error_msg = f"Pipeline execution failed: {exc}"
             logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
-            self._store.jobs[job_id] = {"status": "error", "message": error_msg}
-            raise HTTPException(status_code=500, detail=error_msg)
+            self._store.atomic_update(job_id, {"status": "error", "message": error_msg})
+            raise HTTPException(
+                status_code=500,
+                detail="Pipeline execution failed. Check the server logs for details.",
+            )
 
     def _resolve_data_source(
         self,
@@ -404,7 +443,7 @@ class OptimiserSolveService:
                 "No data arrived at the optimiser node. "
                 "Make sure an upstream data source is connected and producing data."
             )
-            self._store.jobs[job_id] = {"status": "error", "message": error_msg}
+            self._store.atomic_update(job_id, {"status": "error", "message": error_msg})
             raise HTTPException(status_code=400, detail=error_msg)
 
         return source_lf
@@ -435,7 +474,7 @@ class OptimiserSolveService:
         if missing_cols:
             avail = sorted(available_cols)
             detail = f"Missing columns in scored data: {missing_cols}. Available: {avail}"
-            self._store.jobs[job_id] = {"status": "error", "message": detail}
+            self._store.atomic_update(job_id, {"status": "error", "message": detail})
             raise HTTPException(status_code=400, detail=detail)
 
         constraint_cols = list(constraints.keys()) if isinstance(constraints, dict) else []
@@ -512,7 +551,7 @@ class OptimiserSolveService:
         except Exception as exc:
             detail = f"Grid construction failed: {exc}"
             logger.error("grid_build_failed", error=str(exc), node_id=node_id)
-            self._store.update_job(job_id, status="error", message=detail)
+            self._store.atomic_update(job_id, {"status": "error", "message": detail})
             raise HTTPException(status_code=400, detail=detail) from exc
         finally:
             if os.path.exists(tmp_path):
@@ -531,49 +570,46 @@ class OptimiserSolveService:
     ) -> None:
         """Start the solver in a background thread."""
         start_time = time.monotonic()
-        self._store.update_job(job_id,
-            start_time=start_time,
-            timeout=config.get("timeout", _DEFAULT_TIMEOUT),
-        )
+        self._store.atomic_update(job_id, {
+            "start_time": start_time,
+            "timeout": config.get("timeout", _DEFAULT_TIMEOUT),
+        })
 
         def _solve_background() -> None:
             try:
-                job = self._store.jobs[job_id]
-                job.update({
+                # P7: Use atomic_update instead of mutating the job dict
+                # directly, so status-polling reads on the main thread
+                # always see a consistent snapshot.
+                self._store.atomic_update(job_id, {
                     "message": "Solving",
                     "progress": 0.1,
                     "elapsed_seconds": time.monotonic() - start_time,
                 })
                 if mode == "ratebook":
                     _solve_ratebook(
-                        quote_grid, config, factors_df, job, start_time,
+                        quote_grid, config, factors_df,
+                        self._store, job_id, start_time,
                     )
                 else:
-                    _solve_online(quote_grid, config, job, start_time)
-            except ValueError as exc:
-                error_msg = f"Data error: {exc}"
-                logger.error("solve_failed", error=str(exc), node_id=node_id, category="data")
-                self._store.update_job(job_id,
-                    status="error",
-                    message=error_msg,
-                    elapsed_seconds=time.monotonic() - start_time,
-                )
-            except RuntimeError as exc:
-                error_msg = f"Algorithm error: {exc}"
-                logger.error("solve_failed", error=str(exc), node_id=node_id, category="algorithm")
-                self._store.update_job(job_id,
-                    status="error",
-                    message=error_msg,
-                    elapsed_seconds=time.monotonic() - start_time,
-                )
+                    _solve_online(
+                        quote_grid, config,
+                        self._store, job_id, start_time,
+                    )
             except Exception as exc:
-                error_msg = f"Unexpected error: {exc}"
-                logger.error("solve_failed", error=str(exc), node_id=node_id, category="unexpected")
-                self._store.update_job(job_id,
-                    status="error",
-                    message=error_msg,
-                    elapsed_seconds=time.monotonic() - start_time,
+                error_categories: dict[type, tuple[str, str]] = {
+                    ValueError: ("Data error", "data"),
+                    RuntimeError: ("Algorithm error", "algorithm"),
+                }
+                prefix, category = error_categories.get(
+                    type(exc), ("Unexpected error", "unexpected"),
                 )
+                error_msg = f"{prefix}: {exc}"
+                logger.error("solve_failed", error=str(exc), node_id=node_id, category=category)
+                self._store.atomic_update(job_id, {
+                    "status": "error",
+                    "message": error_msg,
+                    "elapsed_seconds": time.monotonic() - start_time,
+                })
 
         thread = threading.Thread(target=_solve_background, daemon=True)
         thread.start()

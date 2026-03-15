@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
+from haute.routes._helpers import _INTERNAL_ERROR_DETAIL
 from haute.routes._job_store import JobStore
 from haute.routes._train_service import (
     TrainService,
@@ -160,13 +161,7 @@ async def mlflow_check() -> MlflowCheckResponse:
 @router.post("/mlflow/log", response_model=LogExperimentResponse)
 async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
     """Log a completed training job's results to MLflow."""
-    job = _store.require_job(body.job_id)
-
-    if job.get("status") != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
-        )
+    job = _store.require_completed_job(body.job_id)
 
     result: TrainResponse | None = job.get("result")
     if result is None:
@@ -244,7 +239,7 @@ async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
         )
     except Exception as exc:
         logger.error("mlflow_log_failed", error=str(exc), job_id=body.job_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/export", response_model=ExportScriptResponse)

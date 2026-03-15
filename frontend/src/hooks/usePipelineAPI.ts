@@ -4,6 +4,7 @@ import type { PreviewData } from "../panels/DataPreview"
 import { makePreviewData } from "../utils/makePreviewData"
 import { loadPipeline, previewNode, savePipeline, ApiError } from "../api/client"
 import { resolveGraphFromRefs } from "../utils/buildGraph"
+import { computeNextNodeId, normalizeEdges } from "../utils/graphHelpers"
 import type { NodeResult } from "../api/types"
 import useToastStore from "../stores/useToastStore"
 import useSettingsStore from "../stores/useSettingsStore"
@@ -140,7 +141,7 @@ export default function usePipelineAPI({
         const pipelineNodes = data.nodes ?? []
         const pipelineEdges = data.edges ?? []
         setNodesRaw(pipelineNodes)
-        setEdgesRaw(pipelineEdges.map((e: Edge) => ({ ...e, type: "default", animated: false })))
+        setEdgesRaw(normalizeEdges(pipelineEdges))
         if (data.preamble !== undefined) {
           setPreamble(data.preamble || "")
           preambleRef.current = data.preamble || ""
@@ -155,10 +156,7 @@ export default function usePipelineAPI({
         if (data.active_scenario) {
           useSettingsStore.getState().setActiveScenario(data.active_scenario)
         }
-        nodeIdCounter.current = pipelineNodes.reduce((max, n) => {
-          const match = n.id.match(/_(\d+)$/)
-          return match ? Math.max(max, parseInt(match[1], 10)) : max
-        }, -1) + 1
+        nodeIdCounter.current = computeNextNodeId(pipelineNodes)
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
         setLoading(false)
       })

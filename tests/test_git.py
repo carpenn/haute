@@ -6,7 +6,6 @@ of subprocess.  This ensures guardrails work against real git state.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +16,8 @@ from haute._git import (
     _build_compare_url,
     _generate_commit_message,
     _get_current_branch,
+    _get_default_branch,
+    _get_default_branch_cached,
     _get_user_slug,
     _is_own_branch,
     _slugify,
@@ -34,32 +35,12 @@ from haute._git import (
     switch_branch,
 )
 
+from tests._git_helpers import git_run as _git, init_repo as _init_repo
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _git(cwd: Path, *args: str) -> str:
-    """Run a raw git command for test setup."""
-    result = subprocess.run(
-        ["git"] + list(args),
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
-
-def _init_repo(path: Path, *, user: str = "Test User") -> Path:
-    """Create a fresh git repo with an initial commit on 'main'."""
-    _git(path, "init", "-b", "main")
-    _git(path, "config", "user.name", user)
-    _git(path, "config", "user.email", "test@example.com")
-    (path / "README.md").write_text("# Test\n")
-    _git(path, "add", ".")
-    _git(path, "commit", "-m", "Initial commit")
-    return path
 
 
 def _init_repo_with_remote(path: Path, *, user: str = "Test User") -> tuple[Path, Path]:
@@ -689,3 +670,303 @@ class TestArgumentInjectionPrevention:
         repo = _init_repo(tmp_path)
         with pytest.raises(GitError, match="forbidden characters"):
             delete_branch("branch\x00evil", repo)
+
+
+# ---------------------------------------------------------------------------
+# P1: list_branches uses single subprocess for commit counts
+# ---------------------------------------------------------------------------
+
+
+class TestListBranchesOptimised:
+    """Verify list_branches returns correct commit counts using the
+    optimised %(ahead-behind:...) format from a single for-each-ref call."""
+
+    def test_commit_count_on_branch(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        for i in range(3):
+            (repo / f"file{i}.py").write_text(f"x = {i}\n")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", f"Commit {i}")
+
+        result = list_branches(repo)
+        feat_branch = next(b for b in result.branches if b.name == "pricing/test-user/feat")
+        assert feat_branch.commit_count == 3
+
+    def test_main_has_zero_commits_ahead(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        result = list_branches(repo)
+        main_branch = next(b for b in result.branches if b.name == "main")
+        assert main_branch.commit_count == 0
+
+    def test_multiple_branches_have_correct_counts(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        # Branch A: 2 commits
+        _git(repo, "checkout", "-b", "pricing/test-user/branch-a")
+        for i in range(2):
+            (repo / f"a{i}.py").write_text(f"x = {i}\n")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", f"A{i}")
+        _git(repo, "checkout", "main")
+
+        # Branch B: 4 commits
+        _git(repo, "checkout", "-b", "pricing/test-user/branch-b")
+        for i in range(4):
+            (repo / f"b{i}.py").write_text(f"x = {i}\n")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", f"B{i}")
+        _git(repo, "checkout", "main")
+
+        result = list_branches(repo)
+        counts = {b.name: b.commit_count for b in result.branches}
+        assert counts["pricing/test-user/branch-a"] == 2
+        assert counts["pricing/test-user/branch-b"] == 4
+
+
+# ---------------------------------------------------------------------------
+# P1: get_history uses single subprocess (no per-commit diff-tree)
+# ---------------------------------------------------------------------------
+
+
+class TestGetHistoryOptimised:
+    """Verify get_history returns correct files_changed from the
+    single-subprocess --name-only approach."""
+
+    def test_files_changed_correct(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+
+        (repo / "first.py").write_text("a = 1\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "Add first")
+
+        (repo / "second.py").write_text("b = 2\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "Add second")
+
+        entries = get_history(cwd=repo)
+        assert len(entries) == 2
+        # Most recent first
+        assert "second.py" in entries[0].files_changed
+        assert "first.py" in entries[1].files_changed
+
+    def test_multiple_files_in_one_commit(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+
+        (repo / "one.py").write_text("x = 1\n")
+        (repo / "two.py").write_text("y = 2\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "Add both")
+
+        entries = get_history(cwd=repo)
+        assert len(entries) == 1
+        assert "one.py" in entries[0].files_changed
+        assert "two.py" in entries[0].files_changed
+
+    def test_history_on_main(self, tmp_path: Path) -> None:
+        """On a protected branch, get_history shows the last N commits."""
+        repo = _init_repo(tmp_path)
+        for i in range(3):
+            (repo / f"f{i}.py").write_text(f"x = {i}\n")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-m", f"Main commit {i}")
+
+        entries = get_history(limit=2, cwd=repo)
+        # Should get 2 most recent (not counting the initial commit if limit=2)
+        assert len(entries) == 2
+        assert entries[0].message == "Main commit 2"
+        assert entries[1].message == "Main commit 1"
+
+
+# ---------------------------------------------------------------------------
+# P2: Fetch throttle in get_status
+# ---------------------------------------------------------------------------
+
+
+class TestFetchThrottle:
+    """Verify get_status throttles git fetch calls."""
+
+    def test_second_call_within_cooldown_skips_fetch(self, tmp_path: Path) -> None:
+        """Two rapid get_status calls should only trigger one git fetch."""
+        import haute._git as git_mod
+
+        repo, _ = _init_repo_with_remote(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        _git(repo, "push", "-u", "origin", "pricing/test-user/feat")
+
+        # Reset the throttle so the first call will fetch
+        git_mod._last_fetch_time = 0.0
+
+        fetch_count = 0
+        original_run_git_ok = git_mod._run_git_ok
+
+        def counting_run_git_ok(*args, **kwargs):
+            nonlocal fetch_count
+            if args and len(args) >= 2 and args[0] == "fetch":
+                fetch_count += 1
+            return original_run_git_ok(*args, **kwargs)
+
+        # Monkey-patch to count fetch calls
+        git_mod._run_git_ok = counting_run_git_ok
+        try:
+            get_status(repo)
+            first_count = fetch_count
+            get_status(repo)
+            second_count = fetch_count
+            # First call should have fetched; second should not
+            assert first_count == 1
+            assert second_count == 1  # No additional fetch
+        finally:
+            git_mod._run_git_ok = original_run_git_ok
+            git_mod._last_fetch_time = 0.0
+
+    def test_fetch_happens_after_cooldown_expires(self, tmp_path: Path) -> None:
+        """After the cooldown expires, a new fetch should happen."""
+        import haute._git as git_mod
+
+        repo, _ = _init_repo_with_remote(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        _git(repo, "push", "-u", "origin", "pricing/test-user/feat")
+
+        # Simulate that the last fetch was long ago
+        git_mod._last_fetch_time = 0.0
+
+        fetch_count = 0
+        original_run_git_ok = git_mod._run_git_ok
+
+        def counting_run_git_ok(*args, **kwargs):
+            nonlocal fetch_count
+            if args and len(args) >= 2 and args[0] == "fetch":
+                fetch_count += 1
+            return original_run_git_ok(*args, **kwargs)
+
+        git_mod._run_git_ok = counting_run_git_ok
+        try:
+            get_status(repo)
+            assert fetch_count == 1
+
+            # Force cooldown to have expired by setting last_fetch_time
+            # far in the past
+            git_mod._last_fetch_time = 0.0
+
+            get_status(repo)
+            assert fetch_count == 2  # Should have fetched again
+        finally:
+            git_mod._run_git_ok = original_run_git_ok
+            git_mod._last_fetch_time = 0.0
+
+    def test_no_fetch_on_main(self, tmp_path: Path) -> None:
+        """get_status on a protected branch should not fetch."""
+        import haute._git as git_mod
+
+        repo, _ = _init_repo_with_remote(tmp_path)
+        git_mod._last_fetch_time = 0.0
+
+        fetch_count = 0
+        original_run_git_ok = git_mod._run_git_ok
+
+        def counting_run_git_ok(*args, **kwargs):
+            nonlocal fetch_count
+            if args and len(args) >= 2 and args[0] == "fetch":
+                fetch_count += 1
+            return original_run_git_ok(*args, **kwargs)
+
+        git_mod._run_git_ok = counting_run_git_ok
+        try:
+            get_status(repo)  # on main
+            assert fetch_count == 0
+        finally:
+            git_mod._run_git_ok = original_run_git_ok
+            git_mod._last_fetch_time = 0.0
+
+
+# ---------------------------------------------------------------------------
+# P3: _get_default_branch caching
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultBranchCache:
+    """Verify _get_default_branch caches results via lru_cache."""
+
+    def test_returns_main(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        _get_default_branch_cached.cache_clear()
+        assert _get_default_branch(repo) == "main"
+
+    def test_cached_second_call_no_subprocess(self, tmp_path: Path) -> None:
+        """Second call with the same cwd should be served from cache."""
+        import haute._git as git_mod
+
+        repo = _init_repo(tmp_path)
+        _get_default_branch_cached.cache_clear()
+
+        subprocess_count = 0
+        original_run_git_ok = git_mod._run_git_ok
+
+        def counting_run_git_ok(*args, **kwargs):
+            nonlocal subprocess_count
+            subprocess_count += 1
+            return original_run_git_ok(*args, **kwargs)
+
+        git_mod._run_git_ok = counting_run_git_ok
+        try:
+            result1 = _get_default_branch(repo)
+            calls_after_first = subprocess_count
+
+            result2 = _get_default_branch(repo)
+            calls_after_second = subprocess_count
+
+            assert result1 == result2 == "main"
+            # Second call should NOT have spawned any subprocess
+            assert calls_after_second == calls_after_first
+        finally:
+            git_mod._run_git_ok = original_run_git_ok
+            _get_default_branch_cached.cache_clear()
+
+    def test_different_cwd_not_cached(self, tmp_path: Path) -> None:
+        """Different cwd values should get separate cache entries."""
+        (tmp_path / "repo1").mkdir()
+        (tmp_path / "repo2").mkdir()
+        repo1 = _init_repo(tmp_path / "repo1")
+        repo2 = _init_repo(tmp_path / "repo2")
+        _get_default_branch_cached.cache_clear()
+
+        # Both should return 'main' but should be separate cache entries
+        assert _get_default_branch(repo1) == "main"
+        assert _get_default_branch(repo2) == "main"
+
+        info = _get_default_branch_cached.cache_info()
+        # Two different cwd values → two misses (no hits on the second call)
+        assert info.misses == 2
+
+    def test_cache_clear_works(self, tmp_path: Path) -> None:
+        """After cache_clear, the next call should re-query git."""
+        import haute._git as git_mod
+
+        repo = _init_repo(tmp_path)
+        _get_default_branch_cached.cache_clear()
+
+        subprocess_count = 0
+        original_run_git_ok = git_mod._run_git_ok
+
+        def counting_run_git_ok(*args, **kwargs):
+            nonlocal subprocess_count
+            subprocess_count += 1
+            return original_run_git_ok(*args, **kwargs)
+
+        git_mod._run_git_ok = counting_run_git_ok
+        try:
+            _get_default_branch(repo)
+            first_calls = subprocess_count
+
+            _get_default_branch_cached.cache_clear()
+
+            _get_default_branch(repo)
+            second_calls = subprocess_count - first_calls
+
+            # After clear, should have made subprocess calls again
+            assert second_calls > 0
+        finally:
+            git_mod._run_git_ok = original_run_git_ok
+            _get_default_branch_cached.cache_clear()

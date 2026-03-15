@@ -78,6 +78,7 @@ class TransformConfig(TypedDict, total=False):
     code: str
     instanceOf: str
     inputMapping: dict[str, str]
+    selected_columns: list[str]
 
 
 class ModelScoreConfig(TypedDict, total=False):
@@ -137,7 +138,7 @@ class RatingStepConfig(TypedDict, total=False):
     """Config for ratingStep nodes."""
 
     tables: list[RatingTable]
-    operation: str  # "multiply" | "add" | "subtract" | "divide"
+    operation: str  # "multiply" | "add" | "min" | "max"
     combinedColumn: str
 
 
@@ -249,6 +250,10 @@ class OptimiserConfig(TypedDict, total=False):
     scored_input: str
     factors_input: str
 
+    # Runtime node-ID references (set by the frontend / optimiser service)
+    data_input: str
+    banding_source: str
+
     # MLflow
     mlflow_experiment: str
     model_name: str
@@ -264,7 +269,9 @@ class OptimiserApplyConfig(TypedDict, total=False):
     registered_model: str       # registered model name (when sourceType="registered")
     version: str                # model version or "latest" (when sourceType="registered")
     experiment_id: str          # MLflow experiment ID (when sourceType="run")
+    experiment_name: str        # UI-only: display name for panel re-open
     run_id: str                 # MLflow run ID (when sourceType="run")
+    run_name: str               # UI-only: display name for panel re-open
 
 
 class ScenarioExpanderConfig(TypedDict, total=False):
@@ -355,7 +362,7 @@ class RatebookSolveResultLike(SolveResultLike, Protocol):
 
 
 MODEL_SCORE_CONFIG_KEYS: tuple[str, ...] = (
-    "source_type", "run_id", "artifact_path", "run_name",
+    "sourceType", "run_id", "artifact_path", "run_name",
     "registered_model", "version", "task", "output_column",
     "experiment_name", "experiment_id",
 )

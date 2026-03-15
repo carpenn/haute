@@ -143,9 +143,7 @@ export default function useTracing({
         },
         style: {
           ...(n.style || {}),
-          opacity: dimmed ? 0.4 : 1,
           transition: 'opacity 0.2s ease',
-          ...(dimmed ? { outline: '1px solid rgba(255,255,255,.08)' } : {}),
         },
       }
     })

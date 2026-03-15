@@ -71,6 +71,20 @@ class JobStore:
         """
         self._jobs[job_id].update(fields)
 
+    def atomic_update(self, job_id: str, fields: dict[str, Any]) -> None:
+        """Replace the job dict with a merged copy — thread-safe.
+
+        Instead of mutating the existing dict (which can race with
+        concurrent readers), this builds a **new** dict and swaps it in
+        with a single pointer assignment.  CPython's GIL guarantees that
+        ``dict.__setitem__`` is atomic, so a reader will always see
+        either the old dict or the new one — never a half-updated state.
+
+        Raises ``KeyError`` if *job_id* does not exist.
+        """
+        old = self._jobs[job_id]
+        self._jobs[job_id] = {**old, **fields}
+
     def require_job(self, job_id: str) -> dict[str, Any]:
         """Return the job dict for *job_id*, or raise HTTP 404 if not found.
 
@@ -82,6 +96,42 @@ class JobStore:
         if job is None:
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
         return job
+
+    def require_completed_job(self, job_id: str) -> dict[str, Any]:
+        """Return the job dict for *job_id*, raising if missing or not completed.
+
+        Combines :meth:`require_job` (404 if not found) with a status
+        check (400 if not ``"completed"``).  Eliminates the repetitive
+        two-step guard pattern at call sites that need a finished job.
+        """
+        job = self.require_job(job_id)
+        if job.get("status") != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job '{job_id}' is not completed (status: {job.get('status')})",
+            )
+        return job
+
+    def clear_result_data(
+        self,
+        job_id: str,
+        keys: tuple[str, ...] = ("solver", "solve_result", "quote_grid"),
+    ) -> None:
+        """Remove heavy objects from a completed job to free memory.
+
+        After a solve result has been saved or logged to MLflow, the full
+        solver, solve result (entire scored DataFrame), and QuoteGrid are
+        no longer needed.  This method strips those keys from the job dict
+        while keeping lightweight metadata (status, config, result summary)
+        intact, allowing the TTL eviction to work on a much smaller dict.
+
+        No-op if *job_id* does not exist or keys are already absent.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        cleaned = {k: v for k, v in job.items() if k not in keys}
+        self._jobs[job_id] = cleaned
 
     @property
     def jobs(self) -> dict[str, dict[str, Any]]:

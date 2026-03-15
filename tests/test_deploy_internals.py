@@ -24,41 +24,15 @@ import numpy as np
 import polars as pl
 import pytest
 
+from tests._deploy_helpers import make_resolved_deploy as _make_resolved
+from tests._deploy_helpers import FIXTURE_DIR
 from tests.conftest import make_graph as _g
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-FIXTURE_DIR = Path("tests/fixtures")
 PIPELINE_FILE = FIXTURE_DIR / "pipeline.py"
-
-
-def _make_resolved(
-    config=None, **overrides,
-):
-    """Build a lightweight ResolvedDeploy with sensible defaults."""
-    from haute.deploy._config import DeployConfig, ResolvedDeploy
-    from haute.graph_utils import PipelineGraph
-
-    if config is None:
-        config = DeployConfig(
-            pipeline_file=PIPELINE_FILE,
-            model_name="test-model",
-        )
-
-    defaults = dict(
-        config=config,
-        full_graph=PipelineGraph(),
-        pruned_graph=PipelineGraph(),
-        input_node_ids=["policies"],
-        output_node_id="output",
-        artifacts={},
-        input_schema={"col": "Int64"},
-        output_schema={"col": "Int64"},
-    )
-    defaults.update(overrides)
-    return ResolvedDeploy(**defaults)
 
 
 # ===========================================================================
@@ -465,6 +439,52 @@ class TestInferOutputSchema:
             result = infer_output_schema(graph, "out", ["src"])
 
         assert result == {"result": "Float64"}
+
+    def test_corrupt_cache_logs_warning(self, tmp_path, monkeypatch):
+        """Corrupt cache JSON logs a warning with path and error details."""
+        from haute.deploy._schema import infer_output_schema
+
+        monkeypatch.chdir(tmp_path)
+
+        pq_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1.0]}).write_parquet(pq_path)
+
+        graph = _g({
+            "nodes": [
+                {"id": "src", "data": {
+                    "label": "src",
+                    "nodeType": "apiInput",
+                    "config": {"path": str(pq_path)},
+                }},
+                {"id": "out", "data": {
+                    "label": "out",
+                    "nodeType": "output",
+                    "config": {},
+                }},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "out"}],
+        })
+
+        cache_dir = tmp_path / ".haute_cache"
+        cache_dir.mkdir()
+        cache_file = cache_dir / "output_schema.json"
+        cache_file.write_text("NOT VALID JSON {{{{")
+
+        mock_result = pl.DataFrame({"result": [42.0]})
+
+        with patch("haute.deploy._schema.logger") as mock_logger, \
+             patch("haute.deploy._scorer.score_graph", return_value=mock_result):
+            infer_output_schema(graph, "out", ["src"])
+
+        # Find the corrupt_schema_cache warning call
+        warning_calls = [
+            c for c in mock_logger.warning.call_args_list
+            if c[0][0] == "corrupt_schema_cache"
+        ]
+        assert len(warning_calls) == 1, f"Expected 1 corrupt_schema_cache warning, got {len(warning_calls)}"
+        kwargs = warning_calls[0][1]
+        assert "path" in kwargs
+        assert "error" in kwargs
 
     def test_cache_miss_writes_cache(self, tmp_path, monkeypatch):
         """Cache miss computes schema and writes cache file."""
@@ -1204,6 +1224,29 @@ class TestLoadEnv:
             _load_env(tmp_path)
 
         assert os.environ.get("MY_PRESET") == "original"
+
+    @pytest.mark.parametrize("raw_value, expected", [
+        ('"hello"', "hello"),
+        ("'hello'", "hello"),
+        ("'quoted with spaces'", "quoted with spaces"),
+        ('"double quoted"', "double quoted"),
+        ("no_quotes", "no_quotes"),
+        ("", ""),
+    ])
+    def test_load_env_fallback_strips_quotes(self, tmp_path, monkeypatch, raw_value, expected):
+        """Fallback parser must strip surrounding single and double quotes."""
+        from haute.deploy._config import _load_env
+
+        env_file = tmp_path / ".env"
+        env_file.write_text(f"QUOTED_VAR={raw_value}\n")
+
+        monkeypatch.delenv("QUOTED_VAR", raising=False)
+
+        with patch.dict("sys.modules", {"dotenv": None}):
+            _load_env(tmp_path)
+
+        assert os.environ.get("QUOTED_VAR") == expected
+        monkeypatch.delenv("QUOTED_VAR", raising=False)
 
 
 class TestApplyEnvOverrides:

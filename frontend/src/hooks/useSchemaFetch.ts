@@ -11,16 +11,19 @@ import type { SchemaInfo } from "../panels/editors/_shared"
 export function useSchemaFetch(initialPath?: string) {
   const [schema, setSchema] = useState<SchemaInfo>(null)
   const [loading, setLoading] = useState(!!initialPath)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchForPath = useCallback((path: string) => {
     setLoading(true)
+    setError(null)
     fetchSchema(path)
       .then((data) => {
         setSchema(data)
         setLoading(false)
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setSchema(null)
+        setError(err instanceof Error ? err.message : String(err))
         setLoading(false)
       })
   }, [])
@@ -30,5 +33,5 @@ export function useSchemaFetch(initialPath?: string) {
     if (initialPath) fetchForPath(initialPath)
   }, [initialPath, fetchForPath])
 
-  return { schema, setSchema, loading, fetchForPath }
+  return { schema, setSchema, loading, error, fetchForPath }
 }

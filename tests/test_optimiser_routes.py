@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import polars as pl
 import pytest
-from fastapi.testclient import TestClient
 
 from haute._parser_helpers import _build_node_config, _infer_node_type
 from haute._sandbox import set_project_root
@@ -18,11 +17,6 @@ from haute.routes._optimiser_service import _compute_scenario_value_stats
 from haute.routes.optimiser import _build_artifact_payload
 from haute.server import app
 from tests.conftest import make_edge, make_graph
-
-
-@pytest.fixture()
-def client():
-    return TestClient(app)
 
 
 @pytest.fixture()

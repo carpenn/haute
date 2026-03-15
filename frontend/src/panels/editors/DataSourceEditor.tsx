@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { FileText, Database } from "lucide-react"
 import { FileBrowser, SchemaPreview } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
@@ -19,7 +18,7 @@ export default function DataSourceEditor({
   onRefreshPreview?: () => void
   accentColor: string
 }) {
-  const [sourceType, setSourceType] = useState<string>(configField(config, "sourceType", "flat_file"))
+  const sourceType = configField(config, "sourceType", "flat_file")
   const { schema, setSchema, loading: loadingSchema, fetchForPath } = useSchemaFetch(configField<string | undefined>(config, "path", undefined))
 
   return (
@@ -30,7 +29,7 @@ export default function DataSourceEditor({
           <div className="mt-1">
             <ToggleButtonGroup
               value={sourceType}
-              onChange={(v) => { setSourceType(v); onUpdate("sourceType", v) }}
+              onChange={(v) => onUpdate("sourceType", v)}
               options={[
                 { key: "flat_file", label: "Flat File", icon: <FileText size={12} /> },
                 { key: "databricks", label: "Databricks", icon: <Database size={12} /> },

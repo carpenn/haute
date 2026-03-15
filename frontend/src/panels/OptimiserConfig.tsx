@@ -167,9 +167,11 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     setSaving(true)
     setSaveMessage(null)
     try {
+      const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "result"
+      const labelSlug = nodeLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "result"
       const result = await saveOptimiser({
         job_id: solveJobId,
-        output_path: `output/optimiser_result.json`,
+        output_path: `output/optimiser_${labelSlug}.json`,
       })
       setSaveMessage(result.message || `Saved to ${result.path}`)
     } catch (e) {
@@ -177,7 +179,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     } finally {
       setSaving(false)
     }
-  }, [solveJobId])
+  }, [solveJobId, allNodes, nodeId])
 
   const handleLogMlflow = useCallback(async () => {
     if (!solveJobId) return
@@ -257,7 +259,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               value={dataInput}
               onChange={(e) => onUpdate("data_input", e.target.value)}
               className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             >
               <option value="">Select input...</option>
               {inputNodes.map(n => (
@@ -281,7 +283,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
             value={objective}
             onChange={(e) => onUpdate("objective", e.target.value)}
             className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-            style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           >
             <option value="">Select objective...</option>
             {dataInputColumns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
@@ -302,7 +304,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 value={effectiveBandingSource}
                 onChange={(e) => handleBandingSourceChange(e.target.value)}
                 className="w-full mt-1 px-2.5 py-1.5 rounded-lg text-xs"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               >
                 {bandingNodes.map(bn => (
                   <option key={bn.id} value={bn.id}>{bn.label}</option>
@@ -364,7 +366,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 value={field.value}
                 onChange={(e) => onUpdate(field.key, e.target.value)}
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               >
                 <option value="">Select {field.label.toLowerCase()}...</option>
                 {dataInputColumns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -398,7 +400,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   value={name}
                   onChange={(e) => handleConstraintColumnChange(name, e.target.value)}
                   className="flex-1 min-w-0 px-1.5 py-1 rounded text-[11px] font-mono"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 >
                   <option value={name}>{name}</option>
                   {dataInputColumns.filter(c => c.name !== name && c.name !== objective && !constraints[c.name]).map(c => (
@@ -409,7 +411,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   value={constraintType}
                   onChange={(e) => handleConstraintValueChange(name, e.target.value, constraintValue)}
                   className="w-[90px] px-1 py-1 rounded text-[10px]"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
                 >
                   {CONSTRAINT_TYPES.map(ct => <option key={ct.value} value={ct.value}>{ct.label}</option>)}
                 </select>
@@ -419,7 +421,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   value={constraintValue}
                   onChange={(e) => handleConstraintValueChange(name, constraintType, parseFloat(e.target.value) || 0)}
                   className="w-16 px-1.5 py-1 rounded text-[11px] font-mono text-right"
-                  style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                  style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 />
                 <button
                   onClick={() => handleRemoveConstraint(name)}
@@ -450,7 +452,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               value={maxIter}
               onChange={(e) => onUpdate("max_iter", parseInt(e.target.value) || 50)}
               className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
           </div>
           <div>
@@ -460,7 +462,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               value={tolerance}
               onChange={(e) => onUpdate("tolerance", parseFloat(e.target.value) || 1e-6)}
               className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-              style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
           </div>
         </div>
@@ -485,7 +487,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 value={chunkSize}
                 onChange={(e) => onUpdate("chunk_size", parseInt(e.target.value) || 500_000)}
                 className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -511,7 +513,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                     value={maxCdIterations}
                     onChange={(e) => onUpdate("max_cd_iterations", parseInt(e.target.value) || 10)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
                 <div>
@@ -521,7 +523,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                     value={cdTolerance}
                     onChange={(e) => onUpdate("cd_tolerance", parseFloat(e.target.value) || 1e-4)}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
-                    style={{ background: "var(--input-bg)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                    style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
                 </div>
               </div>

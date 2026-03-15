@@ -15,14 +15,30 @@ vi.mock("../editors", () => ({
   ),
 }))
 
-// Mock API client
-const mockListFiles = vi.fn()
-const mockReadFile = vi.fn()
-const mockCreateFile = vi.fn()
-const mockUpdateFile = vi.fn()
-const mockDeleteFile = vi.fn()
+// Mock API client — vi.hoisted runs before vi.mock hoisting
+const { mockListFiles, mockReadFile, mockCreateFile, mockUpdateFile, mockDeleteFile, MockApiError } = vi.hoisted(() => {
+  class MockApiError extends Error {
+    status: number
+    detail?: string
+    constructor(message: string, status: number, detail?: string) {
+      super(message)
+      this.name = "ApiError"
+      this.status = status
+      this.detail = detail
+    }
+  }
+  return {
+    mockListFiles: vi.fn(),
+    mockReadFile: vi.fn(),
+    mockCreateFile: vi.fn(),
+    mockUpdateFile: vi.fn(),
+    mockDeleteFile: vi.fn(),
+    MockApiError,
+  }
+})
 
 vi.mock("../../api/client", () => ({
+  ApiError: MockApiError,
   listUtilityFiles: (...args: any[]) => mockListFiles(...args),
   readUtilityFile: (...args: any[]) => mockReadFile(...args),
   createUtilityFile: (...args: any[]) => mockCreateFile(...args),
@@ -209,10 +225,9 @@ describe("UtilityPanel auto-save", () => {
   })
 
   it("shows syntax error from auto-save", async () => {
-    mockUpdateFile.mockResolvedValue({
-      status: "error", name: "features.py", module: "features",
-      error: "unexpected EOF", error_line: 3,
-    })
+    mockUpdateFile.mockRejectedValue(
+      new MockApiError("HTTP 400", 400, JSON.stringify({ error: "unexpected EOF", error_line: 3 })),
+    )
 
     render(<UtilityPanel {...defaultProps} />)
     await waitFor(() => expect(screen.getByTestId("code-editor")).toBeInTheDocument())
@@ -225,10 +240,9 @@ describe("UtilityPanel auto-save", () => {
 
   it("clears error when user edits again", async () => {
     mockUpdateFile
-      .mockResolvedValueOnce({
-        status: "error", name: "features.py", module: "features",
-        error: "unexpected EOF", error_line: 3,
-      })
+      .mockRejectedValueOnce(
+        new MockApiError("HTTP 400", 400, JSON.stringify({ error: "unexpected EOF", error_line: 3 })),
+      )
       .mockResolvedValueOnce({
         status: "ok", name: "features.py", module: "features", import_line: "",
       })
@@ -247,10 +261,9 @@ describe("UtilityPanel auto-save", () => {
   })
 
   it("shows error from failed auto-save", async () => {
-    mockUpdateFile.mockResolvedValue({
-      status: "error", name: "features.py", module: "features",
-      error: "Save failed", error_line: 1,
-    })
+    mockUpdateFile.mockRejectedValue(
+      new MockApiError("HTTP 400", 400, JSON.stringify({ error: "Save failed", error_line: 1 })),
+    )
 
     render(<UtilityPanel {...defaultProps} />)
     await waitFor(() => expect(screen.getByTestId("code-editor")).toBeInTheDocument())
@@ -262,10 +275,9 @@ describe("UtilityPanel auto-save", () => {
   })
 
   it("sets error-line attribute on editor when save returns error_line", async () => {
-    mockUpdateFile.mockResolvedValue({
-      status: "error", name: "features.py", module: "features",
-      error: "syntax error", error_line: 5,
-    })
+    mockUpdateFile.mockRejectedValue(
+      new MockApiError("HTTP 400", 400, JSON.stringify({ error: "syntax error", error_line: 5 })),
+    )
 
     render(<UtilityPanel {...defaultProps} />)
     await waitFor(() => expect(screen.getByTestId("code-editor")).toBeInTheDocument())

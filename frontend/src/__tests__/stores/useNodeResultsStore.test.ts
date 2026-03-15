@@ -451,6 +451,31 @@ describe("useNodeResultsStore", () => {
   })
 
   // ────────────────────────────────────────────────────────────────
+  // B20: bumpGraphVersion should only fire on structural changes
+  // (tested at the store level — App.tsx fingerprinting is the gate)
+  // ────────────────────────────────────────────────────────────────
+
+  describe("bumpGraphVersion idempotence", () => {
+    it("bumpGraphVersion increments by exactly 1 each call", () => {
+      const s = useNodeResultsStore.getState()
+      const v0 = s.graphVersion
+      s.bumpGraphVersion()
+      expect(useNodeResultsStore.getState().graphVersion).toBe(v0 + 1)
+      useNodeResultsStore.getState().bumpGraphVersion()
+      expect(useNodeResultsStore.getState().graphVersion).toBe(v0 + 2)
+    })
+
+    it("multiple rapid bumps are additive (no dedup at store level)", () => {
+      const s = useNodeResultsStore.getState()
+      const v0 = s.graphVersion
+      for (let i = 0; i < 5; i++) {
+        useNodeResultsStore.getState().bumpGraphVersion()
+      }
+      expect(useNodeResultsStore.getState().graphVersion).toBe(v0 + 5)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
   // clearNode
   // ────────────────────────────────────────────────────────────────
 

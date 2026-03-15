@@ -1467,3 +1467,106 @@ class TestPolarsFlattenToParquet:
         assert lf.collect()["x"].to_list() == [1, 2]
 
 
+# ---------------------------------------------------------------------------
+# read_json_flat — JSONL two-step pipeline (P6)
+# ---------------------------------------------------------------------------
+
+
+class TestReadJsonFlatJSONL:
+    """Tests for the two-step JSONL pipeline in read_json_flat."""
+
+    def test_basic_jsonl(self, tmp_path, monkeypatch):
+        """read_json_flat with a .jsonl file uses the two-step pipeline."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1, "y": "a"}\n{"x": 2, "y": "b"}\n')
+
+        lf = read_json_flat(str(data_file))
+        df = lf.collect()
+        assert df["x"].to_list() == [1, 2]
+        assert df["y"].to_list() == ["a", "b"]
+
+    def test_empty_jsonl(self, tmp_path, monkeypatch):
+        """Empty .jsonl produces a valid (empty) LazyFrame."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "empty.jsonl"
+        data_file.write_text("")
+
+        lf = read_json_flat(str(data_file))
+        df = lf.collect()
+        assert len(df) == 0
+
+    def test_single_line_jsonl(self, tmp_path, monkeypatch):
+        """Single-line .jsonl works correctly."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "one.jsonl"
+        data_file.write_text('{"val": 42}\n')
+
+        lf = read_json_flat(str(data_file))
+        df = lf.collect()
+        assert len(df) == 1
+        assert df["val"].to_list() == [42]
+
+    def test_nested_jsonl(self, tmp_path, monkeypatch):
+        """Nested JSONL records are flattened correctly."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "nested.jsonl"
+        data_file.write_text('{"addr": {"city": "London"}, "name": "Alice"}\n')
+
+        lf = read_json_flat(str(data_file))
+        df = lf.collect()
+        assert "addr.city" in df.columns
+        assert df["addr.city"][0] == "London"
+
+    def test_jsonl_cache_reuse(self, tmp_path, monkeypatch):
+        """Second call uses cache, not the two-step pipeline again."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1}\n{"x": 2}\n')
+
+        lf1 = read_json_flat(str(data_file))
+        assert lf1.collect()["x"].to_list() == [1, 2]
+
+        cache_path = _json_cache_path(str(data_file))
+        assert cache_path.exists()
+        first_mtime = cache_path.stat().st_mtime
+
+        lf2 = read_json_flat(str(data_file))
+        assert lf2.collect()["x"].to_list() == [1, 2]
+        assert cache_path.stat().st_mtime == first_mtime
+
+    def test_jsonl_raw_file_cleaned_up(self, tmp_path, monkeypatch):
+        """The intermediate .raw.parquet file is removed after success."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1}\n')
+
+        read_json_flat(str(data_file))
+
+        cache_path = _json_cache_path(str(data_file))
+        raw_path = cache_path.with_suffix(".raw.parquet")
+        assert cache_path.exists()
+        assert not raw_path.exists()
+
+    def test_jsonl_with_schema(self, tmp_path, monkeypatch):
+        """Explicit schema is applied to JSONL two-step pipeline."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"x": 1, "y": "a"}\n{"x": 2, "y": "b"}\n')
+
+        lf = read_json_flat(str(data_file), schema={"x": "int"})
+        df = lf.collect()
+        assert df.columns == ["x"]
+        assert df["x"].to_list() == [1, 2]
+
+    def test_jsonl_blank_lines_only(self, tmp_path, monkeypatch):
+        """JSONL file with only blank lines produces an empty result."""
+        monkeypatch.chdir(tmp_path)
+        data_file = tmp_path / "blanks.jsonl"
+        data_file.write_text("\n\n\n")
+
+        lf = read_json_flat(str(data_file))
+        df = lf.collect()
+        assert len(df) == 0
+
+

@@ -23,6 +23,9 @@ from typing import Generic, TypeVar
 K = TypeVar("K")
 V = TypeVar("V")
 
+_MISSING = object()
+"""Sentinel distinguishing a cache miss from a stored ``None`` value."""
+
 
 class LRUCache(Generic[K, V]):
     """Thread-safe bounded LRU cache with optional TTL.
@@ -59,8 +62,8 @@ class LRUCache(Generic[K, V]):
         and ``None`` is returned.
         """
         with self._lock:
-            value = self._data.get(key)
-            if value is None:
+            value = self._data.get(key, _MISSING)
+            if value is _MISSING:
                 return None
             if self._ttl is not None:
                 stored_at = self._timestamps.get(key, 0.0)

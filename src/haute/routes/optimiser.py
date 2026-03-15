@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from haute._logging import get_logger
 from haute._sandbox import _get_project_root
 from haute._types import SolveResultLike
+from haute.routes._helpers import _INTERNAL_ERROR_DETAIL, validate_safe_path
 from haute.routes._job_store import JobStore
 from haute.routes._optimiser_service import (
     _DEFAULT_CHUNK_SIZE,
@@ -63,12 +64,14 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
         start = job.get("start_time")
         timeout = job.get("timeout", _DEFAULT_TIMEOUT)
         if start and (time.monotonic() - start) > timeout:
-            job.update({
+            # P7: Atomic update to avoid races with background solver thread
+            _store.atomic_update(job_id, {
                 "status": "error",
                 "message": f"Solve timed out after {timeout}s. "
                 "Increase timeout or simplify the problem.",
                 "elapsed_seconds": time.monotonic() - start,
             })
+            job = _store.require_job(job_id)
 
     return OptimiserStatusResponse(
         status=job.get("status", "unknown"),
@@ -83,12 +86,7 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
 def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
     """Apply solved lambdas to the scored data."""
     logger.info("apply_requested", job_id=body.job_id)
-    job = _store.require_job(body.job_id)
-    if job.get("status") != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
-        )
+    job = _store.require_completed_job(body.job_id)
 
     solve_result = job.get("solve_result")
     if solve_result is None:
@@ -105,18 +103,13 @@ def apply_lambdas(body: OptimiserApplyRequest) -> OptimiserApplyResponse:
         )
     except Exception as exc:
         logger.error("apply_failed", error=str(exc), job_id=body.job_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/frontier", response_model=OptimiserFrontierResponse)
 def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
     """Compute efficient frontier for a completed optimisation job."""
-    job = _store.require_job(body.job_id)
-    if job.get("status") != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
-        )
+    job = _store.require_completed_job(body.job_id)
 
     solver = job.get("solver")
     quote_grid = job.get("quote_grid")
@@ -142,7 +135,7 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
         )
     except Exception as exc:
         logger.error("frontier_failed", error=str(exc), job_id=body.job_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 def _build_artifact_payload(
@@ -190,12 +183,7 @@ def _build_artifact_payload(
 @router.post("/save", response_model=OptimiserSaveResponse)
 def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
     """Save the optimisation result to disk."""
-    job = _store.require_job(body.job_id)
-    if job.get("status") != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
-        )
+    job = _store.require_completed_job(body.job_id)
 
     solve_result = job.get("solve_result")
     solver = job.get("solver")
@@ -203,9 +191,7 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
         raise HTTPException(status_code=400, detail="Job has no solve result")
 
     base = _get_project_root()
-    out = (base / body.output_path).resolve()
-    if not str(out).startswith(str(base)):
-        raise HTTPException(status_code=403, detail="Cannot save outside project root")
+    out = validate_safe_path(base, body.output_path)
 
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -225,22 +211,17 @@ def save_result(body: OptimiserSaveRequest) -> OptimiserSaveResponse:
         logger.error("save_failed", error=str(exc), job_id=body.job_id)
         raise HTTPException(
             status_code=500,
-            detail=f"Filesystem error saving optimiser result: {exc}",
+            detail="Filesystem error saving optimiser result. Check the server logs for details.",
         )
     except Exception as exc:
         logger.error("save_failed", error=str(exc), job_id=body.job_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/mlflow/log", response_model=OptimiserMlflowLogResponse)
 def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
     """Log optimisation results to MLflow."""
-    job = _store.require_job(body.job_id)
-    if job.get("status") != "completed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job '{body.job_id}' is not completed (status: {job.get('status')})",
-        )
+    job = _store.require_completed_job(body.job_id)
 
     solver = job.get("solver")
     solve_result = job.get("solve_result")
@@ -317,4 +298,4 @@ def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
         )
     except Exception as exc:
         logger.error("mlflow_log_failed", error=str(exc), job_id=body.job_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)

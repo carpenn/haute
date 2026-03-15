@@ -5,7 +5,7 @@ from pathlib import Path
 
 import click
 
-from haute.cli._helpers import _load_deploy_config
+from haute.cli._helpers import _load_deploy_config, resolve_transport
 
 
 @click.command()
@@ -21,8 +21,6 @@ def smoke(endpoint_suffix: str | None) -> None:
     endpoint and validates the response. Used after staging deploys to
     verify the endpoint is functional.
     """
-    from haute.deploy._container import _CONTAINER_BASED_TARGETS
-
     config = _load_deploy_config(require_toml=True)
     if endpoint_suffix:
         config = config.override(endpoint_suffix=endpoint_suffix)
@@ -42,20 +40,14 @@ def smoke(endpoint_suffix: str | None) -> None:
     click.echo(f"Smoke testing endpoint: {endpoint_name}")
     click.echo(f"  Target: {config.target}")
 
+    transport = resolve_transport(config)
+
     all_ok = True
 
-    if config.target == "databricks":
+    if transport.kind == "databricks":
         all_ok = _smoke_databricks(endpoint_name or "", json_files)
-    elif config.target in _CONTAINER_BASED_TARGETS:
-        endpoint_url = config.ci.staging_endpoint_url
-        if not endpoint_url:
-            click.echo(
-                "Error: No staging endpoint URL configured.\n"
-                "  Set [ci.staging] endpoint_url in haute.toml.",
-                err=True,
-            )
-            raise SystemExit(1)
-        all_ok = _smoke_http(endpoint_url, json_files)
+    elif transport.kind == "http":
+        all_ok = _smoke_http(transport.staging_url, json_files)
     else:
         click.echo(
             f"  \u26a0 Smoke test not yet implemented for target '{config.target}'.",

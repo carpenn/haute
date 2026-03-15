@@ -50,12 +50,57 @@ def _build_params(source_names: list[str]) -> str:
     return "df: pl.LazyFrame"
 
 
+def _sanitize_description(desc: str) -> str:
+    """Sanitize a description string for safe use inside triple-quoted docstrings.
+
+    Replaces ``\"\"\"`` with ``'''`` so that the generated docstring
+    ``\"\"\"{description}\"\"\"`` remains syntactically valid Python.
+
+    Also handles two edge cases that would break the closing ``\"\"\"``:
+
+    - **Trailing double-quotes** merge with the closing ``\"\"\"`` (e.g.
+      ``\"\"\"{desc}\"\"\"`` becomes ``\"\"\"foo\"\"\"\"`` which is invalid).
+      Every trailing ``"`` is backslash-escaped.  If the text *before* the
+      trailing quotes already ends with an odd number of backslashes, an
+      extra backslash is inserted so the escape isn't "absorbed".
+    - **Trailing backslash** would escape the closing quote.  An extra
+      backslash is appended to make the count even.
+    """
+    desc = desc.replace('"""', "'''")
+
+    # ── Trailing double-quotes ────────────────────────────────────────
+    stripped = desc.rstrip('"')
+    n_quotes = len(desc) - len(stripped)
+    if n_quotes > 0:
+        # If the text before the quotes ends with an odd number of
+        # backslashes, our first \" would be parsed as an escaped
+        # backslash + bare quote.  Pad to make the backslash count even.
+        core = stripped.rstrip("\\")
+        n_backslashes = len(stripped) - len(core)
+        if n_backslashes % 2 == 1:
+            stripped = stripped + "\\"
+        desc = stripped + '\\"' * n_quotes
+    else:
+        # ── Trailing backslash (no trailing quotes) ───────────────────
+        core = desc.rstrip("\\")
+        n_backslashes = len(desc) - len(core)
+        if n_backslashes % 2 == 1:
+            desc = desc + "\\"
+
+    return desc
+
+
 def _common_node_fields(node: GraphNode) -> tuple[str, str, dict]:
-    """Extract the (func_name, description, config) triple used by every builder."""
+    """Extract the (func_name, description, config) triple used by every builder.
+
+    The description is sanitized so that triple-quotes cannot break the
+    generated docstring.
+    """
     data = node.data
+    raw_desc = data.description or f"{data.label} node"
     return (
         _sanitize_func_name(data.label),
-        data.description or f"{data.label} node",
+        _sanitize_description(raw_desc),
         data.config,
     )
 
@@ -74,12 +119,13 @@ def _api_input_template(path: str) -> str:
     JSON/JSONL files use ``read_json_flat``, CSV uses ``scan_csv``,
     everything else (parquet / flat) uses ``scan_parquet``.
     """
-    if path.endswith((".json", ".jsonl")):
+    lower = path.lower()
+    if lower.endswith((".json", ".jsonl")):
         body = (
             '    from haute._json_flatten import read_json_flat\n'
             '    return read_json_flat("{path}", config_path="{config_path}")'
         )
-    elif path.endswith(".csv"):
+    elif lower.endswith(".csv"):
         body = '    return pl.scan_csv("{path}")'
     else:
         body = '    return pl.scan_parquet("{path}")'
@@ -112,6 +158,20 @@ def {func_name}() -> pl.LazyFrame:
     return pl.scan_csv("{path}")
 '''
 
+_SOURCE_JSON = '''\
+@pipeline.node(path="{path}")
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.read_json("{path}").lazy()
+'''
+
+_SOURCE_JSONL = '''\
+@pipeline.node(path="{path}")
+def {func_name}() -> pl.LazyFrame:
+    """{description}"""
+    return pl.scan_ndjson("{path}")
+'''
+
 _SOURCE_DATABRICKS = '''\
 @pipeline.node(table="{table}"{http_path_kw}{query_kw})
 def {func_name}() -> pl.LazyFrame:
@@ -124,8 +184,10 @@ _MODEL_SCORE = '''\
 @pipeline.node({decorator_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
+    from pathlib import Path
     from haute.graph_utils import score_from_config
-    return score_from_config({first_param}, config="{config_path}")
+    base = str(Path(__file__).parent)
+    return score_from_config({first_param}, config="{config_path}", base_dir=base)
 '''
 
 _MODEL_SCORE_USER_CODE_SENTINEL = "# -- user code --"
@@ -156,7 +218,8 @@ _SINK_PARQUET = '''\
 @pipeline.node(sink="{path}", format="parquet")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    {first}.collect(engine="streaming").write_parquet("{path}")
+    from haute._polars_utils import safe_sink
+    safe_sink({first}, "{path}")
     return {first}
 '''
 
@@ -164,7 +227,8 @@ _SINK_CSV = '''\
 @pipeline.node(sink="{path}", format="csv")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
-    {first}.collect(engine="streaming").write_csv("{path}")
+    from haute._polars_utils import safe_sink
+    safe_sink({first}, "{path}", fmt="csv")
     return {first}
 '''
 
@@ -357,8 +421,20 @@ def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
             http_path_kw=http_path_kw,
             query_kw=query_kw,
         )
-    elif path.endswith(".csv"):
+    elif path.lower().endswith(".csv"):
         return _SOURCE_CSV.format(
+            func_name=func_name,
+            description=description,
+            path=path,
+        )
+    elif path.lower().endswith(".jsonl"):
+        return _SOURCE_JSONL.format(
+            func_name=func_name,
+            description=description,
+            path=path,
+        )
+    elif path.lower().endswith(".json"):
+        return _SOURCE_JSON.format(
             func_name=func_name,
             description=description,
             path=path,
@@ -444,8 +520,10 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
             f'@pipeline.node({decorator_kwargs})\n'
             f'def {func_name}({params}) -> pl.LazyFrame:\n'
             f'    """{description}"""\n'
+            f'    from pathlib import Path\n'
             f'    from haute.graph_utils import score_from_config\n'
-            f'    result = score_from_config({first_param}, config="{cfg_path}")\n'
+            f'    base = str(Path(__file__).parent)\n'
+            f'    result = score_from_config({first_param}, config="{cfg_path}", base_dir=base)\n'
             f'    {_MODEL_SCORE_USER_CODE_SENTINEL}\n'
             f'{indented}\n'
             f'    return result\n'
@@ -545,68 +623,46 @@ def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
     )
 
 
-@_register_codegen(NodeType.SCENARIO_EXPANDER)
-def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
-    func_name, description, config = _common_node_fields(node)
-    params = _build_params(source_names)
-    first = _first_source(source_names)
-    extra_parts = _build_extra_kwargs(config, SCENARIO_EXPANDER_CONFIG_KEYS)
-    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-    return _SCENARIO_EXPANDER.format(
-        func_name=func_name,
-        description=description,
-        params=params,
-        first=first,
-        extra_kwargs=extra_kwargs,
-    )
+def _make_passthrough_builder(
+    template: str, config_keys: tuple[str, ...],
+) -> CodegenBuilder:
+    """Factory for codegen builders that share the same passthrough pattern.
+
+    Each returned builder extracts common node fields, builds extra kwargs from
+    the given *config_keys*, and formats the *template*.  This eliminates the
+    duplication across scenario-expander, optimiser, optimiser-apply, and
+    modelling builders.
+    """
+
+    def builder(node: GraphNode, source_names: list[str]) -> str:
+        func_name, description, config = _common_node_fields(node)
+        params = _build_params(source_names)
+        first = _first_source(source_names)
+        extra_parts = _build_extra_kwargs(config, config_keys)
+        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        return template.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first=first,
+            extra_kwargs=extra_kwargs,
+        )
+
+    return builder
 
 
-@_register_codegen(NodeType.OPTIMISER)
-def _gen_optimiser(node: GraphNode, source_names: list[str]) -> str:
-    func_name, description, config = _common_node_fields(node)
-    params = _build_params(source_names)
-    first = _first_source(source_names)
-    extra_parts = _build_extra_kwargs(config, OPTIMISER_CONFIG_KEYS)
-    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-    return _OPTIMISER.format(
-        func_name=func_name,
-        description=description,
-        params=params,
-        first=first,
-        extra_kwargs=extra_kwargs,
-    )
-
-
-@_register_codegen(NodeType.OPTIMISER_APPLY)
-def _gen_optimiser_apply(node: GraphNode, source_names: list[str]) -> str:
-    func_name, description, config = _common_node_fields(node)
-    params = _build_params(source_names)
-    first = _first_source(source_names)
-    extra_parts = _build_extra_kwargs(config, OPTIMISER_APPLY_CONFIG_KEYS)
-    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-    return _OPTIMISER_APPLY.format(
-        func_name=func_name,
-        description=description,
-        params=params,
-        first=first,
-        extra_kwargs=extra_kwargs,
-    )
-
-
-@_register_codegen(NodeType.MODELLING)
-def _gen_modelling(node: GraphNode, source_names: list[str]) -> str:
-    func_name, description, config = _common_node_fields(node)
-    params = _build_params(source_names)
-    extra_parts = _build_extra_kwargs(config, MODELLING_CONFIG_KEYS)
-    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
-    first = _first_source(source_names)
-    return _MODELLING.format(
-        func_name=func_name,
-        description=description,
-        params=params,
-        first=first,
-        extra_kwargs=extra_kwargs,
-    )
+_CODEGEN_BUILDERS[NodeType.SCENARIO_EXPANDER] = _make_passthrough_builder(
+    _SCENARIO_EXPANDER, SCENARIO_EXPANDER_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.OPTIMISER] = _make_passthrough_builder(
+    _OPTIMISER, OPTIMISER_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.OPTIMISER_APPLY] = _make_passthrough_builder(
+    _OPTIMISER_APPLY, OPTIMISER_APPLY_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.MODELLING] = _make_passthrough_builder(
+    _MODELLING, MODELLING_CONFIG_KEYS,
+)
 
 
 @_register_codegen(NodeType.EXTERNAL_FILE)
@@ -713,6 +769,12 @@ def _generate_node_code(node: GraphNode, source_names: list[str] | None = None) 
         return builder(node, source_names)
 
     # Fallback: treat unknown types as transforms
+    logger.warning(
+        "unknown_node_type_fallback",
+        node_type=str(node.data.nodeType),
+        node_id=node.id,
+        label=node.data.label,
+    )
     return _gen_transform(node, source_names)
 
 
@@ -730,7 +792,9 @@ def _instance_to_code(
     """
     data = node.data
     label = data.label
-    description = data.description or f"Instance of {original_func_name}"
+    description = _sanitize_description(
+        data.description or f"Instance of {original_func_name}"
+    )
     func_name = _sanitize_func_name(label)
 
     if source_names is None:

@@ -5,6 +5,7 @@ import PolarsIcon from "../components/PolarsIcon"
 import { NODE_TYPES, SOURCE_ONLY_TYPES, SINK_ONLY_TYPES, nodeTypeIcons, nodeTypeColors, nodeTypeLabels } from "../utils/nodeTypes"
 import { formatValueCompact } from "../utils/formatValue"
 import useSettingsStore from "../stores/useSettingsStore"
+import type { HauteNodeData } from "../types/node"
 
 const statusColors: Record<string, string> = {
   ok: "#22c55e",
@@ -12,16 +13,7 @@ const statusColors: Record<string, string> = {
   running: "#6366f1",
 }
 
-export type PipelineNodeData = {
-  label: string
-  description: string
-  nodeType: string
-  config?: Record<string, unknown>
-  _status?: "ok" | "error" | "running"
-  _traceActive?: boolean
-  _traceDimmed?: boolean
-  _traceValue?: unknown
-}
+export type PipelineNodeData = HauteNodeData
 
 /** Isolated component so only LiveSwitch nodes subscribe to the settings store. */
 function LiveSwitchBadge({ accent }: { accent: string }) {

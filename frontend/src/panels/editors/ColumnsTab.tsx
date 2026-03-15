@@ -1,16 +1,18 @@
 import { useState, useMemo } from "react"
 import { Search } from "lucide-react"
-import { getDtypeColor } from "../../utils/dtypeColors"
 import { configField } from "../../utils/configField"
 import type { OnUpdateConfig } from "./_shared"
+import type { ColumnInfo } from "../../types/node"
+import ColumnTable from "../../components/ColumnTable"
+import { EditorLabel } from "../../components/form"
 
 interface ColumnsTabProps {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
   /** Full column set before selected_columns filtering */
-  availableColumns: { name: string; dtype: string }[]
+  availableColumns: ColumnInfo[]
   /** Current output columns (post-filter) */
-  columns: { name: string; dtype: string }[]
+  columns: ColumnInfo[]
 }
 
 export default function ColumnsTab({ config, onUpdate, availableColumns, columns }: ColumnsTabProps) {
@@ -76,9 +78,7 @@ export default function ColumnsTab({ config, onUpdate, availableColumns, columns
   return (
     <div className="px-4 py-3 flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-          Output Columns
-        </span>
+        <EditorLabel as="span">Output Columns</EditorLabel>
         <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
           {selectedCount} / {allColumns.length}
         </span>
@@ -115,48 +115,16 @@ export default function ColumnsTab({ config, onUpdate, availableColumns, columns
       </div>
 
       {/* Column table */}
-      <div className="rounded-lg overflow-hidden max-h-[400px] overflow-y-auto" style={{ border: "1px solid var(--border)", background: "var(--bg-input)" }}>
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
-              <th className="text-left px-2.5 py-1.5 font-semibold" style={{ color: "var(--text-muted)", width: 28 }}></th>
-              <th className="text-left px-2.5 py-1.5 font-semibold" style={{ color: "var(--text-muted)" }}>Column</th>
-              <th className="text-left px-2.5 py-1.5 font-semibold" style={{ color: "var(--text-muted)" }}>Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((col) => {
-              const checked = isSelected(col.name)
-              return (
-                <tr
-                  key={col.name}
-                  className="cursor-pointer transition-colors"
-                  style={{ borderBottom: "1px solid var(--border)" }}
-                  onClick={() => toggleColumn(col.name)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)" }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
-                >
-                  <td className="px-2.5 py-1.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleColumn(col.name)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="accent-blue-500 rounded"
-                    />
-                  </td>
-                  <td className="px-2.5 py-1.5 font-mono" style={{ color: checked ? "var(--text-primary)" : "var(--text-muted)" }}>
-                    {col.name}
-                  </td>
-                  <td className="px-2.5 py-1.5">
-                    <span className={`text-[11px] font-medium ${getDtypeColor(col.dtype)}`}>{col.dtype}</span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      <ColumnTable
+        columns={filtered}
+        className="max-h-[400px] overflow-y-auto"
+        checkbox={{
+          isChecked: (name) => isSelected(name),
+          onToggle: toggleColumn,
+        }}
+        interactiveRows
+        nameColor={(name) => isSelected(name) ? "var(--text-primary)" : "var(--text-muted)"}
+      />
 
       {!isAllSelected && (
         <p className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>

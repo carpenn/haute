@@ -261,3 +261,77 @@ class TestConcurrency:
             t.join()
 
         assert not errors
+
+
+# ---------------------------------------------------------------------------
+# B17: None values vs cache misses (sentinel fix)
+# ---------------------------------------------------------------------------
+
+
+class TestNoneValues:
+    """Verify that ``None`` stored as a value is distinguishable from a miss."""
+
+    def test_get_returns_none_for_stored_none(self) -> None:
+        """A key explicitly stored with value=None should return None, not be
+        confused with a miss."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=4)
+        cache.put("k", None)
+        assert cache.get("k") is None  # should be a hit, not a miss
+        assert "k" in cache  # key is present
+
+    def test_get_returns_none_for_missing_key(self) -> None:
+        """A key that was never stored should also return None (miss)."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=4)
+        assert cache.get("missing") is None
+        assert "missing" not in cache
+
+    def test_none_value_not_confused_with_miss(self) -> None:
+        """The critical distinction: after storing None, the key must remain
+        in the cache and not be evicted/skipped by a `get`."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=2)
+        cache.put("a", None)
+        cache.put("b", 42)
+        # "a" has None value but should still be in cache
+        assert len(cache) == 2
+        assert cache.get("a") is None
+        assert "a" in cache
+        assert cache.get("b") == 42
+
+    def test_none_value_promotes_on_get(self) -> None:
+        """Getting a None-valued entry should promote it (LRU behavior),
+        so a subsequent put evicts the other key instead."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=2)
+        cache.put("a", None)
+        cache.put("b", 1)
+        cache.get("a")  # promote "a"; "b" is now LRU
+        cache.put("c", 2)  # should evict "b", not "a"
+        assert "a" in cache
+        assert "b" not in cache
+        assert cache.get("a") is None
+
+    def test_overwrite_none_with_value(self) -> None:
+        """A None value can be overwritten with a real value."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=4)
+        cache.put("k", None)
+        assert cache.get("k") is None
+        cache.put("k", 99)
+        assert cache.get("k") == 99
+
+    def test_overwrite_value_with_none(self) -> None:
+        """A real value can be overwritten with None."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=4)
+        cache.put("k", 42)
+        assert cache.get("k") == 42
+        cache.put("k", None)
+        assert cache.get("k") is None
+        assert "k" in cache
+
+    def test_none_value_with_ttl(self) -> None:
+        """None values should be subject to TTL expiry like any other value."""
+        cache: LRUCache[str, int | None] = LRUCache(max_size=10, ttl=0.05)
+        cache.put("k", None)
+        assert "k" in cache
+        assert cache.get("k") is None  # hit before TTL
+        time.sleep(0.08)
+        assert cache.get("k") is None  # expired — but return value is same
+        assert "k" not in cache  # key has been evicted

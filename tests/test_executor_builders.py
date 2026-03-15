@@ -12,8 +12,88 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from haute.executor import _build_node_fn
+from haute.executor import NodeBuildContext, _build_node_fn
+from haute.graph_utils import GraphNode, NodeData
 from tests.conftest import make_node as _n
+
+# ---------------------------------------------------------------------------
+# NodeBuildContext property tests
+# ---------------------------------------------------------------------------
+
+
+class TestNodeBuildContextProperties:
+    """Tests for the func_name and config computed properties."""
+
+    def _make_ctx(
+        self,
+        label: str = "My Node",
+        config: dict | None = None,
+    ) -> NodeBuildContext:
+        node = GraphNode(
+            id="n1",
+            data=NodeData(
+                label=label,
+                nodeType="transform",
+                config=config or {},
+            ),
+        )
+        return NodeBuildContext(
+            node=node,
+            source_names=[],
+            row_limit=None,
+            node_map=None,
+            orig_source_names=None,
+            preamble_ns=None,
+            scenario=None,
+        )
+
+    def test_func_name_sanitizes_spaces(self) -> None:
+        ctx = self._make_ctx(label="My Node")
+        assert ctx.func_name == "My_Node"
+        assert ctx.func_name.isidentifier()
+
+    def test_func_name_sanitizes_special_chars(self) -> None:
+        ctx = self._make_ctx(label="rate@2024!")
+        name = ctx.func_name
+        assert "@" not in name
+        assert "!" not in name
+        assert name.isidentifier()
+
+    def test_func_name_sanitizes_leading_digit(self) -> None:
+        ctx = self._make_ctx(label="1st node")
+        assert ctx.func_name.isidentifier()
+        assert not ctx.func_name[0].isdigit()
+
+    def test_func_name_sanitizes_reserved_word(self) -> None:
+        ctx = self._make_ctx(label="return")
+        assert ctx.func_name != "return"
+        assert ctx.func_name.isidentifier()
+
+    def test_func_name_empty_label(self) -> None:
+        ctx = self._make_ctx(label="")
+        assert ctx.func_name.isidentifier()
+
+    def test_config_returns_node_config_dict(self) -> None:
+        cfg = {"path": "data.csv", "sourceType": "flat_file"}
+        ctx = self._make_ctx(config=cfg)
+        assert ctx.config is ctx.node.data.config
+        assert ctx.config == cfg
+
+    def test_config_empty_dict(self) -> None:
+        ctx = self._make_ctx(config={})
+        assert ctx.config == {}
+
+    def test_config_returns_same_object(self) -> None:
+        """config property should return the same dict (not a copy)."""
+        cfg = {"key": "value"}
+        ctx = self._make_ctx(config=cfg)
+        assert ctx.config is ctx.config  # same object on repeated access
+
+    def test_func_name_consistent_across_calls(self) -> None:
+        """func_name should return the same value on repeated access."""
+        ctx = self._make_ctx(label="Test Node")
+        assert ctx.func_name == ctx.func_name
+
 
 # ---------------------------------------------------------------------------
 # Helpers

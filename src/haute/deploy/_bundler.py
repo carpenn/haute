@@ -63,10 +63,27 @@ def collect_artifacts(
             artifacts[artifact_name] = abs_path
 
         elif node_type == NodeType.MODEL_SCORE:
+            source_type = config.get("sourceType", "run")
             run_id = config.get("run_id", "")
             artifact_path = config.get("artifact_path", "")
-            if not run_id or not artifact_path:
-                continue
+
+            if source_type == "registered":
+                registered_model = config.get("registered_model", "")
+                version = config.get("version", "")
+                if not registered_model:
+                    logger.warning(
+                        "model_score_skip_no_registered_model",
+                        node_id=nid,
+                    )
+                    continue
+                run_id, artifact_path = _resolve_registered_model(
+                    registered_model, version,
+                )
+            else:
+                # source_type == "run" (default)
+                if not run_id or not artifact_path:
+                    continue
+
             # Download from MLflow at deploy time so the artifact is
             # bundled into the container / MLflow model package.
             local_path = _download_model_artifact(
@@ -106,6 +123,68 @@ def _resolve_path(raw_path: str, pipeline_dir: Path) -> Path:
 def _artifact_name(node_id: str, path: Path) -> str:
     """Generate a unique artifact name from node ID and filename."""
     return f"{node_id}__{path.name}"
+
+
+def _resolve_registered_model(
+    registered_model: str, version: str,
+) -> tuple[str, str]:
+    """Resolve a registered model name + version to (run_id, artifact_path).
+
+    Uses MLflow's model registry to look up the concrete run that produced
+    the model version, then auto-discovers the artifact path within that run.
+
+    Args:
+        registered_model: Registered model name (e.g. ``"my-model"``).
+        version: Version string (``"1"``, ``"2"``, ``"latest"``, or ``""``).
+
+    Returns:
+        Tuple of ``(run_id, artifact_path)``.
+
+    Raises:
+        ImportError: If ``mlflow`` is not installed.
+        ValueError: If the model or version cannot be found, or if the
+            resolved model version has no associated run.
+    """
+    try:
+        import mlflow
+    except ImportError:
+        raise ImportError(
+            "mlflow is required to bundle MODEL_SCORE artifacts. "
+            "Install it with: pip install mlflow"
+        ) from None
+
+    from mlflow.tracking import MlflowClient
+
+    from haute._mlflow_io import _find_model_artifact
+    from haute._mlflow_utils import resolve_version
+    from haute.modelling._mlflow_log import resolve_tracking_backend
+
+    tracking_uri, _ = resolve_tracking_backend()
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient(tracking_uri=tracking_uri)
+
+    resolved_version = resolve_version(client, registered_model, version)
+    mv = client.get_model_version(registered_model, resolved_version)
+    run_id = mv.run_id or ""
+
+    if not run_id:
+        raise ValueError(
+            f"Registered model '{registered_model}' version {resolved_version} "
+            "has no associated run_id. Cannot download artifact."
+        )
+
+    # Auto-discover the artifact path (e.g. "model.cbm" or "model/")
+    artifact_path, _flavor = _find_model_artifact(client, run_id)
+
+    logger.info(
+        "registered_model_resolved",
+        model=registered_model,
+        version=resolved_version,
+        run_id=run_id,
+        artifact_path=artifact_path,
+    )
+
+    return run_id, artifact_path
 
 
 def _download_model_artifact(

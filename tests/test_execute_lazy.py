@@ -6,6 +6,7 @@ Covers:
   - _execute_lazy             — lazy execution path
   - _build_funcs              — function building for eager execution
   - _execute_eager_core       — eager execution with swallow_errors, timings, memory
+  - _apply_selected_columns   — shared column-filter helper (D4)
   - EagerResult               — named tuple structure
 """
 
@@ -16,6 +17,7 @@ import pytest
 
 from haute._execute_lazy import (
     EagerResult,
+    _apply_selected_columns,
     _build_funcs,
     _execute_eager_core,
     _execute_lazy,
@@ -854,3 +856,208 @@ class TestCheckpointing:
         assert set(df_j2.columns) >= {"key", "a", "c"}
         assert len(df_j1) == 2
         assert len(df_j2) == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D4: _apply_selected_columns helper
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestApplySelectedColumns:
+    """Tests for the shared _apply_selected_columns helper."""
+
+    def test_lazyframe_selects_valid_columns(self):
+        """LazyFrame: only valid selected_columns are kept."""
+        lf = pl.DataFrame({"a": [1], "b": [2], "c": [3]}).lazy()
+        result = _apply_selected_columns(lf, {"selected_columns": ["a", "c"]})
+        assert isinstance(result, pl.LazyFrame)
+        df = result.collect()
+        assert df.columns == ["a", "c"]
+
+    def test_dataframe_selects_valid_columns(self):
+        """DataFrame: only valid selected_columns are kept."""
+        df = pl.DataFrame({"a": [1], "b": [2], "c": [3]})
+        result = _apply_selected_columns(df, {"selected_columns": ["a", "c"]})
+        assert isinstance(result, pl.DataFrame)
+        assert result.columns == ["a", "c"]
+
+    def test_no_selected_columns_returns_unchanged(self):
+        """Missing or None selected_columns returns the frame unchanged."""
+        lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
+        result = _apply_selected_columns(lf, {})
+        schema = result.collect_schema().names()
+        assert schema == ["a", "b"]
+
+    def test_empty_selected_columns_returns_unchanged(self):
+        """Empty list selected_columns returns the frame unchanged."""
+        lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
+        result = _apply_selected_columns(lf, {"selected_columns": []})
+        schema = result.collect_schema().names()
+        assert schema == ["a", "b"]
+
+    def test_all_columns_selected_returns_unchanged(self):
+        """When all columns are in selected_columns, no projection is applied."""
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        result = _apply_selected_columns(df, {"selected_columns": ["a", "b"]})
+        # Should be the exact same object (no unnecessary projection)
+        assert result.columns == ["a", "b"]
+
+    def test_nonexistent_columns_ignored(self):
+        """Columns in selected_columns that don't exist are silently skipped."""
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        result = _apply_selected_columns(df, {"selected_columns": ["a", "missing"]})
+        assert result.columns == ["a"]
+
+    def test_all_nonexistent_returns_unchanged(self):
+        """If no selected_columns exist in the frame, frame is unchanged."""
+        df = pl.DataFrame({"a": [1], "b": [2]})
+        result = _apply_selected_columns(df, {"selected_columns": ["x", "y"]})
+        assert result.columns == ["a", "b"]
+
+    def test_preserves_data_values(self):
+        """Verify data integrity after column filtering."""
+        df = pl.DataFrame({"a": [10, 20], "b": [30, 40], "c": [50, 60]})
+        result = _apply_selected_columns(df, {"selected_columns": ["a", "c"]})
+        assert result["a"].to_list() == [10, 20]
+        assert result["c"].to_list() == [50, 60]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D3: _execute_lazy delegates to _build_funcs
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestExecuteLazyDelegatesToBuildFuncs:
+    """Verify that _execute_lazy uses _build_funcs (not inline loop)."""
+
+    def test_row_limit_none_forwarded(self):
+        """_execute_lazy should pass row_limit=None to _build_funcs."""
+        captured = {}
+
+        def build_fn(node, **kwargs):
+            captured[node.id] = kwargs
+            if node.data.nodeType == NodeType.DATA_SOURCE:
+                return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
+            return node.id, lambda *dfs: dfs[0], False
+
+        g = PipelineGraph(
+            nodes=[_source_node("src")],
+            edges=[],
+        )
+        _execute_lazy(g, build_fn)
+        # _build_funcs always passes row_limit — lazy path sends None
+        assert captured["src"]["row_limit"] is None
+
+    def test_node_map_always_forwarded(self):
+        """_execute_lazy should always pass node_map to build_node_fn (via _build_funcs)."""
+        captured = {}
+
+        def build_fn(node, **kwargs):
+            captured[node.id] = kwargs
+            if node.data.nodeType == NodeType.DATA_SOURCE:
+                return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
+            return node.id, lambda *dfs: dfs[0], False
+
+        g = PipelineGraph(
+            nodes=[_source_node("src"), _transform_node("t")],
+            edges=[_e("src", "t")],
+        )
+        _execute_lazy(g, build_fn)
+        # node_map should always be passed (not conditionally)
+        assert "node_map" in captured["src"]
+        assert "node_map" in captured["t"]
+
+    def test_preamble_ns_forwarded_even_when_none(self):
+        """_execute_lazy should pass preamble_ns through to _build_funcs."""
+        captured = {}
+
+        def build_fn(node, **kwargs):
+            captured[node.id] = kwargs
+            return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
+
+        g = PipelineGraph(
+            nodes=[_source_node("src")],
+            edges=[],
+        )
+        _execute_lazy(g, build_fn, preamble_ns=None)
+        # preamble_ns is always forwarded (even if None)
+        assert "preamble_ns" in captured["src"]
+
+    def test_scenario_forwarded(self):
+        """_execute_lazy should forward the scenario to _build_funcs."""
+        captured = {}
+
+        def build_fn(node, **kwargs):
+            captured[node.id] = kwargs
+            return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
+
+        g = PipelineGraph(
+            nodes=[_source_node("src")],
+            edges=[],
+        )
+        _execute_lazy(g, build_fn, scenario="test_batch")
+        assert captured["src"]["scenario"] == "test_batch"
+
+    def test_lazy_execution_still_works_after_refactor(self):
+        """End-to-end: lazy chain still works after switching to _build_funcs."""
+        g = PipelineGraph(
+            nodes=[_source_node("s"), _transform_node("t")],
+            edges=[_e("s", "t")],
+        )
+        outputs, order, parents, id_to_name = _execute_lazy(g, _simple_build_fn)
+        df = outputs["t"].collect()
+        assert "y" in df.columns
+        assert df["y"].to_list() == [2, 4, 6]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D4: selected_columns applied consistently in lazy and eager paths
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSelectedColumnsInPaths:
+    """Verify selected_columns filtering works in both lazy and eager execution."""
+
+    def test_lazy_path_applies_selected_columns(self):
+        """_execute_lazy applies selected_columns using _apply_selected_columns."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s"),
+                _transform_node("t", selected_columns=["x"]),
+            ],
+            edges=[_e("s", "t")],
+        )
+        outputs, *_ = _execute_lazy(g, _simple_build_fn)
+        df = outputs["t"].collect()
+        # Only "x" should survive (not "y" which is added by transform)
+        assert df.columns == ["x"]
+
+    def test_eager_path_applies_selected_columns(self):
+        """_execute_eager_core applies selected_columns using _apply_selected_columns."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s"),
+                _transform_node("t", selected_columns=["x"]),
+            ],
+            edges=[_e("s", "t")],
+        )
+        result = _execute_eager_core(g, _simple_build_fn)
+        df = result.outputs["t"]
+        assert df.columns == ["x"]
+
+    def test_eager_available_columns_captured_before_filter(self):
+        """Eager path captures available_columns BEFORE applying selected_columns filter."""
+        g = PipelineGraph(
+            nodes=[
+                _source_node("s"),
+                _transform_node("t", selected_columns=["x"]),
+            ],
+            edges=[_e("s", "t")],
+        )
+        result = _execute_eager_core(g, _simple_build_fn)
+        # available_columns should have all columns (before filtering)
+        col_names = [name for name, _ in result.available_columns["t"]]
+        assert "x" in col_names
+        assert "y" in col_names
+        # But the actual output should be filtered
+        assert result.outputs["t"].columns == ["x"]

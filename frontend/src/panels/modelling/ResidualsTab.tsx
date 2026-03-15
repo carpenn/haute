@@ -96,7 +96,7 @@ function ResidualsHistogram({
       <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
         Residuals Distribution
       </label>
-      <svg width={width} height={height} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={width} height={height} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         {/* Horizontal grid lines + y-axis labels */}
         {gridYValues.map((v, i) => {
           const y = yScale(v)
@@ -216,7 +216,7 @@ function ActualVsPredictedScatter({
       <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
         Actual vs Predicted
       </label>
-      <svg width={width} height={height} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={width} height={height} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         {/* Grid lines + labels */}
         {gridValues.map((v, i) => {
           const x = xScale(v)

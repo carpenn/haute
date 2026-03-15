@@ -76,7 +76,7 @@ class TestListWarehouses:
         assert data["warehouses"] == []
 
     def test_exception_returns_500(self, client: TestClient) -> None:
-        """Unexpected exception from Databricks SDK returns 500."""
+        """Unexpected exception from Databricks SDK returns 500 without leaking details."""
         mock_ws = MagicMock()
         mock_ws.warehouses.list.side_effect = RuntimeError("network issue")
 
@@ -84,7 +84,8 @@ class TestListWarehouses:
             resp = client.get("/api/databricks/warehouses")
 
         assert resp.status_code == 500
-        assert "network issue" in resp.json()["detail"]
+        assert "network issue" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_warehouse_without_state(self, client: TestClient) -> None:
         """Warehouse with state=None returns UNKNOWN."""
@@ -257,7 +258,7 @@ class TestListTables:
         assert data["tables"][0]["name"] == "valid_tbl"
 
     def test_exception_returns_500(self, client: TestClient) -> None:
-        """Unexpected error from tables.list returns 500."""
+        """Unexpected error from tables.list returns 500 without leaking details."""
         mock_ws = MagicMock()
         mock_ws.tables.list.side_effect = RuntimeError("quota exceeded")
 
@@ -268,7 +269,8 @@ class TestListTables:
             )
 
         assert resp.status_code == 500
-        assert "quota exceeded" in resp.json()["detail"]
+        assert "quota exceeded" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -407,14 +409,15 @@ class TestFetchTable:
         assert "timed out" in resp.json()["detail"]
 
     def test_fetch_generic_exception_returns_500(self, client: TestClient) -> None:
-        """Unexpected error during fetch returns 500."""
+        """Unexpected error during fetch returns 500 without leaking details."""
         with patch("haute._databricks_io.fetch_and_cache", side_effect=RuntimeError("disk full")):
             resp = client.post("/api/databricks/fetch", json={
                 "table": "cat.sch.tbl",
             })
 
         assert resp.status_code == 500
-        assert "disk full" in resp.json()["detail"]
+        assert "disk full" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_fetch_with_custom_query(self, client: TestClient) -> None:
         """Custom SQL query is forwarded to fetch_and_cache."""

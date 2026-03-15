@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from haute._node_builder import NodeBuildHooks, node_fn_name, wrap_builder
-from haute.graph_utils import GraphNode, NodeData
+from haute.graph_utils import GraphNode
+
+from tests.conftest import make_node
 
 
 # ---------------------------------------------------------------------------
@@ -16,10 +18,10 @@ from haute.graph_utils import GraphNode, NodeData
 
 
 def _make_node(label: str, node_type: str = "transform") -> GraphNode:
-    return GraphNode(
-        id=label,
-        data=NodeData(label=label, nodeType=node_type, config={}),
-    )
+    return make_node({
+        "id": label,
+        "data": {"label": label, "nodeType": node_type, "config": {}},
+    })
 
 
 def _dummy_base(node, source_names=None, **kwargs):

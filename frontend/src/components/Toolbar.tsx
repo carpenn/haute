@@ -5,6 +5,12 @@ import type { NodeTiming, NodeMemory } from "../api/types"
 import BreakdownDropdown, { type BreakdownItem } from "./BreakdownDropdown"
 import useSettingsStore from "../stores/useSettingsStore"
 import useClickOutside from "../hooks/useClickOutside"
+import { hoverHandlers, hoverBg } from "../utils/hoverHandlers"
+
+const chromeHover = hoverHandlers()
+const bgHover = hoverBg("var(--chrome-hover)")
+const accentBtnHover = hoverHandlers("#60a5fa", "", "var(--accent)", "")
+const greenBtnHover = hoverHandlers("#4ade80", "", "#22c55e", "")
 
 function formatTiming(ms: number): string {
   return ms < 1000 ? `${ms.toFixed(1)}ms` : `${(ms / 1000).toFixed(2)}s`
@@ -97,8 +103,8 @@ export default function Toolbar({
             onSubmit={(e) => {
               e.preventDefault()
               if (newScenarioName.trim()) {
-                addScenario(newScenarioName)
-                setActiveScenario(newScenarioName.trim().toLowerCase().replace(/\s+/g, "_"))
+                const slug = addScenario(newScenarioName)
+                if (slug) setActiveScenario(slug)
               }
               setAddingScenario(false)
               setNewScenarioName("")
@@ -147,8 +153,8 @@ export default function Toolbar({
                     color: s === activeScenario ? 'var(--accent)' : 'var(--text-secondary)',
                     background: s === activeScenario ? 'var(--accent-soft)' : 'transparent',
                   }}
-                  onMouseEnter={(e) => { if (s !== activeScenario) e.currentTarget.style.background = 'var(--chrome-hover)' }}
-                  onMouseLeave={(e) => { if (s !== activeScenario) e.currentTarget.style.background = 'transparent' }}
+                  onMouseEnter={(e) => { if (s !== activeScenario) bgHover.onMouseEnter(e) }}
+                  onMouseLeave={(e) => { if (s !== activeScenario) bgHover.onMouseLeave(e) }}
                 >
                   {s === "live"
                     ? <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
@@ -162,8 +168,7 @@ export default function Toolbar({
                 onClick={() => { setAddingScenario(true); setSourceOpen(false) }}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
                 style={{ color: 'var(--text-muted)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                {...hoverHandlers("var(--chrome-hover)", "var(--text-secondary)", "transparent", "var(--text-muted)")}
               >
                 <Plus size={12} />
                 Add scenario
@@ -173,8 +178,7 @@ export default function Toolbar({
                   onClick={() => { removeScenario(activeScenario); setSourceOpen(false) }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
                   style={{ color: '#ef4444' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,.1)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  {...hoverBg("rgba(239,68,68,.1)")}
                 >
                   <Trash2 size={12} />
                   Remove "{activeScenario}"
@@ -201,10 +205,7 @@ export default function Toolbar({
       <button
         onClick={onUndo}
         disabled={!canUndo}
-        className="p-1.5 rounded-md transition-colors disabled:opacity-20 ml-3"
-        style={{ color: 'var(--text-secondary)' }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+        className="p-1.5 rounded-md transition-colors disabled:opacity-20 ml-3 hover-chrome"
         title="Undo (Ctrl+Z)"
       >
         <Undo2 size={14} aria-hidden="true" />
@@ -213,10 +214,7 @@ export default function Toolbar({
         onClick={onRedo}
         disabled={!canRedo}
         aria-label="Redo"
-        className="p-1.5 rounded-md transition-colors disabled:opacity-20"
-        style={{ color: 'var(--text-secondary)' }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+        className="p-1.5 rounded-md transition-colors disabled:opacity-20 hover-chrome"
         title="Redo (Ctrl+Shift+Z)"
       >
         <Redo2 size={14} aria-hidden="true" />
@@ -240,10 +238,7 @@ export default function Toolbar({
       <div className="ml-auto flex items-center gap-1.5">
         <button
           onClick={onOpenUtility}
-          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md flex items-center gap-1 hover-chrome"
           title="Utility scripts — reusable functions"
         >
           <FileCode2 size={13} />
@@ -251,10 +246,7 @@ export default function Toolbar({
         </button>
         <button
           onClick={onOpenImports}
-          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors flex items-center gap-1"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md flex items-center gap-1 hover-chrome"
           title="Pipeline imports — utility and library imports"
         >
           <Package size={13} />
@@ -264,10 +256,7 @@ export default function Toolbar({
         <button
           onClick={onShowShortcuts}
           aria-label="Keyboard shortcuts"
-          className="p-1.5 rounded-md transition-colors"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+          className="p-1.5 rounded-md hover-chrome"
           title="Keyboard shortcuts (?)"
         >
           <Keyboard size={14} aria-hidden="true" />
@@ -276,10 +265,7 @@ export default function Toolbar({
         <button
           onClick={onCentre}
           disabled={nodeCount === 0}
-          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md disabled:opacity-30 hover-chrome"
           title="Fit all nodes in view"
         >
           Centre
@@ -287,10 +273,7 @@ export default function Toolbar({
         <button
           onClick={onAutoLayout}
           disabled={nodeCount === 0}
-          className="px-2.5 py-1 text-[12px] font-medium rounded-md transition-colors disabled:opacity-30"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--chrome-hover)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+          className="px-2.5 py-1 text-[12px] font-medium rounded-md disabled:opacity-30 hover-chrome"
           title="Auto-arrange nodes"
         >
           Layout
@@ -299,8 +282,7 @@ export default function Toolbar({
           onClick={onSave}
           className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors"
           style={{ background: 'var(--accent)' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
+          {...accentBtnHover}
           title="Ctrl+S"
         >
           Save
@@ -309,8 +291,7 @@ export default function Toolbar({
           onClick={onOpenGit}
           className="px-3 py-1 text-[12px] font-semibold text-white rounded-md transition-colors flex items-center gap-1"
           style={{ background: '#22c55e' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = '#4ade80'}
-          onMouseLeave={(e) => e.currentTarget.style.background = '#22c55e'}
+          {...greenBtnHover}
           title="Git — branch management and version control"
         >
           <GitFork size={13} />

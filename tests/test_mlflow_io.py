@@ -12,11 +12,16 @@ import pytest
 from haute._mlflow_io import (
     _MODEL_CACHE_MAX_SIZE,
     ScoringModel,
+    _append_classification_proba,
+    _find_artifact_by_extension,
     _find_cbm_artifact,
+    _find_model_artifact,
+    _load_rustystats_model,
     _model_cache,
     _prepare_predict_frame,
     _wrap_catboost,
     _wrap_pyfunc,
+    load_local_model,
     load_mlflow_model,
 )
 from haute._mlflow_utils import resolve_version as _resolve_version
@@ -480,3 +485,361 @@ class TestPreparePredictFrame:
         result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "pyfunc")
         import pandas as pd
         assert isinstance(result, pd.DataFrame)
+
+
+# ---------------------------------------------------------------------------
+# _find_artifact_by_extension (D8 refactor)
+# ---------------------------------------------------------------------------
+
+
+class TestFindArtifactByExtension:
+    """Tests for the unified artifact discovery helper."""
+
+    def test_finds_top_level_cbm(self):
+        """Finds .cbm at the root level."""
+        client = MagicMock()
+        art = MagicMock(path="my_model.cbm", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        assert _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost") == "my_model.cbm"
+
+    def test_finds_top_level_rsglm(self):
+        """Finds .rsglm at the root level."""
+        client = MagicMock()
+        art = MagicMock(path="glm_model.rsglm", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        assert _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats") == "glm_model.rsglm"
+
+    def test_finds_cbm_in_subdirectory(self):
+        """Finds .cbm one level deep in a subdirectory."""
+        client = MagicMock()
+        dir_art = MagicMock(path="models", is_dir=True)
+        client.list_artifacts.side_effect = [
+            [dir_art],
+            [MagicMock(path="models/trained.cbm", is_dir=False)],
+        ]
+        assert _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost") == "models/trained.cbm"
+
+    def test_finds_rsglm_in_subdirectory(self):
+        """Finds .rsglm one level deep in a subdirectory."""
+        client = MagicMock()
+        dir_art = MagicMock(path="artifacts", is_dir=True)
+        client.list_artifacts.side_effect = [
+            [dir_art],
+            [MagicMock(path="artifacts/glm.rsglm", is_dir=False)],
+        ]
+        assert _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats") == "artifacts/glm.rsglm"
+
+    def test_missing_cbm_raises_with_label(self):
+        """FileNotFoundError includes the extension and label."""
+        client = MagicMock()
+        art = MagicMock(path="readme.txt", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        with pytest.raises(FileNotFoundError, match=r"No \.cbm artifact.*CatBoost"):
+            _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost")
+
+    def test_missing_rsglm_raises_with_label(self):
+        """FileNotFoundError includes the extension and label."""
+        client = MagicMock()
+        art = MagicMock(path="readme.txt", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        with pytest.raises(FileNotFoundError, match=r"No \.rsglm artifact.*RustyStats"):
+            _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats")
+
+    def test_arbitrary_extension(self):
+        """Works for any extension, not just .cbm and .rsglm."""
+        client = MagicMock()
+        art = MagicMock(path="weights.pt", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        assert _find_artifact_by_extension(client, "run1", ".pt", "PyTorch") == "weights.pt"
+
+    def test_prefers_top_level_over_subdirectory(self):
+        """Top-level match is returned even if subdirectory also contains a match."""
+        client = MagicMock()
+        top_art = MagicMock(path="model.cbm", is_dir=False)
+        dir_art = MagicMock(path="subdir", is_dir=True)
+        client.list_artifacts.return_value = [top_art, dir_art]
+        # list_artifacts should only be called once (top level)
+        result = _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost")
+        assert result == "model.cbm"
+        client.list_artifacts.assert_called_once_with("run1")
+
+    def test_delegates_correctly_via_find_cbm(self):
+        """_find_cbm_artifact delegates to _find_artifact_by_extension."""
+        client = MagicMock()
+        art = MagicMock(path="model.cbm", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        assert _find_cbm_artifact(client, "run1") == "model.cbm"
+
+    def test_delegates_correctly_via_find_rsglm(self):
+        """_find_rsglm_artifact delegates to _find_artifact_by_extension."""
+        from haute._mlflow_io import _find_rsglm_artifact
+        client = MagicMock()
+        art = MagicMock(path="model.rsglm", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        assert _find_rsglm_artifact(client, "run1") == "model.rsglm"
+
+
+# ---------------------------------------------------------------------------
+# _append_classification_proba (D9 refactor)
+# ---------------------------------------------------------------------------
+
+
+class TestAppendClassificationProba:
+    """Tests for the unified classification probability helper."""
+
+    def test_2d_proba_extracts_column_1(self):
+        """2-D probability array extracts the positive class (column 1)."""
+        df = pl.DataFrame({"x": [1, 2, 3]})
+        model = MagicMock()
+        model.predict_proba.return_value = np.array([
+            [0.8, 0.2],
+            [0.3, 0.7],
+            [0.5, 0.5],
+        ])
+        sm = ScoringModel(model, ["x"], frozenset(), "catboost")
+        result = _append_classification_proba(df, sm, np.array([[1], [2], [3]]), "pred")
+        assert "pred_proba" in result.columns
+        expected = [0.2, 0.7, 0.5]
+        actual = result["pred_proba"].to_list()
+        for a, e in zip(actual, expected):
+            assert a == pytest.approx(e)
+
+    def test_1d_proba_used_directly(self):
+        """1-D probability array is used as-is."""
+        df = pl.DataFrame({"x": [1, 2]})
+        model = MagicMock()
+        model.predict_proba.return_value = np.array([0.3, 0.9])
+        sm = ScoringModel(model, ["x"], frozenset(), "catboost")
+        result = _append_classification_proba(df, sm, np.array([[1], [2]]), "pred")
+        assert "pred_proba" in result.columns
+        actual = result["pred_proba"].to_list()
+        assert actual[0] == pytest.approx(0.3)
+        assert actual[1] == pytest.approx(0.9)
+
+    def test_no_predict_proba_returns_unchanged(self):
+        """Models without predict_proba return the DataFrame unchanged."""
+        df = pl.DataFrame({"x": [1, 2]})
+        model = MagicMock(spec=[])  # no predict_proba
+        sm = ScoringModel(model, ["x"], frozenset(), "pyfunc")
+        result = _append_classification_proba(df, sm, np.array([[1], [2]]), "pred")
+        assert "pred_proba" not in result.columns
+        assert result.equals(df)
+
+    def test_custom_output_col_name(self):
+        """Proba column is named ``<output_col>_proba``."""
+        df = pl.DataFrame({"x": [1]})
+        model = MagicMock()
+        model.predict_proba.return_value = np.array([[0.4, 0.6]])
+        sm = ScoringModel(model, ["x"], frozenset(), "catboost")
+        result = _append_classification_proba(df, sm, np.array([[1]]), "my_score")
+        assert "my_score_proba" in result.columns
+
+    def test_regression_should_not_call_this(self):
+        """Verify the helper is only called for classification (by caller convention)."""
+        # This test validates the contract: the helper itself doesn't check task,
+        # it just appends probas. Callers gate on task == "classification".
+        df = pl.DataFrame({"x": [1]})
+        model = MagicMock()
+        model.predict_proba.return_value = np.array([0.5])
+        sm = ScoringModel(model, ["x"], frozenset(), "catboost")
+        # Even if called, it appends the column — which is correct behavior.
+        result = _append_classification_proba(df, sm, np.array([[1]]), "pred")
+        assert "pred_proba" in result.columns
+
+
+# ---------------------------------------------------------------------------
+# T9: _load_rustystats_model
+# ---------------------------------------------------------------------------
+
+
+class TestLoadRustystatsModel:
+    """Tests for _load_rustystats_model using mocked rustystats module."""
+
+    def test_loads_and_wraps_model(self, tmp_path):
+        """Reads bytes from file and wraps in ScoringModel with flavor='rustystats'."""
+        model_file = tmp_path / "model.rsglm"
+        model_file.write_bytes(b"fake_bytes")
+
+        mock_model = MagicMock()
+        mock_model.feature_names = ["feat_a", "feat_b"]
+        mock_rs = MagicMock()
+        mock_rs.GLMModel.from_bytes.return_value = mock_model
+
+        with patch.dict(sys.modules, {"rustystats": mock_rs}):
+            sm = _load_rustystats_model(str(model_file))
+
+        assert isinstance(sm, ScoringModel)
+        assert sm.flavor == "rustystats"
+        assert sm.feature_names == ["feat_a", "feat_b"]
+        assert sm.cat_feature_names == frozenset()
+        assert sm.raw_model is mock_model
+
+    def test_model_without_feature_names(self, tmp_path):
+        """Model without feature_names attribute gets empty list."""
+        model_file = tmp_path / "model.rsglm"
+        model_file.write_bytes(b"fake_bytes")
+
+        mock_model = MagicMock(spec=[])  # no feature_names
+        mock_rs = MagicMock()
+        mock_rs.GLMModel.from_bytes.return_value = mock_model
+
+        with patch.dict(sys.modules, {"rustystats": mock_rs}):
+            sm = _load_rustystats_model(str(model_file))
+
+        assert sm.feature_names == []
+
+    def test_reads_file_as_bytes(self, tmp_path):
+        """Verifies the file is read in binary mode."""
+        model_file = tmp_path / "test.rsglm"
+        model_file.write_bytes(b"fake_model_bytes")
+
+        mock_model = MagicMock()
+        mock_model.feature_names = ["x"]
+        mock_rs = MagicMock()
+        mock_rs.GLMModel.from_bytes.return_value = mock_model
+
+        with patch.dict(sys.modules, {"rustystats": mock_rs}):
+            _load_rustystats_model(str(model_file))
+
+        mock_rs.GLMModel.from_bytes.assert_called_once_with(b"fake_model_bytes")
+
+
+# ---------------------------------------------------------------------------
+# T9: load_local_model for .rsglm and edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLocalModel:
+    """Tests for load_local_model dispatching by file extension."""
+
+    def test_cbm_dispatches_to_catboost(self):
+        """'.cbm' extension dispatches to CatBoost loader."""
+        mock_model = MagicMock()
+        mock_model.feature_names_ = ["a"]
+        mock_model.get_cat_feature_indices.return_value = []
+
+        mock_catboost = MagicMock()
+        mock_catboost.CatBoostRegressor.return_value = mock_model
+        with patch.dict(sys.modules, {"catboost": mock_catboost}):
+            sm = load_local_model("/tmp/model.cbm", task="regression")
+
+        assert isinstance(sm, ScoringModel)
+        assert sm.flavor == "catboost"
+
+    def test_rsglm_dispatches_to_rustystats(self, tmp_path):
+        """'.rsglm' extension dispatches to RustyStats loader."""
+        model_file = tmp_path / "model.rsglm"
+        model_file.write_bytes(b"fake_bytes")
+
+        mock_model = MagicMock()
+        mock_model.feature_names = ["x", "y"]
+        mock_rs = MagicMock()
+        mock_rs.GLMModel.from_bytes.return_value = mock_model
+
+        with patch.dict(sys.modules, {"rustystats": mock_rs}):
+            sm = load_local_model(str(model_file))
+
+        assert isinstance(sm, ScoringModel)
+        assert sm.flavor == "rustystats"
+        assert sm.feature_names == ["x", "y"]
+
+    def test_unsupported_extension_raises(self):
+        """Unknown extension raises NotImplementedError."""
+        with pytest.raises(NotImplementedError, match="not yet supported"):
+            load_local_model("/tmp/model.pkl")
+
+    def test_unsupported_extension_lists_formats(self):
+        """Error message lists supported formats."""
+        with pytest.raises(NotImplementedError, match=r"\.cbm.*\.rsglm"):
+            load_local_model("/tmp/model.onnx")
+
+    def test_classification_task_forwarded_for_cbm(self):
+        """task='classification' is forwarded to CatBoost loader."""
+        mock_model = MagicMock()
+        mock_model.feature_names_ = ["a"]
+        mock_model.get_cat_feature_indices.return_value = []
+
+        mock_catboost = MagicMock()
+        mock_catboost.CatBoostClassifier.return_value = mock_model
+        with patch.dict(sys.modules, {"catboost": mock_catboost}):
+            sm = load_local_model("/tmp/model.cbm", task="classification")
+
+        assert sm.flavor == "catboost"
+
+
+# ---------------------------------------------------------------------------
+# T9: _prepare_predict_frame with flavor="rustystats"
+# ---------------------------------------------------------------------------
+
+
+class TestPreparePredictFrameRustystats:
+    """Tests for _prepare_predict_frame with rustystats flavor."""
+
+    def test_returns_polars_dataframe(self):
+        """RustyStats flavor returns the Polars DataFrame directly (no conversion)."""
+        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "rustystats")
+        assert isinstance(result, pl.DataFrame)
+
+    def test_returns_exact_input_dataframe(self):
+        """RustyStats should get the exact same DataFrame object (no copy)."""
+        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "rustystats")
+        assert result is df
+
+    def test_nulls_not_processed(self):
+        """RustyStats handles its own null preprocessing — nulls pass through."""
+        df = pl.DataFrame({"a": [1.0, None, 3.0]})
+        result = _prepare_predict_frame(df, ["a"], frozenset(), "rustystats")
+        assert result["a"].null_count() == 1
+
+    def test_categoricals_not_processed(self):
+        """RustyStats handles its own categoricals — no sentinel fill."""
+        df = pl.DataFrame({"cat": ["x", None, "y"]})
+        result = _prepare_predict_frame(df, ["cat"], frozenset({"cat"}), "rustystats")
+        # Should NOT have _MISSING_ sentinel — nulls pass through
+        assert result["cat"].null_count() == 1
+
+
+# ---------------------------------------------------------------------------
+# T9: _find_model_artifact — auto-detection
+# ---------------------------------------------------------------------------
+
+
+class TestFindModelArtifact:
+    """Tests for _find_model_artifact auto-detection logic."""
+
+    def test_finds_cbm_first(self):
+        """CatBoost .cbm is preferred over other formats."""
+        client = MagicMock()
+        art = MagicMock(path="model.cbm", is_dir=False)
+        client.list_artifacts.return_value = [art]
+        path, flavor = _find_model_artifact(client, "run1")
+        assert path == "model.cbm"
+        assert flavor == "catboost"
+
+    def test_finds_rsglm_when_no_cbm(self):
+        """RustyStats .rsglm is found when no .cbm exists."""
+        client = MagicMock()
+        rsglm_art = MagicMock(path="model.rsglm", is_dir=False)
+        client.list_artifacts.return_value = [rsglm_art]
+        path, flavor = _find_model_artifact(client, "run1")
+        assert path == "model.rsglm"
+        assert flavor == "rustystats"
+
+    def test_finds_pyfunc_when_no_native(self):
+        """Falls back to pyfunc 'model' directory."""
+        client = MagicMock()
+        model_dir = MagicMock(path="model", is_dir=True)
+        client.list_artifacts.return_value = [model_dir]
+        path, flavor = _find_model_artifact(client, "run1")
+        assert path == "model"
+        assert flavor == "pyfunc"
+
+    def test_no_artifact_raises(self):
+        """Raises FileNotFoundError when no model artifact found."""
+        client = MagicMock()
+        txt_art = MagicMock(path="readme.txt", is_dir=False)
+        client.list_artifacts.return_value = [txt_art]
+        with pytest.raises(FileNotFoundError, match="No model artifact"):
+            _find_model_artifact(client, "run1")

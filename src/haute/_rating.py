@@ -8,6 +8,7 @@ module itself, keeping the dependency graph acyclic.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import polars as pl
@@ -132,15 +133,29 @@ def _apply_rating_table(
         return lf
     lookup = lookup.with_columns(pl.col("value").cast(pl.Float64))
 
+    # B15: Select only factor columns + "value" to avoid polluting the main
+    # frame with extra keys that may be present in the entries dicts.
+    # Guard: if any factor column is missing from entries, config is invalid.
+    missing = [f for f in factors if f not in lookup.columns]
+    if missing:
+        return lf
+    lookup = lookup.select([*factors, "value"])
+
+    # B14: Deduplicate on factor columns so a left join cannot fan out rows.
+    lookup = lookup.unique(subset=factors, keep="last")
+
     # Cast factor columns in lookup to Utf8 so the join matches string bands
     for f in factors:
         if f in lookup.columns:
             lookup = lookup.with_columns(pl.col(f).cast(pl.Utf8))
 
     # Cast factor columns in the main frame to Utf8 too
+    existing_cols = set(
+        lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns
+    )
     cast_exprs = [
         pl.col(f).cast(pl.Utf8).alias(f) for f in factors
-        if f in (lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns)
+        if f in existing_cols
     ]
     if cast_exprs:
         lf = lf.with_columns(cast_exprs)
@@ -149,8 +164,15 @@ def _apply_rating_table(
     lf = lf.join(lookup.lazy(), on=factors, how="left")
 
     # Rename value → outputColumn, apply default
+    # B13: Gracefully handle non-numeric defaultValue (e.g. "N/A", "", inf, nan)
     has_default = default_raw is not None and str(default_raw).strip()
-    default_val = float(str(default_raw)) if has_default else None
+    try:
+        default_val = float(str(default_raw)) if has_default else None
+    except (ValueError, TypeError):
+        default_val = None
+    # Reject inf/nan — they corrupt downstream arithmetic silently
+    if default_val is not None and not math.isfinite(default_val):
+        default_val = None
     if default_val is not None:
         lf = lf.with_columns(
             pl.col("value").fill_null(default_val).alias(output_col),

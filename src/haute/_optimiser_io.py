@@ -47,10 +47,9 @@ def load_optimiser_artifact(path: str) -> dict[str, Any]:
 
     key = (path, mtime)
 
-    cached = _artifact_cache.get(key)
-    if cached is not None:
+    if key in _artifact_cache:
         logger.debug("optimiser_artifact_cache_hit", path=path)
-        return cached
+        return _artifact_cache.get(key)
 
     with open(path) as f:
         artifact = json.load(f)
@@ -130,10 +129,9 @@ def load_mlflow_optimiser_artifact(
         )
 
     cache_key = (source_type, resolved_run_id, resolved_version)
-    cached = _mlflow_cache.get(cache_key)
-    if cached is not None:
+    if cache_key in _mlflow_cache:
         logger.debug("mlflow_optimiser_cache_hit", key=str(cache_key))
-        return cached
+        return _mlflow_cache.get(cache_key)
 
     local_path = mlflow.artifacts.download_artifacts(
         f"runs:/{resolved_run_id}/{_MLFLOW_ARTIFACT_NAME}"

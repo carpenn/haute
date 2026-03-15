@@ -149,3 +149,14 @@ html, body, #root {
 .animate-slide-in { animation: slide-in 0.2s ease-out; }
 .animate-fade-in { animation: fade-in 0.12s ease-out; }
 .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Shared hover: chrome toolbar buttons / icon buttons */
+.hover-chrome {
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background 150ms, color 150ms;
+}
+.hover-chrome:hover {
+  background: var(--chrome-hover);
+  color: var(--text-primary);
+}

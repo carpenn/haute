@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from haute._logging import get_logger
 from haute.deploy._config import ResolvedDeploy
+from haute.deploy._utils import build_manifest
 
 logger = get_logger(component="deploy.mlflow")
 
@@ -89,7 +90,7 @@ def deploy_to_mlflow(
     uc_model_name = build_uc_model_name(config)
 
     # 1. Build deployment manifest
-    manifest = _build_manifest(resolved)
+    manifest = build_manifest(resolved)
 
     # 2. Write manifest to a persistent location (not a temp dir that gets deleted)
     build_dir = config.pipeline_file.resolve().parent / ".haute_build"
@@ -202,13 +203,6 @@ def get_deploy_status(
         "status": latest.status,
         "run_id": latest.run_id or "",
     }
-
-
-def _build_manifest(resolved: ResolvedDeploy) -> dict:
-    """Build the deployment manifest dict."""
-    from haute.deploy._utils import build_manifest
-
-    return build_manifest(resolved)
 
 
 def _build_signature(resolved: ResolvedDeploy) -> object:
@@ -407,8 +401,3 @@ def _check_databricks_connectivity(
         ) from exc
 
 
-def _get_user() -> str:
-    """Get the current user's name."""
-    from haute.deploy._utils import get_user
-
-    return get_user()

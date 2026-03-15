@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-li
 import ModellingConfig from "../ModellingConfig"
 import useNodeResultsStore, { hashConfig } from "../../stores/useNodeResultsStore"
 import useSettingsStore from "../../stores/useSettingsStore"
+import useToastStore from "../../stores/useToastStore"
 import type { TrainResult } from "../../stores/useNodeResultsStore"
 
 // ── Mocks ────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ beforeEach(() => {
     mlflow: { status: "pending", backend: "", host: "" },
     collapsedSections: {},
   })
+  useToastStore.setState({ toasts: [], _toastCounter: 0 })
   mockTrainModel.mockReset()
   // Return a never-resolving promise by default so the useEffect doesn't cause
   // act() warnings from resolved promises after unmount.
@@ -679,6 +681,41 @@ describe("ModellingConfig", () => {
       await waitFor(() => {
         expect(screen.getByText(/GPU training needs.*but GPU has/)).toBeTruthy()
       })
+    })
+
+    it("shows inline warning and toast when RAM estimate fails", async () => {
+      mockEstimateTrainingRam.mockRejectedValue(new Error("Network error"))
+      const { container } = renderConfig()
+      // Wait for loading to finish and error state to propagate
+      await waitFor(() => {
+        // The toast store should have received the warning
+        const toasts = useToastStore.getState().toasts
+        expect(toasts.some((t) => t.text.includes("RAM estimate failed"))).toBe(true)
+      })
+      // Inline warning is shown
+      expect(screen.getByText(/RAM estimate unavailable/)).toBeTruthy()
+      // Verify toast content
+      const toasts = useToastStore.getState().toasts
+      const ramToast = toasts.find((t) => t.text.includes("RAM estimate failed"))!
+      expect(ramToast.type).toBe("warning")
+      expect(ramToast.text).toContain("Network error")
+    })
+
+    it("does not show inline warning when estimate succeeds", async () => {
+      mockEstimateTrainingRam.mockResolvedValue({
+        total_rows: 100000,
+        safe_row_limit: null,
+        estimated_mb: 50,
+        training_mb: 200,
+        available_mb: 8192,
+        bytes_per_row: 700,
+        was_downsampled: false,
+      })
+      renderConfig()
+      await waitFor(() => {
+        expect(screen.getByText("Dataset fits in memory")).toBeTruthy()
+      })
+      expect(screen.queryByText(/RAM estimate unavailable/)).toBeNull()
     })
   })
 

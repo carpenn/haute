@@ -820,7 +820,8 @@ class TestPipelineExceptions:
                 "graph": graph.model_dump(), "row_index": 0,
             })
         assert resp.status_code == 500
-        assert "trace error" in resp.json()["detail"]
+        assert "trace error" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_preview_exception(self, client: TestClient, pipeline_dir: Path):
         from unittest.mock import patch
@@ -838,7 +839,8 @@ class TestPipelineExceptions:
                 "graph": graph.model_dump(), "node_id": node_id,
             })
         assert resp.status_code == 500
-        assert "preview error" in resp.json()["detail"]
+        assert "preview error" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_sink_exception(self, client: TestClient, pipeline_dir: Path):
         from unittest.mock import patch
@@ -861,7 +863,8 @@ class TestPipelineExceptions:
         ):
             resp = client.post("/api/pipeline/sink", json={"graph": graph, "node_id": "sink"})
         assert resp.status_code == 500
-        assert "sink error" in resp.json()["detail"]
+        assert "sink error" not in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
 
 class TestPreviewEdgeCases:

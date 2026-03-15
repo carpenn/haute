@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import {
-  X, GitBranch, GitFork, Plus, ChevronDown, Clock, ArrowDownToLine,
+  GitBranch, GitFork, Plus, ChevronDown, Clock, ArrowDownToLine,
   ExternalLink, Archive, Trash2, RotateCcw, AlertTriangle,
 } from "lucide-react"
 import PanelShell from "./PanelShell"
+import PanelHeader from "./PanelHeader"
 import useClickOutside from "../hooks/useClickOutside"
+import { hoverHandlers, hoverBg } from "../utils/hoverHandlers"
 import {
   getGitStatus,
   listGitBranches,
@@ -237,17 +239,11 @@ export default function GitPanel({ onClose }: GitPanelProps) {
   return (
     <PanelShell>
       {/* Header */}
-      <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-        <GitFork size={14} style={{ color: '#22c55e' }} />
-        <span className="text-[13px] font-semibold flex-1" style={{ color: 'var(--text-primary)' }}>Git</span>
-        <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          title="Close"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      <PanelHeader
+        title="Git"
+        onClose={onClose}
+        icon={<GitFork size={14} style={{ color: '#22c55e' }} />}
+      />
 
       {/* Error banner */}
       {error && (
@@ -423,8 +419,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                 onClick={() => setCreating(true)}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium rounded-md transition-colors"
                 style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(59,130,246,.2)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
+                {...hoverBg("rgba(59,130,246,.2)", "var(--accent-soft)")}
               >
                 <Plus size={13} />
                 Start editing (create branch)
@@ -465,8 +460,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                   disabled={loading}
                   className="w-full px-3 py-2 text-[12px] font-medium rounded-md transition-colors disabled:opacity-40"
                   style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-input)'}
+                  {...hoverBg("var(--bg-hover)", "var(--bg-input)")}
                 >
                   Save progress
                 </button>
@@ -476,8 +470,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12px] font-semibold text-white rounded-md transition-colors disabled:opacity-40"
                 style={{ background: 'var(--accent)' }}
-                onMouseEnter={(e) => e.currentTarget.style.background = '#60a5fa'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent)'}
+                {...hoverBg("#60a5fa", "var(--accent)")}
               >
                 <ExternalLink size={12} />
                 Submit for review
@@ -498,8 +491,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                   disabled={loading}
                   className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors disabled:opacity-40"
                   style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-input)'}
+                  {...hoverBg("var(--bg-hover)", "var(--bg-input)")}
                 >
                   <ArrowDownToLine size={12} />
                   Pull latest
@@ -540,8 +532,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                           onClick={() => setConfirmAction({ type: "revert", target: entry.sha, label: entry.message })}
                           className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                           style={{ color: 'var(--text-muted)' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--accent)' }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                          {...hoverHandlers("var(--bg-hover)", "var(--accent)", "transparent", "var(--text-muted)")}
                           title="Revert to this version"
                         >
                           <RotateCcw size={12} />
@@ -560,8 +551,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                 disabled={loading}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors disabled:opacity-40"
                 style={{ color: 'var(--text-muted)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                {...hoverHandlers("var(--bg-hover)", "var(--text-secondary)", "transparent", "var(--text-muted)")}
               >
                 <Archive size={11} />
                 Archive
@@ -571,8 +561,7 @@ export default function GitPanel({ onClose }: GitPanelProps) {
                 disabled={loading}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors disabled:opacity-40"
                 style={{ color: 'var(--text-muted)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,.1)'; e.currentTarget.style.color = '#ef4444' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                {...hoverHandlers("rgba(239,68,68,.1)", "#ef4444", "transparent", "var(--text-muted)")}
               >
                 <Trash2 size={11} />
                 Delete
@@ -602,6 +591,8 @@ export default function GitPanel({ onClose }: GitPanelProps) {
 // Branch list item
 // ---------------------------------------------------------------------------
 
+const branchHover = hoverBg("var(--bg-hover)")
+
 function BranchItem({
   branch,
   currentBranch,
@@ -624,8 +615,8 @@ function BranchItem({
         color: isCurrent ? 'var(--accent)' : 'var(--text-secondary)',
         background: isCurrent ? 'var(--accent-soft)' : 'transparent',
       }}
-      onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-hover)' }}
-      onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent' }}
+      onMouseEnter={(e) => { if (!isCurrent) branchHover.onMouseEnter(e) }}
+      onMouseLeave={(e) => { if (!isCurrent) branchHover.onMouseLeave(e) }}
     >
       <GitBranch size={11} style={{ color: isCurrent ? 'var(--accent)' : 'var(--text-muted)', flexShrink: 0 }} />
       <span className="flex-1 truncate">{displayName}</span>

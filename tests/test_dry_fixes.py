@@ -1,0 +1,576 @@
+"""Tests for DRY refactors D6, D7, D12, D13.
+
+D6  — _finalize_solve_result extracted from _solve_online / _solve_ratebook
+D7  — _dc_to_pydantic auto-converts dataclasses → Pydantic models
+D12 — PreviewNodeResponse inherits from NodeResult
+D13 — LogExperimentResponse and OptimiserMlflowLogResponse share MlflowLogResponse
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from typing import Any
+
+import pytest
+from pydantic import BaseModel
+
+from haute.routes._job_store import JobStore
+
+# ──────────────────────────────────────────────────────────────────────
+# D6: _finalize_solve_result
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeSolveResult:
+    """Minimal duck-type of SolveResultLike for testing _finalize_solve_result."""
+
+    def __init__(
+        self,
+        *,
+        converged: bool = True,
+        total_objective: float = 100.0,
+        baseline_objective: float = 95.0,
+        total_constraints: dict[str, float] | None = None,
+        baseline_constraints: dict[str, float] | None = None,
+        lambdas: dict[str, float] | None = None,
+    ) -> None:
+        self.converged = converged
+        self.total_objective = total_objective
+        self.baseline_objective = baseline_objective
+        self.total_constraints = total_constraints or {"loss": 1.0}
+        self.baseline_constraints = baseline_constraints or {"loss": 0.9}
+        self.lambdas = lambdas or {"loss": 0.5}
+
+
+class TestFinalizeOnline:
+    """D6: _finalize_solve_result for online mode."""
+
+    def test_shared_keys_present(self) -> None:
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(converged=True)
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver="fake_solver",
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.23,
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        assert rd["mode"] == "online"
+        assert rd["total_objective"] == 100.0
+        assert rd["baseline_objective"] == 95.0
+        assert rd["constraints"] == {"loss": 1.0}
+        assert rd["baseline_constraints"] == {"loss": 0.9}
+        assert rd["lambdas"] == {"loss": 0.5}
+        assert rd["converged"] is True
+        assert "warning" not in rd
+
+    def test_extra_fields_merged(self) -> None:
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult()
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver="s",
+            quote_grid="g",
+            store=store,
+            job_id=job_id,
+            elapsed=0.5,
+            extra_fields={"iterations": 42, "n_quotes": 100},
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        assert rd["iterations"] == 42
+        assert rd["n_quotes"] == 100
+
+    def test_non_converged_adds_warning(self) -> None:
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(converged=False)
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="ratebook",
+            solver="s",
+            quote_grid="g",
+            store=store,
+            job_id=job_id,
+            elapsed=2.0,
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        assert rd["converged"] is False
+        assert "warning" in rd
+        assert "not converge" in rd["warning"]
+
+    def test_job_status_fields(self) -> None:
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult()
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver="my_solver",
+            quote_grid="my_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=3.14,
+        )
+        job = store.get_job(job_id)
+        assert job["status"] == "completed"
+        assert job["progress"] == 1.0
+        assert job["message"] == "Completed"
+        assert job["elapsed_seconds"] == 3.14
+        assert job["solver"] == "my_solver"
+        assert job["quote_grid"] == "my_grid"
+        assert job["solve_result"] is result
+
+    def test_scenario_value_stats_populated_when_dataframe_present(self) -> None:
+        """When solve_result has a dataframe with optimal_scenario_value,
+        stats and histogram should be populated."""
+        import numpy as np
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        class ResultWithDF(_FakeSolveResult):
+            def __init__(self, **kw: Any) -> None:
+                super().__init__(**kw)
+                # Minimal duck-type of a column
+                self.dataframe = type("DF", (), {
+                    "columns": ["optimal_scenario_value"],
+                    "__getitem__": lambda self, key: type("Col", (), {
+                        "mean": lambda s: 1.05,
+                        "std": lambda s: 0.1,
+                        "min": lambda s: 0.9,
+                        "max": lambda s: 1.2,
+                        "quantile": lambda s, q: 1.0 + q * 0.1,
+                        "sum": lambda s: 5,
+                        "__gt__": lambda s, v: type("Mask", (), {"sum": lambda s: 3})(),
+                        "__lt__": lambda s, v: type("Mask", (), {"sum": lambda s: 2})(),
+                        "__len__": lambda s: 10,
+                        "to_numpy": lambda s: np.array([1.0, 1.05, 0.95, 1.1, 0.98, 1.02, 1.03, 0.97, 1.01, 1.04]),
+                    })(),
+                })()
+
+        result = ResultWithDF()
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result, mode="online", solver="s", quote_grid="g",
+            store=store, job_id=job_id, elapsed=0.1,
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        assert rd["scenario_value_stats"]
+        assert rd["scenario_value_histogram"]
+
+    def test_no_extra_fields_when_none(self) -> None:
+        """extra_fields=None should not add any extra keys."""
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult()
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver="s",
+            quote_grid="g",
+            store=store,
+            job_id=job_id,
+            elapsed=0.1,
+            extra_fields=None,
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        # Should not have mode-specific keys like iterations or cd_iterations
+        assert "iterations" not in rd
+        assert "cd_iterations" not in rd
+
+
+class TestFinalizeRatebook:
+    """D6: _finalize_solve_result for ratebook mode."""
+
+    def test_ratebook_extra_fields(self) -> None:
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(converged=True)
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        _finalize_solve_result(
+            result,
+            mode="ratebook",
+            solver="rb_solver",
+            quote_grid="rb_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=5.0,
+            extra_fields={
+                "cd_iterations": 7,
+                "factor_tables": {"age": [{"__factor_group__": "young", "optimal_scenario_value": 1.1}]},
+                "clamp_rate": 0.05,
+                "history": None,
+            },
+        )
+        job = store.get_job(job_id)
+        rd = job["result"]
+        assert rd["mode"] == "ratebook"
+        assert rd["cd_iterations"] == 7
+        assert rd["factor_tables"]["age"][0]["__factor_group__"] == "young"
+        assert rd["clamp_rate"] == 0.05
+        assert rd["history"] is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# D7: _dc_to_pydantic
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestDcToPydantic:
+    """D7: Dataclass → Pydantic auto-conversion."""
+
+    def test_flat_dataclass(self) -> None:
+        from haute._git import GitStatus
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitStatusResponse
+
+        dc = GitStatus(
+            branch="pricing/alice/feature",
+            is_main=False,
+            is_read_only=False,
+            changed_files=["main.py", "config.json"],
+            main_ahead=True,
+            main_ahead_by=3,
+            main_last_updated="2026-03-14T10:00:00+00:00",
+        )
+        model = _dc_to_pydantic(dc, GitStatusResponse)
+        assert isinstance(model, GitStatusResponse)
+        assert model.branch == "pricing/alice/feature"
+        assert model.is_main is False
+        assert model.changed_files == ["main.py", "config.json"]
+        assert model.main_ahead_by == 3
+        assert model.main_last_updated == "2026-03-14T10:00:00+00:00"
+
+    def test_nested_dataclass_list(self) -> None:
+        """BranchListResult contains a list of BranchInfo dataclasses."""
+        from haute._git import BranchInfo, BranchListResult
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitBranchListResponse
+
+        dc = BranchListResult(
+            current="main",
+            branches=[
+                BranchInfo(
+                    name="pricing/alice/feat",
+                    is_yours=True,
+                    is_current=False,
+                    is_archived=False,
+                    last_commit_time="2026-03-14T09:00:00",
+                    commit_count=5,
+                ),
+                BranchInfo(
+                    name="archive/old-feat",
+                    is_yours=False,
+                    is_current=False,
+                    is_archived=True,
+                    last_commit_time="2026-01-01T00:00:00",
+                    commit_count=1,
+                ),
+            ],
+        )
+        model = _dc_to_pydantic(dc, GitBranchListResponse)
+        assert isinstance(model, GitBranchListResponse)
+        assert model.current == "main"
+        assert len(model.branches) == 2
+        assert model.branches[0].name == "pricing/alice/feat"
+        assert model.branches[0].is_yours is True
+        assert model.branches[1].is_archived is True
+
+    def test_save_result(self) -> None:
+        from haute._git import SaveResult
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitSaveResponse
+
+        dc = SaveResult(
+            commit_sha="abc123def",
+            message="Updated main",
+            timestamp="2026-03-14T12:00:00+00:00",
+        )
+        model = _dc_to_pydantic(dc, GitSaveResponse)
+        assert isinstance(model, GitSaveResponse)
+        assert model.commit_sha == "abc123def"
+        assert model.message == "Updated main"
+
+    def test_submit_result_with_none_url(self) -> None:
+        from haute._git import SubmitResult
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitSubmitResponse
+
+        dc = SubmitResult(compare_url=None, branch="pricing/alice/feat")
+        model = _dc_to_pydantic(dc, GitSubmitResponse)
+        assert model.compare_url is None
+        assert model.branch == "pricing/alice/feat"
+
+    def test_revert_result(self) -> None:
+        from haute._git import RevertResult
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitRevertResponse
+
+        dc = RevertResult(backup_tag="backup/pricing-alice-feat/2026-03-14T12-00-00", reverted_to="abc1234")
+        model = _dc_to_pydantic(dc, GitRevertResponse)
+        assert model.backup_tag.startswith("backup/")
+        assert model.reverted_to == "abc1234"
+
+    def test_pull_result_with_conflict(self) -> None:
+        from haute._git import PullResult
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitPullResponse
+
+        dc = PullResult(
+            success=False,
+            conflict=True,
+            conflict_message="Merge conflict in main.py",
+            commits_pulled=0,
+        )
+        model = _dc_to_pydantic(dc, GitPullResponse)
+        assert model.success is False
+        assert model.conflict is True
+        assert model.conflict_message == "Merge conflict in main.py"
+        assert model.commits_pulled == 0
+
+    def test_history_entry(self) -> None:
+        from haute._git import HistoryEntry
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitHistoryEntry
+
+        dc = HistoryEntry(
+            sha="abc123def456",
+            short_sha="abc123d",
+            message="Updated pricing",
+            timestamp="2026-03-14T12:00:00",
+            files_changed=["main.py", "config/banding/opt.json"],
+        )
+        model = _dc_to_pydantic(dc, GitHistoryEntry)
+        assert model.sha == "abc123def456"
+        assert model.files_changed == ["main.py", "config/banding/opt.json"]
+
+    def test_roundtrip_preserves_json_shape(self) -> None:
+        """model_dump() from _dc_to_pydantic matches manual construction."""
+        from haute._git import GitStatus
+        from haute.routes.git import _dc_to_pydantic
+        from haute.schemas import GitStatusResponse
+
+        dc = GitStatus(
+            branch="main",
+            is_main=True,
+            is_read_only=True,
+            changed_files=[],
+            main_ahead=False,
+            main_ahead_by=0,
+            main_last_updated=None,
+        )
+        auto = _dc_to_pydantic(dc, GitStatusResponse)
+        manual = GitStatusResponse(
+            branch="main",
+            is_main=True,
+            is_read_only=True,
+            changed_files=[],
+            main_ahead=False,
+            main_ahead_by=0,
+            main_last_updated=None,
+        )
+        assert auto.model_dump() == manual.model_dump()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# D12: PreviewNodeResponse inherits from NodeResult
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestPreviewNodeResponseInheritance:
+    """D12: PreviewNodeResponse should inherit all NodeResult fields."""
+
+    def test_is_subclass(self) -> None:
+        from haute.schemas import NodeResult, PreviewNodeResponse
+
+        assert issubclass(PreviewNodeResponse, NodeResult)
+
+    def test_inherits_all_node_result_fields(self) -> None:
+        from haute.schemas import NodeResult, PreviewNodeResponse
+
+        node_fields = set(NodeResult.model_fields.keys())
+        preview_fields = set(PreviewNodeResponse.model_fields.keys())
+        assert node_fields.issubset(preview_fields), (
+            f"Missing fields: {node_fields - preview_fields}"
+        )
+
+    def test_serialization_includes_inherited_and_own_fields(self) -> None:
+        from haute.schemas import ColumnInfo, PreviewNodeResponse
+
+        resp = PreviewNodeResponse(
+            node_id="n1",
+            status="ok",
+            row_count=42,
+            column_count=3,
+            columns=[ColumnInfo(name="a", dtype="Int64")],
+            preview=[{"a": 1}],
+            error=None,
+            timing_ms=12.5,
+            memory_bytes=1024,
+            timings=[],
+            memory=[],
+            node_statuses={"n1": "ok", "n2": "ok"},
+        )
+        d = resp.model_dump()
+        # Inherited from NodeResult
+        assert d["status"] == "ok"
+        assert d["row_count"] == 42
+        assert d["column_count"] == 3
+        assert d["columns"] == [{"name": "a", "dtype": "Int64"}]
+        assert d["timing_ms"] == 12.5
+        assert d["memory_bytes"] == 1024
+        assert d["error"] is None
+        # Own fields
+        assert d["node_id"] == "n1"
+        assert d["node_statuses"] == {"n1": "ok", "n2": "ok"}
+
+    def test_deserialization_from_dict(self) -> None:
+        from haute.schemas import PreviewNodeResponse
+
+        data = {
+            "node_id": "n2",
+            "status": "error",
+            "error": "bad column",
+            "error_line": 5,
+            "row_count": 0,
+        }
+        resp = PreviewNodeResponse.model_validate(data)
+        assert resp.node_id == "n2"
+        assert resp.status == "error"
+        assert resp.error == "bad column"
+        assert resp.error_line == 5
+        assert resp.row_count == 0
+
+    def test_defaults_from_node_result(self) -> None:
+        """Fields with defaults in NodeResult should have same defaults."""
+        from haute.schemas import PreviewNodeResponse
+
+        resp = PreviewNodeResponse(node_id="n1", status="ok")
+        assert resp.row_count == 0
+        assert resp.column_count == 0
+        assert resp.columns == []
+        assert resp.preview == []
+        assert resp.error is None
+        assert resp.timing_ms == 0
+        assert resp.memory_bytes == 0
+        assert resp.schema_warnings == []
+
+    def test_node_result_standalone_still_works(self) -> None:
+        """NodeResult should still work independently (not broken by inheritance)."""
+        from haute.schemas import NodeResult
+
+        nr = NodeResult(status="ok", row_count=10, column_count=2)
+        d = nr.model_dump()
+        assert d["status"] == "ok"
+        assert d["row_count"] == 10
+        assert "node_id" not in d  # Not in NodeResult
+
+
+# ──────────────────────────────────────────────────────────────────────
+# D13: MlflowLogResponse shared base
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestMlflowLogResponseSharedBase:
+    """D13: LogExperimentResponse and OptimiserMlflowLogResponse share a base."""
+
+    def test_both_subclass_base(self) -> None:
+        from haute.schemas import (
+            LogExperimentResponse,
+            MlflowLogResponse,
+            OptimiserMlflowLogResponse,
+        )
+
+        assert issubclass(LogExperimentResponse, MlflowLogResponse)
+        assert issubclass(OptimiserMlflowLogResponse, MlflowLogResponse)
+
+    def test_identical_fields(self) -> None:
+        from haute.schemas import LogExperimentResponse, OptimiserMlflowLogResponse
+
+        log_fields = set(LogExperimentResponse.model_fields.keys())
+        opt_fields = set(OptimiserMlflowLogResponse.model_fields.keys())
+        assert log_fields == opt_fields
+
+    def test_identical_serialization(self) -> None:
+        from haute.schemas import LogExperimentResponse, OptimiserMlflowLogResponse
+
+        kwargs = {
+            "status": "ok",
+            "backend": "databricks",
+            "experiment_name": "/my/experiment",
+            "run_id": "abc123",
+            "run_url": "https://example.com/run/abc123",
+            "tracking_uri": "databricks",
+        }
+        log_resp = LogExperimentResponse(**kwargs)
+        opt_resp = OptimiserMlflowLogResponse(**kwargs)
+        assert log_resp.model_dump() == opt_resp.model_dump()
+
+    def test_error_case_serialization(self) -> None:
+        from haute.schemas import LogExperimentResponse, OptimiserMlflowLogResponse
+
+        kwargs = {
+            "status": "error",
+            "error": "MLflow server unreachable",
+        }
+        log_resp = LogExperimentResponse(**kwargs)
+        opt_resp = OptimiserMlflowLogResponse(**kwargs)
+        assert log_resp.model_dump() == opt_resp.model_dump()
+        assert log_resp.error == "MLflow server unreachable"
+
+    def test_defaults(self) -> None:
+        from haute.schemas import MlflowLogResponse
+
+        resp = MlflowLogResponse(status="ok")
+        assert resp.backend == ""
+        assert resp.experiment_name == ""
+        assert resp.run_id is None
+        assert resp.run_url is None
+        assert resp.tracking_uri == ""
+        assert resp.error is None
+
+    def test_run_id_accepts_string_and_none(self) -> None:
+        from haute.schemas import LogExperimentResponse, OptimiserMlflowLogResponse
+
+        # String run_id
+        r1 = LogExperimentResponse(status="ok", run_id="run123")
+        assert r1.run_id == "run123"
+
+        # None run_id (default)
+        r2 = OptimiserMlflowLogResponse(status="ok")
+        assert r2.run_id is None
+
+    def test_base_model_dump_matches_children(self) -> None:
+        """Base class should produce same JSON shape as children."""
+        from haute.schemas import (
+            LogExperimentResponse,
+            MlflowLogResponse,
+            OptimiserMlflowLogResponse,
+        )
+
+        kwargs = {"status": "ok", "backend": "local", "run_id": "x"}
+        base = MlflowLogResponse(**kwargs)
+        child1 = LogExperimentResponse(**kwargs)
+        child2 = OptimiserMlflowLogResponse(**kwargs)
+        assert base.model_dump() == child1.model_dump() == child2.model_dump()

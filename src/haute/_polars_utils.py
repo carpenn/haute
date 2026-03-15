@@ -2,13 +2,74 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
 from haute._logging import get_logger
 
 logger = get_logger(component="polars_utils")
+
+
+# ---------------------------------------------------------------------------
+# Atomic write helper
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def atomic_write(dest: Path) -> Generator[Path, None, None]:
+    """Context manager for atomic file writes via temp-then-rename.
+
+    Yields a temporary path (``dest`` with ``.parquet.tmp`` suffix).
+    On successful exit, atomically renames the temp file to *dest*.
+    On exception, cleans up the temp file and re-raises.
+
+    Usage::
+
+        with atomic_write(cache_path) as tmp:
+            df.write_parquet(tmp, compression="zstd")
+        # cache_path now exists
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".parquet.tmp")
+    try:
+        yield tmp
+        tmp.rename(dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Parquet metadata reader
+# ---------------------------------------------------------------------------
+
+
+def read_parquet_metadata(path: Path) -> dict[str, Any]:
+    """Read lightweight schema info from a parquet file.
+
+    Returns a dict with keys: ``row_count``, ``column_count``, ``columns``
+    (name → Arrow type string), ``size_bytes``, and ``mtime``.
+    """
+    import pyarrow.parquet as pq
+
+    stat = path.stat()
+    meta = pq.read_metadata(str(path))
+    arrow_schema = pq.read_schema(str(path))
+    columns = {
+        name: str(arrow_schema.field(name).type)
+        for name in arrow_schema.names
+    }
+    return {
+        "row_count": meta.num_rows,
+        "column_count": meta.num_columns,
+        "columns": columns,
+        "size_bytes": stat.st_size,
+        "mtime": stat.st_mtime,
+    }
 
 
 def _malloc_trim() -> None:

@@ -14,15 +14,20 @@ from haute.cli._helpers import _load_deploy_config
 )
 def status(model_name: str | None, version_only: bool) -> None:
     """Check the status of a deployed model."""
-    # Load model name from haute.toml if not specified
+    # Load config — always needed for catalog/schema, and for model_name
+    # when not explicitly passed on the CLI.
+    config = _load_deploy_config(require_toml=(model_name is None))
     if model_name is None:
-        config = _load_deploy_config(require_toml=True)
         model_name = config.model_name
 
     try:
         from haute.deploy._mlflow import get_deploy_status
 
-        info = get_deploy_status(model_name)
+        info = get_deploy_status(
+            model_name,
+            catalog=config.databricks.catalog,
+            schema=config.databricks.schema,
+        )
     except ImportError:
         click.echo(
             "Error: mlflow is not installed. Install with: pip install haute[databricks]",

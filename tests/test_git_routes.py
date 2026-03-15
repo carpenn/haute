@@ -5,31 +5,15 @@ Uses real git repos in tmp_path for integration testing.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from fastapi.testclient import TestClient
 
+from tests._git_helpers import git_run as _git, init_repo as _init_repo
 
-def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git"] + list(args),
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
-
-def _init_repo(path: Path, *, user: str = "Test User") -> Path:
-    _git(path, "init", "-b", "main")
-    _git(path, "config", "user.name", user)
-    _git(path, "config", "user.email", "test@example.com")
-    (path / "README.md").write_text("# Test\n")
-    _git(path, "add", ".")
-    _git(path, "commit", "-m", "Initial commit")
-    return path
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -38,13 +22,6 @@ def _isolated_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo = _init_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     return repo
-
-
-@pytest.fixture()
-def client() -> TestClient:
-    from haute.server import app
-
-    return TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------
@@ -319,3 +296,131 @@ class TestGitDeleteBranch:
     def test_blocked_on_protected(self, client: TestClient) -> None:
         res = client.request("DELETE", "/api/git/branches", json={"branch": "main"})
         assert res.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# B16: Handlers must be sync (not async) so FastAPI threads them
+# ---------------------------------------------------------------------------
+
+
+class TestHandlersAreSync:
+    """All git route handlers must be plain ``def`` so FastAPI runs them in
+    ``run_in_threadpool``, avoiding event-loop blocking on slow git ops."""
+
+    def test_all_handlers_are_sync(self) -> None:
+        import asyncio
+        import inspect
+
+        from haute.routes.git import router
+
+        for route in router.routes:
+            endpoint = getattr(route, "endpoint", None)
+            if endpoint is None:
+                continue
+            assert not asyncio.iscoroutinefunction(endpoint), (
+                f"{endpoint.__name__} should be def, not async def"
+            )
+            assert not inspect.isawaitable(endpoint), (
+                f"{endpoint.__name__} should not be awaitable"
+            )
+
+
+# ---------------------------------------------------------------------------
+# E1: Non-GitError exceptions return 500 with safe (non-leaking) message
+# ---------------------------------------------------------------------------
+
+
+class TestGeneralExceptionHandling:
+    """Non-GitError exceptions must return 500 with a safe detail message
+    (not the raw exception string) and log the actual error."""
+
+    _SAFE_DETAIL = "Operation failed. Check the server logs for details."
+
+    # Map of (endpoint_function_to_patch, request_method, path, body)
+    _ENDPOINTS: list[tuple[str, str, str, dict | None]] = [
+        ("get_status", "GET", "/api/git/status", None),
+        ("list_branches", "GET", "/api/git/branches", None),
+        ("create_branch", "POST", "/api/git/branches", {"description": "test"}),
+        ("switch_branch", "POST", "/api/git/switch", {"branch": "x"}),
+        ("save_progress", "POST", "/api/git/save", None),
+        ("submit_for_review", "POST", "/api/git/submit", None),
+        ("get_history", "GET", "/api/git/history", None),
+        ("revert_to", "POST", "/api/git/revert", {"sha": "abc123"}),
+        ("pull_latest", "POST", "/api/git/pull", None),
+        ("archive_branch", "POST", "/api/git/archive", {"branch": "x"}),
+        ("delete_branch", "DELETE", "/api/git/branches", {"branch": "x"}),
+    ]
+
+    @pytest.mark.parametrize(
+        "git_func,method,path,body",
+        _ENDPOINTS,
+        ids=[e[0] for e in _ENDPOINTS],
+    )
+    def test_non_git_error_returns_500_safe_message(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        git_func: str,
+        method: str,
+        path: str,
+        body: dict | None,
+    ) -> None:
+        """Patch the underlying _git function to raise a RuntimeError and
+        verify the route returns 500 with a safe detail message."""
+        import haute.routes.git as git_routes
+
+        monkeypatch.setattr(
+            git_routes,
+            git_func,
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("disk on fire")),
+        )
+
+        if method == "GET":
+            res = client.get(path)
+        elif method == "POST":
+            res = client.post(path, json=body or {})
+        elif method == "DELETE":
+            res = client.request("DELETE", path, json=body or {})
+        else:
+            raise AssertionError(f"Unknown method {method}")
+
+        assert res.status_code == 500
+        detail = res.json()["detail"]
+        assert detail == self._SAFE_DETAIL
+        # Must NOT leak the raw exception message
+        assert "disk on fire" not in detail
+
+
+# ---------------------------------------------------------------------------
+# E6: _handle_git_error logs warnings
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitErrorLogging:
+    """_handle_git_error should log warnings for GitError and GitGuardrailError."""
+
+    def test_logs_git_error(self) -> None:
+        from unittest.mock import patch
+
+        from haute._git import GitError
+        from haute.routes.git import _handle_git_error
+
+        with patch("haute.routes.git.logger") as mock_logger:
+            with pytest.raises(Exception):  # HTTPException
+                _handle_git_error(GitError("something broke"))
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert call_args[0][0] == "git_error"
+
+    def test_logs_guardrail_error(self) -> None:
+        from unittest.mock import patch
+
+        from haute._git import GitGuardrailError
+        from haute.routes.git import _handle_git_error
+
+        with patch("haute.routes.git.logger") as mock_logger:
+            with pytest.raises(Exception):  # HTTPException
+                _handle_git_error(GitGuardrailError("not allowed"))
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert call_args[0][0] == "git_guardrail_error"

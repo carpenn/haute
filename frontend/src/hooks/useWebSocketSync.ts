@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import { getLayoutedElements } from "../utils/layout"
+import { computeNextNodeId, normalizeEdges } from "../utils/graphHelpers"
 import useToastStore from "../stores/useToastStore"
 import useUIStore from "../stores/useUIStore"
 
@@ -57,7 +58,7 @@ export default function useWebSocketSync({
 
             const g = msg.graph
             const newNodes = g.nodes || []
-            const newEdges = (g.edges || []).map((e: Edge) => ({ ...e, type: "default", animated: false }))
+            const newEdges = normalizeEdges(g.edges || [])
 
             const hasPositions = newNodes.some(
               (n: Node) => n.position && (n.position.x !== 0 || n.position.y !== 0)
@@ -74,10 +75,7 @@ export default function useWebSocketSync({
               setPreamble(g.preamble || "")
               preambleRef.current = g.preamble || ""
             }
-            nodeIdCounter.current = newNodes.reduce((max: number, n: Node) => {
-              const match = n.id.match(/_(\d+)$/)
-              return match ? Math.max(max, parseInt(match[1], 10)) : max
-            }, -1) + 1
+            nodeIdCounter.current = computeNextNodeId(newNodes)
             setSyncBanner(null)
             addToast("info", "Pipeline updated from file")
             setTimeout(() => fitView({ padding: 0.8 }), 100)

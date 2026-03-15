@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { extractBandingLevelsForNode, extractBandingLevels } from "../../utils/banding"
+import { buildCartesianEntries } from "../../panels/editors/rating/ratingTableUtils"
 import type { SimpleNode } from "../../panels/editors/_shared"
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -32,44 +33,6 @@ function makeOtherNode(id: string, nodeType = "transform"): SimpleNode {
       nodeType,
     },
   }
-}
-
-// ─── Copy of buildCartesianEntries (pure logic, not exported) ────
-
-function buildCartesianEntries(
-  factors: string[],
-  bandingLevels: Record<string, string[]>,
-  existing: Record<string, string | number>[],
-  defaultValue: string | null,
-): Record<string, string | number>[] {
-  if (factors.length === 0) return []
-  const levelArrays = factors.map(f => bandingLevels[f] || [])
-  if (levelArrays.some(a => a.length === 0)) return existing
-
-  const existingLookup = new Map<string, number>()
-  for (const e of existing) {
-    const key = factors.map(f => String(e[f] ?? "")).join("|")
-    const v = e.value
-    if (v !== undefined && v !== null && v !== "") {
-      existingLookup.set(key, typeof v === "number" ? v : parseFloat(String(v)))
-    }
-  }
-
-  const defVal = defaultValue != null && String(defaultValue).trim() ? parseFloat(String(defaultValue)) : 1.0
-  const entries: Record<string, string | number>[] = []
-
-  function recurse(depth: number, current: Record<string, string>) {
-    if (depth === factors.length) {
-      const key = factors.map(f => current[f]).join("|")
-      entries.push({ ...current, value: existingLookup.get(key) ?? defVal })
-      return
-    }
-    for (const level of levelArrays[depth]) {
-      recurse(depth + 1, { ...current, [factors[depth]]: level })
-    }
-  }
-  recurse(0, {})
-  return entries
 }
 
 // ─── Tests: extractBandingLevelsForNode ──────────────────────────

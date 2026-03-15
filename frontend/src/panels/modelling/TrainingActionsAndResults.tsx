@@ -19,6 +19,7 @@ export type TrainingActionsAndResultsProps = {
   isStale: boolean
   ramEstimate: TrainEstimate | null
   ramEstimateLoading: boolean
+  ramEstimateError?: string | null
   rowLimit: number | null
   /** True while the initial POST /api/modelling/train is in flight (pipeline executing). */
   submitting?: boolean
@@ -33,6 +34,7 @@ export function TrainingActionsAndResults({
   isStale,
   ramEstimate,
   ramEstimateLoading,
+  ramEstimateError = null,
   rowLimit,
   submitting = false,
   onTrain,
@@ -106,6 +108,12 @@ export function TrainingActionsAndResults({
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(168,85,247,.06)", border: "1px solid rgba(168,85,247,.15)" }}>
           <Loader2 size={12} className="animate-spin" style={{ color: "#a855f7" }} />
           <span style={{ color: "var(--text-muted)" }}>Estimating dataset size...</span>
+        </div>
+      )}
+      {ramEstimateError && !ramEstimateLoading && !ramEstimate && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
+          <AlertTriangle size={12} className="shrink-0" style={{ color: "#f59e0b" }} />
+          <span style={{ color: "#fbbf24" }}>RAM estimate unavailable — training will still work</span>
         </div>
       )}
       {ramEstimate && !ramEstimateLoading && adjusted && (

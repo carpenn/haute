@@ -13,11 +13,14 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 
 from haute._logging import get_logger
+from haute._types import HauteError
 
 logger = get_logger(component="git")
 
@@ -26,6 +29,10 @@ PROTECTED_BRANCHES = frozenset({"main", "master", "develop", "production"})
 # Branch names created by haute follow: pricing/<user>/<slug>
 _BRANCH_PREFIX = "pricing"
 _ARCHIVE_PREFIX = "archive"
+
+# Minimum seconds between `git fetch` calls in get_status.
+_FETCH_COOLDOWN_SECONDS: float = 30.0
+_last_fetch_time: float = 0.0
 
 # Characters that have no business in a branch name or SHA — used by
 # ``_validate_ref_name`` to block argument injection.
@@ -37,7 +44,7 @@ _BAD_REF_CHARS = re.compile(r"[\x00-\x1f\x7f~^:?*\[\\]")
 # ---------------------------------------------------------------------------
 
 
-class GitError(Exception):
+class GitError(HauteError):
     """User-facing git operation error."""
 
 
@@ -157,8 +164,12 @@ def _get_current_branch(cwd: Path | None = None) -> str:
     return branch if ok else "HEAD"
 
 
-def _get_default_branch(cwd: Path | None = None) -> str:
-    """Detect the default branch (main or master)."""
+@lru_cache(maxsize=32)
+def _get_default_branch_cached(cwd_str: str) -> str:
+    """Cached inner implementation.  Keyed on stringified *cwd* because
+    ``Path`` is unhashable and we need ``lru_cache`` compatibility.
+    """
+    cwd = Path(cwd_str) if cwd_str else None
     ok, ref = _run_git_ok(
         "symbolic-ref", "refs/remotes/origin/HEAD", "--short", cwd=cwd,
     )
@@ -172,6 +183,16 @@ def _get_default_branch(cwd: Path | None = None) -> str:
     if ok_master:
         return "master"
     return "main"
+
+
+def _get_default_branch(cwd: Path | None = None) -> str:
+    """Detect the default branch (main or master).
+
+    Result is cached per *cwd* — the default branch almost never changes
+    during a session so this avoids up to 3 subprocess calls on every
+    operation.
+    """
+    return _get_default_branch_cached(str(cwd) if cwd else "")
 
 
 def _get_user_slug(cwd: Path | None = None) -> str:
@@ -330,8 +351,14 @@ def get_status(cwd: Path | None = None) -> GitStatus:
     main_ahead_by = 0
     main_last_updated: str | None = None
     if _has_remote(cwd) and not is_main:
-        # Fetch silently to get latest remote state
-        _run_git_ok("fetch", "origin", default, "--quiet", cwd=cwd)
+        # Fetch silently — but throttle to avoid hammering the remote
+        # when the frontend polls frequently.
+        global _last_fetch_time  # noqa: PLW0603
+        now = time.monotonic()
+        if now - _last_fetch_time >= _FETCH_COOLDOWN_SECONDS:
+            _run_git_ok("fetch", "origin", default, "--quiet", cwd=cwd)
+            _last_fetch_time = now
+
         ok_count, count_str = _run_git_ok(
             "rev-list", "--count", f"HEAD..origin/{default}", cwd=cwd,
         )
@@ -386,38 +413,60 @@ def create_branch(description: str, cwd: Path | None = None) -> str:
 
 
 def list_branches(cwd: Path | None = None) -> BranchListResult:
-    """List all branches, with the user's branches first."""
+    """List all branches, with the user's branches first.
+
+    Uses ``%(ahead-behind:<default>)`` (git 2.35+) to get commit counts
+    in a single subprocess call instead of one per branch.
+    """
     _assert_git_repo(cwd)
 
     current = _get_current_branch(cwd)
     default = _get_default_branch(cwd)
     user_slug = _get_user_slug(cwd)
 
-    # Get all local branches with metadata
-    # Format: refname:short | committerdate:iso | ahead count
+    # Try the fast path first: %(ahead-behind:ref) gives "ahead behind"
+    # counts in one subprocess call (git ≥ 2.35).
     ok, raw = _run_git_ok(
         "for-each-ref",
         "--sort=-committerdate",
-        "--format=%(refname:short)\t%(committerdate:iso-strict)",
+        f"--format=%(refname:short)\t%(committerdate:iso-strict)\t%(ahead-behind:{default})",
         "refs/heads/",
         cwd=cwd,
     )
 
+    if not ok or not raw:
+        # Fallback for very old git: no ahead-behind support.
+        ok, raw = _run_git_ok(
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname:short)\t%(committerdate:iso-strict)",
+            "refs/heads/",
+            cwd=cwd,
+        )
+
     branches: list[BranchInfo] = []
     if ok and raw:
         for line in raw.splitlines():
-            parts = line.split("\t", 1)
+            parts = line.split("\t")
             if len(parts) < 2:
                 continue
-            name, commit_time = parts
 
-            # Count commits ahead of default branch
+            name = parts[0]
+            commit_time = parts[1]
+
+            # Parse ahead-behind if available (format: "ahead behind")
             commit_count = 0
-            ok_count, count_str = _run_git_ok(
-                "rev-list", "--count", f"{default}..{name}", cwd=cwd,
-            )
-            if ok_count and count_str.isdigit():
-                commit_count = int(count_str)
+            if len(parts) >= 3:
+                ab = parts[2].split()
+                if len(ab) == 2 and ab[0].isdigit():
+                    commit_count = int(ab[0])
+            else:
+                # Slow fallback: one subprocess per branch
+                ok_count, count_str = _run_git_ok(
+                    "rev-list", "--count", f"{default}..{name}", cwd=cwd,
+                )
+                if ok_count and count_str.isdigit():
+                    commit_count = int(count_str)
 
             branches.append(BranchInfo(
                 name=name,
@@ -511,7 +560,12 @@ def _auto_commit(cwd: Path | None = None) -> None:
 
 
 def get_history(limit: int = 20, cwd: Path | None = None) -> list[HistoryEntry]:
-    """Get commit history for the current branch."""
+    """Get commit history for the current branch.
+
+    Uses ``git log --name-only`` to retrieve commit metadata *and*
+    changed file paths in a single subprocess call instead of spawning
+    a separate ``diff-tree`` per commit.
+    """
     _assert_git_repo(cwd)
 
     default = _get_default_branch(cwd)
@@ -524,27 +578,33 @@ def get_history(limit: int = 20, cwd: Path | None = None) -> list[HistoryEntry]:
     else:
         range_spec = f"{default}..{branch}"
 
+    # --name-only appends changed file paths after each commit record.
+    # We use a unique separator so we can split on it reliably.
+    _sep = "---commit-sep---"
     ok, raw = _run_git_ok(
         "log", range_spec, f"--max-count={limit}",
-        "--format=%H\t%h\t%s\t%aI",
+        f"--format={_sep}%n%H\t%h\t%s\t%aI",
+        "--name-only",
         cwd=cwd,
     )
 
     entries: list[HistoryEntry] = []
     if ok and raw:
-        for line in raw.splitlines():
-            parts = line.split("\t", 3)
+        # Split on the separator to get per-commit blocks.
+        blocks = raw.split(_sep)
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+            lines = block.splitlines()
+            header = lines[0]
+            parts = header.split("\t", 3)
             if len(parts) < 4:
                 continue
             sha, short_sha, message, timestamp = parts
 
-            # Get files changed in this commit.  The SHA comes from
-            # git log output (not user input) so no injection risk.
-            ok_files, files_raw = _run_git_ok(
-                "diff-tree", "--no-commit-id", "--name-only", "-r", sha,
-                cwd=cwd,
-            )
-            files_changed = files_raw.splitlines() if ok_files and files_raw else []
+            # Remaining non-empty lines are changed file paths
+            files_changed = [f for f in lines[1:] if f.strip()]
 
             entries.append(HistoryEntry(
                 sha=sha,

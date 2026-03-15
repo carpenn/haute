@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { X, Plus, Trash2, FileCode2, ChevronDown } from "lucide-react"
+import { Plus, Trash2, FileCode2, ChevronDown } from "lucide-react"
 import { CodeEditor } from "./editors"
 import PanelShell from "./PanelShell"
+import PanelHeader from "./PanelHeader"
 import useClickOutside from "../hooks/useClickOutside"
+import { hoverHandlers, hoverBg } from "../utils/hoverHandlers"
 import {
+  ApiError,
   listUtilityFiles,
   readUtilityFile,
   createUtilityFile,
@@ -11,6 +14,25 @@ import {
   deleteUtilityFile,
 } from "../api/client"
 import type { UtilityFile } from "../api/client"
+
+const fileHover = hoverBg("var(--bg-hover)")
+
+/** Extract syntax error info from an ApiError's detail (which may be a JSON object or string). */
+function parseSyntaxError(err: unknown): { error: string; error_line: number | null } | null {
+  if (!(err instanceof ApiError) || err.status !== 400) return null
+  const raw = err.detail
+  if (!raw) return null
+  // detail may already be an object (runtime) or a JSON string
+  let parsed: unknown = raw
+  if (typeof raw === "string") {
+    try { parsed = JSON.parse(raw) } catch { return { error: raw, error_line: null } }
+  }
+  if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+    const obj = parsed as { error?: string; error_line?: number | null }
+    return { error: obj.error ?? "Syntax error", error_line: obj.error_line ?? null }
+  }
+  return { error: String(raw), error_line: null }
+}
 
 interface UtilityPanelProps {
   onClose: () => void
@@ -40,18 +62,18 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
       // Guard: module may have changed during the debounce window
       if (activeModuleRef.current !== module) return
       try {
-        const res = await updateUtilityFile(module, value)
+        await updateUtilityFile(module, value)
         if (activeModuleRef.current !== module) return
-        if (res.status === "error") {
-          setErrorLine(res.error_line ?? null)
-          setErrorMsg(res.error ?? "Syntax error")
-        } else {
-          setErrorLine(null)
-          setErrorMsg(null)
-        }
+        setErrorLine(null)
+        setErrorMsg(null)
       } catch (err) {
-        console.warn("Failed to save utility file", module, err)
-        if (activeModuleRef.current === module) {
+        if (activeModuleRef.current !== module) return
+        const syntaxErr = parseSyntaxError(err)
+        if (syntaxErr) {
+          setErrorLine(syntaxErr.error_line)
+          setErrorMsg(syntaxErr.error)
+        } else {
+          console.warn("Failed to save utility file", module, err)
           setErrorMsg("Failed to save")
         }
       }
@@ -105,10 +127,6 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
     setNewName("")
     try {
       const res = await createUtilityFile({ name })
-      if (res.status === "error") {
-        setErrorMsg(res.error ?? "Failed to create")
-        return
-      }
       // Auto-add import to preamble
       if (res.import_line) {
         onImportAdded(res.import_line)
@@ -116,7 +134,12 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
       await loadFiles()
       loadFile(res.module)
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to create")
+      const syntaxErr = parseSyntaxError(err)
+      if (syntaxErr) {
+        setErrorMsg(syntaxErr.error)
+      } else {
+        setErrorMsg(err instanceof Error ? err.message : "Failed to create")
+      }
     }
   }, [newName, loadFiles, loadFile, onImportAdded])
 
@@ -138,17 +161,11 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
   return (
     <PanelShell>
       {/* Header */}
-      <div className="px-3 py-2.5 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-        <FileCode2 size={14} style={{ color: 'var(--accent)' }} />
-        <span className="text-[13px] font-semibold flex-1" style={{ color: 'var(--text-primary)' }}>Utility Scripts</span>
-        <button onClick={onClose} className="p-1 rounded shrink-0 transition-colors" style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          title="Close"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      <PanelHeader
+        title="Utility Scripts"
+        onClose={onClose}
+        icon={<FileCode2 size={14} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* File selector */}
       <div className="px-3 py-2 flex items-center gap-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -194,8 +211,8 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
                           color: f.module === activeModule ? 'var(--accent)' : 'var(--text-secondary)',
                           background: f.module === activeModule ? 'var(--accent-soft)' : 'transparent',
                         }}
-                        onMouseEnter={(e) => { if (f.module !== activeModule) e.currentTarget.style.background = 'var(--bg-hover)' }}
-                        onMouseLeave={(e) => { if (f.module !== activeModule) e.currentTarget.style.background = 'transparent' }}
+                        onMouseEnter={(e) => { if (f.module !== activeModule) fileHover.onMouseEnter(e) }}
+                        onMouseLeave={(e) => { if (f.module !== activeModule) fileHover.onMouseLeave(e) }}
                       >
                         {f.module}
                       </button>
@@ -208,8 +225,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
               onClick={() => setCreating(true)}
               className="p-1.5 rounded-md transition-colors"
               style={{ color: 'var(--text-muted)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+              {...hoverHandlers("var(--bg-hover)", "var(--accent)", "transparent", "var(--text-muted)")}
               title="New utility file"
             >
               <Plus size={14} />
@@ -219,8 +235,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
                 onClick={handleDelete}
                 className="p-1.5 rounded-md transition-colors"
                 style={{ color: 'var(--text-muted)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,.1)'; e.currentTarget.style.color = '#ef4444' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+                {...hoverHandlers("rgba(239,68,68,.1)", "#ef4444", "transparent", "var(--text-muted)")}
                 title={`Delete ${activeModule}`}
               >
                 <Trash2 size={14} />
@@ -257,8 +272,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
                   onClick={() => setCreating(true)}
                   className="mt-2 px-3 py-1 text-[12px] font-medium rounded-md transition-colors"
                   style={{ color: 'var(--accent)', background: 'var(--accent-soft)' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(59,130,246,.2)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'var(--accent-soft)'}
+                  {...hoverBg("rgba(59,130,246,.2)", "var(--accent-soft)")}
                 >
                   Create one
                 </button>

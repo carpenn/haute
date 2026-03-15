@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from haute.cli._helpers import _load_deploy_config
+from haute.cli._helpers import _load_deploy_config, resolve_transport
 
 
 @click.command()
@@ -36,7 +36,6 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
     """
     import os
 
-    from haute.deploy._container import _CONTAINER_BASED_TARGETS
     from haute.deploy._impact import (
         ImpactReport,
         build_report,
@@ -80,22 +79,15 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
     click.echo(f"  Dataset: {impact_path} ({len(records):,} rows)")
 
     # Score via the appropriate transport
-    if config.target == "databricks":
+    transport = resolve_transport(config)
+
+    if transport.kind == "databricks":
         staging_preds, prod_preds, prod_exists = _impact_databricks(
             staging_name, prod_name, records, batch_size,
         )
-    elif config.target in _CONTAINER_BASED_TARGETS:
-        staging_url = config.ci.staging_endpoint_url
-        prod_url = config.ci.production_endpoint_url
-        if not staging_url:
-            click.echo(
-                "Error: No staging endpoint URL configured.\n"
-                "  Set [ci.staging] endpoint_url in haute.toml.",
-                err=True,
-            )
-            raise SystemExit(1)
+    elif transport.kind == "http":
         staging_preds, prod_preds, prod_exists = _impact_http(
-            staging_url, prod_url, records, batch_size,
+            transport.staging_url, transport.prod_url, records, batch_size,
         )
     else:
         click.echo(

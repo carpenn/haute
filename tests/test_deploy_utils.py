@@ -10,9 +10,13 @@ from haute._types import GraphNode, NodeData, PipelineGraph
 from haute.deploy._config import DeployConfig, ResolvedDeploy
 from haute.deploy._utils import build_manifest, get_haute_version, get_user
 
+from tests._deploy_helpers import make_resolved_deploy
+
 # ---------------------------------------------------------------------------
 # Helpers — real ResolvedDeploy with sensible defaults
 # ---------------------------------------------------------------------------
+
+_SENTINEL = object()
 
 
 def _make_graph(
@@ -33,43 +37,46 @@ def _make_graph(
 def _make_resolved(
     *,
     pipeline_name: str | None = "my_pipeline",
+    nodes_count: int = 3,
     model_name: str = "my_model",
     pipeline_file: Path = Path("/repo/main.py"),
     target: str = "databricks",
     output_fields: list[str] | None = None,
     input_node_ids: list[str] | None = None,
     output_node_id: str = "sink_1",
-    artifacts: dict[str, Path] | None = None,
+    artifacts: object = _SENTINEL,
     input_schema: dict[str, str] | None = None,
     output_schema: dict[str, str] | None = None,
-    removed_node_ids: list[str] | None = None,
-    nodes_count: int = 3,
+    removed_node_ids: object = _SENTINEL,
 ) -> ResolvedDeploy:
-    """Build a real ResolvedDeploy with sensible defaults."""
-    config = DeployConfig(
+    """Build a real ResolvedDeploy with sensible defaults.
+
+    Delegates to the shared ``make_resolved_deploy`` helper, adding
+    graph-building and richer defaults needed by the deploy-utils tests.
+    """
+    graph = _make_graph(pipeline_name=pipeline_name, nodes_count=nodes_count)
+
+    if artifacts is _SENTINEL:
+        artifacts = {
+            "model.pkl": Path("/repo/artifacts/model.pkl"),
+            "scaler.pkl": Path("/repo/artifacts/scaler.pkl"),
+        }
+    if removed_node_ids is _SENTINEL:
+        removed_node_ids = ["train_node", "eval_node"]
+
+    return make_resolved_deploy(
         pipeline_file=pipeline_file,
         model_name=model_name,
         target=target,
         output_fields=output_fields or ["premium"],
-    )
-    graph = _make_graph(pipeline_name=pipeline_name, nodes_count=nodes_count)
-
-    return ResolvedDeploy(
-        config=config,
         full_graph=graph,
         pruned_graph=graph,
         input_node_ids=input_node_ids or ["api_input_1"],
         output_node_id=output_node_id,
-        artifacts=artifacts if artifacts is not None else {
-            "model.pkl": Path("/repo/artifacts/model.pkl"),
-            "scaler.pkl": Path("/repo/artifacts/scaler.pkl"),
-        },
+        artifacts=artifacts,
         input_schema=input_schema or {"age": "int", "postcode": "str"},
         output_schema=output_schema or {"premium": "float"},
-        removed_node_ids=(
-            removed_node_ids if removed_node_ids is not None
-            else ["train_node", "eval_node"]
-        ),
+        removed_node_ids=removed_node_ids,
     )
 
 

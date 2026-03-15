@@ -230,4 +230,38 @@ describe("useSettingsStore", () => {
       expect(useSettingsStore.getState().collapsedSections["b"]).toBe(true)
     })
   })
+
+  // ────────────────────────────────────────────────────────────────
+  // Scenario slug (B12 fix)
+  // ────────────────────────────────────────────────────────────────
+
+  describe("addScenario returns normalized slug", () => {
+    it("returns the slugified name on success", () => {
+      const result = useSettingsStore.getState().addScenario("My Test Scenario")
+      expect(result).toBe("my_test_scenario")
+      expect(useSettingsStore.getState().scenarios).toContain("my_test_scenario")
+    })
+
+    it("returns null for duplicate scenario", () => {
+      useSettingsStore.getState().addScenario("dup")
+      const result = useSettingsStore.getState().addScenario("dup")
+      expect(result).toBeNull()
+    })
+
+    it("returns null for empty name", () => {
+      const result = useSettingsStore.getState().addScenario("   ")
+      expect(result).toBeNull()
+    })
+
+    it("normalizes whitespace to underscores", () => {
+      const result = useSettingsStore.getState().addScenario("  Two  Words  ")
+      expect(result).toBe("two_words")
+    })
+
+    it("slug is consistent with what gets stored in scenarios list", () => {
+      const slug = useSettingsStore.getState().addScenario("New Scenario")
+      const scenarios = useSettingsStore.getState().scenarios
+      expect(scenarios).toContain(slug)
+    })
+  })
 })

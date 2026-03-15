@@ -150,7 +150,9 @@ class TestPipeline:
         assert [n.name for n in order] == ["first", "second"]
 
     def test_topo_order_cycle_raises(self):
-        """Cycle detection should raise ValueError."""
+        """Cycle detection should raise CycleError."""
+        from haute._topo import CycleError
+
         p = Pipeline("cycle")
 
         @p.node
@@ -162,7 +164,7 @@ class TestPipeline:
             return a
 
         p.connect("a", "b").connect("b", "a")
-        with pytest.raises(ValueError, match="Cycle|disconnected"):
+        with pytest.raises(CycleError, match="Cycle detected"):
             p._topo_order()
 
     def test_run_no_edges_uses_last_output(self):

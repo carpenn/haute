@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from haute._logging import get_logger
 from haute._mlflow_utils import search_versions
+from haute.routes._helpers import _INTERNAL_ERROR_DETAIL
 from haute.schemas import (
     MlflowExperimentSummary,
     MlflowModelSummary,
@@ -62,7 +63,8 @@ def list_experiments() -> list[MlflowExperimentSummary]:
     try:
         experiments = mlflow.search_experiments()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
+        logger.error("mlflow_list_experiments_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail=_INTERNAL_ERROR_DETAIL)
 
     return [
         MlflowExperimentSummary(
@@ -102,14 +104,15 @@ def list_runs(
             output_format="list",
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
+        logger.error("mlflow_list_runs_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail=_INTERNAL_ERROR_DETAIL)
 
-    _MODEL_EXTENSIONS = (".cbm", ".rsglm")
+    model_extensions = (".cbm", ".rsglm")
 
     def _match(path: str) -> bool:
         if artifact_filter == "optimiser":
             return path == "optimiser_result.json"
-        return any(path.endswith(ext) for ext in _MODEL_EXTENSIONS)
+        return any(path.endswith(ext) for ext in model_extensions)
 
     results: list[MlflowRunSummary] = []
     for run in runs:
@@ -151,7 +154,8 @@ def list_models(
             page_token=page_token if page_token else None,
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
+        logger.error("mlflow_list_models_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail=_INTERNAL_ERROR_DETAIL)
 
     return [
         MlflowModelSummary(
@@ -179,7 +183,8 @@ def list_model_versions(
     try:
         versions = search_versions(client, model_name)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MLflow connection error: {exc}")
+        logger.error("mlflow_list_versions_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail=_INTERNAL_ERROR_DETAIL)
 
     return [
         MlflowModelVersionSummary(

@@ -7,9 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from haute.codegen import _build_params, _node_to_code, graph_to_code
+from haute.codegen import (
+    _build_params,
+    _generate_node_code,
+    _make_passthrough_builder,
+    _node_to_code,
+    graph_to_code,
+)
 from haute.parser import parse_pipeline_source
-from tests.conftest import make_graph as _g, make_node as _n
+from tests.conftest import compile_node_code as _compile_node_code, make_graph as _g, make_node as _n
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,15 +40,6 @@ class TestBuildParams:
 # _node_to_code
 # ---------------------------------------------------------------------------
 
-def _compile_node_code(code: str) -> None:
-    """Verify generated node code compiles inside a pipeline context."""
-    wrapper = (
-        "import polars as pl\nimport haute\n"
-        "pipeline = haute.Pipeline('test')\n\n"
-        f"{code}\n"
-    )
-    compile(wrapper, "<test>", "exec")
-
 
 class TestNodeToCode:
     @pytest.mark.parametrize(
@@ -59,6 +56,18 @@ class TestNodeToCode:
                 {"path": "data/input.csv"},
                 ['scan_csv("data/input.csv")', "def CSV_Source()", 'config="config/data_source/CSV_Source.json"'],
                 id="csv",
+            ),
+            pytest.param(
+                "JSON Source",
+                {"path": "data/input.json"},
+                ['read_json("data/input.json")', ".lazy()", "def JSON_Source()", 'config="config/data_source/JSON_Source.json"'],
+                id="json",
+            ),
+            pytest.param(
+                "JSONL Source",
+                {"path": "data/input.jsonl"},
+                ['scan_ndjson("data/input.jsonl")', "def JSONL_Source()", 'config="config/data_source/JSONL_Source.json"'],
+                id="jsonl",
             ),
             pytest.param(
                 "DB Source",
@@ -152,7 +161,7 @@ class TestNodeToCode:
             },
         })
         code = _node_to_code(node, source_names=["transform"])
-        assert 'write_parquet("out.parquet")' in code
+        assert 'safe_sink(transform, "out.parquet")' in code
         assert "def Write(transform: pl.LazyFrame)" in code
         _compile_node_code(code)
 
@@ -166,7 +175,7 @@ class TestNodeToCode:
             },
         })
         code = _node_to_code(node)
-        assert 'write_csv("out.csv")' in code
+        assert 'safe_sink(df, "out.csv", fmt="csv")' in code
         _compile_node_code(code)
 
     def test_model_score(self):
@@ -189,6 +198,35 @@ class TestNodeToCode:
         # Thin delegation body
         assert "score_from_config" in code
         assert "def Score(df: pl.LazyFrame)" in code
+        # B18: base_dir parameter resolves config relative to pipeline file
+        assert "base = str(Path(__file__).parent)" in code
+        assert "base_dir=base" in code
+        assert "from pathlib import Path" in code
+        _compile_node_code(code)
+
+    def test_model_score_with_user_code_has_base_dir(self):
+        """B18: Model score with user code also passes base_dir to score_from_config."""
+        node = _n({
+            "id": "ms",
+            "data": {
+                "label": "ScorePost",
+                "nodeType": "modelScore",
+                "config": {
+                    "sourceType": "run",
+                    "run_id": "abc123",
+                    "artifact_path": "model.cbm",
+                    "task": "regression",
+                    "output_column": "prediction",
+                    "code": "result = result * 2",
+                },
+            },
+        })
+        code = _node_to_code(node)
+        assert "score_from_config" in code
+        assert "base = str(Path(__file__).parent)" in code
+        assert "base_dir=base" in code
+        assert "from pathlib import Path" in code
+        assert "result = result * 2" in code
         _compile_node_code(code)
 
     def test_rating_step(self):
@@ -831,3 +869,545 @@ class TestTemplateParamConsistency:
         code = _node_to_code(node, source_names=[])
         assert "return df" in code
         _compile_node_code(code)
+
+
+# ---------------------------------------------------------------------------
+# B4: JSON/JSONL data source codegen (regression + new behaviour)
+# ---------------------------------------------------------------------------
+
+
+class TestDataSourceJsonCodegen:
+    """Verify that DATA_SOURCE codegen produces correct templates for all
+    supported file extensions, including JSON and JSONL which were previously
+    missing (B4 bug: fell through to parquet template).
+    """
+
+    def _make_ds_node(self, path: str, label: str = "Source", **extra_config):
+        config = {"path": path, **extra_config}
+        return _n({
+            "id": "src",
+            "data": {"label": label, "nodeType": "dataSource", "config": config},
+        })
+
+    # -- CSV (regression: existing behaviour must not break) ----------------
+
+    def test_csv_uses_scan_csv(self):
+        code = _node_to_code(self._make_ds_node("data/file.csv", "CSVSrc"))
+        assert 'scan_csv("data/file.csv")' in code
+        assert "scan_parquet" not in code
+        assert "read_json" not in code
+        _compile_node_code(code)
+
+    # -- Parquet (regression: existing behaviour must not break) -------------
+
+    def test_parquet_uses_scan_parquet(self):
+        code = _node_to_code(self._make_ds_node("data/file.parquet", "ParqSrc"))
+        assert 'scan_parquet("data/file.parquet")' in code
+        assert "scan_csv" not in code
+        assert "read_json" not in code
+        _compile_node_code(code)
+
+    # -- JSON (new behaviour) -----------------------------------------------
+
+    def test_json_uses_read_json_lazy(self):
+        """JSON data source should use pl.read_json(...).lazy(), matching _io.read_source."""
+        code = _node_to_code(self._make_ds_node("data/quotes.json", "JSONSrc"))
+        assert 'read_json("data/quotes.json")' in code
+        assert ".lazy()" in code
+        assert "scan_parquet" not in code
+        assert "scan_csv" not in code
+        _compile_node_code(code)
+
+    def test_json_produces_valid_python(self):
+        """Generated JSON data source code must be parseable by ast.parse."""
+        import ast
+        code = _node_to_code(self._make_ds_node("data/input.json", "JsonValid"))
+        wrapper = (
+            "import polars as pl\nimport haute\n"
+            "pipeline = haute.Pipeline('test')\n\n"
+            f"{code}\n"
+        )
+        ast.parse(wrapper)
+
+    def test_json_config_path(self):
+        """JSON data source should still emit the config= decorator reference."""
+        code = _node_to_code(self._make_ds_node("data/input.json", "JsonCfg"))
+        assert 'config="config/data_source/JsonCfg.json"' in code
+
+    # -- JSONL (new behaviour) ----------------------------------------------
+
+    def test_jsonl_uses_scan_ndjson(self):
+        """JSONL data source should use pl.scan_ndjson(...), matching _io.read_source."""
+        code = _node_to_code(self._make_ds_node("data/events.jsonl", "JsonlSrc"))
+        assert 'scan_ndjson("data/events.jsonl")' in code
+        assert "scan_parquet" not in code
+        assert "scan_csv" not in code
+        assert "read_json" not in code
+        _compile_node_code(code)
+
+    def test_jsonl_produces_valid_python(self):
+        """Generated JSONL data source code must be parseable by ast.parse."""
+        import ast
+        code = _node_to_code(self._make_ds_node("data/events.jsonl", "JsonlValid"))
+        wrapper = (
+            "import polars as pl\nimport haute\n"
+            "pipeline = haute.Pipeline('test')\n\n"
+            f"{code}\n"
+        )
+        ast.parse(wrapper)
+
+    def test_jsonl_config_path(self):
+        """JSONL data source should still emit the config= decorator reference."""
+        code = _node_to_code(self._make_ds_node("data/stream.jsonl", "JsonlCfg"))
+        assert 'config="config/data_source/JsonlCfg.json"' in code
+
+    # -- Case-insensitive extension matching --------------------------------
+
+    def test_uppercase_json_extension(self):
+        """Path with .JSON (uppercase) should still use the JSON template."""
+        code = _node_to_code(self._make_ds_node("data/INPUT.JSON", "UpperJson"))
+        assert 'read_json("data/INPUT.JSON")' in code
+        assert ".lazy()" in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_uppercase_jsonl_extension(self):
+        """Path with .JSONL (uppercase) should still use the JSONL template."""
+        code = _node_to_code(self._make_ds_node("data/EVENTS.JSONL", "UpperJsonl"))
+        assert 'scan_ndjson("data/EVENTS.JSONL")' in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_uppercase_csv_extension(self):
+        """Path with .CSV (uppercase) should still use the CSV template."""
+        code = _node_to_code(self._make_ds_node("data/FILE.CSV", "UpperCsv"))
+        assert 'scan_csv("data/FILE.CSV")' in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    # -- Paths with dots in directory names ---------------------------------
+
+    def test_json_with_dots_in_directory(self):
+        """Dots in parent directory names must not confuse extension detection."""
+        code = _node_to_code(self._make_ds_node("data/v2.1/quotes.json", "DotDir"))
+        assert 'read_json("data/v2.1/quotes.json")' in code
+        assert ".lazy()" in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_jsonl_with_dots_in_directory(self):
+        """Dots in parent directory names must not confuse extension detection."""
+        code = _node_to_code(self._make_ds_node("data/v3.0.beta/events.jsonl", "DotDirL"))
+        assert 'scan_ndjson("data/v3.0.beta/events.jsonl")' in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_parquet_with_dots_in_directory(self):
+        """Parquet path with dots in directory should still use scan_parquet."""
+        code = _node_to_code(self._make_ds_node("data/v1.2/file.parquet", "DotDirP"))
+        assert 'scan_parquet("data/v1.2/file.parquet")' in code
+        _compile_node_code(code)
+
+    # -- Consistency with _io.read_source -----------------------------------
+
+    @pytest.mark.parametrize(
+        "ext, expected_fn",
+        [
+            (".csv", "scan_csv"),
+            (".json", "read_json"),
+            (".jsonl", "scan_ndjson"),
+            (".parquet", "scan_parquet"),
+        ],
+        ids=["csv", "json", "jsonl", "parquet"],
+    )
+    def test_codegen_matches_read_source_dispatch(self, ext, expected_fn):
+        """Codegen must use the same Polars function as _io.read_source for each extension."""
+        path = f"data/file{ext}"
+        code = _node_to_code(self._make_ds_node(path, f"Src{ext.strip('.')}"))
+        assert expected_fn in code, (
+            f"Expected {expected_fn!r} in codegen for {ext!r}, got:\n{code}"
+        )
+        _compile_node_code(code)
+
+    # -- Unknown extension falls through to parquet -------------------------
+
+    def test_unknown_extension_falls_through_to_parquet(self):
+        """An unrecognised extension should still fall through to scan_parquet."""
+        code = _node_to_code(self._make_ds_node("data/file.feather", "FeatherSrc"))
+        assert "scan_parquet" in code
+        _compile_node_code(code)
+
+    # -- Full graph integration with JSON/JSONL data sources ----------------
+
+    def test_json_data_source_in_full_graph(self):
+        """A graph with a JSON data source compiles end-to-end."""
+        graph = _g({
+            "nodes": [
+                {"id": "s", "data": {"label": "JsonData", "nodeType": "dataSource", "config": {"path": "data.json"}}},
+                {"id": "t", "data": {"label": "Clean", "nodeType": "transform", "config": {"code": ".drop_nulls()"}}},
+            ],
+            "edges": [{"id": "e1", "source": "s", "target": "t"}],
+        })
+        code = graph_to_code(graph)
+        assert 'read_json("data.json")' in code
+        assert ".lazy()" in code
+        assert "def Clean(JsonData: pl.LazyFrame)" in code
+        compile(code, "<test>", "exec")
+
+    def test_jsonl_data_source_in_full_graph(self):
+        """A graph with a JSONL data source compiles end-to-end."""
+        graph = _g({
+            "nodes": [
+                {"id": "s", "data": {"label": "EventLog", "nodeType": "dataSource", "config": {"path": "events.jsonl"}}},
+                {"id": "t", "data": {"label": "Filter", "nodeType": "transform", "config": {"code": ".filter(pl.col('x') > 0)"}}},
+            ],
+            "edges": [{"id": "e1", "source": "s", "target": "t"}],
+        })
+        code = graph_to_code(graph)
+        assert 'scan_ndjson("events.jsonl")' in code
+        assert "def Filter(EventLog: pl.LazyFrame)" in code
+        compile(code, "<test>", "exec")
+
+    # -- Additional edge cases ----------------------------------------------
+
+    def test_ndjson_extension_falls_through_to_parquet(self):
+        """.ndjson is NOT a supported user-facing extension — falls through to parquet."""
+        code = _node_to_code(self._make_ds_node("data/events.ndjson", "NdjsonSrc"))
+        assert "scan_parquet" in code
+        assert "scan_ndjson" not in code
+        _compile_node_code(code)
+
+    def test_empty_path_falls_through_to_parquet(self):
+        """Empty path string should fall through to parquet template."""
+        code = _node_to_code(self._make_ds_node("", "EmptyPath"))
+        assert "scan_parquet" in code
+        _compile_node_code(code)
+
+    def test_no_extension_falls_through_to_parquet(self):
+        """Path with no extension should fall through to parquet template."""
+        code = _node_to_code(self._make_ds_node("data/noext", "NoExt"))
+        assert "scan_parquet" in code
+        _compile_node_code(code)
+
+    def test_mixed_case_json_extension(self):
+        """Path with .Json (mixed case) should use the JSON template."""
+        code = _node_to_code(self._make_ds_node("data/file.Json", "MixedJson"))
+        assert 'read_json("data/file.Json")' in code
+        assert ".lazy()" in code
+        _compile_node_code(code)
+
+    def test_mixed_case_parquet_extension(self):
+        """Path with .Parquet (mixed case) should use the parquet template."""
+        code = _node_to_code(self._make_ds_node("data/file.Parquet", "MixedPq"))
+        assert 'scan_parquet("data/file.Parquet")' in code
+        _compile_node_code(code)
+
+
+# ---------------------------------------------------------------------------
+# API input codegen: case-insensitive extension matching
+# ---------------------------------------------------------------------------
+
+
+class TestApiInputCodegen:
+    """Verify that API input codegen handles case-insensitive extensions."""
+
+    def _make_api_node(self, path: str, label: str = "Input"):
+        return _n({
+            "id": "inp",
+            "data": {"label": label, "nodeType": "apiInput", "config": {"path": path}},
+        })
+
+    def test_json_api_input(self):
+        code = _node_to_code(self._make_api_node("input.json", "JsonIn"))
+        assert "read_json_flat" in code
+        assert "api_input=True" not in code  # replaced by config= ref
+        _compile_node_code(code)
+
+    def test_jsonl_api_input(self):
+        code = _node_to_code(self._make_api_node("input.jsonl", "JsonlIn"))
+        assert "read_json_flat" in code
+        _compile_node_code(code)
+
+    def test_csv_api_input(self):
+        code = _node_to_code(self._make_api_node("input.csv", "CsvIn"))
+        assert "scan_csv" in code
+        assert "read_json_flat" not in code
+        _compile_node_code(code)
+
+    def test_uppercase_json_api_input(self):
+        """Case-insensitive: .JSON should use read_json_flat, not scan_parquet."""
+        code = _node_to_code(self._make_api_node("input.JSON", "UpperIn"))
+        assert "read_json_flat" in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_uppercase_csv_api_input(self):
+        """Case-insensitive: .CSV should use scan_csv, not scan_parquet."""
+        code = _node_to_code(self._make_api_node("input.CSV", "UpperCsv"))
+        assert "scan_csv" in code
+        assert "scan_parquet" not in code
+        _compile_node_code(code)
+
+    def test_parquet_api_input(self):
+        code = _node_to_code(self._make_api_node("input.parquet", "PqIn"))
+        assert "scan_parquet" in code
+        assert "read_json_flat" not in code
+        _compile_node_code(code)
+
+
+# ---------------------------------------------------------------------------
+# _make_passthrough_builder factory + all four passthrough node types
+# ---------------------------------------------------------------------------
+
+
+class TestMakePassthroughBuilder:
+    """Tests for the ``_make_passthrough_builder`` factory and the four
+    passthrough codegen builders it creates (scenario_expander, optimiser,
+    optimiser_apply, modelling).
+    """
+
+    # -- factory unit tests --------------------------------------------------
+
+    def test_factory_returns_callable(self):
+        template = """\
+@pipeline.node(foo=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    \"\"\"{description}\"\"\"
+    return {first}
+"""
+        builder = _make_passthrough_builder(template, ("bar",))
+        assert callable(builder)
+
+    def test_factory_produces_valid_code(self):
+        """A builder from the factory should produce compilable code."""
+        template = """\
+@pipeline.node(test=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    \"\"\"{description}\"\"\"
+    return {first}
+"""
+        builder = _make_passthrough_builder(template, ("alpha", "beta"))
+        node = _n({
+            "id": "x",
+            "data": {
+                "label": "My Node",
+                "nodeType": "transform",
+                "config": {"alpha": 42, "beta": "hello"},
+            },
+        })
+        code = builder(node, ["upstream"])
+        assert "def My_Node(upstream: pl.LazyFrame)" in code
+        assert "test=True" in code
+        assert "alpha=42" in code
+        assert "beta='hello'" in code
+        assert "return upstream" in code
+        _compile_node_code(code)
+
+    def test_factory_skips_empty_config_values(self):
+        """None, empty string, and empty list config values are omitted."""
+        template = """\
+@pipeline.node(t=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    \"\"\"{description}\"\"\"
+    return {first}
+"""
+        builder = _make_passthrough_builder(template, ("a", "b", "c", "d"))
+        node = _n({
+            "id": "x",
+            "data": {
+                "label": "Skip",
+                "nodeType": "transform",
+                "config": {"a": None, "b": "", "c": [], "d": "keep"},
+            },
+        })
+        code = builder(node, [])
+        assert "a=" not in code
+        assert "b=" not in code
+        assert "c=" not in code
+        assert "d='keep'" in code
+
+    def test_factory_no_extra_kwargs(self):
+        """When all config keys are absent, no trailing comma appears."""
+        template = """\
+@pipeline.node(t=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    \"\"\"{description}\"\"\"
+    return {first}
+"""
+        builder = _make_passthrough_builder(template, ("missing_key",))
+        node = _n({
+            "id": "x",
+            "data": {
+                "label": "Bare",
+                "nodeType": "transform",
+                "config": {},
+            },
+        })
+        code = builder(node, [])
+        assert "t=True)" in code
+        assert "missing_key" not in code
+
+    def test_factory_multiple_sources(self):
+        """Builder should list all upstream params and return the first."""
+        template = """\
+@pipeline.node(t=True{extra_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    \"\"\"{description}\"\"\"
+    return {first}
+"""
+        builder = _make_passthrough_builder(template, ())
+        node = _n({
+            "id": "x",
+            "data": {"label": "Join", "nodeType": "transform", "config": {}},
+        })
+        code = builder(node, ["left", "right"])
+        assert "def Join(left: pl.LazyFrame, right: pl.LazyFrame)" in code
+        assert "return left" in code
+
+    # -- integration tests for the four registered builders ------------------
+
+    @pytest.mark.parametrize(
+        "node_type, decorator_flag, config_key_sample, config_folder",
+        [
+            pytest.param(
+                "scenarioExpander",
+                "scenario_expander=True",
+                {"quote_id": "qid", "column_name": "col1"},
+                "expander",
+                id="scenario_expander",
+            ),
+            pytest.param(
+                "optimiser",
+                "optimiser=True",
+                {"mode": "minimize", "tolerance": 0.01},
+                "optimisation",
+                id="optimiser",
+            ),
+            pytest.param(
+                "optimiserApply",
+                "optimiser_apply=True",
+                {"artifact_path": "models/opt", "version": "3"},
+                "apply_optimisation",
+                id="optimiser_apply",
+            ),
+            pytest.param(
+                "modelling",
+                "modelling=True",
+                {"target": "loss_ratio", "algorithm": "catboost"},
+                "model_training",
+                id="modelling",
+            ),
+        ],
+    )
+    def test_passthrough_node_basic(
+        self, node_type, decorator_flag, config_key_sample, config_folder,
+    ):
+        """Each passthrough builder generates code with the correct decorator
+        flag, config kwargs, and a passthrough return statement."""
+        node = _n({
+            "id": "n1",
+            "data": {
+                "label": "My Step",
+                "nodeType": node_type,
+                "config": config_key_sample,
+            },
+        })
+        # _generate_node_code preserves the inline decorator (pre-config rewrite)
+        raw_code = _generate_node_code(node, source_names=["upstream"])
+        assert decorator_flag in raw_code
+        for key, val in config_key_sample.items():
+            assert f"{key}={val!r}" in raw_code
+        assert "def My_Step(upstream: pl.LazyFrame)" in raw_code
+        assert "return upstream" in raw_code
+
+        # _node_to_code replaces decorator with config= path
+        final_code = _node_to_code(node, source_names=["upstream"])
+        assert f'config="config/{config_folder}/My_Step.json"' in final_code
+        _compile_node_code(final_code)
+
+    @pytest.mark.parametrize(
+        "node_type, decorator_flag",
+        [
+            ("scenarioExpander", "scenario_expander=True"),
+            ("optimiser", "optimiser=True"),
+            ("optimiserApply", "optimiser_apply=True"),
+            ("modelling", "modelling=True"),
+        ],
+    )
+    def test_passthrough_node_empty_config(self, node_type, decorator_flag):
+        """Passthrough builders work correctly with an empty config dict."""
+        node = _n({
+            "id": "n1",
+            "data": {
+                "label": "Empty",
+                "nodeType": node_type,
+                "config": {},
+            },
+        })
+        raw_code = _generate_node_code(node, source_names=[])
+        assert decorator_flag in raw_code
+        assert "def Empty(df: pl.LazyFrame)" in raw_code
+        assert "return df" in raw_code
+
+        final_code = _node_to_code(node, source_names=[])
+        _compile_node_code(final_code)
+
+    @pytest.mark.parametrize(
+        "node_type",
+        ["scenarioExpander", "optimiser", "optimiserApply", "modelling"],
+    )
+    def test_passthrough_node_multi_source(self, node_type):
+        """Passthrough builders handle multiple upstream sources correctly."""
+        node = _n({
+            "id": "n1",
+            "data": {
+                "label": "Merge",
+                "nodeType": node_type,
+                "config": {},
+            },
+        })
+        code = _node_to_code(node, source_names=["left", "right"])
+        assert "def Merge(left: pl.LazyFrame, right: pl.LazyFrame)" in code
+        assert "return left" in code
+        _compile_node_code(code)
+
+
+# ---------------------------------------------------------------------------
+# E10: Unknown node type logs warning and falls back to transform
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownNodeTypeFallback:
+    def test_unknown_type_logs_warning(self) -> None:
+        """When a node type has no registered builder, log a warning and fall back to transform."""
+        from unittest.mock import patch
+
+        from haute.codegen import _CODEGEN_BUILDERS
+
+        # Use a valid nodeType but temporarily remove its builder to trigger fallback
+        node = _n({
+            "id": "n_unknown",
+            "data": {
+                "label": "Mystery",
+                "nodeType": "banding",
+                "config": {"code": ""},
+            },
+        })
+
+        original_builder = _CODEGEN_BUILDERS.pop("banding", None)
+        try:
+            with patch("haute.codegen.logger") as mock_logger:
+                code = _node_to_code(node, source_names=["src"])
+
+            mock_logger.warning.assert_any_call(
+                "unknown_node_type_fallback",
+                node_type="banding",
+                node_id="n_unknown",
+                label="Mystery",
+            )
+            # Falls back to transform — should still produce valid code
+            assert "def Mystery" in code
+            _compile_node_code(code)
+        finally:
+            if original_builder is not None:
+                _CODEGEN_BUILDERS["banding"] = original_builder

@@ -1493,12 +1493,10 @@ class TestExecuteGraphErrorPaths:
         results = execute_graph(graph)
         assert results["bad"].status == "error"
 
-    def test_circular_dependency_handled_gracefully(self, tmp_path):
-        """Circular edges should not hang the executor — topo sort drops them.
+    def test_circular_dependency_raises_cycle_error(self, tmp_path):
+        """Circular edges raise CycleError with the node names involved."""
+        from haute._topo import CycleError
 
-        Kahn's algorithm naturally ignores nodes involved in cycles (they never
-        reach in-degree 0), so they are simply absent from results.
-        """
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
@@ -1514,18 +1512,9 @@ class TestExecuteGraphErrorPaths:
                 _edge("b", "a"),  # circular
             ],
         })
-        # Should not hang — execute within a timeout
-        results = execute_graph(graph)
-        # Source should succeed; a and b are in a cycle so topo_sort
-        # drops them — they won't appear in results.
-        assert results["src"].status == "ok"
-        # The cycle nodes may or may not be in results depending on
-        # whether the topo sort includes them. If they are present,
-        # they should have error status.
-        if "a" in results:
-            assert results["a"].status == "error"
-        if "b" in results:
-            assert results["b"].status == "error"
+        with pytest.raises(CycleError, match="Cycle detected") as exc_info:
+            execute_graph(graph)
+        assert set(exc_info.value.cycle_nodes) == {"a", "b"}
 
     def test_disconnected_nodes_still_execute(self, tmp_path):
         """Nodes with no edges (disconnected) should still be executed."""

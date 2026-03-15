@@ -179,4 +179,30 @@ describe("ExternalFileEditor", () => {
     expect(editor.placeholder).toContain("df_in")
     expect(editor.placeholder).toContain("feature_names_")
   })
+
+  it("reflects external fileType config changes (B22 fix)", () => {
+    const { rerender } = render(<ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "pickle" }} />)
+    const pickleBtn = screen.getByText("PICKLE").closest("button")!
+    // Pickle is active
+    expect(pickleBtn.style.background).toContain("147")
+
+    // Simulate external config change to json
+    rerender(<ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "json" }} />)
+    const jsonBtn = screen.getByText("JSON").closest("button")!
+    expect(jsonBtn.style.background).toContain("147")
+  })
+
+  it("reflects external modelClass config changes when catboost (B22 fix)", () => {
+    const { rerender } = render(
+      <ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "catboost", modelClass: "classifier" }} />
+    )
+    expect(screen.getByText("Model Type")).toBeTruthy()
+    const classifierBtn = screen.getByText("Classifier").closest("button")!
+    expect(classifierBtn.style.background).toContain("147")
+
+    // Simulate external config change to regressor
+    rerender(<ExternalFileEditor {...DEFAULT_PROPS} config={{ fileType: "catboost", modelClass: "regressor" }} />)
+    const regressorBtn = screen.getByText("Regressor").closest("button")!
+    expect(regressorBtn.style.background).toContain("147")
+  })
 })

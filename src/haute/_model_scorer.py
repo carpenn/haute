@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextvars
 from typing import Any
 
-import numpy as np
 import polars as pl
 
 from haute._logging import get_logger
@@ -172,6 +171,7 @@ class ModelScorer:
 def score_from_config(
     *dfs: pl.LazyFrame,
     config: str,
+    base_dir: str | None = None,
 ) -> pl.LazyFrame:
     """Score using model parameters from a JSON config file.
 
@@ -187,11 +187,18 @@ def score_from_config(
         *dfs: Upstream LazyFrame(s) — the first is used as scoring input.
         config: Path to the JSON config file (e.g.
             ``"config/model_scoring/competitor_scoring.json"``).
+        base_dir: Directory to resolve *config* against.  When ``None``
+            the path is resolved relative to ``Path.cwd()``.  Codegen
+            templates pass ``Path(__file__).parent`` so the config is
+            always found regardless of the working directory at runtime.
     """
     import json
     from pathlib import Path
 
-    cfg = json.loads(Path(config).read_text())
+    config_path = Path(config)
+    if base_dir is not None and not config_path.is_absolute():
+        config_path = Path(base_dir) / config_path
+    cfg = json.loads(config_path.read_text())
     scorer = ModelScorer(
         source_type=cfg.get("sourceType", "run"),
         run_id=cfg.get("run_id", ""),
@@ -239,7 +246,7 @@ def _batch_score_to_parquet(
 
     import pyarrow.parquet as pq
 
-    from haute._mlflow_io import _prepare_predict_frame
+    from haute._mlflow_io import _append_classification_proba, _prepare_predict_frame
 
     fd, out_path = tempfile.mkstemp(
         suffix=".parquet", prefix="haute_score_out_",
@@ -265,16 +272,9 @@ def _batch_score_to_parquet(
                 pl.Series(output_col, preds),
             )
             if want_proba:
-                probas = scoring_model.predict_proba(x_data)
-                if probas is not None:
-                    if probas.ndim == 2:
-                        probas = probas[:, 1]
-                    chunk = chunk.with_columns(
-                        pl.Series(
-                            f"{output_col}_proba",
-                            np.asarray(probas).flatten(),
-                        ),
-                    )
+                chunk = _append_classification_proba(
+                    chunk, scoring_model, x_data, output_col,
+                )
             table = chunk.to_arrow()
             if writer is None:
                 writer = pq.ParquetWriter(

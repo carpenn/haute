@@ -45,7 +45,7 @@ export default function ConstantEditor({
               placeholder="name"
               className="flex-1 min-w-0 px-2 py-1.5 text-xs font-mono rounded-lg"
               style={{
-                background: "var(--input-bg)",
+                background: "var(--bg-input)",
                 color: "var(--text-primary)",
                 border: "1px solid var(--border)",
               }}
@@ -57,7 +57,7 @@ export default function ConstantEditor({
               placeholder="value"
               className="w-24 px-2 py-1.5 text-xs font-mono rounded-lg text-right"
               style={{
-                background: "var(--input-bg)",
+                background: "var(--bg-input)",
                 color: "var(--text-primary)",
                 border: "1px solid var(--border)",
               }}

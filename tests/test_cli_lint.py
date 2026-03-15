@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
-from click.testing import CliRunner
 
 from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
 from haute.cli import cli
 
-
-@pytest.fixture()
-def runner() -> CliRunner:
-    return CliRunner()
+if TYPE_CHECKING:
+    from click.testing import CliRunner
 
 
 class TestLintEdgeCases:

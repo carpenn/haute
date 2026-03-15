@@ -19,14 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 
 from haute.server import app
-
-
-@pytest.fixture()
-def client():
-    return TestClient(app)
 
 
 def _mock_tracking(mlflow=None, client=None):
@@ -108,7 +102,7 @@ class TestListExperiments:
             resp = client.get("/api/mlflow/experiments")
 
         assert resp.status_code == 502
-        assert "MLflow connection error" in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_multiple_experiments(self, client):
         """Returns multiple experiments in correct structure."""
@@ -257,7 +251,7 @@ class TestListRuns:
             resp = client.get("/api/mlflow/runs?experiment_id=1")
 
         assert resp.status_code == 502
-        assert "MLflow connection error" in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_missing_experiment_id_422(self, client):
         """Missing required experiment_id returns 422."""
@@ -420,7 +414,7 @@ class TestListModels:
             resp = client.get("/api/mlflow/models")
 
         assert resp.status_code == 502
-        assert "MLflow connection error" in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +473,7 @@ class TestListModelVersions:
             resp = client.get("/api/mlflow/model-versions?model_name=my-model")
 
         assert resp.status_code == 502
-        assert "MLflow connection error" in resp.json()["detail"]
+        assert "Check the server logs" in resp.json()["detail"]
 
     def test_version_missing_optional_fields(self, client):
         """Versions with missing optional fields default gracefully."""

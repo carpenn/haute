@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = get_logger(component="mlflow_io")
 
 _MODEL_CACHE_MAX_SIZE = 16
-_model_cache: LRUCache[tuple[str, str, str, str], "ScoringModel"] = LRUCache(
+_model_cache: LRUCache[tuple[str, str, str, str], ScoringModel] = LRUCache(
     max_size=_MODEL_CACHE_MAX_SIZE,
 )
 
@@ -192,40 +192,48 @@ def _extract_pyfunc_features(model: Any) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _find_cbm_artifact(client: MlflowClient, run_id: str) -> str:
-    """Find the first ``.cbm`` artifact in a run's artifact list."""
+def _find_artifact_by_extension(
+    client: MlflowClient, run_id: str, ext: str, label: str,
+) -> str:
+    """Find the first artifact with the given extension in a run.
+
+    Searches the top-level artifact list first, then one level of
+    subdirectories.
+
+    Args:
+        client: MLflow tracking client.
+        run_id: MLflow run ID to search.
+        ext: File extension including the dot (e.g. ``".cbm"``).
+        label: Human-readable label for error messages (e.g. ``"CatBoost"``).
+
+    Raises:
+        FileNotFoundError: If no artifact with *ext* is found.
+    """
     artifacts = client.list_artifacts(run_id)
     for art in artifacts:
-        if art.path.endswith(".cbm"):
+        if art.path.endswith(ext):
             return str(art.path)
     # Check one level deep (artifacts may be in subdirectories)
     for art in artifacts:
         if art.is_dir:
             sub_artifacts = client.list_artifacts(run_id, art.path)
             for sub in sub_artifacts:
-                if sub.path.endswith(".cbm"):
+                if sub.path.endswith(ext):
                     return str(sub.path)
     raise FileNotFoundError(
-        f"No .cbm artifact found in run '{run_id}'. "
-        "Ensure the model was logged with mlflow.log_artifact()."
+        f"No {ext} artifact found in run '{run_id}'. "
+        f"Ensure the {label} model was logged with mlflow.log_artifact()."
     )
+
+
+def _find_cbm_artifact(client: MlflowClient, run_id: str) -> str:
+    """Find the first ``.cbm`` artifact in a run's artifact list."""
+    return _find_artifact_by_extension(client, run_id, ".cbm", "CatBoost")
 
 
 def _find_rsglm_artifact(client: MlflowClient, run_id: str) -> str:
     """Find the first ``.rsglm`` artifact in a run's artifact list."""
-    artifacts = client.list_artifacts(run_id)
-    for art in artifacts:
-        if art.path.endswith(".rsglm"):
-            return str(art.path)
-    for art in artifacts:
-        if art.is_dir:
-            sub_artifacts = client.list_artifacts(run_id, art.path)
-            for sub in sub_artifacts:
-                if sub.path.endswith(".rsglm"):
-                    return str(sub.path)
-    raise FileNotFoundError(
-        f"No .rsglm artifact found in run '{run_id}'."
-    )
+    return _find_artifact_by_extension(client, run_id, ".rsglm", "RustyStats")
 
 
 def _find_model_artifact(client: MlflowClient, run_id: str) -> tuple[str, str]:
@@ -393,10 +401,9 @@ def load_mlflow_model(
 
     cache_key = (source_type, resolved_run_id, resolved_version or resolved_artifact, task)
 
-    cached = _model_cache.get(cache_key)
-    if cached is not None:
+    if cache_key in _model_cache:
         logger.info("mlflow_model_cache_hit", key=str(cache_key))
-        return cached
+        return _model_cache.get(cache_key)
 
     # Load model based on detected flavor
     if flavor == "catboost":
@@ -471,6 +478,28 @@ def _prepare_predict_frame(
     return selected.to_numpy()
 
 
+def _append_classification_proba(
+    df: pl.DataFrame,
+    scoring_model: ScoringModel,
+    x_data: Any,
+    output_col: str,
+) -> pl.DataFrame:
+    """Append a ``<output_col>_proba`` column for classification tasks.
+
+    Handles models that return 2-D probability arrays (one column per class)
+    by extracting the positive-class column (index 1).  If the model does
+    not support ``predict_proba`` the DataFrame is returned unchanged.
+    """
+    probas = scoring_model.predict_proba(x_data)
+    if probas is None:
+        return df
+    if probas.ndim == 2:
+        probas = probas[:, 1]
+    return df.with_columns(
+        pl.Series(f"{output_col}_proba", np.asarray(probas).flatten()),
+    )
+
+
 def _score_eager(
     scoring_model: ScoringModel,
     lf: pl.LazyFrame,
@@ -493,11 +522,7 @@ def _score_eager(
         pl.Series(output_col, preds),
     )
     if task == "classification":
-        probas = scoring_model.predict_proba(x_data)
-        if probas is not None:
-            if probas.ndim == 2:
-                probas = probas[:, 1]
-            df_eager = df_eager.with_columns(
-                pl.Series(f"{output_col}_proba", np.asarray(probas).flatten()),
-            )
+        df_eager = _append_classification_proba(
+            df_eager, scoring_model, x_data, output_col,
+        )
     return df_eager.lazy()

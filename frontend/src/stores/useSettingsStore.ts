@@ -33,7 +33,7 @@ interface SettingsState {
   activeScenario: string
   setScenarios: (scenarios: string[]) => void
   setActiveScenario: (scenario: string) => void
-  addScenario: (name: string) => void
+  addScenario: (name: string) => string | null
   removeScenario: (name: string) => void
 
   // File listing cache (keyed by "dir|extensions")
@@ -96,11 +96,13 @@ const useSettingsStore = create<SettingsState>()((set, get) => ({
   activeScenario: "live",
   setScenarios: (scenarios) => set({ scenarios }),
   setActiveScenario: (scenario) => set({ activeScenario: scenario }),
-  addScenario: (name) => set((s) => {
+  addScenario: (name) => {
     const trimmed = name.trim().toLowerCase().replace(/\s+/g, "_")
-    if (!trimmed || s.scenarios.includes(trimmed)) return s
-    return { scenarios: [...s.scenarios, trimmed] }
-  }),
+    const current = get().scenarios
+    if (!trimmed || current.includes(trimmed)) return null
+    set({ scenarios: [...current, trimmed] })
+    return trimmed
+  },
   removeScenario: (name) => set((s) => {
     if (name === "live") return s
     const next = s.scenarios.filter((sc) => sc !== name)

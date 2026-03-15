@@ -21,7 +21,7 @@ from haute._logging import get_logger
 from haute._types import GraphNode, PipelineGraph
 from haute.graph_utils import NodeType
 from haute.modelling._algorithms import ALGORITHM_REGISTRY
-from haute.routes._helpers import raise_node_not_found, raise_node_type_error
+from haute.routes._helpers import find_typed_node
 from haute.routes._job_store import JobStore
 from haute.schemas import TrainRequest, TrainResponse
 
@@ -72,12 +72,7 @@ def _clamp_row_limit(
 
 def _find_modelling_node(graph: PipelineGraph, node_id: str) -> GraphNode:
     """Find and validate a modelling node in the graph."""
-    node = graph.node_map.get(node_id)
-    if node is None:
-        raise_node_not_found(node_id)
-    if node.data.nodeType != NodeType.MODELLING:
-        raise_node_type_error(node_id, "modelling", str(node.data.nodeType))
-    return node
+    return find_typed_node(graph, node_id, NodeType.MODELLING, "modelling")
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -405,7 +400,10 @@ class TrainService:
             error_msg = f"Pipeline execution failed: {exc}"
             logger.error("pipeline_exec_failed", error=str(exc), node_id=body.node_id)
             self._store.update_job(job_id, status="error", message=error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
+            raise HTTPException(
+                status_code=500,
+                detail="Pipeline execution failed. Check the server logs for details.",
+            )
         finally:
             if checkpoint_dir and checkpoint_dir.exists():
                 shutil.rmtree(checkpoint_dir, ignore_errors=True)

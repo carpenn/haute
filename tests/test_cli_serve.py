@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from click.testing import CliRunner
 
 from haute.cli import cli
 
-
-@pytest.fixture()
-def runner() -> CliRunner:
-    return CliRunner()
+if TYPE_CHECKING:
+    from click.testing import CliRunner
 
 
 class TestServe:

@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { InputSourcesBar, FileBrowser, CodeEditor } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
@@ -19,8 +18,8 @@ export default function ExternalFileEditor({
   errorLine?: number | null
   accentColor: string
 }) {
-  const [fileType, setFileType] = useState<string>(configField(config, "fileType", "pickle"))
-  const [modelClass, setModelClass] = useState<string>(configField(config, "modelClass", "classifier"))
+  const fileType = configField(config, "fileType", "pickle")
+  const modelClass = configField(config, "modelClass", "classifier")
   const defaultCode = configField(config, "code", "")
   const hasInput = inputSources.length > 0
 
@@ -49,7 +48,7 @@ export default function ExternalFileEditor({
         <div className="mt-1">
           <ToggleButtonGroup
             value={fileType}
-            onChange={(ft) => { setFileType(ft); onUpdate("fileType", ft) }}
+            onChange={(ft) => onUpdate("fileType", ft)}
             options={[
               { key: "pickle", label: "PICKLE" },
               { key: "json", label: "JSON" },
@@ -67,7 +66,7 @@ export default function ExternalFileEditor({
           <div className="mt-1">
             <ToggleButtonGroup
               value={modelClass}
-              onChange={(mc) => { setModelClass(mc); onUpdate("modelClass", mc) }}
+              onChange={(mc) => onUpdate("modelClass", mc)}
               options={[
                 { key: "classifier", label: "Classifier" },
                 { key: "regressor", label: "Regressor" },

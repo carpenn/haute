@@ -12,11 +12,13 @@ from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from haute.deploy._config import ContainerConfig, DeployConfig, ResolvedDeploy
 from haute.deploy._container import (
     _ARTIFACT_EXT_TO_DEP,
-    _build_manifest,
     _detect_extra_deps,
     _generate_app_source,
     _generate_dockerfile,
 )
+from haute.deploy._utils import build_manifest as _build_manifest
+
+from tests._deploy_helpers import make_resolved_deploy
 
 
 # ---------------------------------------------------------------------------
@@ -30,19 +32,16 @@ def _make_resolved(
     model_name: str = "test-model",
     target: str = "container",
 ) -> ResolvedDeploy:
-    """Build a minimal ResolvedDeploy for unit tests."""
-    config = DeployConfig(
+    """Build a minimal ResolvedDeploy for container unit tests.
+
+    Delegates to the shared helper with container-specific defaults.
+    """
+    return make_resolved_deploy(
         pipeline_file=Path("main.py"),
         model_name=model_name,
         target=target,
         container=container or ContainerConfig(),
-    )
-    return ResolvedDeploy(
-        config=config,
-        full_graph=PipelineGraph(),
         pruned_graph=PipelineGraph(nodes=[GraphNode(id="n1", data=NodeData(label="n1"))]),
-        input_node_ids=["policies"],
-        output_node_id="output",
         artifacts=artifacts or {},
         input_schema={"age": "int", "region": "str"},
         output_schema={"premium": "float"},

@@ -67,6 +67,45 @@ class TestReadSourceJSONL:
         assert result["v"].to_list() == [10, 20]
 
 
+class TestReadSourceCaseInsensitive:
+    """Extension matching must be case-insensitive (consistent with codegen)."""
+
+    def test_uppercase_csv(self, tmp_path: Path) -> None:
+        path = tmp_path / "DATA.CSV"
+        pl.DataFrame({"a": [1]}).write_csv(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.collect()["a"].to_list() == [1]
+
+    def test_uppercase_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "DATA.JSON"
+        pl.DataFrame({"a": [1]}).write_json(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.collect()["a"].to_list() == [1]
+
+    def test_uppercase_jsonl(self, tmp_path: Path) -> None:
+        path = tmp_path / "DATA.JSONL"
+        pl.DataFrame({"a": [1]}).write_ndjson(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.collect()["a"].to_list() == [1]
+
+    def test_uppercase_parquet(self, tmp_path: Path) -> None:
+        path = tmp_path / "DATA.PARQUET"
+        pl.DataFrame({"a": [1]}).write_parquet(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.collect()["a"].to_list() == [1]
+
+    def test_mixed_case_json(self, tmp_path: Path) -> None:
+        path = tmp_path / "data.Json"
+        pl.DataFrame({"a": [1]}).write_json(str(path))
+        lf = read_source(str(path))
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.collect()["a"].to_list() == [1]
+
+
 class TestReadSourceErrors:
     def test_unsupported_extension_raises(self) -> None:
         with pytest.raises(ValueError, match="Unsupported file type: .xlsx"):
@@ -94,19 +133,9 @@ def _clear_cache():
     _object_cache.clear()
 
 
-@pytest.fixture()
-def _widen_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Allow loading files from tmp directories."""
-    from haute._sandbox import _get_project_root, set_project_root
-
-    original = _get_project_root()
-    set_project_root(Path("/"))
-    yield
-    set_project_root(original)
-
 
 class TestLoadExternalObjectJSON:
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_loads_json_file(self, tmp_path: Path) -> None:
         path = tmp_path / "model.json"
         data = {"weights": [1, 2, 3]}
@@ -114,7 +143,7 @@ class TestLoadExternalObjectJSON:
         result = load_external_object(str(path), "json")
         assert result == data
 
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_json_caching(self, tmp_path: Path) -> None:
         path = tmp_path / "model.json"
         path.write_text('{"x": 1}')
@@ -126,7 +155,7 @@ class TestLoadExternalObjectJSON:
 
 
 class TestLoadExternalObjectPickle:
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_delegates_to_safe_unpickle(self, tmp_path: Path) -> None:
         path = tmp_path / "model.pkl"
         path.write_bytes(b"fake")
@@ -138,7 +167,7 @@ class TestLoadExternalObjectPickle:
 
 
 class TestLoadExternalObjectJoblib:
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_delegates_to_safe_joblib_load(self, tmp_path: Path) -> None:
         path = tmp_path / "model.joblib"
         path.write_bytes(b"fake")
@@ -150,7 +179,7 @@ class TestLoadExternalObjectJoblib:
 
 
 class TestLoadExternalObjectCatboost:
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_classifier_by_default(self, tmp_path: Path) -> None:
         path = tmp_path / "model.cbm"
         path.write_bytes(b"fake")
@@ -160,7 +189,7 @@ class TestLoadExternalObjectCatboost:
         mock_model.load_model.assert_called_once_with(str(path))
         assert result is mock_model
 
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_regressor_class(self, tmp_path: Path) -> None:
         path = tmp_path / "model.cbm"
         path.write_bytes(b"fake")
@@ -172,7 +201,7 @@ class TestLoadExternalObjectCatboost:
 
 
 class TestObjectCacheBehavior:
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_cache_invalidated_on_mtime_change(self, tmp_path: Path) -> None:
         """Modifying the file changes the mtime, causing a cache miss."""
         import os
@@ -190,7 +219,7 @@ class TestObjectCacheBehavior:
         r2 = load_external_object(str(path), "json")
         assert r2 == {"v": 2}
 
-    @pytest.mark.usefixtures("_widen_sandbox")
+    @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_missing_file_uses_mtime_zero(self, tmp_path: Path) -> None:
         """When the file doesn't exist, mtime defaults to 0.0."""
         path = tmp_path / "missing.json"

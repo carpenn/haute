@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from haute._databricks_io import _TABLE_NAME_RE
 from haute._logging import get_logger
+from haute.routes._helpers import _INTERNAL_ERROR_DETAIL
 from haute.schemas import (
     CacheStatusResponse,
     CatalogItem,
@@ -84,7 +85,8 @@ def list_databricks_warehouses() -> WarehouseListResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("list_warehouses_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.get("/catalogs", response_model=CatalogListResponse)
@@ -101,7 +103,8 @@ def list_databricks_catalogs() -> CatalogListResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("list_catalogs_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.get("/schemas", response_model=SchemaListResponse)
@@ -118,7 +121,8 @@ def list_databricks_schemas(catalog: str) -> SchemaListResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("list_schemas_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.get("/tables", response_model=TableListResponse)
@@ -140,7 +144,8 @@ def list_databricks_tables(catalog: str, schema: str) -> TableListResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("list_tables_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.post("/fetch", response_model=FetchTableResponse)
@@ -175,7 +180,8 @@ async def fetch_databricks_table(body: FetchTableRequest) -> FetchTableResponse:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("fetch_table_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
 @router.get("/fetch/progress", response_model=FetchProgressResponse)

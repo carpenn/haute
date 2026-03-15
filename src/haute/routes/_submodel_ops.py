@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from haute._types import PipelineGraph
-from haute.graph_utils import (
-    GraphEdge,
-    GraphNode,
-    NodeData,
-    NodeType,
-    _sanitize_func_name,
+from haute._submodel_graph import (
+    build_submodel_placeholder,
+    classify_ports,
+    rewire_edges,
 )
+from haute._types import PipelineGraph
+from haute.graph_utils import _sanitize_func_name
 
 
 @dataclass
@@ -66,16 +65,9 @@ def create_submodel_graph(
         and e.target not in child_node_ids
     ]
 
-    # Determine input/output ports
-    input_ports: list[str] = []
-    output_ports: list[str] = []
-    for e in cross_edges:
-        if e.target in child_node_ids and e.source not in child_node_ids:
-            if e.target not in input_ports:
-                input_ports.append(e.target)
-        if e.source in child_node_ids and e.target not in child_node_ids:
-            if e.source not in output_ports:
-                output_ports.append(e.source)
+    # Determine input/output ports from cross-boundary edges
+    cross_tuples = [(e.source, e.target) for e in cross_edges]
+    input_ports, output_ports = classify_ports(cross_tuples, child_node_ids)
 
     # Build submodel internal graph dict
     sm_graph = {
@@ -87,41 +79,14 @@ def create_submodel_graph(
     }
 
     # Build submodel placeholder node
-    sm_node_id = f"submodel__{sm_name}"
-    sm_node = GraphNode(
-        id=sm_node_id,
-        type=NodeType.SUBMODEL,
-        position={"x": 0, "y": 0},
-        data=NodeData(
-            label=sm_name,
-            description="",
-            nodeType=NodeType.SUBMODEL,
-            config={
-                "file": sm_file,
-                "childNodeIds": list(child_node_ids),
-                "inputPorts": input_ports,
-                "outputPorts": output_ports,
-            },
-        ),
+    sm_node = build_submodel_placeholder(
+        sm_name, sm_file, list(child_node_ids),
+        input_ports, output_ports,
     )
+    sm_node_id = sm_node.id
 
     # Rewire cross-boundary edges
-    rewired_cross: list[GraphEdge] = []
-    for e in cross_edges:
-        if e.target in child_node_ids:
-            rewired_cross.append(GraphEdge(
-                id=f"e_{e.source}_{sm_node_id}__{e.target}",
-                source=e.source,
-                target=sm_node_id,
-                targetHandle=f"in__{e.target}",
-            ))
-        elif e.source in child_node_ids:
-            rewired_cross.append(GraphEdge(
-                id=f"e_{sm_node_id}_{e.target}__{e.source}",
-                source=sm_node_id,
-                sourceHandle=f"out__{e.source}",
-                target=e.target,
-            ))
+    rewired_cross = rewire_edges(cross_edges, sm_node_id, child_node_ids)
 
     # Assemble new parent graph
     existing_submodels = dict(graph.submodels or {})

@@ -9,16 +9,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import polars as pl
 import pytest
-from fastapi.testclient import TestClient
 
 from haute.routes._train_service import TrainService, _clamp_row_limit, _friendly_error
 from haute.server import app
 from tests.conftest import make_edge, make_graph
-
-
-@pytest.fixture()
-def client():
-    return TestClient(app)
 
 
 def _make_modelling_graph(
@@ -563,7 +557,8 @@ class TestMlflowLogSuccess:
             ):
                 resp = client.post("/api/modelling/mlflow/log", json={"job_id": "test_err"})
             assert resp.status_code == 500
-            assert "MLflow connection refused" in resp.json()["detail"]
+            assert "MLflow connection refused" not in resp.json()["detail"]
+            assert "Check the server logs" in resp.json()["detail"]
         finally:
             _store.jobs.pop("test_err", None)
 

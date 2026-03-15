@@ -6,9 +6,23 @@ import pytest
 
 from haute._config_validation import (
     VALID_KEYS,
+    _UNIVERSAL_KEYS,
     warn_unrecognized_config_keys,
 )
-from haute._types import NodeType
+from haute._types import (
+    MODEL_SCORE_CONFIG_KEYS,
+    MODELLING_CONFIG_KEYS,
+    OPTIMISER_APPLY_CONFIG_KEYS,
+    OPTIMISER_CONFIG_KEYS,
+    SCENARIO_EXPANDER_CONFIG_KEYS,
+    DataSinkConfig,
+    DataSourceConfig,
+    ModelScoreConfig,
+    NodeType,
+    OptimiserApplyConfig,
+    OptimiserConfig,
+    TransformConfig,
+)
 
 # ---------------------------------------------------------------------------
 # VALID_KEYS registry sanity checks
@@ -288,3 +302,282 @@ class TestBuildNodeConfigProducesValidKeys:
         config = _build_node_config(node_type, kwargs, body, params)
         bad = warn_unrecognized_config_keys(node_type, config)
         assert bad == [], f"Unrecognized keys in {node_type}: {bad}"
+
+    def test_transform_with_selected_columns_no_warning(self):
+        """selected_columns in a transform config must not be flagged."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.TRANSFORM,
+            {"selected_columns": ["col_a", "col_b"]},
+            '    """doc"""\n    return df',
+            ["df"],
+        )
+        bad = warn_unrecognized_config_keys(NodeType.TRANSFORM, config)
+        assert bad == [], f"selected_columns should be valid: {bad}"
+        assert config["selected_columns"] == ["col_a", "col_b"]
+
+    def test_model_score_source_type_maps_to_sourceType(self):
+        """Parser should map snake_case source_type to camelCase sourceType."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.MODEL_SCORE,
+            {"model_score": True, "source_type": "registered", "registered_model": "m", "version": "1"},
+            "",
+            ["df"],
+        )
+        bad = warn_unrecognized_config_keys(NodeType.MODEL_SCORE, config)
+        assert bad == [], f"Unrecognized keys in modelScore: {bad}"
+        assert config["sourceType"] == "registered"
+        assert "source_type" not in config, "snake_case source_type should not appear in config"
+
+    def test_model_score_all_keys_valid(self):
+        """All keys from MODEL_SCORE_CONFIG_KEYS should be recognised."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.MODEL_SCORE,
+            {
+                "model_score": True,
+                "source_type": "run",
+                "run_id": "abc",
+                "artifact_path": "model.cbm",
+                "run_name": "my_run",
+                "registered_model": "m",
+                "version": "1",
+                "task": "regression",
+                "output_column": "pred",
+                "experiment_name": "exp",
+                "experiment_id": "eid",
+            },
+            "",
+            ["df"],
+        )
+        bad = warn_unrecognized_config_keys(NodeType.MODEL_SCORE, config)
+        assert bad == [], f"Unrecognized keys in modelScore: {bad}"
+
+    def test_optimiser_data_input_banding_source_valid(self):
+        """data_input and banding_source should be valid optimiser keys."""
+        bad = warn_unrecognized_config_keys(
+            NodeType.OPTIMISER,
+            {"mode": "ratebook", "data_input": "node_1", "banding_source": "node_2"},
+        )
+        assert bad == [], f"data_input/banding_source should be valid: {bad}"
+
+    def test_optimiser_apply_experiment_name_run_name_valid(self):
+        """experiment_name and run_name should be valid optimiserApply keys."""
+        bad = warn_unrecognized_config_keys(
+            NodeType.OPTIMISER_APPLY,
+            {
+                "artifact_path": "opt.json",
+                "experiment_name": "my_exp",
+                "run_name": "my_run",
+                "experiment_id": "eid",
+                "run_id": "rid",
+            },
+        )
+        assert bad == [], f"experiment_name/run_name should be valid: {bad}"
+
+
+# ---------------------------------------------------------------------------
+# B7: selected_columns is universally valid (executor applies it to all nodes)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectedColumnsUniversal:
+    """Verify selected_columns doesn't trigger false positives on any node type."""
+
+    def test_selected_columns_in_universal_keys(self):
+        """selected_columns should be in the universal keys set."""
+        assert "selected_columns" in _UNIVERSAL_KEYS
+
+    @pytest.mark.parametrize("node_type", list(VALID_KEYS.keys()))
+    def test_selected_columns_valid_for_all_node_types(self, node_type):
+        """selected_columns should be accepted for every node type with validation."""
+        bad = warn_unrecognized_config_keys(
+            node_type,
+            {"selected_columns": ["a", "b"]},
+        )
+        assert bad == [], (
+            f"selected_columns flagged as unrecognized for {node_type}"
+        )
+
+    def test_selected_columns_in_transform_typed_dict(self):
+        """TransformConfig TypedDict should declare selected_columns."""
+        assert "selected_columns" in TransformConfig.__annotations__
+
+
+# ---------------------------------------------------------------------------
+# B8: Config key tuples aligned with TypedDict field names
+# ---------------------------------------------------------------------------
+
+
+class TestConfigKeyTupleAlignment:
+    """Verify config key tuples match their TypedDict annotations."""
+
+    def test_model_score_keys_match_typed_dict(self):
+        """Every key in MODEL_SCORE_CONFIG_KEYS should exist in ModelScoreConfig."""
+        td_keys = set(ModelScoreConfig.__annotations__)
+        for key in MODEL_SCORE_CONFIG_KEYS:
+            assert key in td_keys, (
+                f"MODEL_SCORE_CONFIG_KEYS has '{key}' but ModelScoreConfig does not"
+            )
+
+    def test_model_score_keys_use_camelCase_sourceType(self):
+        """MODEL_SCORE_CONFIG_KEYS should use 'sourceType' (camelCase), not 'source_type'."""
+        assert "sourceType" in MODEL_SCORE_CONFIG_KEYS
+        assert "source_type" not in MODEL_SCORE_CONFIG_KEYS
+
+    def test_optimiser_keys_match_typed_dict(self):
+        """Every key in OPTIMISER_CONFIG_KEYS should exist in OptimiserConfig."""
+        td_keys = set(OptimiserConfig.__annotations__)
+        for key in OPTIMISER_CONFIG_KEYS:
+            assert key in td_keys, (
+                f"OPTIMISER_CONFIG_KEYS has '{key}' but OptimiserConfig does not"
+            )
+
+    def test_optimiser_apply_keys_match_typed_dict(self):
+        """Every key in OPTIMISER_APPLY_CONFIG_KEYS should exist in OptimiserApplyConfig."""
+        td_keys = set(OptimiserApplyConfig.__annotations__)
+        for key in OPTIMISER_APPLY_CONFIG_KEYS:
+            assert key in td_keys, (
+                f"OPTIMISER_APPLY_CONFIG_KEYS has '{key}' but OptimiserApplyConfig does not"
+            )
+
+    def test_optimiser_config_has_data_input(self):
+        """OptimiserConfig should declare data_input (used by _optimiser_service)."""
+        assert "data_input" in OptimiserConfig.__annotations__
+
+    def test_optimiser_config_has_banding_source(self):
+        """OptimiserConfig should declare banding_source (used by _optimiser_service)."""
+        assert "banding_source" in OptimiserConfig.__annotations__
+
+    def test_optimiser_apply_has_experiment_name(self):
+        """OptimiserApplyConfig should declare experiment_name (UI-only)."""
+        assert "experiment_name" in OptimiserApplyConfig.__annotations__
+
+    def test_optimiser_apply_has_run_name(self):
+        """OptimiserApplyConfig should declare run_name (UI-only)."""
+        assert "run_name" in OptimiserApplyConfig.__annotations__
+
+    def test_modelling_keys_match_typed_dict(self):
+        """Every key in MODELLING_CONFIG_KEYS should exist in ModellingConfig."""
+        from haute._types import ModellingConfig
+        td_keys = set(ModellingConfig.__annotations__)
+        for key in MODELLING_CONFIG_KEYS:
+            assert key in td_keys, (
+                f"MODELLING_CONFIG_KEYS has '{key}' but ModellingConfig does not"
+            )
+
+    def test_scenario_expander_keys_match_typed_dict(self):
+        """Every key in SCENARIO_EXPANDER_CONFIG_KEYS should exist in ScenarioExpanderConfig."""
+        from haute._types import ScenarioExpanderConfig
+        td_keys = set(ScenarioExpanderConfig.__annotations__)
+        for key in SCENARIO_EXPANDER_CONFIG_KEYS:
+            assert key in td_keys, (
+                f"SCENARIO_EXPANDER_CONFIG_KEYS has '{key}' but ScenarioExpanderConfig does not"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Parser round-trip: source_type → sourceType mapping
+# ---------------------------------------------------------------------------
+
+
+class TestParserSourceTypeMapping:
+    """Verify the parser correctly maps decorator snake_case to config camelCase."""
+
+    def test_run_source_type(self):
+        """source_type='run' in decorator kwargs maps to sourceType='run' in config."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.MODEL_SCORE,
+            {"model_score": True, "source_type": "run", "run_id": "r1", "artifact_path": "m.cbm"},
+            "",
+            ["df"],
+        )
+        assert config["sourceType"] == "run"
+        assert config["run_id"] == "r1"
+        assert config["artifact_path"] == "m.cbm"
+        assert "source_type" not in config
+
+    def test_registered_source_type(self):
+        """source_type='registered' in decorator maps to sourceType='registered'."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.MODEL_SCORE,
+            {
+                "model_score": True,
+                "source_type": "registered",
+                "registered_model": "my_model",
+                "version": "3",
+            },
+            "",
+            ["df"],
+        )
+        assert config["sourceType"] == "registered"
+        assert config["registered_model"] == "my_model"
+        assert config["version"] == "3"
+        assert "source_type" not in config
+
+    def test_missing_source_type_not_set(self):
+        """If source_type is absent from decorator, sourceType should not be in config."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.MODEL_SCORE,
+            {"model_score": True, "run_id": "r1"},
+            "",
+            ["df"],
+        )
+        assert "sourceType" not in config
+        assert "source_type" not in config
+
+    def test_optimiser_apply_copies_all_keys(self):
+        """All keys from OPTIMISER_APPLY_CONFIG_KEYS should be copied when present."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.OPTIMISER_APPLY,
+            {
+                "optimiser_apply": True,
+                "artifact_path": "opt.json",
+                "version_column": "__v__",
+                "sourceType": "registered",
+                "registered_model": "m",
+                "version": "2",
+                "experiment_id": "eid",
+                "experiment_name": "exp",
+                "run_id": "rid",
+                "run_name": "rn",
+            },
+            "",
+            ["df"],
+        )
+        bad = warn_unrecognized_config_keys(NodeType.OPTIMISER_APPLY, config)
+        assert bad == [], f"Unrecognized keys: {bad}"
+        assert config["experiment_name"] == "exp"
+        assert config["run_name"] == "rn"
+
+    def test_optimiser_copies_data_input_and_banding_source(self):
+        """data_input and banding_source should be copied when present."""
+        from haute._parser_helpers import _build_node_config
+
+        config = _build_node_config(
+            NodeType.OPTIMISER,
+            {
+                "optimiser": True,
+                "mode": "ratebook",
+                "data_input": "node_1",
+                "banding_source": "node_2",
+            },
+            "",
+            ["df"],
+        )
+        bad = warn_unrecognized_config_keys(NodeType.OPTIMISER, config)
+        assert bad == [], f"Unrecognized keys: {bad}"
+        assert config["data_input"] == "node_1"
+        assert config["banding_source"] == "node_2"

@@ -111,12 +111,12 @@ async def create_utility_file(body: UtilityCreateRequest) -> UtilityWriteRespons
 
     ok, err_msg, err_line = _validate_syntax(content)
     if not ok:
-        return UtilityWriteResponse(
-            status="error",
-            name=f"{body.name}.py",
-            module=body.name,
-            error=err_msg,
-            error_line=err_line,
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": err_msg,
+                "error_line": err_line,
+            },
         )
 
     target.write_text(content, encoding="utf-8")
@@ -142,12 +142,12 @@ async def update_utility_file(module: str, body: UtilityWriteRequest) -> Utility
 
     ok, err_msg, err_line = _validate_syntax(body.content)
     if not ok:
-        return UtilityWriteResponse(
-            status="error",
-            name=f"{module}.py",
-            module=module,
-            error=err_msg,
-            error_line=err_line,
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": err_msg,
+                "error_line": err_line,
+            },
         )
 
     target.write_text(body.content, encoding="utf-8")

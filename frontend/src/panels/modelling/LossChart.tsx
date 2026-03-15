@@ -48,7 +48,7 @@ export function LossChart({ lossHistory, bestIteration }: LossChartProps) {
   return (
     <div>
       <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Loss Curve</label>
-      <svg width={w} height={h} className="mt-1" style={{ background: "var(--input-bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+      <svg width={w} height={h} className="mt-1" style={{ background: "var(--bg-input)", borderRadius: 6, border: "1px solid var(--border)" }}>
         <path d={makePath(trainKey)} fill="none" stroke="#a855f7" strokeWidth={1.5} />
         {evalKey && <path d={makePath(evalKey)} fill="none" stroke="#22c55e" strokeWidth={1.5} />}
         {bestX != null && <line x1={bestX} y1={py} x2={bestX} y2={py + chartH} stroke="#f59e0b" strokeWidth={1} strokeDasharray="3,2" />}

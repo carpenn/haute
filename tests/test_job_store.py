@@ -282,3 +282,352 @@ class TestJobStoreConcurrency:
             result = store.get_job(jid)
             assert result is not None
             assert result["status"] == "fresh"
+
+
+# ---------------------------------------------------------------------------
+# require_job
+# ---------------------------------------------------------------------------
+
+
+class TestRequireJob:
+    """Tests for require_job — raises HTTP 404 for missing jobs."""
+
+    def test_returns_existing_job(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({"status": "running", "progress": 0.5})
+        job = store.require_job(job_id)
+        assert job["status"] == "running"
+        assert job["progress"] == 0.5
+
+    def test_raises_404_for_missing_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore()
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_job("nonexistent_id")
+        assert exc_info.value.status_code == 404
+        assert "nonexistent_id" in exc_info.value.detail
+
+    def test_raises_404_for_evicted_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore(ttl_seconds=1)
+        job_id = store.create_job({"status": "old", "created_at": time.time() - 10})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_job(job_id)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# require_completed_job
+# ---------------------------------------------------------------------------
+
+
+class TestRequireCompletedJob:
+    """Tests for require_completed_job — fetch + status check in one call."""
+
+    def test_returns_completed_job(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({"status": "completed", "result": {"score": 0.95}})
+        job = store.require_completed_job(job_id)
+        assert job["status"] == "completed"
+        assert job["result"] == {"score": 0.95}
+
+    def test_raises_404_for_missing_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore()
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job("nonexistent_id")
+        assert exc_info.value.status_code == 404
+        assert "nonexistent_id" in exc_info.value.detail
+
+    def test_raises_400_for_running_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        assert exc_info.value.status_code == 400
+        assert "not completed" in exc_info.value.detail
+        assert "running" in exc_info.value.detail
+
+    def test_raises_400_for_pending_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"status": "pending"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        assert exc_info.value.status_code == 400
+        assert "not completed" in exc_info.value.detail
+        assert "pending" in exc_info.value.detail
+
+    def test_raises_400_for_error_job(self) -> None:
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"status": "error", "message": "boom"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        assert exc_info.value.status_code == 400
+        assert "not completed" in exc_info.value.detail
+        assert "error" in exc_info.value.detail
+
+    def test_raises_400_when_status_missing(self) -> None:
+        """A job dict with no 'status' key should be treated as not completed."""
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"progress": 0.0})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        assert exc_info.value.status_code == 400
+        assert "not completed" in exc_info.value.detail
+
+    def test_detail_includes_job_id(self) -> None:
+        """Error messages should include the job ID for debuggability."""
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        assert job_id in exc_info.value.detail
+
+    def test_raises_404_for_evicted_job(self) -> None:
+        """An evicted (stale) job should raise 404, not 400."""
+        from fastapi import HTTPException
+
+        store = JobStore(ttl_seconds=1)
+        job_id = store.create_job({"status": "completed", "created_at": time.time() - 10})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        # Should be 404 (not found due to eviction), not 400 (not completed)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# P7: atomic_update — thread-safe dict replacement
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicUpdate:
+    """Tests for atomic_update — replaces dict instead of mutating in-place."""
+
+    def test_atomic_update_merges_fields(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({"status": "running", "progress": 0.0})
+        store.atomic_update(job_id, {"status": "completed", "progress": 1.0})
+        result = store.get_job(job_id)
+        assert result is not None
+        assert result["status"] == "completed"
+        assert result["progress"] == 1.0
+
+    def test_atomic_update_preserves_existing_keys(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({"status": "running", "config": {"x": 1}})
+        store.atomic_update(job_id, {"status": "completed"})
+        result = store.get_job(job_id)
+        assert result is not None
+        assert result["config"] == {"x": 1}
+        assert result["status"] == "completed"
+
+    def test_atomic_update_creates_new_dict(self) -> None:
+        """The old dict reference should no longer be the stored one."""
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        old_dict = store.get_job(job_id)
+        store.atomic_update(job_id, {"status": "completed"})
+        new_dict = store.get_job(job_id)
+        # The new dict should be a different object
+        assert old_dict is not new_dict
+        # The old dict should still have the old status
+        assert old_dict["status"] == "running"
+        # The new dict should have the new status
+        assert new_dict["status"] == "completed"
+
+    def test_atomic_update_raises_for_unknown_id(self) -> None:
+        store = JobStore()
+        with pytest.raises(KeyError):
+            store.atomic_update("nonexistent", {"status": "done"})
+
+    def test_atomic_update_thread_safety(self) -> None:
+        """Concurrent atomic updates should not corrupt the dict.
+
+        NOTE: ``atomic_update`` uses a read-modify-write pattern
+        (``old = d[k]; d[k] = {**old, **fields}``) which is NOT
+        linearisable under concurrency -- concurrent writers to
+        *different* keys can lose each other's updates.  This is
+        acceptable for the real workload where only ONE background
+        thread writes to a given job and the main thread only reads.
+
+        This test verifies that no exception is raised and the dict
+        remains structurally intact.
+        """
+        store = JobStore()
+        job_id = store.create_job({"status": "running"})
+        n_threads = 20
+        barrier = threading.Barrier(n_threads)
+
+        def update_field(idx: int) -> None:
+            barrier.wait()
+            store.atomic_update(job_id, {f"field_{idx}": idx})
+
+        threads = [
+            threading.Thread(target=update_field, args=(i,))
+            for i in range(n_threads)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        result = store.get_job(job_id)
+        assert result is not None
+        # The dict should still be valid and contain at least the
+        # original keys plus whatever the last writer included.
+        assert result["status"] == "running"
+        # At least one field_N key must be present (the last writer's)
+        field_keys = [k for k in result if k.startswith("field_")]
+        assert len(field_keys) >= 1
+
+    def test_atomic_update_vs_reader_no_partial_state(self) -> None:
+        """A reader should never see a half-updated state.
+
+        We simulate the pattern: background thread updates status + progress
+        atomically, while main thread reads the job dict repeatedly.
+        """
+        store = JobStore()
+        job_id = store.create_job({"status": "running", "progress": 0.0})
+
+        partial_states_seen: list[bool] = []
+        stop_event = threading.Event()
+
+        def reader() -> None:
+            while not stop_event.is_set():
+                job = store.get_job(job_id)
+                if job is None:
+                    continue
+                status = job.get("status")
+                progress = job.get("progress")
+                # A partial state would be: status is "completed" but
+                # progress is still 0.0, or vice versa.
+                if status == "completed" and progress != 1.0:
+                    partial_states_seen.append(True)
+                if status == "running" and progress == 1.0:
+                    partial_states_seen.append(True)
+
+        def writer() -> None:
+            for _ in range(100):
+                store.atomic_update(job_id, {
+                    "status": "completed",
+                    "progress": 1.0,
+                })
+                store.atomic_update(job_id, {
+                    "status": "running",
+                    "progress": 0.0,
+                })
+
+        reader_thread = threading.Thread(target=reader, daemon=True)
+        writer_thread = threading.Thread(target=writer)
+        reader_thread.start()
+        writer_thread.start()
+        writer_thread.join(timeout=5)
+        stop_event.set()
+        reader_thread.join(timeout=2)
+
+        assert not partial_states_seen, "Reader saw a partially-updated job dict"
+
+
+# ---------------------------------------------------------------------------
+# P5: clear_result_data — strip heavy objects after consumption
+# ---------------------------------------------------------------------------
+
+
+class TestClearResultData:
+    """Tests for clear_result_data — memory cleanup for completed jobs."""
+
+    def test_clears_default_heavy_keys(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "solver": "heavy_solver_object",
+            "solve_result": "heavy_result_object",
+            "quote_grid": "heavy_grid_object",
+            "config": {"objective": "income"},
+            "result": {"converged": True},
+        })
+        store.clear_result_data(job_id)
+        job = store.get_job(job_id)
+        assert job is not None
+        # Heavy keys should be gone
+        assert "solver" not in job
+        assert "solve_result" not in job
+        assert "quote_grid" not in job
+        # Lightweight keys should remain
+        assert job["status"] == "completed"
+        assert job["config"] == {"objective": "income"}
+        assert job["result"] == {"converged": True}
+
+    def test_clears_custom_keys(self) -> None:
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "big_thing": "data",
+            "another": "thing",
+            "keep": "this",
+        })
+        store.clear_result_data(job_id, keys=("big_thing", "another"))
+        job = store.get_job(job_id)
+        assert job is not None
+        assert "big_thing" not in job
+        assert "another" not in job
+        assert job["keep"] == "this"
+
+    def test_noop_for_missing_job(self) -> None:
+        """Should not raise for a nonexistent job ID."""
+        store = JobStore()
+        store.clear_result_data("nonexistent")  # no exception
+
+    def test_noop_when_keys_already_absent(self) -> None:
+        """If heavy keys were never stored, the method is a no-op."""
+        store = JobStore()
+        job_id = store.create_job({"status": "completed", "result": {"ok": True}})
+        store.clear_result_data(job_id)
+        job = store.get_job(job_id)
+        assert job is not None
+        assert job["status"] == "completed"
+        assert job["result"] == {"ok": True}
+
+    def test_idempotent(self) -> None:
+        """Calling clear_result_data twice should not error or change state."""
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "solver": "heavy",
+            "solve_result": "heavy",
+        })
+        store.clear_result_data(job_id)
+        store.clear_result_data(job_id)  # second call
+        job = store.get_job(job_id)
+        assert job is not None
+        assert "solver" not in job
+        assert job["status"] == "completed"
+
+    def test_clear_uses_atomic_replacement(self) -> None:
+        """The old dict reference should not be mutated."""
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "solver": "heavy",
+        })
+        old_dict = store.get_job(job_id)
+        store.clear_result_data(job_id)
+        new_dict = store.get_job(job_id)
+        # Old dict should still have solver
+        assert "solver" in old_dict
+        # New dict should not
+        assert "solver" not in new_dict
+        assert old_dict is not new_dict

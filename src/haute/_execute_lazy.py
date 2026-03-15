@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import polars as pl
 
@@ -25,6 +25,37 @@ from haute._types import (
 )
 
 logger = get_logger(component="execute")
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _apply_selected_columns(
+    frame: pl.LazyFrame | pl.DataFrame,
+    config: dict,
+) -> pl.LazyFrame | pl.DataFrame:
+    """Filter *frame* to only the columns listed in *config*'s ``selected_columns``.
+
+    If ``selected_columns`` is absent, empty, or names no valid columns the
+    frame is returned unchanged.  Only columns that actually exist in the
+    frame are kept, and the filter is a no-op when every column is selected
+    (avoids an unnecessary projection).
+    """
+    sel_cols: list[str] | None = config.get("selected_columns")
+    if not sel_cols:
+        return frame
+
+    if isinstance(frame, pl.LazyFrame):
+        all_cols = frame.collect_schema().names()
+    else:
+        all_cols = frame.columns
+
+    valid = [c for c in sel_cols if c in all_cols]
+    if valid and len(valid) < len(all_cols):
+        return frame.select(valid)
+    return frame
 
 
 def _prune_live_switch_edges(
@@ -154,21 +185,13 @@ def _execute_lazy(
     # Full parent lookup from ALL edges for instance resolution
     all_parents = graph.parents_of
 
-    # Build executable functions
-    funcs: dict[str, tuple[Callable, bool]] = {}
-    for nid in order:
-        source_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
-        orig_src_names = resolve_orig_source_names(
-            node_map[nid], node_map, all_parents, id_to_name,
-        )
-        kwargs: dict[str, Any] = {"source_names": source_names, "scenario": scenario}
-        if orig_src_names is not None:
-            kwargs["node_map"] = node_map
-            kwargs["orig_source_names"] = orig_src_names
-        if preamble_ns:
-            kwargs["preamble_ns"] = preamble_ns
-        _, fn, is_source = build_node_fn(node_map[nid], **kwargs)
-        funcs[nid] = (fn, is_source)
+    # Build executable functions — delegates to _build_funcs with
+    # row_limit=None (lazy path never caps source output).
+    funcs = _build_funcs(
+        order, node_map, parents_of, id_to_name, all_parents,
+        build_node_fn, row_limit=None, preamble_ns=preamble_ns,
+        scenario=scenario,
+    )
 
     # Execute - all intermediate results stay lazy
     lazy_outputs: dict[str, _Frame] = {}
@@ -205,12 +228,7 @@ def _execute_lazy(
             lf = lf.lazy()
 
         # Apply selected_columns filter for downstream propagation
-        sel_cols = node_map[nid].data.config.get("selected_columns")
-        if sel_cols:
-            schema_names = lf.collect_schema().names()
-            valid = [c for c in sel_cols if c in schema_names]
-            if valid and len(valid) < len(schema_names):
-                lf = lf.select(valid)
+        lf = _apply_selected_columns(lf, node_map[nid].data.config)
 
         # Checkpoint to break Polars plan duplication and chained-join
         # memory accumulation (pola-rs/polars#24206).  Three triggers:
@@ -419,18 +437,14 @@ def _execute_eager_core(
             ]
 
             # Apply selected_columns filter for downstream propagation
-            sel_cols = node_map[nid].data.config.get("selected_columns")
-            if sel_cols:
-                valid = [c for c in sel_cols if c in df.columns]
-                if valid and len(valid) < len(df.columns):
-                    df = df.select(valid)
+            df = _apply_selected_columns(df, node_map[nid].data.config)
 
             eager_outputs[nid] = df
             memory_bytes[nid] = df.estimated_size("b")
         except Exception as exc:
             if not swallow_errors:
                 raise
-            logger.warning("node_failed", node_id=nid, error=str(exc))
+            logger.error("node_failed", node_id=nid, error=str(exc))
             eager_outputs[nid] = None
             errors[nid] = str(exc)
             error_line = _extract_error_line(exc)

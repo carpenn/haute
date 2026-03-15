@@ -321,6 +321,43 @@ class TestExtractConnectCalls:
         tree = ast.parse(source)
         assert _extract_connect_calls(tree) == []
 
+    def test_rejects_chained_attribute_receiver(self):
+        """module.pipeline.connect() should be rejected (receiver is not ast.Name)."""
+        source = 'module.pipeline.connect("a", "b")'
+        tree = ast.parse(source)
+        assert _extract_connect_calls(tree) == []
+
+    def test_rejects_deeply_chained_receiver(self):
+        """a.b.c.connect() should be rejected."""
+        source = 'a.b.c.connect("x", "y")'
+        tree = ast.parse(source)
+        assert _extract_connect_calls(tree) == []
+
+    def test_correct_receiver_still_works_after_fix(self):
+        """pipeline.connect() with correct receiver should still work."""
+        source = 'pipeline.connect("a", "b")\npipeline.connect("c", "d")'
+        tree = ast.parse(source)
+        pairs = _extract_connect_calls(tree, receiver="pipeline")
+        assert pairs == [("a", "b"), ("c", "d")]
+
+    def test_chained_receiver_with_custom_receiver(self):
+        """module.submodel.connect() should be rejected for receiver='submodel'."""
+        source = 'module.submodel.connect("a", "b")'
+        tree = ast.parse(source)
+        assert _extract_connect_calls(tree, receiver="submodel") == []
+
+    def test_rejects_subscript_receiver(self):
+        """receivers[0].connect() should be rejected (subscript, not ast.Name)."""
+        source = 'receivers[0].connect("a", "b")'
+        tree = ast.parse(source)
+        assert _extract_connect_calls(tree) == []
+
+    def test_rejects_call_receiver(self):
+        """get_pipeline().connect() should be rejected (call, not ast.Name)."""
+        source = 'get_pipeline().connect("a", "b")'
+        tree = ast.parse(source)
+        assert _extract_connect_calls(tree) == []
+
 
 # ===========================================================================
 # _build_edges
@@ -879,14 +916,36 @@ class TestResolveNodeConfig:
         # Config path says "banding" => BANDING
         assert node_type == NodeType.BANDING
 
-    def test_config_pops_config_key_only(self):
-        """The 'config' key is consumed but other kwargs survive."""
+    def test_does_not_mutate_decorator_kwargs(self):
+        """_resolve_node_config must not modify the caller's dict (B21)."""
         kwargs: dict[str, Any] = {"config": "config/data_source/x.json", "extra": True}
+        original = dict(kwargs)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             with patch("haute._parser_helpers.load_node_config", return_value={}):
                 _resolve_node_config(kwargs, "", [], 0, None)
-        assert "config" not in kwargs
-        assert kwargs["extra"] is True
+        # The original dict must be untouched — "config" key stays.
+        assert kwargs == original
+
+    def test_no_mutation_inline_kwargs_path(self):
+        """Even the inline-kwargs path must not mutate the input dict (B21)."""
+        kwargs: dict[str, Any] = {"path": "data.parquet"}
+        original = dict(kwargs)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            _resolve_node_config(kwargs, "", [], 0, None)
+        assert kwargs == original
+
+    def test_no_mutation_with_multiple_keys(self):
+        """Input dict with many keys must not lose or gain any entries (B21)."""
+        kwargs: dict[str, Any] = {
+            "config": "config/banding/x.json",
+            "sink": "out.parquet",
+            "format": "parquet",
+        }
+        original = dict(kwargs)
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            with patch("haute._parser_helpers.load_node_config", return_value={}):
+                _resolve_node_config(kwargs, "", [], 0, None)
+        assert kwargs == original
 
 
 # ===========================================================================

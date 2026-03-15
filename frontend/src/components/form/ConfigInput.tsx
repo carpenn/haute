@@ -1,4 +1,5 @@
 import { useId } from "react"
+import EditorLabel from "./EditorLabel"
 
 interface ConfigInputProps {
   value: string;
@@ -31,13 +32,9 @@ export default function ConfigInput({
   return (
     <div>
       {label && (
-        <label
-          htmlFor={inputId}
-          className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 block"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <EditorLabel htmlFor={inputId} className="mb-1 block">
           {label}
-        </label>
+        </EditorLabel>
       )}
       <input
         id={inputId}

@@ -34,7 +34,7 @@ export function FeatureBrowser({ features, selected, onSelect, width = 180 }: Fe
     <div className="flex flex-col shrink-0" style={{ width, borderRight: "1px solid var(--border)" }}>
       {/* Search */}
       <div className="px-2 py-1.5 shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: "var(--input-bg)", border: "1px solid var(--border)" }}>
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}>
           <Search size={11} style={{ color: "var(--text-muted)" }} />
           <input
             type="text"

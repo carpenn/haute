@@ -1,4 +1,5 @@
 import { useId } from "react"
+import EditorLabel from "./EditorLabel"
 
 interface ConfigSelectProps {
   value: string;
@@ -41,13 +42,9 @@ export default function ConfigSelect({
   return (
     <div>
       {label && (
-        <label
-          htmlFor={selectId}
-          className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 block"
-          style={{ color: "var(--text-muted)" }}
-        >
+        <EditorLabel htmlFor={selectId} className="mb-1 block">
           {label}
-        </label>
+        </EditorLabel>
       )}
       <select
         id={selectId}

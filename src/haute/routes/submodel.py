@@ -11,6 +11,7 @@ from haute.routes._helpers import (
     load_sidecar_positions,
     mark_self_write,
     save_sidecar,
+    validate_safe_path,
 )
 from haute.schemas import (
     CreateSubmodelRequest,
@@ -47,8 +48,11 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
             " and send the original pipeline file path",
         )
 
-    # Write files to disk
+    # Validate source_file stays within project root
     cwd = Path.cwd()
+    py_path = validate_safe_path(cwd, body.source_file)
+
+    # Write files to disk
     mark_self_write()
     files = graph_to_code_multi(
         result.graph,
@@ -57,15 +61,12 @@ async def create_submodel(body: CreateSubmodelRequest) -> CreateSubmodelResponse
         source_file=body.source_file,
     )
     for rel_path, code in files.items():
-        out_path = (cwd / rel_path).resolve()
-        if out_path.is_relative_to(cwd):
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(code)
+        out_path = validate_safe_path(cwd, rel_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(code)
 
     # Save sidecar
-    py_path = (cwd / body.source_file).resolve()
-    if py_path.is_relative_to(cwd):
-        save_sidecar(py_path, result.graph)
+    save_sidecar(py_path, result.graph)
 
     return CreateSubmodelResponse(
         status="ok",
@@ -81,7 +82,7 @@ async def get_submodel(name: str) -> SubmodelGraphResponse:
     from haute.parser import parse_submodel_file
 
     cwd = Path.cwd()
-    sm_path = cwd / "modules" / f"{name}.py"
+    sm_path = validate_safe_path(cwd / "modules", f"{name}.py")
     if not sm_path.is_file():
         raise HTTPException(status_code=404, detail=f"Submodel '{name}' not found")
 
@@ -142,7 +143,7 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
             detail="source_file is required — the frontend must track"
             " and send the original pipeline file path",
         )
-    py_path = (cwd / body.source_file).resolve()
+    py_path = validate_safe_path(cwd, body.source_file)
 
     code = graph_to_code(
         flat,
@@ -154,8 +155,12 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
 
     # Delete the submodel file
     if sm_file:
-        sm_path = (cwd / sm_file).resolve()
-        if sm_path.is_file() and sm_path.is_relative_to(cwd):
+        try:
+            sm_path = validate_safe_path(cwd, sm_file)
+        except HTTPException:
+            logger.warning("dissolve_skip_delete_traversal", file=sm_file)
+            sm_path = None
+        if sm_path is not None and sm_path.is_file():
             sm_path.unlink()
 
     return DissolveSubmodelResponse(status="ok", graph=flat)

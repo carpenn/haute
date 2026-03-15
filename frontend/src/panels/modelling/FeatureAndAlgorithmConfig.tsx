@@ -154,7 +154,7 @@ export function FeatureAndAlgorithmConfig({
           rows={Math.min(20, Math.max(6, draft.split("\n").length + 1))}
           className="w-full mt-1.5 px-2.5 py-2 rounded-lg text-xs font-mono"
           style={{
-            background: "var(--input-bg)",
+            background: "var(--bg-input)",
             border: `1px solid ${parseError ? "#ef4444" : "var(--border)"}`,
             color: "var(--text-primary)",
             resize: "vertical",

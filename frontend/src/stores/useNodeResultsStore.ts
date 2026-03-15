@@ -15,6 +15,7 @@
 import { create } from "zustand"
 import type { PreviewData } from "../panels/DataPreview"
 import type { SolveResult, OptimiserPreviewData } from "../panels/OptimiserPreview"
+import type { ColumnInfo } from "../types/node"
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -146,14 +147,14 @@ interface NodeResultsState {
   trainJobs: Record<string, ActiveTrainJob>
 
   // Column cache — keyed by source node ID, cached across panel mounts
-  columnCache: Record<string, { columns: { name: string; dtype: string }[]; graphVersion: number }>
+  columnCache: Record<string, { columns: ColumnInfo[]; graphVersion: number }>
 
   // Graph version — bumped on any node/edge change
   graphVersion: number
 
   // ── Column cache actions ──
-  setColumns: (sourceNodeId: string, columns: { name: string; dtype: string }[], graphVersion: number) => void
-  getColumns: (sourceNodeId: string) => { columns: { name: string; dtype: string }[]; fresh: boolean } | null
+  setColumns: (sourceNodeId: string, columns: ColumnInfo[], graphVersion: number) => void
+  getColumns: (sourceNodeId: string) => { columns: ColumnInfo[]; fresh: boolean } | null
 
   // ── Preview actions ──
   setPreview: (nodeId: string, data: PreviewData, graphVersion: number) => void

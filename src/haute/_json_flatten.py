@@ -28,6 +28,7 @@ import orjson
 
 from haute._logging import get_logger
 from haute._polars_utils import _malloc_trim
+from haute._types import HauteError
 
 if TYPE_CHECKING:
     import polars as pl
@@ -57,7 +58,7 @@ _cancel_events: dict[str, threading.Event] = {}
 
 # -- Test helpers for flatten progress state ---------------------------------
 
-class JsonCacheCancelledError(Exception):
+class JsonCacheCancelledError(HauteError):
     """Raised when a JSON cache build is cancelled by the user."""
 
 
@@ -743,9 +744,18 @@ def _jsonl_to_raw_parquet(
 
     # Infer a consistent schema from a large sample so all chunks
     # parse with identical types (avoids ParquetWriter schema mismatches).
-    ndjson_schema = pl.scan_ndjson(
-        path, infer_schema_length=_SCHEMA_SAMPLE_SIZE,
-    ).collect_schema()
+    # Empty or blank-line-only files cause Polars to raise — write an empty
+    # parquet and return immediately.
+    try:
+        ndjson_schema = pl.scan_ndjson(
+            path, infer_schema_length=_SCHEMA_SAMPLE_SIZE,
+        ).collect_schema()
+    except pl.exceptions.ComputeError:
+        import pyarrow as pa
+
+        pq.write_table(pa.table({}), str(tmp), compression="zstd")
+        tmp.rename(dest)
+        return 0
 
     writer: pq.ParquetWriter | None = None
     total_rows = 0
@@ -1096,17 +1106,12 @@ def _flatten_and_write(
     """
     import polars as pl
 
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = cache_path.with_suffix(".parquet.tmp")
+    from haute._polars_utils import atomic_write
 
-    try:
+    with atomic_write(cache_path) as tmp_path:
         rows = [flatten(d, schema) for d in samples]
         df = pl.from_dicts(rows) if rows else pl.DataFrame()
         df.write_parquet(tmp_path, compression="zstd")
-        tmp_path.rename(cache_path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
 
     logger.info(
         "json_cache_written",
@@ -1154,9 +1159,14 @@ def read_json_flat(
     — truly lazy with predicate pushdown.  The cache auto-invalidates when
     the source data file or config file is modified.
 
-    Streams records through PyArrow ``ParquetWriter`` in chunks of
-    ``_FLATTEN_CHUNK_SIZE`` rows, so memory usage is bounded regardless of
-    file size.
+    For ``.jsonl`` files, uses the same two-step streaming pipeline as
+    :func:`build_json_cache`:
+
+    1. JSONL -> raw Parquet  (Polars/Arrow memory, freed between chunks)
+    2. raw Parquet -> flat Parquet  (row-group streaming)
+
+    For ``.json`` files, streams records through PyArrow ``ParquetWriter``
+    in chunks (JSON format requires eager parsing anyway).
     """
     import polars as pl
 
@@ -1172,7 +1182,16 @@ def read_json_flat(
         return pl.scan_parquet(cache_path)
 
     resolved = _resolve_flatten_schema(p, schema, config_path)
-    _flatten_and_write_streaming(_iter_json_records(p), resolved, cache_path)
+
+    if p.suffix == ".jsonl":
+        raw_path = cache_path.with_suffix(".raw.parquet")
+        try:
+            _jsonl_to_raw_parquet(p, raw_path)
+            _flatten_raw_parquet(raw_path, resolved, cache_path)
+        finally:
+            raw_path.unlink(missing_ok=True)
+    else:
+        _flatten_and_write_streaming(_iter_json_records(p), resolved, cache_path)
 
     return pl.scan_parquet(cache_path)
 
@@ -1206,23 +1225,20 @@ class JsonCacheInfoDict(TypedDict):
 
 def json_cache_info(data_path: str | Path) -> JsonCacheInfoDict | None:
     """Return metadata about a cached JSON file, or ``None`` if not cached."""
-    import pyarrow.parquet as pq
+    from haute._polars_utils import read_parquet_metadata
 
     cache_path = _json_cache_path(data_path)
     if not cache_path.exists():
         return None
-    stat = cache_path.stat()
-    meta = pq.read_metadata(str(cache_path))
-    arrow_schema = pq.read_schema(str(cache_path))
-    columns = {name: str(arrow_schema.field(name).type) for name in arrow_schema.names}
+    meta = read_parquet_metadata(cache_path)
     return {
         "path": str(cache_path),
         "data_path": str(data_path),
-        "row_count": meta.num_rows,
-        "column_count": meta.num_columns,
-        "columns": columns,
-        "size_bytes": stat.st_size,
-        "cached_at": stat.st_mtime,
+        "row_count": meta["row_count"],
+        "column_count": meta["column_count"],
+        "columns": meta["columns"],
+        "size_bytes": meta["size_bytes"],
+        "cached_at": meta["mtime"],
     }
 
 
@@ -1300,22 +1316,16 @@ def build_json_cache(
 
     elapsed = time.monotonic() - t0
 
-    import pyarrow.parquet as pq
+    from haute._polars_utils import read_parquet_metadata
 
-    stat = cache_path.stat()
-    meta = pq.read_metadata(str(cache_path))
-    arrow_schema = pq.read_schema(str(cache_path))
-    columns_map = {
-        name: str(arrow_schema.field(name).type) for name in arrow_schema.names
-    }
-
+    meta = read_parquet_metadata(cache_path)
     return {
         "path": str(cache_path),
         "data_path": data_path_str,
-        "row_count": meta.num_rows,
-        "column_count": meta.num_columns,
-        "columns": columns_map,
-        "size_bytes": stat.st_size,
-        "cached_at": stat.st_mtime,
+        "row_count": meta["row_count"],
+        "column_count": meta["column_count"],
+        "columns": meta["columns"],
+        "size_bytes": meta["size_bytes"],
+        "cached_at": meta["mtime"],
         "cache_seconds": round(elapsed, 2),
     }

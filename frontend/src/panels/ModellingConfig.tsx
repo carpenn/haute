@@ -4,6 +4,7 @@ import { trainModel, estimateTrainingRam } from "../api/client"
 import type { TrainEstimate } from "../api/client"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useSettingsStore from "../stores/useSettingsStore"
+import useToastStore from "../stores/useToastStore"
 import { configField } from "../utils/configField"
 import { buildGraph } from "../utils/buildGraph"
 import { TargetAndTaskConfig } from "./modelling/TargetAndTaskConfig"
@@ -45,7 +46,9 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   // ── RAM estimate (fetched once when modelling node selected) ──
   const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)
   const [ramEstimateLoading, setRamEstimateLoading] = useState(false)
+  const [ramEstimateError, setRamEstimateError] = useState<string | null>(null)
   const estimateAbortRef = useRef<AbortController | null>(null)
+  const addToast = useToastStore((s) => s.addToast)
   // Ref to capture latest graph inputs without re-triggering the effect
   const graphInputsRef = useRef({ allNodes, edges, submodels, preamble })
   graphInputsRef.current = { allNodes, edges, submodels, preamble }
@@ -59,6 +62,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
     setRamEstimateLoading(true)
     setRamEstimate(null)
+    setRamEstimateError(null)
 
     const { allNodes: n, edges: e, submodels: s, preamble: p } = graphInputsRef.current
     estimateTrainingRam(
@@ -69,14 +73,18 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         if (!controller.signal.aborted) setRamEstimate(est)
       })
       .catch((err) => {
-        if (!controller.signal.aborted) console.warn("RAM estimate failed:", err)
+        if (!controller.signal.aborted) {
+          const msg = err instanceof Error ? err.message : String(err)
+          setRamEstimateError(msg)
+          addToast("warning", `RAM estimate failed: ${msg}`)
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setRamEstimateLoading(false)
       })
 
     return () => controller.abort()
-  }, [nodeId])
+  }, [nodeId, addToast])
 
   // Collapse state from UI store (persisted)
   const featuresOpen = useSettingsStore((s) => s.isSectionOpen("modelling.features"))
@@ -206,6 +214,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
           isStale={isStale}
           ramEstimate={ramEstimate}
           ramEstimateLoading={ramEstimateLoading}
+          ramEstimateError={ramEstimateError}
           rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
           submitting={submitting}
           onTrain={handleTrain}
@@ -261,6 +270,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
         isStale={isStale}
         ramEstimate={ramEstimate}
         ramEstimateLoading={ramEstimateLoading}
+        ramEstimateError={ramEstimateError}
         rowLimit={typeof config.row_limit === "number" ? config.row_limit : null}
         submitting={submitting}
         onTrain={handleTrain}
