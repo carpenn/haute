@@ -72,7 +72,11 @@ html, body, #root {
 
 /* React Flow overrides */
 .react-flow__node {
-  transition: filter 0.2s ease !important;
+  transition: filter 0.2s ease, box-shadow 0.15s ease !important;
+}
+.react-flow__node:hover:not(.selected) > div {
+  border-color: rgba(255,255,255,.20) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06) !important;
 }
 .react-flow__node-output {
   background: transparent !important;
@@ -82,12 +86,23 @@ html, body, #root {
   box-shadow: none !important;
 }
 .react-flow__handle {
-  width: 8px !important;
-  height: 8px !important;
+  width: 10px !important;
+  height: 10px !important;
   background: var(--text-muted) !important;
   border: 2px solid var(--bg-elevated) !important;
   opacity: 0;
-  transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease !important;
+  transition: opacity 0.15s ease, background 0.15s ease !important;
+}
+/* Invisible hit area — 28px around the visual 10px handle */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
 }
 .react-flow__node:hover .react-flow__handle,
 .react-flow__node.selected .react-flow__handle {
@@ -96,17 +111,37 @@ html, body, #root {
 .react-flow__handle:hover {
   background: var(--accent) !important;
   opacity: 1 !important;
-  transform: scale(1.5) !important;
 }
+/* Edge default + transitions */
 .react-flow__edge-path {
   stroke-width: 1.5 !important;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease !important;
 }
+/* Edge hover */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgba(255,255,255,.50) !important;
+  stroke-width: 2px !important;
+}
+.react-flow__edge:hover {
+  cursor: pointer;
+}
+/* Edge selected — accent color with glow */
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: rgba(255,255,255,.45) !important;
+  stroke: var(--accent) !important;
   stroke-width: 2.5 !important;
+  filter: drop-shadow(0 0 3px rgba(59,130,246,.4));
 }
 .react-flow__edge.selected marker path {
-  fill: rgba(255,255,255,.45) !important;
+  fill: var(--accent) !important;
+}
+.react-flow__edge:hover marker path {
+  fill: rgba(255,255,255,.50) !important;
+}
+/* Connection line (drag-to-connect) */
+.react-flow__connection-path {
+  stroke: var(--accent) !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: 6 3 !important;
 }
 /* Selection rectangle styling */
 .react-flow__selection {
