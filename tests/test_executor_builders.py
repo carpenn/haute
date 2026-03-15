@@ -488,6 +488,21 @@ class TestBuildScenarioExpander:
         assert "my_idx" in result.columns
         assert result["my_idx"].to_list() == [0, 1, 2]
 
+    def test_index_only_when_column_name_empty(self) -> None:
+        """Empty column_name produces index column only, no value column."""
+        _, fn, _ = _build(
+            "scenarioExpander",
+            {"column_name": "", "steps": 3, "step_column": "idx"},
+            source_names=["upstream"],
+        )
+        input_df = pl.DataFrame({"x": [1]}).lazy()
+        result = fn(input_df).collect()
+        assert result.shape[0] == 3
+        assert "idx" in result.columns
+        assert "x" in result.columns
+        # No value column should be present
+        assert len(result.columns) == 2
+
     def test_user_code_transforms_expanded_data(self) -> None:
         """User Polars code runs after the cross-join expansion."""
         _, fn, _ = _build(

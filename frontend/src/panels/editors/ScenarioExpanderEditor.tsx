@@ -20,11 +20,11 @@ export default function ScenarioExpanderEditor({
   errorLine?: number | null
 }) {
   const quoteId = configField(config, "quote_id", "")
-  const columnName = configField(config, "column_name", "scenario_value")
-  const minValue = configField(config, "min_value", 0.8)
-  const maxValue = configField(config, "max_value", 1.2)
-  const steps = configField(config, "steps", 21)
-  const stepColumn = configField(config, "step_column", "scenario_index")
+  const columnName = configField(config, "column_name", "")
+  const minValue = configField(config, "min_value", "")
+  const maxValue = configField(config, "max_value", "")
+  const steps = configField(config, "steps", "")
+  const stepColumn = configField(config, "step_column", "")
 
   return (
     <>
@@ -35,6 +35,7 @@ export default function ScenarioExpanderEditor({
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
           Row Key
+          <span className="ml-1.5 normal-case tracking-normal font-normal">unique column per input row</span>
         </label>
         {upstreamColumns.length > 0 ? (
           <select
@@ -55,78 +56,15 @@ export default function ScenarioExpanderEditor({
             style={INPUT_STYLE}
             value={quoteId}
             onChange={(e) => onUpdate("quote_id", e.target.value)}
-            placeholder="quote_id"
           />
         )}
-        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-          Column that uniquely identifies each input row
-        </p>
       </div>
 
-      {/* New column name */}
+      {/* Index column name */}
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-          Value Column
-        </label>
-        <input
-          type="text"
-          className="w-full px-2.5 py-1.5 rounded-md text-[12px] font-mono"
-          style={INPUT_STYLE}
-          value={columnName}
-          onChange={(e) => onUpdate("column_name", e.target.value)}
-          placeholder="scenario_value"
-        />
-        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-          Name of the new column with generated values
-        </p>
-      </div>
-
-      {/* Range: Min / Max / Steps */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-          Range
-        </label>
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Min</label>
-            <input
-              type="number"
-              step="any"
-              className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
-              style={INPUT_STYLE}
-              value={minValue}
-              onChange={(e) => onUpdate("min_value", parseFloat(e.target.value) || 0)}
-            />
-          </div>
-          <div>
-            <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Max</label>
-            <input
-              type="number"
-              step="any"
-              className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
-              style={INPUT_STYLE}
-              value={maxValue}
-              onChange={(e) => onUpdate("max_value", parseFloat(e.target.value) || 0)}
-            />
-          </div>
-          <div>
-            <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Steps</label>
-            <input
-              type="number"
-              min={1}
-              className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
-              style={INPUT_STYLE}
-              value={steps}
-              onChange={(e) => onUpdate("steps", Math.max(1, parseInt(e.target.value) || 1))}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Step column name */}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-          Step Column
+          Index Column
+          <span className="ml-1.5 normal-case tracking-normal font-normal">0-based step index column</span>
         </label>
         <input
           type="text"
@@ -134,22 +72,82 @@ export default function ScenarioExpanderEditor({
           style={INPUT_STYLE}
           value={stepColumn}
           onChange={(e) => onUpdate("step_column", e.target.value)}
-          placeholder="scenario_index"
         />
-        <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
-          Name of the 0-based step index column
-        </p>
       </div>
 
-      {/* Preview line */}
-      <div className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-        <div className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
-          Each input row &rarr; <span style={{ color: accentColor, fontWeight: 600 }}>{steps}</span> output rows
-        </div>
-        <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          {columnName || "value"}: {minValue} &rarr; {maxValue} ({steps} steps)
-        </div>
+      {/* Steps (always visible) */}
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
+          Steps
+          <span className="ml-1.5 normal-case tracking-normal font-normal">rows generated per input row</span>
+        </label>
+        <input
+          type="number"
+          min={1}
+          className="w-full px-2.5 py-1.5 rounded-md text-[12px] font-mono"
+          style={INPUT_STYLE}
+          value={steps}
+          onChange={(e) => onUpdate("steps", Math.max(1, parseInt(e.target.value) || 1))}
+        />
       </div>
+
+      {/* Value column (optional) */}
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
+          Value Column
+          <span className="ml-1.5 normal-case tracking-normal font-normal">(optional)</span>
+        </label>
+        <input
+          type="text"
+          className="w-full px-2.5 py-1.5 rounded-md text-[12px] font-mono"
+          style={INPUT_STYLE}
+          value={columnName}
+          onChange={(e) => onUpdate("column_name", e.target.value)}
+        />
+      </div>
+
+      {/* Value range — only shown when value column is set */}
+      {columnName && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1.5" style={{ color: 'var(--text-muted)' }}>
+            Value Range
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Min</label>
+              <input
+                type="number"
+                step="any"
+                className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
+                style={INPUT_STYLE}
+                value={minValue}
+                onChange={(e) => onUpdate("min_value", parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Max</label>
+              <input
+                type="number"
+                step="any"
+                className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
+                style={INPUT_STYLE}
+                value={maxValue}
+                onChange={(e) => onUpdate("max_value", parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-muted)' }}>Step Size</label>
+              <div
+                className="w-full px-2 py-1.5 rounded-md text-[12px] font-mono"
+                style={{ ...INPUT_STYLE, opacity: 0.7 }}
+                data-testid="step-size"
+              >
+                {steps && Number(steps) > 1 && minValue !== "" && maxValue !== "" ? +((Number(maxValue) - Number(minValue)) / (Number(steps) - 1)).toFixed(4) : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
 
     <div className="px-3 py-2 flex flex-col gap-2" style={{ borderTop: '1px solid var(--border)' }}>

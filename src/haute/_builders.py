@@ -339,7 +339,7 @@ def _build_rating_step(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 @_register(NodeType.SCENARIO_EXPANDER)
 def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
-    _col_name = config.get("column_name", "scenario_value")
+    _col_name = (config.get("column_name") or "").strip()
     _min_val = float(config.get("min_value", _DEFAULT_SCENARIO_MIN))
     _max_val = float(config.get("max_value", _DEFAULT_SCENARIO_MAX))
     _steps = int(config.get("steps", _DEFAULT_SCENARIO_STEPS))
@@ -355,15 +355,17 @@ def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool
         _st: int = _steps,
         _sc: str = _step_col,
     ) -> _Frame:
-        import numpy as np
-
         lf = dfs[0] if dfs else pl.LazyFrame()
-        vals = np.linspace(_mn, _mx, _st)
-        scenarios = pl.DataFrame({
+        data: dict[str, pl.Series] = {
             _sc: pl.Series(range(_st), dtype=pl.Int32),
+        }
+        if _cn:
+            import numpy as np
+
+            vals = np.linspace(_mn, _mx, _st)
             # Float32 to match Rust QuoteGrid schema (price-contour ingests f32)
-            _cn: pl.Series(vals.tolist(), dtype=pl.Float32),
-        }).lazy()
+            data[_cn] = pl.Series(vals.tolist(), dtype=pl.Float32)
+        scenarios = pl.DataFrame(data).lazy()
         return lf.join(scenarios, how="cross")
 
     if not code:
