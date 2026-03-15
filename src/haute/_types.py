@@ -284,6 +284,7 @@ class ScenarioExpanderConfig(TypedDict, total=False):
     max_value: float    # end of linspace
     steps: int          # number of steps
     step_column: str    # name of the 0-based step index column (e.g. "scenario_index")
+    code: str           # optional Polars transformation code (post-expansion)
 
 
 # ---------------------------------------------------------------------------

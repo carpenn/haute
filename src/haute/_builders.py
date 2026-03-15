@@ -344,6 +344,8 @@ def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool
     _max_val = float(config.get("max_value", _DEFAULT_SCENARIO_MAX))
     _steps = int(config.get("steps", _DEFAULT_SCENARIO_STEPS))
     _step_col = config.get("step_column", "scenario_index")
+    code = (config.get("code") or "").strip()
+    _preamble = dict(ctx.preamble_ns) if ctx.preamble_ns else None
 
     def scenario_expand_fn(
         *dfs: _Frame,
@@ -364,7 +366,18 @@ def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool
         }).lazy()
         return lf.join(scenarios, how="cross")
 
-    return ctx.func_name, scenario_expand_fn, False
+    if not code:
+        return ctx.func_name, scenario_expand_fn, False
+
+    def scenario_expand_with_code(
+        *dfs: _Frame,
+    ) -> _Frame:
+        from haute.executor import _exec_user_code
+
+        expanded = scenario_expand_fn(*dfs)
+        return _exec_user_code(code, ["df"], (expanded,), extra_ns=_preamble)
+
+    return ctx.func_name, scenario_expand_with_code, False
 
 
 @_register(NodeType.OPTIMISER)

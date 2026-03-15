@@ -639,9 +639,34 @@ def _make_passthrough_builder(
     return builder
 
 
-_CODEGEN_BUILDERS[NodeType.SCENARIO_EXPANDER] = _make_passthrough_builder(
-    _SCENARIO_EXPANDER, SCENARIO_EXPANDER_CONFIG_KEYS,
-)
+@_register_codegen(NodeType.SCENARIO_EXPANDER)
+def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
+    func_name, description, config = _common_node_fields(node)
+    params = _build_params(source_names)
+    first = _first_source(source_names)
+    extra_parts = _build_extra_kwargs(config, SCENARIO_EXPANDER_CONFIG_KEYS)
+    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    code = (config.get("code") or "").strip()
+
+    if not code:
+        return _SCENARIO_EXPANDER.format(
+            func_name=func_name,
+            description=description,
+            params=params,
+            first=first,
+            extra_kwargs=extra_kwargs,
+        )
+
+    user_body = _wrap_user_code(code, ["df"])
+    return (
+        f"@pipeline.node(scenario_expander=True{extra_kwargs})\n"
+        f"def {func_name}({params}) -> pl.LazyFrame:\n"
+        f'    """{description}"""\n'
+        f"    df = {first}\n"
+        f"    {_USER_CODE_SENTINEL}\n"
+        f"{user_body}\n"
+    )
+
 _CODEGEN_BUILDERS[NodeType.OPTIMISER] = _make_passthrough_builder(
     _OPTIMISER, OPTIMISER_CONFIG_KEYS,
 )

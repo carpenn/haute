@@ -1,4 +1,4 @@
-import { InputSourcesBar, INPUT_STYLE } from "./_shared"
+import { InputSourcesBar, CodeEditor, INPUT_STYLE } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
 
@@ -9,6 +9,7 @@ export default function ScenarioExpanderEditor({
   onDeleteInput,
   upstreamColumns,
   accentColor,
+  errorLine,
 }: {
   config: Record<string, unknown>
   onUpdate: OnUpdateConfig
@@ -16,6 +17,7 @@ export default function ScenarioExpanderEditor({
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns: { name: string; dtype: string }[]
   accentColor: string
+  errorLine?: number | null
 }) {
   const quoteId = configField(config, "quote_id", "")
   const columnName = configField(config, "column_name", "scenario_value")
@@ -25,6 +27,7 @@ export default function ScenarioExpanderEditor({
   const stepColumn = configField(config, "step_column", "scenario_index")
 
   return (
+    <>
     <div className="px-4 py-3 space-y-4">
       <InputSourcesBar inputSources={inputSources} onDeleteInput={onDeleteInput} />
 
@@ -148,5 +151,24 @@ export default function ScenarioExpanderEditor({
         </div>
       </div>
     </div>
+
+    <div className="px-3 py-2 flex flex-col gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between shrink-0">
+        <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--text-muted)' }}>
+          Polars Code
+          <span className="ml-1.5 normal-case tracking-normal font-normal">(optional)</span>
+        </label>
+        <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+          use <code className="px-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>df</code> for expanded data
+        </span>
+      </div>
+      <CodeEditor
+        defaultValue={configField(config, "code", "")}
+        onChange={(val) => onUpdate("code", val)}
+        errorLine={errorLine}
+        placeholder={'.filter(pl.col("scenario_value") > 0.9)\n.with_columns(pl.col("scenario_value").alias("factor"))'}
+      />
+    </div>
+    </>
   )
 }

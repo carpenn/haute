@@ -1490,6 +1490,34 @@ class TestExcludedTypeRoundTrips:
         parsed = _parse_roundtrip(graph, tmp_path)
         _assert_structural_equivalence(graph, parsed)
 
+    def test_scenario_expander_with_code(self, tmp_path: Path) -> None:
+        """scenarioExpander with user code round-trips."""
+        graph = PipelineGraph(
+            nodes=[
+                self._source_node(),
+                GraphNode(
+                    id="expand",
+                    data=NodeData(
+                        label="expand",
+                        nodeType=NodeType.SCENARIO_EXPANDER,
+                        config={
+                            "column_name": "discount",
+                            "steps": 5,
+                            "code": '.filter(pl.col("discount") >= 1.0)',
+                        },
+                    ),
+                ),
+            ],
+            edges=[GraphEdge(id="e1", source="source", target="expand")],
+            pipeline_name="roundtrip_test",
+        )
+        parsed = _parse_roundtrip(graph, tmp_path)
+        _assert_structural_equivalence(graph, parsed)
+        expand_node = next(n for n in parsed.nodes if n.id == "expand")
+        # Chain syntax is wrapped by codegen into df = (df\n.filter(...)\n)
+        # so the round-tripped code includes the wrapper
+        assert '.filter(pl.col("discount") >= 1.0)' in expand_node.data.config.get("code", "")
+
 
 # ---------------------------------------------------------------------------
 # Sanitize function name tests

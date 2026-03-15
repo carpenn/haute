@@ -781,6 +781,37 @@ class TestBuildNodeConfigExtended:
         assert config["min_value"] == 0.8
         assert config["steps"] == 5
 
+    def test_scenario_expander_config_extracts_sentinel_code(self):
+        body = (
+            '    """Expand."""\n'
+            '    df = source\n'
+            '    # -- user code --\n'
+            '    df = (\n'
+            '        df\n'
+            '        .filter(pl.col("sv") > 0.9)\n'
+            '    )\n'
+            '    return df'
+        )
+        config = _build_node_config(
+            NodeType.SCENARIO_EXPANDER,
+            {"scenario_expander": True, "steps": 5},
+            body, ["source"],
+        )
+        assert "code" in config
+        assert '.filter(pl.col("sv") > 0.9)' in config["code"]
+
+    def test_scenario_expander_config_empty_code_without_sentinel(self):
+        body = (
+            '    """Expand."""\n'
+            '    return source'
+        )
+        config = _build_node_config(
+            NodeType.SCENARIO_EXPANDER,
+            {"scenario_expander": True, "steps": 5},
+            body, ["source"],
+        )
+        assert config.get("code", "") == ""
+
     def test_optimiser_config(self):
         config = _build_node_config(
             NodeType.OPTIMISER,

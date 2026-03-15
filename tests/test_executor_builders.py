@@ -488,6 +488,60 @@ class TestBuildScenarioExpander:
         assert "my_idx" in result.columns
         assert result["my_idx"].to_list() == [0, 1, 2]
 
+    def test_user_code_transforms_expanded_data(self) -> None:
+        """User Polars code runs after the cross-join expansion."""
+        _, fn, _ = _build(
+            "scenarioExpander",
+            {
+                "column_name": "sv",
+                "min_value": 0.8,
+                "max_value": 1.2,
+                "steps": 3,
+                "code": '.filter(pl.col("sv") >= 1.0)',
+            },
+            source_names=["upstream"],
+        )
+        input_df = pl.DataFrame({"x": [1]}).lazy()
+        result = fn(input_df).collect()
+        # 3 steps: 0.8, 1.0, 1.2 — filter keeps 1.0 and 1.2
+        assert result.shape[0] == 2
+        assert all(v >= 1.0 for v in result["sv"].to_list())
+
+    def test_empty_code_behaves_as_before(self) -> None:
+        """Empty code string doesn't change behavior."""
+        _, fn, _ = _build(
+            "scenarioExpander",
+            {
+                "column_name": "sv",
+                "min_value": 0.8,
+                "max_value": 1.2,
+                "steps": 3,
+                "code": "",
+            },
+            source_names=["upstream"],
+        )
+        input_df = pl.DataFrame({"x": [1]}).lazy()
+        result = fn(input_df).collect()
+        assert result.shape[0] == 3
+
+    def test_user_code_with_assignment(self) -> None:
+        """User code using assignment syntax works."""
+        _, fn, _ = _build(
+            "scenarioExpander",
+            {
+                "column_name": "sv",
+                "min_value": 0.5,
+                "max_value": 1.5,
+                "steps": 3,
+                "code": 'df = df.with_columns(pl.col("sv").alias("factor"))',
+            },
+            source_names=["upstream"],
+        )
+        input_df = pl.DataFrame({"x": [1]}).lazy()
+        result = fn(input_df).collect()
+        assert "factor" in result.columns
+        assert result.shape[0] == 3
+
 
 # ---------------------------------------------------------------------------
 # _build_api_input

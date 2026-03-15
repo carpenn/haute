@@ -16,6 +16,14 @@ vi.mock("../../panels/editors/_shared", async () => {
     InputSourcesBar: ({ inputSources }: { inputSources: { varName: string; edgeId: string; sourceLabel: string }[] }) => (
       <div data-testid="input-sources">{inputSources?.length ?? 0} inputs</div>
     ),
+    CodeEditor: ({ defaultValue, onChange, placeholder }: { defaultValue: string; onChange: (v: string) => void; placeholder?: string; errorLine?: number | null }) => (
+      <textarea
+        data-testid="code-editor"
+        defaultValue={defaultValue}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    ),
     INPUT_STYLE: {},
   }
 })
@@ -212,5 +220,34 @@ describe("ScenarioExpanderEditor", () => {
     expect(screen.getByDisplayValue("2")).toBeTruthy()
     expect(screen.getByDisplayValue("11")).toBeTruthy()
     expect(screen.getByDisplayValue("my_step")).toBeTruthy()
+  })
+
+  it("renders Polars Code section with label and helper text", () => {
+    const { container } = render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
+    const text = container.textContent || ""
+    expect(text).toContain("Polars Code")
+    expect(text).toContain("(optional)")
+    expect(text).toContain("expanded data")
+  })
+
+  it("renders CodeEditor with default empty value", () => {
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} />)
+    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
+    expect(editor.defaultValue).toBe("")
+  })
+
+  it("renders CodeEditor with code from config", () => {
+    const config = { code: '.filter(pl.col("x") > 0)' }
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} config={config} />)
+    const editor = screen.getByTestId("code-editor") as HTMLTextAreaElement
+    expect(editor.defaultValue).toBe('.filter(pl.col("x") > 0)')
+  })
+
+  it("CodeEditor onChange calls onUpdate with code key", () => {
+    const onUpdate = vi.fn()
+    render(<ScenarioExpanderEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
+    const editor = screen.getByTestId("code-editor")
+    fireEvent.change(editor, { target: { value: ".select('a', 'b')" } })
+    expect(onUpdate).toHaveBeenCalledWith("code", ".select('a', 'b')")
   })
 })

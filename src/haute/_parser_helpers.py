@@ -572,6 +572,7 @@ def _build_node_config(
             config["combinedColumn"] = str(combined)
     elif node_type == NodeType.SCENARIO_EXPANDER:
         _copy_config_keys(config, decorator_kwargs, SCENARIO_EXPANDER_CONFIG_KEYS)
+        config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
     elif node_type == NodeType.OPTIMISER_APPLY:
         _copy_config_keys(config, decorator_kwargs, OPTIMISER_APPLY_CONFIG_KEYS)
     elif node_type == NodeType.OPTIMISER:
@@ -843,6 +844,8 @@ def _resolve_node_config(
         elif node_type == NodeType.TRANSFORM:
             config["code"] = _extract_user_code(body, param_names) if body else ""
         elif node_type == NodeType.DATA_SOURCE:
+            config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
+        elif node_type == NodeType.SCENARIO_EXPANDER:
             config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
     else:
         node_type = _infer_node_type(decorator_kwargs, n_params)

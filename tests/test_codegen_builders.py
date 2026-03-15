@@ -359,6 +359,53 @@ class TestGenScenarioExpander:
         assert 'config="config/expander/PartialExpand.json"' in code
         _compile_node_code(code)
 
+    def test_with_user_code_chain(self) -> None:
+        """Scenario expander with chain-syntax Polars code generates sentinel."""
+        node = _make_codegen_node(
+            "scenarioExpander",
+            {
+                "column_name": "sv",
+                "steps": 5,
+                "code": '.filter(pl.col("sv") > 0.9)',
+            },
+            label="FilteredExpand",
+        )
+        code = _node_to_code(node, source_names=["upstream"])
+        assert "# -- user code --" in code
+        assert "df = upstream" in code
+        assert '.filter(pl.col("sv") > 0.9)' in code
+        assert "return df" in code
+        _compile_node_code(code)
+
+    def test_with_user_code_assignment(self) -> None:
+        """Scenario expander with assignment-style user code."""
+        node = _make_codegen_node(
+            "scenarioExpander",
+            {
+                "column_name": "sv",
+                "steps": 3,
+                "code": 'df = df.with_columns(pl.col("sv").alias("factor"))',
+            },
+            label="AssignExpand",
+        )
+        code = _node_to_code(node, source_names=["data"])
+        assert "# -- user code --" in code
+        assert "df = data" in code
+        assert 'df = df.with_columns' in code
+        _compile_node_code(code)
+
+    def test_empty_code_uses_passthrough(self) -> None:
+        """Empty code string produces passthrough (no sentinel)."""
+        node = _make_codegen_node(
+            "scenarioExpander",
+            {"column_name": "sv", "steps": 5, "code": ""},
+            label="PassExpand",
+        )
+        code = _node_to_code(node, source_names=["data"])
+        assert "# -- user code --" not in code
+        assert "return data" in code
+        _compile_node_code(code)
+
 
 # ---------------------------------------------------------------------------
 # _gen_optimiser
