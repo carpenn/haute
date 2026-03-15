@@ -62,7 +62,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   const statusText = nodeData._status ? `, status: ${nodeData._status}` : ""
   const ariaLabel = `${typeName} node: ${nodeData.label}${statusText}${isInstance ? ", instance" : ""}${traceActive ? ", trace active" : ""}`
 
-  // Compact mode: just a colored pill with icon — readable at far zoom
+  // Compact mode: tinted background with icon + label — readable at far zoom
   if (zoomLevel === "compact") {
     return (
       <div
@@ -70,20 +70,16 @@ function PipelineNode({ data, selected }: NodeProps) {
         role="button"
         className={`relative min-w-[120px] max-w-[160px] cursor-pointer ${isPill ? "rounded-full" : "rounded-lg"}`}
         style={{
-          background: `linear-gradient(${accent}18, ${accent}10), var(--bg-elevated)`,
-          border: selected ? `2px solid ${accent}` : `1.5px solid ${accent}30`,
+          background: `linear-gradient(${accent}28, ${accent}1a), var(--bg-elevated)`,
+          border: selected ? `3px solid ${accent}` : `3px solid ${accent}40`,
           boxShadow: "var(--node-shadow)",
           opacity: dimmed ? 0.25 : 1,
           transition: "opacity 0.2s ease",
         }}
       >
-        <div
-          className="absolute left-0 top-1.5 bottom-1.5 w-[4px] rounded-full"
-          style={{ backgroundColor: accent }}
-        />
         {!isSourceOnly && <Handle type="target" position={Position.Left} />}
-        <div className="flex items-center gap-2 pl-3.5 pr-2.5 py-2">
-          <Icon size={16} style={{ color: accent }} className="shrink-0" />
+        <div className="flex items-center gap-2 pl-3 pr-2.5 py-2">
+          <Icon size={14} style={{ color: accent }} className="shrink-0" />
           <div className="font-bold text-[12px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
             {nodeData.label}
           </div>
@@ -93,39 +89,48 @@ function PipelineNode({ data, selected }: NodeProps) {
     )
   }
 
-  // Medium mode: icon + label + type badge, no extra badges/status
+  // Shared styling for medium + full modes
+  const border = traceActive || selected
+    ? `3px solid ${accent}`
+    : isInstance
+      ? `3px dashed ${accent}60`
+      : `3px solid ${accent}30`
+  const shadow = traceActive
+    ? `0 0 12px ${accent}40, var(--node-shadow)`
+    : "var(--node-shadow)"
+  const containerStyle = {
+    background: "var(--bg-elevated)",
+    border,
+    boxShadow: shadow,
+    opacity: dimmed ? 0.25 : 1,
+    transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
+  }
+
+  // Header bar border-radius: matches inner edge of container (outer radius minus border)
+  const headerRadius = isPill ? "15px 15px 0 0" : "11px 11px 0 0"
+
+  // Medium mode: header bar + label, no extra badges
   if (zoomLevel === "medium") {
     return (
       <div
         aria-label={ariaLabel}
         role="button"
         className={`relative min-w-[180px] max-w-[260px] cursor-pointer ${isPill ? "rounded-2xl" : "rounded-xl"}`}
-        style={{
-          background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
-          border: traceActive || selected
-            ? `1.5px solid ${accent}`
-            : isInstance
-              ? `1.5px dashed ${accent}60`
-              : `1px solid ${accent}20`,
-          boxShadow: traceActive
-            ? `0 0 12px ${accent}40, var(--node-shadow)`
-            : "var(--node-shadow)",
-          opacity: dimmed ? 0.25 : 1,
-          transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
-        }}
+        style={containerStyle}
       >
-        <div
-          className="absolute left-0 top-2 bottom-2 w-[4px] rounded-full"
-          style={{ backgroundColor: accent, opacity: selected || traceActive ? 1 : 0.7 }}
-        />
         {!isSourceOnly && <Handle type="target" position={Position.Left} />}
-        <div className="pl-4 pr-3 py-2">
-          <div className="flex items-center gap-2 mb-0.5">
-            <Icon size={14} style={{ color: accent }} className="shrink-0" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0" style={{ color: accent }}>
-              {typeLabel}
-            </span>
-          </div>
+        {/* Header bar */}
+        <div
+          className="flex items-center gap-2 px-3 py-1.5"
+          style={{ background: `${accent}30`, borderRadius: headerRadius }}
+        >
+          <Icon size={14} style={{ color: accent }} className="shrink-0" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0" style={{ color: accent }}>
+            {typeLabel}
+          </span>
+        </div>
+        {/* Body */}
+        <div className="px-3 py-1.5">
           <div className="font-semibold text-[13px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
             {nodeData.label}
           </div>
@@ -135,74 +140,60 @@ function PipelineNode({ data, selected }: NodeProps) {
     )
   }
 
-  // Full mode: all details visible
+  // Full mode: header bar with badges + body with label and trace
   return (
     <div
       aria-label={ariaLabel}
       role="button"
       className={`relative min-w-[180px] max-w-[260px] cursor-pointer ${isPill ? "rounded-2xl" : "rounded-xl"}`}
-      style={{
-        background: `linear-gradient(${accent}10, ${accent}08), var(--bg-elevated)`,
-        border: traceActive
-          ? `1.5px solid ${accent}`
-          : selected
-            ? `1.5px solid ${accent}`
-            : isInstance
-              ? `1.5px dashed ${accent}60`
-              : `1px solid ${accent}20`,
-        boxShadow: traceActive
-          ? `0 0 12px ${accent}40, var(--node-shadow)`
-          : "var(--node-shadow)",
-        opacity: dimmed ? 0.25 : 1,
-        transition: "border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease",
-      }}
+      style={containerStyle}
     >
-      {/* Left accent stripe */}
-      <div
-        className="absolute left-0 top-2 bottom-2 w-[4px] rounded-full"
-        style={{ backgroundColor: accent, opacity: selected || traceActive ? 1 : 0.7, transition: "opacity 0.2s ease" }}
-      />
-
       {!isSourceOnly && <Handle type="target" position={Position.Left} />}
 
-      <div className="pl-4 pr-3 py-2.5">
-        <div className="flex items-center gap-2 mb-1">
-          <Icon size={14} style={{ color: accent }} className="shrink-0" />
+      {/* Header bar */}
+      <div
+        className="flex items-center gap-2 px-3 py-1.5"
+        style={{ background: `${accent}30`, borderRadius: headerRadius }}
+      >
+        <Icon size={16} style={{ color: accent }} className="shrink-0" />
+        <span
+          className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0"
+          style={{ color: accent }}
+        >
+          {typeLabel}
+        </span>
+        {isInstance && (
           <span
-            className="text-[10px] font-bold uppercase tracking-[0.1em] shrink-0"
-            style={{ color: accent }}
+            className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+            style={{ background: `${accent}15`, color: accent, border: `1px solid ${accent}25` }}
+            title={`Instance of ${nodeData.config?.instanceOf}`}
           >
-            {typeLabel}
+            <Link2 size={8} />
+            Instance
           </span>
-          {isInstance && (
-            <span
-              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
-              style={{ background: `${accent}15`, color: accent, border: `1px solid ${accent}25` }}
-              title={`Instance of ${nodeData.config?.instanceOf}`}
-            >
-              <Link2 size={8} />
-              Instance
-            </span>
-          )}
-          {isDeployInput && (
-            <span
-              className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
-              style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
-            >
-              <Radio size={8} />
-              API
-            </span>
-          )}
-          {isLiveSwitch && <LiveSwitchBadge accent={accent} />}
-          {nodeData._status && (
-            <span
-              className={`${isDeployInput ? "" : "ml-auto "} w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}
-              style={{ backgroundColor: statusColors[nodeData._status] }}
-              role="status"
-              aria-label={`Node ${nodeData._status}`}
-            />
-          )}
-        </div>
+        )}
+        {isDeployInput && (
+          <span
+            className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"
+            style={{ background: `${accent}1f`, color: accent, border: `1px solid ${accent}33` }}
+          >
+            <Radio size={8} />
+            API
+          </span>
+        )}
+        {isLiveSwitch && <LiveSwitchBadge accent={accent} />}
+        {nodeData._status && (
+          <span
+            className={`${isDeployInput ? "" : "ml-auto "} w-[7px] h-[7px] rounded-full shrink-0 ${nodeData._status === "running" ? "animate-pulse-dot" : ""}`}
+            style={{ backgroundColor: statusColors[nodeData._status] }}
+            role="status"
+            aria-label={`Node ${nodeData._status}`}
+          />
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="px-3 py-2">
         <div className="font-semibold text-[13px] leading-tight truncate" style={{ color: "var(--text-primary)" }}>
           {nodeData.label}
         </div>

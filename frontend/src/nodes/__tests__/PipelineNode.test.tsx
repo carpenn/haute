@@ -145,8 +145,8 @@ describe("PipelineNode", () => {
     // The outer rendered div is the node root with inline style
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
     const rawStyle = nodeEl.getAttribute("style") || ""
-    // jsdom normalizes hex to rgb; #06b6d4 -> rgb(6, 182, 212)
-    expect(rawStyle).toContain("1.5px solid")
+    // Selected border is 3px solid accent
+    expect(rawStyle).toContain("3px solid")
     expect(rawStyle).not.toContain("var(--border-bright)")
   })
 
@@ -157,9 +157,8 @@ describe("PipelineNode", () => {
     )
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
     const rawStyle = nodeEl.getAttribute("style") || ""
-    // Default border uses accent-tinted color (e.g. #06b6d420) not plain var(--border-bright)
-    expect(rawStyle).toContain("1px solid")
-    expect(rawStyle).not.toContain("1.5px solid")
+    // Default border uses 3px accent-tinted color, not plain var(--border-bright)
+    expect(rawStyle).toContain("3px solid")
   })
 
   // ── Node label ─────────────────────────────────────────────────────
