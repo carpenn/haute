@@ -233,6 +233,207 @@ class TestFinalizeRatebook:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# T2: _finalize_solve_result — frontier computation
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestFinalizeFrontier:
+    """T2: Frontier computation within _finalize_solve_result."""
+
+    def test_computes_frontier_when_online_with_constraints(self) -> None:
+        """Online mode + constraints → frontier_data populated on the job."""
+        from unittest.mock import MagicMock
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(
+            converged=True,
+            baseline_constraints={"loss": 0.9},
+        )
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "running",
+            "config": {
+                "mode": "online",
+                "constraints": {"loss": {"max": 1.05}},
+            },
+        })
+
+        # Mock solver with a frontier() method that returns a FrontierResult
+        mock_solver = MagicMock()
+        mock_points = MagicMock()
+        mock_points.to_dicts.return_value = [
+            {"total_objective": 100.0, "total_loss": 0.92, "lambda_loss": 0.01},
+            {"total_objective": 105.0, "total_loss": 0.95, "lambda_loss": 0.02},
+        ]
+        mock_points.__len__ = lambda self: 2
+        mock_frontier_result = MagicMock()
+        mock_frontier_result.points = mock_points
+        mock_solver.frontier.return_value = mock_frontier_result
+
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver=mock_solver,
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.0,
+        )
+
+        job = store.get_job(job_id)
+        assert job["frontier_data"] is not None
+        assert job["frontier_data"]["status"] == "ok"
+        assert job["frontier_data"]["n_points"] == 2
+        assert len(job["frontier_data"]["points"]) == 2
+        assert "loss" in job["frontier_data"]["constraint_names"]
+        # Also stored in result dict for the frontend
+        assert job["result"]["frontier"] is not None
+
+    def test_frontier_skipped_for_ratebook(self) -> None:
+        """Ratebook mode → frontier_data is None."""
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(converged=True)
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "running",
+            "config": {
+                "mode": "ratebook",
+                "constraints": {"loss": {"max": 1.05}},
+            },
+        })
+
+        _finalize_solve_result(
+            result,
+            mode="ratebook",
+            solver="fake_solver",
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.0,
+        )
+
+        job = store.get_job(job_id)
+        assert job["frontier_data"] is None
+        assert job["result"]["frontier"] is None
+
+    def test_frontier_skipped_no_constraints(self) -> None:
+        """Online mode + empty constraints → frontier_data is None."""
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(converged=True)
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "running",
+            "config": {
+                "mode": "online",
+                "constraints": {},
+            },
+        })
+
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver="fake_solver",
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.0,
+        )
+
+        job = store.get_job(job_id)
+        assert job["frontier_data"] is None
+
+    def test_frontier_exception_non_fatal(self) -> None:
+        """solver.frontier() raising does not fail the solve — status is still completed."""
+        from unittest.mock import MagicMock
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(
+            converged=True,
+            baseline_constraints={"loss": 0.9},
+        )
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "running",
+            "config": {
+                "mode": "online",
+                "constraints": {"loss": {"max": 1.05}},
+            },
+        })
+
+        mock_solver = MagicMock()
+        mock_solver.frontier.side_effect = RuntimeError("Frontier blew up")
+
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver=mock_solver,
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.0,
+        )
+
+        job = store.get_job(job_id)
+        assert job["status"] == "completed"
+        assert job["frontier_data"] is None
+        assert job["result"]["frontier"] is None
+
+    def test_frontier_skips_zero_baseline(self) -> None:
+        """A constraint with baseline=0 is excluded from frontier ranges."""
+        from unittest.mock import MagicMock
+        from haute.routes._optimiser_service import _finalize_solve_result
+
+        result = _FakeSolveResult(
+            converged=True,
+            baseline_constraints={"loss": 0.9, "zero_cstr": 0.0},
+        )
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "running",
+            "config": {
+                "mode": "online",
+                "constraints": {
+                    "loss": {"max": 1.05},
+                    "zero_cstr": {"max": 1.0},
+                },
+            },
+        })
+
+        mock_solver = MagicMock()
+        mock_points = MagicMock()
+        mock_points.to_dicts.return_value = [
+            {"total_objective": 100.0, "total_loss": 0.92, "lambda_loss": 0.01},
+        ]
+        mock_points.__len__ = lambda self: 1
+        mock_frontier_result = MagicMock()
+        mock_frontier_result.points = mock_points
+        mock_solver.frontier.return_value = mock_frontier_result
+
+        _finalize_solve_result(
+            result,
+            mode="online",
+            solver=mock_solver,
+            quote_grid="fake_grid",
+            store=store,
+            job_id=job_id,
+            elapsed=1.0,
+        )
+
+        # The frontier was called with ranges that exclude zero_cstr
+        call_kwargs = mock_solver.frontier.call_args
+        ranges = call_kwargs[1]["threshold_ranges"] if call_kwargs[1] else call_kwargs[0][1]
+        # Only "loss" should be in ranges, not "zero_cstr"
+        assert "loss" in ranges
+        assert "zero_cstr" not in ranges
+
+        job = store.get_job(job_id)
+        assert job["frontier_data"] is not None
+        assert "loss" in job["frontier_data"]["constraint_names"]
+
+
+# ──────────────────────────────────────────────────────────────────────
 # D7: _dc_to_pydantic
 # ──────────────────────────────────────────────────────────────────────
 

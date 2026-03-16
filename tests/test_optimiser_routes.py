@@ -913,6 +913,58 @@ class TestBuildArtifactPayload:
         payload = _build_artifact_payload(job, solve_result, version_override="v2.0")
         assert payload["version"] == "v2.0"
 
+    def test_payload_includes_frontier_selection(self):
+        """T3: When a frontier point is selected, payload includes frontier_selection."""
+        job = {
+            "node_label": "my_opt",
+            "config": {"mode": "online", "objective": "income", "constraints": {}},
+            "selected_frontier_point": 2,
+            "frontier_data": {
+                "status": "ok",
+                "points": [
+                    {"total_objective": 100.0},
+                    {"total_objective": 110.0},
+                    {"total_objective": 120.0},
+                ],
+                "n_points": 3,
+                "constraint_names": ["volume"],
+            },
+        }
+        solve_result = SimpleNamespace(
+            lambdas={"volume": 0.5},
+            total_objective=120.0,
+            baseline_objective=100.0,
+            total_constraints={"volume": 0.92},
+            baseline_constraints={"volume": 0.88},
+            converged=True,
+            iterations=10,
+        )
+        payload = _build_artifact_payload(job, solve_result)
+        assert "frontier_selection" in payload
+        fs = payload["frontier_selection"]
+        assert fs["selected_from_frontier"] is True
+        assert fs["point_index"] == 2
+        assert fs["n_frontier_points"] == 3
+
+    def test_payload_no_frontier_selection_when_none(self):
+        """T3: When no frontier point is selected, payload has no frontier_selection key."""
+        job = {
+            "node_label": "my_opt",
+            "config": {"mode": "online", "objective": "income", "constraints": {}},
+            # No selected_frontier_point key
+        }
+        solve_result = SimpleNamespace(
+            lambdas={"volume": 0.5},
+            total_objective=100.0,
+            baseline_objective=95.0,
+            total_constraints={"volume": 0.92},
+            baseline_constraints={"volume": 0.88},
+            converged=True,
+            iterations=10,
+        )
+        payload = _build_artifact_payload(job, solve_result)
+        assert "frontier_selection" not in payload
+
 
 # ---------------------------------------------------------------------------
 # Phase 1B: MLflow log endpoint tests
@@ -1428,3 +1480,214 @@ class TestExecutePipelineCleanup:
             with pytest.raises(HTTPException) as exc_info:
                 service._execute_pipeline(body, job_id, checkpoint_dir)
             assert exc_info.value.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Frontier-in-solve and /frontier/select tests
+# ---------------------------------------------------------------------------
+
+
+class TestFrontierInSolve:
+    """Verify that frontier data is computed automatically as part of the solve."""
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_status_includes_frontier(self, client, scored_data):
+        """After a successful solve with constraints, status includes frontier data."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        assert resp.status_code == 200
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+
+        assert status["status"] == "completed"
+        # Frontier should be present in the result dict
+        result = status["result"]
+        assert result is not None
+        assert "frontier" in result
+        frontier = result["frontier"]
+        assert frontier is not None
+        assert frontier["n_points"] > 0
+        assert len(frontier["points"]) == frontier["n_points"]
+        assert "volume" in frontier["constraint_names"]
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_status_frontier_response_field(self, client, scored_data):
+        """The top-level 'frontier' field on the status response is populated."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+
+        assert status["status"] == "completed"
+        assert "frontier" in status
+        frontier = status["frontier"]
+        assert frontier is not None
+        assert frontier["status"] == "ok"
+        assert frontier["n_points"] > 0
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_solve_no_constraints_no_frontier(self, client, scored_data):
+        """A solve with empty constraints should have no frontier data."""
+        cfg = {
+            "objective": "expected_income",
+            "constraints": {},
+            "max_iter": 5,
+        }
+        graph = _make_optimiser_graph(scored_data, config=cfg)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        # May succeed or fail depending on solver behavior with no constraints
+        if resp.status_code != 200:
+            return
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        if status["status"] != "completed":
+            return
+        result = status["result"]
+        # Frontier should be None when no constraints
+        assert result.get("frontier") is None
+
+
+class TestFrontierSelect:
+    """Tests for POST /api/optimiser/frontier/select."""
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_select_frontier_point(self, client, scored_data):
+        """Selecting a frontier point returns updated metrics."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        assert status["status"] == "completed"
+
+        frontier = status["result"]["frontier"]
+        assert frontier is not None
+        n_points = frontier["n_points"]
+        assert n_points > 0
+
+        # Select the first point
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": job_id,
+            "point_index": 0,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "total_objective" in data
+        assert "constraints" in data
+        assert "lambdas" in data
+        assert isinstance(data["converged"], bool)
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_select_last_frontier_point(self, client, scored_data):
+        """Selecting the last frontier point works."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        frontier = status["result"]["frontier"]
+        n_points = frontier["n_points"]
+
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": job_id,
+            "point_index": n_points - 1,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    def test_select_out_of_range(self, client, clean_job_store):
+        """Point index >= n_points returns 400."""
+        clean_job_store.jobs["sel_oob"] = {
+            "status": "completed",
+            "solver": MagicMock(),
+            "quote_grid": MagicMock(),
+            "frontier_data": {
+                "status": "ok",
+                "points": [{"total_objective": 1.0, "lambda_volume": 0.5}],
+                "n_points": 1,
+                "constraint_names": ["volume"],
+            },
+            "result": {},
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": "sel_oob",
+            "point_index": 5,
+        })
+        assert resp.status_code == 400
+        assert "out of range" in resp.json()["detail"].lower()
+
+    def test_select_negative_index(self, client, clean_job_store):
+        """Negative point index returns 400."""
+        clean_job_store.jobs["sel_neg"] = {
+            "status": "completed",
+            "solver": MagicMock(),
+            "quote_grid": MagicMock(),
+            "frontier_data": {
+                "status": "ok",
+                "points": [{"total_objective": 1.0}],
+                "n_points": 1,
+                "constraint_names": ["volume"],
+            },
+            "result": {},
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": "sel_neg",
+            "point_index": -1,
+        })
+        assert resp.status_code == 400
+
+    def test_select_no_frontier_data(self, client, clean_job_store):
+        """Select when no frontier data returns 400."""
+        clean_job_store.jobs["sel_nf"] = {
+            "status": "completed",
+            "solver": MagicMock(),
+            "quote_grid": MagicMock(),
+            "frontier_data": None,
+            "result": {},
+            "created_at": time.time(),
+        }
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": "sel_nf",
+            "point_index": 0,
+        })
+        assert resp.status_code == 400
+        assert "no frontier" in resp.json()["detail"].lower()
+
+    def test_select_missing_job(self, client):
+        """Non-existent job returns 404."""
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": "nonexistent",
+            "point_index": 0,
+        })
+        assert resp.status_code == 404
+
+    @pytest.mark.usefixtures("_widen_sandbox_root")
+    def test_select_then_save_uses_new_lambdas(self, client, scored_data, tmp_path):
+        """After selecting a frontier point, save uses the selected point's result."""
+        graph = _make_optimiser_graph(scored_data)
+        resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
+        job_id = resp.json()["job_id"]
+        status = _poll_until_done(client, job_id)
+        original_obj = status["result"]["total_objective"]
+
+        # Select point 0
+        resp = client.post("/api/optimiser/frontier/select", json={
+            "job_id": job_id, "point_index": 0,
+        })
+        assert resp.status_code == 200
+        selected_obj = resp.json()["total_objective"]
+
+        # Save should use the selected result
+        out_path = str(tmp_path / "result.json")
+        resp = client.post("/api/optimiser/save", json={
+            "job_id": job_id, "output_path": out_path,
+        })
+        assert resp.status_code == 200
+
+        import json
+        saved = json.loads((tmp_path / "result.json").read_text())
+        assert saved["total_objective"] == pytest.approx(selected_obj, rel=1e-4)
+        # Frontier provenance should be present
+        assert saved.get("frontier_selection") is not None
+        assert saved["frontier_selection"]["point_index"] == 0

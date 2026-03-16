@@ -18,12 +18,15 @@ from haute.routes._optimiser_service import (
     _DEFAULT_CHUNK_SIZE,
     _DEFAULT_TIMEOUT,
     OptimiserSolveService,
+    _compute_scenario_value_stats,
 )
 from haute.schemas import (
     OptimiserApplyRequest,
     OptimiserApplyResponse,
     OptimiserFrontierRequest,
     OptimiserFrontierResponse,
+    OptimiserFrontierSelectRequest,
+    OptimiserFrontierSelectResponse,
     OptimiserMlflowLogRequest,
     OptimiserMlflowLogResponse,
     OptimiserSaveRequest,
@@ -73,12 +76,19 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
             })
             job = _store.require_job(job_id)
 
+    frontier_resp = None
+    if job.get("status") == "completed":
+        fd = job.get("frontier_data")
+        if fd:
+            frontier_resp = OptimiserFrontierResponse(**fd)
+
     return OptimiserStatusResponse(
         status=job.get("status", "unknown"),
         progress=job.get("progress", 0.0),
         message=job.get("message", ""),
         elapsed_seconds=job.get("elapsed_seconds", 0.0),
         result=job.get("result"),
+        frontier=frontier_resp,
     )
 
 
@@ -138,6 +148,101 @@ def run_frontier(body: OptimiserFrontierRequest) -> OptimiserFrontierResponse:
         raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
+@router.post("/frontier/select", response_model=OptimiserFrontierSelectResponse)
+def select_frontier_point(body: OptimiserFrontierSelectRequest) -> OptimiserFrontierSelectResponse:
+    """Re-solve at a specific frontier point's lambdas and swap the job's active result."""
+    job = _store.require_completed_job(body.job_id)
+
+    # M10: Short-circuit if this point is already selected (idempotent)
+    if job.get("selected_frontier_point") == body.point_index:
+        result = job.get("result", {})
+        return OptimiserFrontierSelectResponse(
+            status="ok",
+            total_objective=result.get("total_objective", 0.0),
+            constraints=result.get("constraints", {}),
+            baseline_objective=result.get("baseline_objective", 0.0),
+            baseline_constraints=result.get("baseline_constraints", {}),
+            lambdas=result.get("lambdas", {}),
+            converged=result.get("converged", True),
+        )
+
+    solver = job.get("solver")
+    quote_grid = job.get("quote_grid")
+    frontier_data = job.get("frontier_data")
+
+    if solver is None or quote_grid is None:
+        raise HTTPException(status_code=400, detail="Job has no solver or quote grid")
+    if not frontier_data or not frontier_data.get("points"):
+        raise HTTPException(status_code=400, detail="Job has no frontier data")
+
+    points = frontier_data["points"]
+    if body.point_index < 0 or body.point_index >= len(points):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Point index {body.point_index} out of range [0, {len(points)})",
+        )
+
+    point = points[body.point_index]
+    # Extract lambdas from frontier point (columns are lambda_{constraint_name})
+    new_lambdas = {
+        k.removeprefix("lambda_"): v
+        for k, v in point.items()
+        if k.startswith("lambda_") and isinstance(v, (int, float))
+    }
+
+    if not new_lambdas:
+        raise HTTPException(status_code=400, detail="Frontier point has no lambda values")
+
+    try:
+        # Re-solve with the selected point's lambdas (warm-start = fast)
+        new_result = solver.solve(quote_grid, lambdas=new_lambdas)
+
+        # Swap the solve_result; preserve original for revert
+        result_dict = dict(job.get("result", {}))
+        result_dict.update({
+            "total_objective": new_result.total_objective,
+            "baseline_objective": new_result.baseline_objective,
+            "constraints": new_result.total_constraints,
+            "baseline_constraints": new_result.baseline_constraints,
+            "lambdas": new_result.lambdas,
+            "converged": new_result.converged,
+            "selected_frontier_point": body.point_index,
+        })
+
+        # M1: Recompute scenario value stats for the new solve result
+        scenario_stats, scenario_histogram = _compute_scenario_value_stats(new_result)
+        result_dict["scenario_value_stats"] = scenario_stats
+        result_dict["scenario_value_histogram"] = scenario_histogram
+
+        # M2: Update convergence warning for the new solve result
+        if not new_result.converged:
+            result_dict["warning"] = (
+                "Solver did not converge. "
+                "Consider increasing max_iter or relaxing tolerance."
+            )
+        else:
+            result_dict.pop("warning", None)
+
+        _store.atomic_update(body.job_id, {
+            "solve_result": new_result,
+            "selected_frontier_point": body.point_index,
+            "result": result_dict,
+        })
+
+        return OptimiserFrontierSelectResponse(
+            status="ok",
+            total_objective=new_result.total_objective,
+            constraints=new_result.total_constraints,
+            baseline_objective=new_result.baseline_objective,
+            baseline_constraints=new_result.baseline_constraints,
+            lambdas=new_result.lambdas,
+            converged=new_result.converged,
+        )
+    except Exception as exc:
+        logger.error("frontier_select_failed", error=str(exc), job_id=body.job_id)
+        raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
+
+
 def _build_artifact_payload(
     job: dict[str, Any],
     solve_result: SolveResultLike,
@@ -174,6 +279,15 @@ def _build_artifact_payload(
         "iterations": getattr(solve_result, "iterations", None),
         "cd_iterations": getattr(solve_result, "cd_iterations", None),
     }
+    # Frontier provenance — record which point was selected (if any)
+    selected_idx = job.get("selected_frontier_point")
+    frontier_data = job.get("frontier_data")
+    if selected_idx is not None and frontier_data:
+        payload["frontier_selection"] = {
+            "selected_from_frontier": True,
+            "point_index": selected_idx,
+            "n_frontier_points": frontier_data.get("n_points", 0),
+        }
     if job_config.get("mode") == "ratebook":
         payload["factor_tables"] = job.get("result", {}).get("factor_tables")
         payload["clamp_rate"] = getattr(solve_result, "clamp_rate", None)
@@ -275,6 +389,26 @@ def mlflow_log(body: OptimiserMlflowLogRequest) -> OptimiserMlflowLogResponse:
                 complete_path = Path(tmpdir) / "optimiser_result.json"
                 complete_path.write_text(json.dumps(complete_payload, indent=2, default=str))
                 mlflow.log_artifact(str(complete_path))
+
+                # Log frontier CSV artifact + provenance tags
+                frontier_data = job.get("frontier_data")
+                if frontier_data and frontier_data.get("points"):
+                    import csv
+                    import io
+
+                    points = frontier_data["points"]
+                    buf = io.StringIO()
+                    writer = csv.DictWriter(buf, fieldnames=points[0].keys())
+                    writer.writeheader()
+                    writer.writerows(points)
+                    frontier_path = Path(tmpdir) / "frontier.csv"
+                    frontier_path.write_text(buf.getvalue())
+                    mlflow.log_artifact(str(frontier_path))
+                    mlflow.set_tag("frontier.n_points", str(frontier_data["n_points"]))
+
+                selected_idx = job.get("selected_frontier_point")
+                if selected_idx is not None:
+                    mlflow.set_tag("frontier.selected_point_index", str(selected_idx))
 
             run_id = run.info.run_id
             run_url = None

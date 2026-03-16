@@ -26,6 +26,7 @@ import type {
   ApplyOptimiserResponse,
   SaveOptimiserResponse,
   FrontierResponse,
+  FrontierSelectResponse,
   DatabricksWarehouse,
   DatabricksCatalog,
   DatabricksSchema,
@@ -321,6 +322,13 @@ export function runFrontier(
   options?: { signal?: AbortSignal },
 ): Promise<FrontierResponse> {
   return post("/api/optimiser/frontier", payload, { timeout: 120_000, ...options })
+}
+
+export function selectFrontierPoint(
+  payload: { job_id: string; point_index: number },
+  options?: { signal?: AbortSignal },
+): Promise<FrontierSelectResponse> {
+  return post("/api/optimiser/frontier/select", payload, options)
 }
 
 // ---------------------------------------------------------------------------

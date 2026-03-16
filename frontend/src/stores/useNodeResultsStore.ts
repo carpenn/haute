@@ -15,6 +15,7 @@
 import { create } from "zustand"
 import type { PreviewData } from "../panels/DataPreview"
 import type { SolveResult, OptimiserPreviewData } from "../panels/OptimiserPreview"
+import type { FrontierSelectResponse, FrontierData } from "../api/types"
 import type { ColumnInfo } from "../types/node"
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -81,11 +82,14 @@ interface CachedPreview {
 
 interface CachedSolveResult {
   result: SolveResult
+  originalResult: SolveResult
   jobId: string
   configHash: string
   /** Constraint config snapshot for OptimiserPreview */
   constraints: Record<string, Record<string, number>>
   nodeLabel: string
+  frontier: FrontierData | null
+  selectedPointIndex: number | null
 }
 
 interface ActiveSolveJob {
@@ -167,6 +171,8 @@ interface NodeResultsState {
   updateSolveProgress: (nodeId: string, progress: SolveProgress) => void
   completeSolveJob: (nodeId: string, result: SolveResult) => void
   failSolveJob: (nodeId: string, error: string) => void
+  selectFrontierPoint: (nodeId: string, pointIndex: number | null) => void
+  updateFrontierAfterSelect: (nodeId: string, pointIndex: number, selectResult: FrontierSelectResponse) => void
 
   // ── Training actions ──
   startTrainJob: (nodeId: string, jobId: string, nodeLabel: string, configHash: string) => void
@@ -244,16 +250,24 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       const job = s.solveJobs[nodeId]
       if (!job) return s
       const { [nodeId]: _, ...remainingJobs } = s.solveJobs
+      // Extract frontier data from the result if present
+      const rawFrontier = result.frontier
+      const frontier: FrontierData | null = rawFrontier && rawFrontier.points?.length
+        ? { points: rawFrontier.points, n_points: rawFrontier.n_points, constraint_names: rawFrontier.constraint_names }
+        : null
       return {
         solveJobs: remainingJobs,
         solveResults: {
           ...s.solveResults,
           [nodeId]: {
             result,
+            originalResult: result,
             jobId: job.jobId,
             configHash: job.configHash,
             constraints: job.constraints,
             nodeLabel: job.nodeLabel,
+            frontier,
+            selectedPointIndex: null,
           },
         },
       }
@@ -267,6 +281,47 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
         solveJobs: {
           ...s.solveJobs,
           [nodeId]: { ...job, progress: null, error },
+        },
+      }
+    }),
+
+  selectFrontierPoint: (nodeId, pointIndex) =>
+    set((s) => {
+      const cached = s.solveResults[nodeId]
+      if (!cached) return s
+      return {
+        solveResults: {
+          ...s.solveResults,
+          [nodeId]: {
+            ...cached,
+            selectedPointIndex: pointIndex,
+            // Revert to original result when deselecting
+            ...(pointIndex === null ? { result: cached.originalResult } : {}),
+          },
+        },
+      }
+    }),
+
+  updateFrontierAfterSelect: (nodeId, pointIndex, selectResult) =>
+    set((s) => {
+      const cached = s.solveResults[nodeId]
+      if (!cached) return s
+      return {
+        solveResults: {
+          ...s.solveResults,
+          [nodeId]: {
+            ...cached,
+            selectedPointIndex: pointIndex,
+            result: {
+              ...cached.result,
+              total_objective: selectResult.total_objective,
+              constraints: selectResult.constraints,
+              baseline_objective: selectResult.baseline_objective,
+              baseline_constraints: selectResult.baseline_constraints,
+              lambdas: selectResult.lambdas,
+              converged: selectResult.converged,
+            },
+          },
         },
       }
     }),
@@ -330,6 +385,8 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       jobId: cached.jobId,
       constraints: cached.constraints,
       nodeLabel: cached.nodeLabel,
+      frontier: cached.frontier,
+      selectedPointIndex: cached.selectedPointIndex,
     }
   },
 

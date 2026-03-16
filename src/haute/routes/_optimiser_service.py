@@ -144,8 +144,51 @@ def _finalize_solve_result(
             "Solver did not converge. Consider increasing max_iter or relaxing tolerance."
         )
 
+    # ── Compute efficient frontier (online mode only, non-fatal) ────
+    frontier_data = None
+    # M6: Use direct dict access to avoid _evict_stale() from background thread
+    job_snapshot = store.jobs.get(job_id, {})
+    config = job_snapshot.get("config", {})
+    constraints = config.get("constraints")
+    if mode == "online" and constraints:
+        try:
+            frontier_min = config.get("frontier_min", 0.80)
+            frontier_max = config.get("frontier_max", 1.10)
+            frontier_steps = config.get("frontier_steps", 15)
+
+            baseline_constraints = solve_result.baseline_constraints
+            ranges: dict[str, tuple[float, float]] = {}
+            for cname in constraints:
+                baseline = baseline_constraints.get(cname)
+                if baseline is not None and baseline != 0:
+                    ranges[cname] = (baseline * frontier_min, baseline * frontier_max)
+            if ranges:
+                frontier_result = solver.frontier(
+                    quote_grid,
+                    threshold_ranges=ranges,
+                    n_points_per_dim=frontier_steps,
+                )
+                frontier_data = {
+                    "status": "ok",
+                    "points": frontier_result.points.to_dicts(),
+                    "n_points": len(frontier_result.points),
+                    "constraint_names": list(ranges.keys()),
+                }
+                logger.info(
+                    "frontier_computed", n_points=frontier_data["n_points"],
+                    job_id=job_id,
+                )
+        except Exception as exc:
+            logger.warning("frontier_computation_failed", error=str(exc), job_id=job_id)
+
+    result_dict["frontier"] = frontier_data
+
     # P7: Atomic update — replace the entire dict to avoid races with
     # status-polling reads on the main thread.
+    # L5: result_dict["frontier"] is the frontend-serialised frontier payload
+    # (consumed by OptimiserStatusResponse).  "frontier_data" is a top-level
+    # job key used by internal endpoints (e.g. /frontier/select) to look up
+    # raw frontier points without going through the result dict.
     store.atomic_update(job_id, {
         "status": "completed",
         "progress": 1.0,
@@ -155,6 +198,7 @@ def _finalize_solve_result(
         "solve_result": solve_result,
         "quote_grid": quote_grid,
         "result": result_dict,
+        "frontier_data": frontier_data,
     })
 
 

@@ -6,13 +6,9 @@ import useSettingsStore from "../../stores/useSettingsStore"
 
 // ── Mock API client ──
 const mockSolveOptimiser = vi.fn()
-const mockSaveOptimiser = vi.fn()
-const mockLogOptimiserToMlflow = vi.fn()
 
 vi.mock("../../api/client", () => ({
   solveOptimiser: (...args: unknown[]) => mockSolveOptimiser(...args),
-  saveOptimiser: (...args: unknown[]) => mockSaveOptimiser(...args),
-  logOptimiserToMlflow: (...args: unknown[]) => mockLogOptimiserToMlflow(...args),
 }))
 
 // ── Mock buildGraph ──
@@ -82,12 +78,9 @@ beforeEach(() => {
     solveResults: {},
   })
   useSettingsStore.setState({
-    mlflow: { status: "pending", backend: "", host: "" },
     collapsedSections: {},
   })
   mockSolveOptimiser.mockReset()
-  mockSaveOptimiser.mockReset()
-  mockLogOptimiserToMlflow.mockReset()
   mockHandleAddConstraint.mockReset()
   mockHandleRemoveConstraint.mockReset()
   mockHandleConstraintColumnChange.mockReset()
@@ -369,8 +362,14 @@ describe("OptimiserConfig", () => {
   // ═══════════════════════════════════════════════════════════════════
 
   describe("Solve action", () => {
-    it("solve button is disabled when no constraints set (canSolve requires constraints)", () => {
-      render(<OptimiserConfig {...makeProps()} />)
+    it("solve button is disabled when no objective is set", () => {
+      render(
+        <OptimiserConfig
+          {...makeProps({
+            config: { _nodeId: "opt_1", mode: "online", objective: "", constraints: {} },
+          })}
+        />,
+      )
       const btn = screen.getByRole("button", { name: /Optimise/ })
       expect(btn).toBeDisabled()
     })
@@ -522,109 +521,6 @@ describe("OptimiserConfig", () => {
       expect(screen.getByText("Solver exploded")).toBeInTheDocument()
     })
 
-    it("shows Save Result button when result exists", () => {
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-          })}
-        />,
-      )
-      expect(screen.getByRole("button", { name: /Save Result/ })).toBeInTheDocument()
-    })
-
-    it("save button calls saveOptimiser API with node-label-based path", async () => {
-      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-            allNodes: [
-              { id: "input_1", data: { label: "Data Input", description: "", nodeType: "dataSource", config: {} } },
-              { id: "opt_1", data: { label: "My Optimiser", description: "", nodeType: "optimiser", config: {} } },
-            ],
-          })}
-        />,
-      )
-      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
-      await waitFor(() => {
-        expect(mockSaveOptimiser).toHaveBeenCalledWith(
-          expect.objectContaining({
-            job_id: "job_42",
-            output_path: "output/optimiser_my_optimiser.json",
-          }),
-        )
-      })
-    })
-
-    it("save path falls back to 'result' when node label is not found", async () => {
-      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-            allNodes: [], // no matching node
-          })}
-        />,
-      )
-      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
-      await waitFor(() => {
-        expect(mockSaveOptimiser).toHaveBeenCalledWith(
-          expect.objectContaining({
-            output_path: "output/optimiser_result.json",
-          }),
-        )
-      })
-    })
-
-    it("save path slugifies special characters in node label", async () => {
-      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-            allNodes: [
-              { id: "opt_1", data: { label: "  My Fancy Optimiser!! ", description: "", nodeType: "optimiser", config: {} } },
-            ],
-          })}
-        />,
-      )
-      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
-      await waitFor(() => {
-        expect(mockSaveOptimiser).toHaveBeenCalledWith(
-          expect.objectContaining({
-            output_path: "output/optimiser_my_fancy_optimiser.json",
-          }),
-        )
-      })
-    })
-
-    it("save path falls back to 'result' when label slugifies to empty (e.g. Unicode-only)", async () => {
-      mockSaveOptimiser.mockResolvedValue({ message: "Saved!", path: "/tmp/out.json" })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-            allNodes: [
-              { id: "opt_1", data: { label: "!!!@@@", description: "", nodeType: "optimiser", config: {} } },
-            ],
-          })}
-        />,
-      )
-      fireEvent.click(screen.getByRole("button", { name: /Save Result/ }))
-      await waitFor(() => {
-        expect(mockSaveOptimiser).toHaveBeenCalledWith(
-          expect.objectContaining({
-            output_path: "output/optimiser_result.json",
-          }),
-        )
-      })
-    })
   })
 
   // ═══════════════════════════════════════════════════════════════════
@@ -702,74 +598,116 @@ describe("OptimiserConfig", () => {
   })
 
   // ═══════════════════════════════════════════════════════════════════
-  // MLflow
+  // Efficient Frontier
   // ═══════════════════════════════════════════════════════════════════
 
-  describe("MLflow", () => {
-    const convergedResult = {
-      result: {
-        total_objective: 1000,
-        baseline_objective: 900,
-        constraints: {},
-        baseline_constraints: {},
-        lambdas: {},
-        converged: true,
-        iterations: 5,
-      },
-      jobId: "job_42",
-      configHash: "",
-      constraints: {},
-      nodeLabel: "Optimiser",
-    }
-
-    it("shows MLflow log button when mlflowBackend is connected and solveJobId exists", () => {
-      useSettingsStore.setState({
-        mlflow: { status: "connected", backend: "databricks", host: "https://db.com" },
-      })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
-      render(
-        <OptimiserConfig
-          {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
-          })}
-        />,
-      )
-      expect(screen.getByRole("button", { name: /Log to MLflow/ })).toBeInTheDocument()
-      expect(screen.getByText(/databricks/)).toBeInTheDocument()
+  describe("Efficient Frontier", () => {
+    it("does not show frontier section when no constraints are configured", () => {
+      render(<OptimiserConfig {...makeProps()} />)
+      expect(screen.queryByText("Efficient Frontier")).not.toBeInTheDocument()
     })
 
-    it("does not show MLflow button when mlflow is not connected", () => {
-      useSettingsStore.setState({
-        mlflow: { status: "error", backend: "", host: "" },
-      })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
+    it("shows frontier section when constraints are configured", () => {
       render(
         <OptimiserConfig
           {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            config: {
+              _nodeId: "opt_1",
+              mode: "online",
+              objective: "premium",
+              constraints: { loss_ratio: { max: 1.05 } },
+            },
           })}
         />,
       )
-      expect(screen.queryByRole("button", { name: /Log to MLflow/ })).not.toBeInTheDocument()
+      expect(screen.getByText("Efficient Frontier")).toBeInTheDocument()
+      expect(screen.getByText("Min multiplier")).toBeInTheDocument()
+      expect(screen.getByText("Max multiplier")).toBeInTheDocument()
+      expect(screen.getByText("Steps")).toBeInTheDocument()
     })
 
-    it("calls logOptimiserToMlflow on MLflow button click", async () => {
-      mockLogOptimiserToMlflow.mockResolvedValue({ status: "ok", experiment_name: "test_exp" })
-      useSettingsStore.setState({
-        mlflow: { status: "connected", backend: "databricks", host: "https://db.com" },
-      })
-      useNodeResultsStore.setState({ solveResults: { opt_1: convergedResult } })
+    it("renders default frontier values (0.8, 1.1, 15)", () => {
       render(
         <OptimiserConfig
           {...makeProps({
-            config: { _nodeId: "opt_1", mode: "online", objective: "premium", constraints: { loss_ratio: { max: 1.05 } } },
+            config: {
+              _nodeId: "opt_1",
+              mode: "online",
+              objective: "premium",
+              constraints: { loss_ratio: { max: 1.05 } },
+            },
           })}
         />,
       )
-      fireEvent.click(screen.getByRole("button", { name: /Log to MLflow/ }))
-      await waitFor(() => {
-        expect(mockLogOptimiserToMlflow).toHaveBeenCalledWith({ job_id: "job_42" })
+      expect(screen.getByDisplayValue("0.8")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("1.1")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("15")).toBeInTheDocument()
+    })
+
+    it("renders custom frontier values from config", () => {
+      render(
+        <OptimiserConfig
+          {...makeProps({
+            config: {
+              _nodeId: "opt_1",
+              mode: "online",
+              objective: "premium",
+              constraints: { loss_ratio: { max: 1.05 } },
+              frontier_min: 0.70,
+              frontier_max: 1.30,
+              frontier_steps: 25,
+            },
+          })}
+        />,
+      )
+      expect(screen.getByDisplayValue("0.7")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("1.3")).toBeInTheDocument()
+      expect(screen.getByDisplayValue("25")).toBeInTheDocument()
+    })
+
+    it("changing frontier_min calls onUpdate", () => {
+      const props = makeProps({
+        config: {
+          _nodeId: "opt_1",
+          mode: "online",
+          objective: "premium",
+          constraints: { loss_ratio: { max: 1.05 } },
+        },
       })
+      render(<OptimiserConfig {...props} />)
+      const input = screen.getByDisplayValue("0.8")
+      fireEvent.change(input, { target: { value: "0.75" } })
+      expect(props.onUpdate).toHaveBeenCalledWith("frontier_min", 0.75)
+    })
+
+    it("changing frontier_max calls onUpdate", () => {
+      const props = makeProps({
+        config: {
+          _nodeId: "opt_1",
+          mode: "online",
+          objective: "premium",
+          constraints: { loss_ratio: { max: 1.05 } },
+        },
+      })
+      render(<OptimiserConfig {...props} />)
+      const input = screen.getByDisplayValue("1.1")
+      fireEvent.change(input, { target: { value: "1.25" } })
+      expect(props.onUpdate).toHaveBeenCalledWith("frontier_max", 1.25)
+    })
+
+    it("changing frontier_steps calls onUpdate", () => {
+      const props = makeProps({
+        config: {
+          _nodeId: "opt_1",
+          mode: "online",
+          objective: "premium",
+          constraints: { loss_ratio: { max: 1.05 } },
+        },
+      })
+      render(<OptimiserConfig {...props} />)
+      const input = screen.getByDisplayValue("15")
+      fireEvent.change(input, { target: { value: "20" } })
+      expect(props.onUpdate).toHaveBeenCalledWith("frontier_steps", 20)
     })
   })
 })

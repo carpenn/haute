@@ -16,6 +16,7 @@ import {
   Search,
 } from "lucide-react"
 import { useDragResize } from "../hooks/useDragResize"
+import { formatAxisLabel, yTicks } from "../utils/chartHelpers"
 import type { PreviewData } from "./DataPreview"
 
 // ─── Colours for series lines (CVD-safe Okabe-Ito subset) ─────────
@@ -49,22 +50,6 @@ const CHART_PX = 44 // left padding for Y axis labels
 const CHART_PX_RIGHT = 12
 const CHART_PY = 14
 const CHART_PY_BOTTOM = 22
-
-function yTicks(min: number, max: number, count = 4): number[] {
-  if (min === max) return [min]
-  const step = (max - min) / count
-  const ticks: number[] = []
-  for (let i = 0; i <= count; i++) ticks.push(min + step * i)
-  return ticks
-}
-
-function formatAxisLabel(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M"
-  if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(1) + "K"
-  if (Math.abs(v) < 0.01 && v !== 0) return v.toExponential(1)
-  if (Number.isInteger(v)) return String(v)
-  return v.toFixed(2)
-}
 
 interface ScaleContext {
   xScale: (i: number) => number

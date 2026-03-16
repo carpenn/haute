@@ -172,6 +172,19 @@ export interface FrontierResponse {
   constraint_names: string[]
 }
 
+export type FrontierData = Omit<FrontierResponse, 'status'>
+
+export interface FrontierSelectResponse {
+  status: string
+  total_objective: number
+  constraints: Record<string, number>
+  baseline_objective: number
+  baseline_constraints: Record<string, number>
+  lambdas: Record<string, number>
+  converged: boolean
+  error?: string
+}
+
 // ---------------------------------------------------------------------------
 // Databricks types
 // ---------------------------------------------------------------------------

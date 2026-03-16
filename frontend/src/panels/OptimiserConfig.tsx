@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react"
-import { Save, Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, FlaskConical, Layers, RefreshCw } from "lucide-react"
+import { Loader2, ChevronDown, ChevronRight, AlertTriangle, Plus, X, Target, Layers, RefreshCw } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./editors"
-import { solveOptimiser, saveOptimiser, logOptimiserToMlflow } from "../api/client"
+import { solveOptimiser } from "../api/client"
 import { useDataInputColumns } from "../hooks/useDataInputColumns"
 import { useConstraintHandlers } from "../hooks/useConstraintHandlers"
 import type { SolveResult } from "./OptimiserPreview"
@@ -75,20 +75,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const solveProgress = solveJob?.progress ?? null
   const solveError = solveJob?.error ?? null
   const solveResult: SolveResult | null = cachedResult?.result ?? null
-  const solveJobId: string | null = cachedResult?.jobId ?? solveJob?.jobId ?? null
-
   // Staleness detection: has config changed since last solve?
   const currentConfigHash = useMemo(() => hashConfig(config), [config])
   const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
-  const [saving, setSaving] = useState(false)
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
-  const [loggingToMlflow, setLoggingToMlflow] = useState(false)
-  const [mlflowResult, setMlflowResult] = useState<{ status: string; backend?: string; experiment_name?: string; run_id?: string; run_url?: string | null; tracking_uri?: string; error?: string } | null>(null)
-
-  // Global MLflow status from store (fetched once on app startup)
-  const mlflow = useSettingsStore((s) => s.mlflow)
-  const mlflowBackend = mlflow.status === "connected" ? { installed: true, backend: mlflow.backend, host: mlflow.host } : null
-
   // Collapse state from UI store (persisted)
   const advancedOpen = useSettingsStore((s) => s.isSectionOpen("optimiser.advanced"))
   const toggleAdvanced = useSettingsStore((s) => s.toggleSection)
@@ -106,6 +95,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const recordHistory = configField(config, "record_history", true)
   const maxCdIterations = configField(config, "max_cd_iterations", 10)
   const cdTolerance = configField(config, "cd_tolerance", 1e-4)
+  const frontierMin = configField(config, "frontier_min", 0.80)
+  const frontierMax = configField(config, "frontier_max", 1.10)
+  const frontierSteps = configField(config, "frontier_steps", 15)
 
   // Input nodes connected to this optimiser
   const inputNodes = useMemo(
@@ -147,8 +139,6 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   // --- Actions (polling is handled by useBackgroundJobs hook in App.tsx) ---
 
   const handleSolve = useCallback(async () => {
-    setSaveMessage(null)
-    setMlflowResult(null)
     setSubmitting(true)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Optimiser"
     try {
@@ -165,39 +155,6 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
       setSubmitting(false)
     }
   }, [nodeId, allNodes, buildGraphCb, constraints, currentConfigHash, startSolveJob])
-
-  const handleSave = useCallback(async () => {
-    if (!solveJobId) return
-    setSaving(true)
-    setSaveMessage(null)
-    try {
-      const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "result"
-      const labelSlug = nodeLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "result"
-      const result = await saveOptimiser({
-        job_id: solveJobId,
-        output_path: `output/optimiser_${labelSlug}.json`,
-      })
-      setSaveMessage(result.message || `Saved to ${result.path}`)
-    } catch (e) {
-      setSaveMessage(`Error: ${e}`)
-    } finally {
-      setSaving(false)
-    }
-  }, [solveJobId, allNodes, nodeId])
-
-  const handleLogMlflow = useCallback(async () => {
-    if (!solveJobId) return
-    setLoggingToMlflow(true)
-    setMlflowResult(null)
-    try {
-      const result = await logOptimiserToMlflow({ job_id: solveJobId })
-      setMlflowResult(result)
-    } catch (e) {
-      setMlflowResult({ status: "error", error: String(e) })
-    } finally {
-      setLoggingToMlflow(false)
-    }
-  }, [solveJobId])
 
   // Banding node selection — only from connected inputs
   const bandingNodes = useMemo(
@@ -445,6 +402,51 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
         </div>
       </div>
 
+      {/* Efficient Frontier (only when constraints are configured) */}
+      {Object.keys(constraints).length > 0 && (
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+            Efficient Frontier
+          </label>
+          <div className="mt-1.5 grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Min multiplier</label>
+              <input
+                type="number"
+                step={0.01}
+                value={frontierMin}
+                onChange={(e) => onUpdate("frontier_min", parseFloat(e.target.value) || 0.80)}
+                className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              />
+            </div>
+            <div>
+              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Max multiplier</label>
+              <input
+                type="number"
+                step={0.01}
+                value={frontierMax}
+                onChange={(e) => onUpdate("frontier_max", parseFloat(e.target.value) || 1.10)}
+                className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              />
+            </div>
+            <div>
+              <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>Steps</label>
+              <input
+                type="number"
+                min={2}
+                step={1}
+                value={frontierSteps}
+                onChange={(e) => onUpdate("frontier_steps", parseInt(e.target.value) || 15)}
+                className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
+                style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Solver Tuning */}
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>Solver</label>
@@ -635,67 +637,6 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 <> ({solveResult.n_quotes.toLocaleString()} quotes, {solveResult.n_steps} steps)</>
               )}
             </div>
-          </div>
-
-
-          {/* Save & MLflow buttons */}
-          <div className="space-y-2 pt-1">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-              style={{
-                background: saving ? "var(--chrome-hover)" : withAlpha(accentColor, 0.15),
-                color: saving ? "var(--text-muted)" : accentColor,
-                border: `1px solid ${withAlpha(accentColor, 0.3)}`,
-              }}
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? "Saving..." : "Save Result"}
-            </button>
-            {saveMessage && (
-              <div className="text-[11px] px-3 py-1.5 rounded-lg" style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
-                {saveMessage}
-              </div>
-            )}
-
-            {mlflowBackend?.installed && solveJobId && (
-              <>
-                <button
-                  onClick={handleLogMlflow}
-                  disabled={loggingToMlflow}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-                  style={{
-                    background: loggingToMlflow ? "var(--chrome-hover)" : "rgba(59,130,246,.15)",
-                    color: loggingToMlflow ? "var(--text-muted)" : "#3b82f6",
-                    border: "1px solid rgba(59,130,246,.3)",
-                  }}
-                >
-                  {loggingToMlflow ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />}
-                  {loggingToMlflow ? "Logging..." : `Log to MLflow (${mlflowBackend.backend})`}
-                </button>
-                {mlflowResult && mlflowResult.status === "ok" && (
-                  <div className="px-3 py-2 rounded-lg text-xs space-y-1" style={{ background: "rgba(59,130,246,.08)", border: "1px solid rgba(59,130,246,.2)", color: "#3b82f6" }}>
-                    <div>Logged successfully</div>
-                    {mlflowResult.experiment_name && (
-                      <div className="font-mono text-[11px]" style={{ color: "#93c5fd" }}>{mlflowResult.experiment_name}</div>
-                    )}
-                    {mlflowResult.run_url ? (
-                      <a href={mlflowResult.run_url} target="_blank" rel="noreferrer" className="underline" style={{ color: "#60a5fa" }}>
-                        Open in Databricks
-                      </a>
-                    ) : mlflowResult.run_id ? (
-                      <div className="font-mono text-[11px]" style={{ color: "#93c5fd" }}>Run: {mlflowResult.run_id.slice(0, 8)}</div>
-                    ) : null}
-                  </div>
-                )}
-                {mlflowResult && mlflowResult.status === "error" && (
-                  <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", color: "#fca5a5" }}>
-                    {mlflowResult.error}
-                  </div>
-                )}
-              </>
-            )}
           </div>
         </div>
       )}

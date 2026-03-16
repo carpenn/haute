@@ -384,6 +384,7 @@ function FlowEditor() {
                 return (
                   <OptimiserPreview
                     data={optPreview}
+                    nodeId={activeNodeId!}
                   />
                 )
               }

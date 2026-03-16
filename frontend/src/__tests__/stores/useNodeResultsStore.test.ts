@@ -553,4 +553,198 @@ describe("useNodeResultsStore", () => {
       expect(preview!.nodeLabel).toBe("Optim Node")
     })
   })
+
+  // ────────────────────────────────────────────────────────────────
+  // Frontier actions
+  // ────────────────────────────────────────────────────────────────
+
+  describe("Frontier actions", () => {
+    it("completeSolveJob extracts frontier from result", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", { vol: { min: 0.9 } }, "h1")
+
+      const frontier = {
+        status: "ok",
+        points: [{ total_objective: 100, total_vol: 0.95, lambda_vol: 0.01 }],
+        n_points: 1,
+        constraint_names: ["vol"],
+      }
+      const result = makeSolveResult({ frontier })
+      s.completeSolveJob("n1", result)
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached).toBeDefined()
+      expect(cached.frontier).not.toBeNull()
+      expect(cached.frontier!.points).toHaveLength(1)
+      expect(cached.frontier!.n_points).toBe(1)
+      expect(cached.frontier!.constraint_names).toEqual(["vol"])
+      expect(cached.selectedPointIndex).toBeNull()
+    })
+
+    it("completeSolveJob sets null frontier when points empty", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+
+      const frontier = {
+        status: "ok",
+        points: [],
+        n_points: 0,
+        constraint_names: [],
+      }
+      const result = makeSolveResult({ frontier })
+      s.completeSolveJob("n1", result)
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached).toBeDefined()
+      expect(cached.frontier).toBeNull()
+    })
+
+    it("completeSolveJob sets null frontier when absent", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+
+      const result = makeSolveResult()
+      // Ensure no frontier key on the result
+      expect(result.frontier).toBeUndefined()
+      s.completeSolveJob("n1", result)
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached).toBeDefined()
+      expect(cached.frontier).toBeNull()
+    })
+
+    it("selectFrontierPoint sets index", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+      s.completeSolveJob("n1", makeSolveResult())
+
+      s.selectFrontierPoint("n1", 3)
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached.selectedPointIndex).toBe(3)
+    })
+
+    it("selectFrontierPoint null deselects and reverts result", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+      const original = makeSolveResult({ total_objective: 100 })
+      s.completeSolveJob("n1", original)
+
+      // Simulate selecting a point and updating the result via updateFrontierAfterSelect
+      s.selectFrontierPoint("n1", 2)
+      s.updateFrontierAfterSelect("n1", 2, {
+        status: "ok",
+        total_objective: 200,
+        constraints: { premium: 60 },
+        baseline_objective: 80,
+        baseline_constraints: { premium: 45 },
+        lambdas: { premium: 0.2 },
+        converged: true,
+      })
+
+      // The result should now reflect the frontier point
+      expect(useNodeResultsStore.getState().solveResults["n1"].result.total_objective).toBe(200)
+
+      // Deselect — set back to null
+      s.selectFrontierPoint("n1", null)
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached.selectedPointIndex).toBeNull()
+      // The original result is preserved in originalResult for the caller to use
+      expect(cached.originalResult.total_objective).toBe(100)
+    })
+
+    it("selectFrontierPoint noop for unknown node", () => {
+      const s = useNodeResultsStore.getState()
+      // Should not crash
+      s.selectFrontierPoint("ghost", 5)
+      expect(useNodeResultsStore.getState().solveResults["ghost"]).toBeUndefined()
+    })
+
+    it("updateFrontierAfterSelect updates result metrics", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+      s.completeSolveJob("n1", makeSolveResult({
+        total_objective: 100,
+        constraints: { premium: 50 },
+        lambdas: { premium: 0.1 },
+        converged: true,
+      }))
+
+      s.updateFrontierAfterSelect("n1", 2, {
+        status: "ok",
+        total_objective: 250,
+        constraints: { premium: 70 },
+        baseline_objective: 90,
+        baseline_constraints: { premium: 48 },
+        lambdas: { premium: 0.3 },
+        converged: false,
+      })
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      expect(cached.selectedPointIndex).toBe(2)
+      expect(cached.result.total_objective).toBe(250)
+      expect(cached.result.constraints).toEqual({ premium: 70 })
+      expect(cached.result.baseline_objective).toBe(90)
+      expect(cached.result.baseline_constraints).toEqual({ premium: 48 })
+      expect(cached.result.lambdas).toEqual({ premium: 0.3 })
+      expect(cached.result.converged).toBe(false)
+    })
+
+    it("updateFrontierAfterSelect preserves other result fields", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "j1", "Node 1", {}, "h1")
+      const original = makeSolveResult({
+        iterations: 42,
+        n_quotes: 5000,
+        history: [
+          { iteration: 1, total_objective: 100, max_lambda_change: 0.1, all_constraints_satisfied: false },
+        ],
+      })
+      s.completeSolveJob("n1", original)
+
+      s.updateFrontierAfterSelect("n1", 1, {
+        status: "ok",
+        total_objective: 999,
+        constraints: { premium: 99 },
+        baseline_objective: 88,
+        baseline_constraints: { premium: 44 },
+        lambdas: { premium: 0.9 },
+        converged: true,
+      })
+
+      const cached = useNodeResultsStore.getState().solveResults["n1"]
+      // These fields should be updated
+      expect(cached.result.total_objective).toBe(999)
+      // These fields should be preserved from the original
+      expect(cached.result.iterations).toBe(42)
+      expect(cached.result.n_quotes).toBe(5000)
+      expect(cached.result.history).toHaveLength(1)
+    })
+
+    it("getOptimiserPreview includes frontier and selectedPointIndex", () => {
+      const s = useNodeResultsStore.getState()
+      const constraints = { vol: { min: 0.9 } }
+      s.startSolveJob("n1", "j1", "Optim Node", constraints, "h1")
+
+      const frontier = {
+        status: "ok",
+        points: [
+          { total_objective: 100, total_vol: 0.95, lambda_vol: 0.01 },
+          { total_objective: 110, total_vol: 0.92, lambda_vol: 0.02 },
+        ],
+        n_points: 2,
+        constraint_names: ["vol"],
+      }
+      s.completeSolveJob("n1", makeSolveResult({ frontier }))
+      s.selectFrontierPoint("n1", 1)
+
+      const preview = useNodeResultsStore.getState().getOptimiserPreview("n1")
+      expect(preview).not.toBeNull()
+      expect(preview!.frontier).not.toBeNull()
+      expect(preview!.frontier!.points).toHaveLength(2)
+      expect(preview!.frontier!.n_points).toBe(2)
+      expect(preview!.frontier!.constraint_names).toEqual(["vol"])
+      expect(preview!.selectedPointIndex).toBe(1)
+    })
+  })
 })

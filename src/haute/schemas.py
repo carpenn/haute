@@ -596,12 +596,26 @@ class OptimiserSolveResponse(BaseModel):
     error: str | None = None
 
 
+class OptimiserFrontierRequest(BaseModel):
+    job_id: str
+    threshold_ranges: dict[str, list[float]]
+    n_points_per_dim: int = 5
+
+
+class OptimiserFrontierResponse(BaseModel):
+    status: str
+    points: list[dict[str, Any]] = Field(default_factory=list)
+    n_points: int = 0
+    constraint_names: list[str] = Field(default_factory=list)
+
+
 class OptimiserStatusResponse(BaseModel):
     status: str  # "running" | "completed" | "error"
     progress: float = 0.0
     message: str = ""
     elapsed_seconds: float = 0.0
     result: dict[str, Any] | None = None
+    frontier: OptimiserFrontierResponse | None = None
 
 
 class OptimiserApplyRequest(BaseModel):
@@ -617,17 +631,20 @@ class OptimiserApplyResponse(BaseModel):
     error: str | None = None
 
 
-class OptimiserFrontierRequest(BaseModel):
+class OptimiserFrontierSelectRequest(BaseModel):
     job_id: str
-    threshold_ranges: dict[str, list[float]]
-    n_points_per_dim: int = 5
+    point_index: int
 
 
-class OptimiserFrontierResponse(BaseModel):
+class OptimiserFrontierSelectResponse(BaseModel):
     status: str
-    points: list[dict[str, Any]] = Field(default_factory=list)
-    n_points: int = 0
-    constraint_names: list[str] = Field(default_factory=list)
+    total_objective: float = 0.0
+    constraints: dict[str, float] = Field(default_factory=dict)
+    baseline_objective: float = 0.0
+    baseline_constraints: dict[str, float] = Field(default_factory=dict)
+    lambdas: dict[str, float] = Field(default_factory=dict)
+    converged: bool = True
+    error: str | None = None
 
 
 class OptimiserSaveRequest(BaseModel):
