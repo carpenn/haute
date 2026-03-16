@@ -479,6 +479,7 @@ class TrainStatusResponse(BaseModel):
 class TrainEstimateRequest(BaseModel):
     graph: Graph
     node_id: str
+    scenario: str = "live"
 
 
 class TrainEstimateResponse(BaseModel):

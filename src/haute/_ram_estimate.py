@@ -300,6 +300,7 @@ def estimate_safe_training_rows(
     overhead_multiplier: float = _CATBOOST_OVERHEAD_MULTIPLIER,
     safety_factor: float = _RAM_SAFETY_FACTOR,
     preamble_ns: dict | None = None,
+    scenario: str = "live",
 ) -> RamEstimate:
     """Estimate whether the full pipeline fits in RAM for training.
 
@@ -320,6 +321,7 @@ def estimate_safe_training_rows(
         row_limit=probe_rows,
         swallow_errors=True,
         preamble_ns=preamble_ns,
+        scenario=scenario,
     )
 
     probe_df = probe_result.outputs.get(target_node_id)

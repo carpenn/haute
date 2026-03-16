@@ -3,14 +3,11 @@
   "registered_model": "",
   "version": "latest",
   "task": "regression",
-  "output_column": "prediction",
+  "output_column": "conversion_prediction",
   "experiment_id": "4403259996564708",
   "experiment_name": "/Shared/haute/conversion",
   "run_id": "6ace65682bcc4046a1923ea2b7a6e631",
   "run_name": "conversion",
   "artifact_path": "conversion.rsglm",
-  "selected_columns": [
-    "quote_id",
-    "prediction"
-  ]
+  "selected_columns": []
 }

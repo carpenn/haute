@@ -177,8 +177,8 @@ class TrainService:
             })
 
         preamble_ns = self._compile_preamble(body.graph)
-        ram_warning, row_limit, total_source_rows, probe_columns = (
-            self._estimate_ram(body.graph, body.node_id, preamble_ns, job_id)
+        ram_warning, row_limit, total_source_rows, probe_columns = self._estimate_ram(
+            body.graph, body.node_id, preamble_ns, job_id, scenario=body.scenario,
         )
         user_limit = config.get("row_limit")
         row_limit = _clamp_row_limit(row_limit, user_limit)
@@ -264,6 +264,7 @@ class TrainService:
         node_id: str,
         preamble_ns: dict[str, Any] | None,
         job_id: str,
+        scenario: str = "live",
     ) -> tuple[str | None, int | None, int | None, int]:
         """Estimate safe row limit from available RAM.
 
@@ -282,6 +283,7 @@ class TrainService:
             ram_est = estimate_safe_training_rows(
                 graph, node_id, _build_node_fn,
                 preamble_ns=preamble_ns,
+                scenario=scenario,
             )
             row_limit = ram_est.safe_row_limit
             ram_warning = ram_est.warning

@@ -1,8 +1,8 @@
 {
   "quote_id": "quote_id",
   "column_name": "premium_multiplier",
-  "min_value": 0.8,
-  "max_value": 1.2,
+  "min_value": 0.2,
+  "max_value": 1.4,
   "steps": 21,
   "step_column": "scenario_index",
   "selected_columns": [
@@ -10,6 +10,8 @@
     "premium_multiplier",
     "scenario_index",
     "premium",
-    "competitor_premium"
+    "competitor_premium",
+    "margin",
+    "burn_cost"
   ]
 }

@@ -84,6 +84,7 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
         ram_est = estimate_safe_training_rows(
             body.graph, body.node_id, _build_node_fn,
             preamble_ns=preamble_ns,
+            scenario=body.scenario,
         )
     except Exception as exc:
         logger.warning("estimate_failed", error=str(exc), node_id=body.node_id)

@@ -68,7 +68,10 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const cachedResult = useNodeResultsStore((s) => s.solveResults[nodeId])
   const startSolveJob = useNodeResultsStore((s) => s.startSolveJob)
 
-  const solving = !!solveJob
+  // ── Local UI state (cheap, ok to recreate) ──
+  const [submitting, setSubmitting] = useState(false)
+
+  const solving = submitting || !!solveJob
   const solveProgress = solveJob?.progress ?? null
   const solveError = solveJob?.error ?? null
   const solveResult: SolveResult | null = cachedResult?.result ?? null
@@ -77,8 +80,6 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   // Staleness detection: has config changed since last solve?
   const currentConfigHash = useMemo(() => hashConfig(config), [config])
   const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
-
-  // ── Local UI state (cheap, ok to recreate) ──
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [loggingToMlflow, setLoggingToMlflow] = useState(false)
@@ -148,6 +149,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const handleSolve = useCallback(async () => {
     setSaveMessage(null)
     setMlflowResult(null)
+    setSubmitting(true)
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Optimiser"
     try {
       const result = await solveOptimiser({ graph: buildGraphCb(), node_id: nodeId })
@@ -159,6 +161,8 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
       }
     } catch (e) {
       useNodeResultsStore.getState().failSolveJob(nodeId, String(e))
+    } finally {
+      setSubmitting(false)
     }
   }, [nodeId, allNodes, buildGraphCb, constraints, currentConfigHash, startSolveJob])
 
@@ -224,7 +228,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
     onUpdate("factor_columns", allFactors)
   }, [allNodes, onUpdate])
 
-  const canSolve = !!objective && Object.keys(constraints).length > 0 &&
+  const canSolve = !!objective &&
     (mode !== "ratebook" || factorColumns.length > 0)
 
   return (
@@ -564,6 +568,14 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
           {solving ? "Optimising..." : "Optimise"}
         </button>
       </div>
+
+      {/* Submitting (before job starts polling) */}
+      {submitting && !solveProgress && (
+        <div className="px-3 py-2.5 rounded-lg text-xs flex items-center gap-2" style={{ background: withAlpha(accentColor, 0.06), border: `1px solid ${withAlpha(accentColor, 0.2)}` }}>
+          <Loader2 size={12} className="animate-spin" style={{ color: accentColor }} />
+          <span style={{ color: accentColor }}>Executing pipeline...</span>
+        </div>
+      )}
 
       {/* Live Progress */}
       {solveProgress && (

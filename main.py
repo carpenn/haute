@@ -19,13 +19,7 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 @pipeline.node(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    df = pl.scan_parquet("data/batch_quotes.parquet")
-    # -- user code --
-    df = (
-        df
-        .filter(pl.col('quote_id') == 'QUO-2026-000000001')
-    )
-    return df
+    return pl.scan_parquet("data/batch_quotes.parquet")
 
 
 @pipeline.node(config="config/data_source/competitor_insights.json")
@@ -174,13 +168,14 @@ def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame)
         how = 'left'
     )
     .with_columns(
-        sale_flag = pl.when(pl.col('policy_id').is_null()).then(pl.lit(0)).otherwise(pl.lit(1))
+        sale_flag = pl.when(pl.col('policy_id').is_null()).then(pl.lit(0)).otherwise(pl.lit(1)),
+        burn_cost = pl.col('premium') * 0.7
     )
     )
     return df
 
 
-@pipeline.node(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type'])
+@pipeline.node(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type', 'margin', 'burn_cost'])
 def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
     df = (
@@ -210,9 +205,9 @@ def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     df = join_premiums
     # -- user code --
     df = (
-        df
-        .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
-    )
+                df
+                .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
+            )
     return df
 
 
@@ -226,13 +221,24 @@ def conversion_scoring(competitor_features_scenarios: pl.LazyFrame) -> pl.LazyFr
 
 
 @pipeline.node
-def Polars_8(conversion_scoring: pl.LazyFrame) -> pl.LazyFrame:
+def optimiser_input(conversion_scoring: pl.LazyFrame) -> pl.LazyFrame:
     """Polars 8 node"""
     df = (
-        conversion_scoring
-        .with_columns(prediction = pl.col('prediction') * 1000)
+    conversion_scoring
+    .with_columns(
+        margin = pl.col('premium') - pl.col('burn_cost'),
+    )
+    .with_columns(
+        expected_margin = pl.col('margin') * pl.col('conversion_prediction'),
+    )
     )
     return df
+
+
+@pipeline.node(config="config/optimisation/online_optimiser.json")
+def online_optimiser(optimiser_input: pl.LazyFrame) -> pl.LazyFrame:
+    """online_optimiser node"""
+    return optimiser_input
 
 
 @pipeline.node(instance_of="competitor_features")
@@ -262,4 +268,5 @@ pipeline.connect("join_premiums", "premium")
 pipeline.connect("competitor_features", "conversion")
 pipeline.connect("premium", "competitor_features_scenarios")
 pipeline.connect("competitor_features_scenarios", "conversion_scoring")
-pipeline.connect("conversion_scoring", "Polars_8")
+pipeline.connect("conversion_scoring", "optimiser_input")
+pipeline.connect("optimiser_input", "online_optimiser")

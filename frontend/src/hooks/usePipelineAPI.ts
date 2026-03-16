@@ -10,6 +10,7 @@ import useToastStore from "../stores/useToastStore"
 import useSettingsStore from "../stores/useSettingsStore"
 import useUIStore from "../stores/useUIStore"
 import useNodeResultsStore from "../stores/useNodeResultsStore"
+import { validateConfigRefs, formatConfigRefWarnings } from "../utils/validateConfigRefs"
 
 interface PipelineAPIParams {
   selectedNode: Node | null
@@ -129,10 +130,10 @@ export default function usePipelineAPI({
             }
           }
         })
-        .catch((e) => console.warn("propagation_failed", dsId, e))
+        .catch((e) => { console.warn("propagation_failed", dsId, e); addToast("warning", `Preview propagation failed for "${dsId}"`) })
         .finally(() => { propagatingRef.current.delete(dsId) })
     }
-  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+  }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes, addToast])
 
   // Initial pipeline load
   useEffect(() => {
@@ -264,7 +265,7 @@ export default function usePipelineAPI({
               ))
             }
           })
-          .catch((e) => console.warn("upstream_preview_failed", upstream.id, e)),
+          .catch((e) => { console.warn("upstream_preview_failed", upstream.id, e); addToast("warning", `Upstream preview failed for "${upstream.data?.label || upstream.id}"`) }),
       ),
     ).then(() => {
       fetchPreviewImmediate(node)
@@ -273,6 +274,11 @@ export default function usePipelineAPI({
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
+    // Warn about broken config references before saving
+    const refWarnings = validateConfigRefs(n)
+    if (refWarnings.length > 0) {
+      addToast("warning", formatConfigRefWarnings(refWarnings))
+    }
     const { scenarios: sc, activeScenario: as_ } = useSettingsStore.getState()
     savePipeline({
       name: pipelineNameRef.current,

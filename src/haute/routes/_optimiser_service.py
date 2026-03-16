@@ -170,7 +170,7 @@ def _solve_online(
 
     solver = OnlineOptimiser(
         objective=config["objective"],
-        constraints=config["constraints"],
+        constraints=config["constraints"] or None,
         max_iter=config.get("max_iter", _DEFAULT_MAX_ITER),
         chunk_size=config.get("chunk_size", _DEFAULT_CHUNK_SIZE),
         tolerance=config.get("tolerance", _DEFAULT_TOLERANCE),
@@ -361,13 +361,6 @@ class OptimiserSolveService:
                 status_code=400,
                 detail="No objective column configured."
                 " Open the config panel and set an objective.",
-            )
-
-        constraints = config.get("constraints")
-        if not constraints:
-            raise HTTPException(
-                status_code=400,
-                detail="No constraints configured. Add at least one constraint.",
             )
 
         mode = config.get("mode", "online")
