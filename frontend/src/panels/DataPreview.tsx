@@ -113,7 +113,7 @@ export default function DataPreview({ data, onCellClick, tracedCell }: DataPrevi
         onMouseLeave={(e) => e.currentTarget.style.background = 'var(--chrome-border)'}
       />
       {/* Header bar */}
-      <div className="h-9 flex items-center px-4 shrink-0 gap-2" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+      <div className="min-h-9 flex items-center flex-wrap px-4 shrink-0 gap-x-2 gap-y-1 py-1.5" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
         <Table2 size={14} style={{ color: 'var(--text-muted)' }} />
         <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{data.nodeLabel}</span>
 

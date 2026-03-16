@@ -121,7 +121,7 @@ export default function OptimiserPreview({ data }: OptimiserPreviewProps) {
       />
 
       {/* Header */}
-      <div className="h-9 flex items-center px-4 shrink-0 gap-2" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
+      <div className="min-h-9 flex items-center flex-wrap px-4 shrink-0 gap-x-2 gap-y-1 py-1.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
         <Target size={14} style={{ color: "#f59e0b" }} />
         <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{data.nodeLabel}</span>
         <span className="text-[11px]" style={{ color: result.converged ? "#22c55e" : "#f59e0b" }}>

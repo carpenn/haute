@@ -663,6 +663,109 @@ class TestBuildOptimiser:
         result = fn(input_df).collect()
         assert result["x"].to_list() == [1]
 
+    def test_data_input_selects_correct_input(self) -> None:
+        """When data_input is set, the optimiser should pick that specific
+        input rather than blindly using dfs[0]."""
+        # Build node map: two upstream nodes — banding + data
+        banding_node = _n({
+            "id": "banding_1",
+            "data": {"label": "Banding", "nodeType": "banding", "config": {}},
+        })
+        data_node = _n({
+            "id": "data_1",
+            "data": {"label": "Scored Data", "nodeType": "transform", "config": {}},
+        })
+        opt_node = _n({
+            "id": "opt_1",
+            "data": {
+                "label": "Optimiser",
+                "nodeType": "optimiser",
+                "config": {
+                    "mode": "online",
+                    "objective": "profit",
+                    "data_input": "data_1",
+                },
+            },
+        })
+        node_map = {
+            "banding_1": banding_node,
+            "data_1": data_node,
+            "opt_1": opt_node,
+        }
+        # source_names order: banding first, data second (simulates edge order)
+        # Names are sanitized labels: "Banding" → "Banding", "Scored Data" → "Scored_Data"
+        _, fn, _ = _build_node_fn(
+            opt_node,
+            source_names=["Banding", "Scored_Data"],
+            node_map=node_map,
+        )
+        banding_df = pl.DataFrame({"quote_id": ["q1"], "factor": [1.1]}).lazy()
+        data_df = pl.DataFrame({
+            "quote_id": ["q1", "q1", "q1"],
+            "scenario_index": [0, 1, 2],
+            "profit": [100.0, 110.0, 120.0],
+        }).lazy()
+        result = fn(banding_df, data_df).collect()
+        # Should pick data_df (index 1), not banding_df (index 0)
+        assert result.shape[0] == 3
+        assert "scenario_index" in result.columns
+
+    def test_data_input_fallback_when_not_configured(self) -> None:
+        """Without data_input, falls back to dfs[0]."""
+        _, fn, _ = _build(
+            "optimiser",
+            {"mode": "online", "objective": "profit"},
+            source_names=["upstream"],
+        )
+        df = pl.DataFrame({"x": [1, 2]}).lazy()
+        result = fn(df).collect()
+        assert result["x"].to_list() == [1, 2]
+
+    def test_data_input_fallback_when_id_not_in_node_map(self) -> None:
+        """If data_input references a missing node, fall back to dfs[0]."""
+        opt_node = _n({
+            "id": "opt_1",
+            "data": {
+                "label": "Optimiser",
+                "nodeType": "optimiser",
+                "config": {"data_input": "nonexistent_node"},
+            },
+        })
+        _, fn, _ = _build_node_fn(
+            opt_node,
+            source_names=["upstream"],
+            node_map={"opt_1": opt_node},
+        )
+        df = pl.DataFrame({"x": [42]}).lazy()
+        result = fn(df).collect()
+        assert result["x"].to_list() == [42]
+
+    def test_data_input_raises_on_index_mismatch(self) -> None:
+        """If data_input resolves to an index beyond the actual inputs,
+        raise rather than silently falling back."""
+        data_node = _n({
+            "id": "data_1",
+            "data": {"label": "Scored Data", "nodeType": "transform", "config": {}},
+        })
+        opt_node = _n({
+            "id": "opt_1",
+            "data": {
+                "label": "Optimiser",
+                "nodeType": "optimiser",
+                "config": {"data_input": "data_1"},
+            },
+        })
+        node_map = {"data_1": data_node, "opt_1": opt_node}
+        # source_names has two entries but we only pass one df
+        _, fn, _ = _build_node_fn(
+            opt_node,
+            source_names=["Banding", "Scored_Data"],
+            node_map=node_map,
+        )
+        single_df = pl.DataFrame({"x": [1]}).lazy()
+        with pytest.raises(ValueError, match="expected input at index 1"):
+            fn(single_df)
+
 
 # ---------------------------------------------------------------------------
 # _build_live_switch

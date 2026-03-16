@@ -128,7 +128,7 @@ export function ModellingPreview({
       )}
 
       {/* Header */}
-      <div className="h-9 flex items-center px-4 shrink-0 gap-2" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
+      <div className="min-h-9 flex items-center flex-wrap px-4 shrink-0 gap-x-2 gap-y-1 py-1.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
         <BrainCircuit size={14} style={{ color: "#a855f7" }} />
         <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{data.nodeLabel}</span>
         {/* Tab bar */}

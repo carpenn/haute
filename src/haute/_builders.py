@@ -385,6 +385,23 @@ def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool
 @_register(NodeType.OPTIMISER)
 def _build_optimiser(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
+    # When data_input is configured, select that specific input so the
+    # preview shows scenario-expanded data rather than a banding source.
+    data_input_id = ctx.config.get("data_input")
+    if data_input_id and ctx.node_map and data_input_id in ctx.node_map:
+        target_name = _sanitize_func_name(ctx.node_map[data_input_id].data.label)
+        if target_name in ctx.source_names:
+            idx = ctx.source_names.index(target_name)
+
+            def _optimiser_select(*dfs: _Frame, _i: int = idx) -> _Frame:
+                if len(dfs) <= _i:
+                    raise ValueError(
+                        f"Optimiser expected input at index {_i} but only "
+                        f"received {len(dfs)} input(s)",
+                    )
+                return dfs[_i]
+
+            return ctx.func_name, _optimiser_select, False
     return ctx.func_name, _passthrough_fn, False
 
 

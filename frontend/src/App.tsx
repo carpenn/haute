@@ -19,6 +19,7 @@ import NodePalette from "./panels/NodePalette"
 import NodePanel, { type SimpleNode, type SimpleEdge } from "./panels/NodePanel"
 import DataPreview from "./panels/DataPreview"
 import OptimiserPreview from "./panels/OptimiserPreview"
+import OptimiserDataPreview from "./panels/OptimiserDataPreview"
 import { ModellingPreview } from "./panels/ModellingPreview"
 
 import TracePanel from "./panels/TracePanel"
@@ -383,6 +384,24 @@ function FlowEditor() {
                 return (
                   <OptimiserPreview
                     data={optPreview}
+                  />
+                )
+              }
+              // Pre-solve chart view for optimiser nodes
+              const activeNode = activeNodeId
+                ? nodes.find((n) => n.id === activeNodeId)
+                : null
+              if (
+                activeNode &&
+                nodeData(activeNode).nodeType === NODE_TYPES.OPTIMISER &&
+                previewData &&
+                previewData.status === "ok" &&
+                previewData.preview.length > 0
+              ) {
+                return (
+                  <OptimiserDataPreview
+                    data={previewData}
+                    config={nodeData(activeNode).config ?? {}}
                   />
                 )
               }
