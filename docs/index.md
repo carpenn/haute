@@ -15,44 +15,67 @@ hide:
 
 Haute is a free, open-source pricing engine for insurance teams. Build rating pipelines in a visual editor, keep everything as standard Python, and deploy to a live scoring API - all without leaving your IDE or waiting on engineering.
 
-!!! tip "Who is this for?"
-    Pricing teams who want to move faster without giving up control - of their code, their infrastructure, or their deployment process. If you're tired of six-figure platform licences or deployment scripts that only one person understands, this is for you.
-
 ---
 
 ## :material-target: The problem it solves
 
-Getting a pricing model from someone's laptop into a live system that can serve real quotes is **hard**. The typical path:
+Insurance pricing teams have been left behind. While the rest of the data science world moved to open-source tooling, version control, automated testing, and continuous deployment, pricing teams have been stuck with expensive proprietary platforms that don't automate anything, don't teach transferable skills, and lock teams into clunky workflows that haven't changed in a decade.
 
 <div class="grid cards" markdown>
 
-- :material-swap-horizontal:{ .lg .middle } **Weeks of handoff**
+- :material-cash-lock:{ .lg .middle } **Expensive, closed platforms**
 
     ---
 
-    Actuaries build models, then wait for engineering to deploy them. Back and forth, every release.
+    Six-figure licences for software that does less than free, open-source alternatives. No transparency, no flexibility, no escape.
 
-- :material-lock:{ .lg .middle } **Deployment scripts nobody understands**
-
-    ---
-
-    One person wrote the deploy script. They left. Now nobody touches it.
-
-- :material-eye-off:{ .lg .middle } **No visibility before go-live**
+- :material-school-outline:{ .lg .middle } **No skills development**
 
     ---
 
-    "What will this do to the book?" Nobody knows until it's in production.
+    Proprietary tools don't teach analysts to code or build their own solutions. When the tool can't do something, neither can the team.
+
+- :material-sync-off:{ .lg .middle } **No automation**
+
+    ---
+
+    Manual exports, manual deployments, manual everything. Best practices from software engineering and data science never make it through the door.
 
 </div>
 
-Haute handles that entire path. You build a pipeline, Haute packages it, tests it, deploys it to a staging environment, shows you the financial impact, and promotes it to production when you're ready. The whole process runs automatically every time you merge a change.
+Haute fixes this by packaging modern data science and engineering tooling into a ready-to-go interface. Analysts get version control, automated CI/CD, experiment tracking, and a visual editor - all built on standard Python they can learn from and extend.
+
+## :material-account-group: Who is this for?
+
+Teams looking to keep in line with data science and engineering best practices and advancements, rather than falling further behind.
+
+<div class="grid cards" markdown>
+
+- :material-chart-line:{ .lg .middle } **Pricing and actuarial teams**
+
+    ---
+
+    Build, test, and deploy rating pipelines without waiting on engineering or learning DevOps from scratch.
+
+- :material-trending-up:{ .lg .middle } **Teams outgrowing legacy platforms**
+
+    ---
+
+    Move off expensive proprietary tools without losing structure. Haute gives you the same guardrails with modern, open-source foundations.
+
+- :material-lightbulb-on-outline:{ .lg .middle } **Teams investing in their analysts**
+
+    ---
+
+    Everything runs on standard Python. Skills learned here transfer everywhere - not just within one vendor's ecosystem.
+
+</div>
 
 ---
 
 ## :material-cog: How it works
 
-A pricing pipeline in Haute is a Python file. Standard Python, using [Polars](https://pola.rs/) DataFrames. Each step is a function - load data, apply a model, calculate a premium.
+A pricing pipeline is a Python file. Each step is a function - load data, join sources, score a model, calculate a premium. Haute connects them into a graph.
 
 ```python
 import haute
@@ -60,28 +83,27 @@ import polars as pl
 
 pipeline = haute.Pipeline("motor_pricing")
 
-@pipeline.node
-def policies(path="data/policies.parquet") -> pl.DataFrame:
-    return pl.read_parquet(path)
+@pipeline.node(config="config/data_source/policies.json")
+def policies() -> pl.LazyFrame:
+    return pl.scan_parquet("data/policies.parquet")
+
+@pipeline.node(config="config/model_scoring/frequency.json")
+def frequency(policies: pl.LazyFrame) -> pl.LazyFrame:
+    from haute.graph_utils import score_from_config
+    return score_from_config(policies, config="config/model_scoring/frequency.json")
 
 @pipeline.node
-def frequency_model(policies: pl.DataFrame) -> pl.DataFrame:
-    model = haute.load_model("models/freq.cbm")
-    return policies.with_columns(pred_freq=model.predict(policies))
-
-@pipeline.node
-def calculate_premium(frequency_model: pl.DataFrame) -> pl.DataFrame:
-    return frequency_model.with_columns(
-        premium=pl.col("pred_freq") * pl.col("pred_sev") * 1.15
+def premium(frequency: pl.LazyFrame) -> pl.LazyFrame:
+    return frequency.with_columns(
+        premium=pl.col("pred_freq") * pl.col("pred_sev") * 1.15,
+        margin=pl.col("premium") - pl.col("burn_cost"),
     )
+
+pipeline.connect("policies", "frequency")
+pipeline.connect("frequency", "premium")
 ```
 
-That same file is also a visual graph. Haute runs a browser-based editor where your pipeline appears as a drag-and-drop flow diagram - nodes for data sources, models, transforms, and outputs, connected by edges showing how data flows through the rating structure.
-
-!!! success "The key bit: these are the same thing"
-    Edit the code and the graph updates. Edit the graph and the code updates. There's no import/export step, no "generate code" button. They're always in sync.
-
-    Analysts work visually. Engineers work in code. Nobody has to choose.
+That same file is also a visual graph. Run `haute serve` and your pipeline appears in a browser-based editor - nodes for data sources, models, transforms, and outputs, connected by edges showing how data flows through the rating structure.
 
 ---
 
@@ -121,47 +143,40 @@ That same file is also a visual graph. Haute runs a browser-based editor where y
 
     [:octicons-arrow-right-24: CI/CD setup](deployment/ci/github-actions.md)
 
+- :material-magnify-scan:{ .lg .middle } **Execution tracing**
+
+    ---
+
+    Click any row and trace exactly how it becomes a price. Per-node snapshots show which columns changed, what was added, and how long each step took - no print statements, no guesswork.
+
+- :material-source-branch-check:{ .lg .middle } **Git without the command line**
+
+    ---
+
+    Branch, save, revert, and submit for review - all from the visual editor. Built for teams where not everyone speaks git, with guardrails to prevent mistakes on shared branches.
+
 </div>
 
 ---
 
-## :material-rocket-launch: Deploy targets
+## :material-rocket-launch: Deploy
 
 You pick the target that matches your infrastructure. Haute handles the rest.
 
-=== ":material-cloud: Container platforms"
+| Target | Description |
+|---|---|
+| **Databricks** | Deploys to Databricks Model Serving. For teams already on the Databricks platform. |
+| **Azure Container Apps** | Deploys to Azure's serverless container platform. |
+| **AWS ECS** | Deploys to Amazon's container orchestration service. |
+| **GCP Cloud Run** | Deploys to Google Cloud's serverless container platform. |
+| **Docker** | Builds a container image. You choose where to run it. |
 
-    All container-based targets produce the same thing: a FastAPI app with `POST /quote` and `GET /health`, packaged into a Docker image. CI builds and pushes it - analysts never touch Docker.
+Analysts only ever need Python installed. Everything else - building, testing, deploying - happens automatically when you push your changes. `haute init` generates the CI/CD pipeline for your platform (GitHub Actions, GitLab CI, or Azure DevOps), so there's nothing to set up manually.
 
-    | Target | What happens |
-    |---|---|
-    | **Container** | Build + push to registry. You manage the service. |
-    | **Azure Container Apps** | Build + push + create a new ACA revision |
-    | **AWS ECS** | Build + push + update the ECS task |
-    | **GCP Cloud Run** | Build + push + deploy a new Cloud Run revision |
-
-=== ":material-database: Databricks"
-
-    Wraps the pipeline in an MLflow `PythonModel` and deploys to Databricks Model Serving. For teams already on the Databricks platform.
-
----
-
-## :material-account-hard-hat: What runs where
-
-Analysts only need Python. Everything else happens in CI.
-
-| | Command | Where | What it needs |
-|---|---|---|---|
-| :material-laptop: | `haute init` | Local | Python |
-| :material-laptop: | `haute serve` | Local | Python |
-| :material-robot: | `haute deploy` | CI only | Docker + cloud creds |
-| :material-robot: | `haute smoke` | CI only | Cloud creds |
-| :material-robot: | `haute impact` | CI only | Cloud creds |
+Every change goes through the same process: deploy to staging, run smoke tests against real data, analyse the financial impact, and wait for approval before promoting to production. No one can skip a step, and no one can deploy from their laptop.
 
 !!! info "The analyst's workflow"
-    Edit your pipeline :material-arrow-right: `haute serve` to preview :material-arrow-right: push to Git :material-arrow-right: CI does the rest.
-
-    Deployments can only happen through this process. Nobody can push a model to production from their laptop.
+    Edit your pipeline :material-arrow-right: `haute serve` to preview :material-arrow-right: push to Git :material-arrow-right: everything else is automatic.
 
 ---
 
@@ -169,7 +184,7 @@ Analysts only need Python. Everything else happens in CI.
 
 ```bash
 uv add haute
-haute init --target databricks --ci github
+haute init
 haute serve   # open the visual editor
 ```
 

@@ -8,7 +8,7 @@
 
 Haute is an open-source Python library that gives insurance pricing teams a **code-first, GUI-friendly** way to build, test, and deploy pricing pipelines. It bridges the gap between:
 
-- **Pricing analysts** who are comfortable with visual tools (like WTW Radar)
+- **Pricing analysts** who are comfortable with visual tools
 - **Engineering best practices** that come from working in code: version control, CI/CD, unit tests, linting, code review
 
 The core principle: **Python code is the source of truth**. The GUI is a live, editable view of that code. Edit either one - the other stays in sync.

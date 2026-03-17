@@ -1,6 +1,6 @@
 # Setting Up Your Environment
 
-You need three things installed: **VS Code**, **Python**, and **uv**.
+You need two things installed: **VS Code** and **uv**.
 
 ---
 
@@ -14,22 +14,14 @@ You need three things installed: **VS Code**, **Python**, and **uv**.
 
 ---
 
-## 2. Python
+## 2. uv
 
-**Python** is the language Haute and your pricing pipeline are written in. You need version 3.11 or newer.
+**uv** is a fast Python package manager. It handles Python installation, virtual environments, and dependencies for you - so you don't need to install Python separately.
 
-- **Download it** from [python.org/downloads](https://www.python.org/downloads/) and run the installer
-- **Tick "Add Python to PATH"** during installation
-- To check it worked, open the VS Code terminal (++ctrl+grave++) and type `python --version`
+- Open the VS Code terminal (Ctrl + Shift + ') and run: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+- To check it worked, close and reopen the terminal, then type `uv --version`
 
----
-
-## 3. uv
-
-**uv** is a fast Python package manager. It handles virtual environments and dependencies for you.
-
-- Open the VS Code terminal and run: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-- To check it worked, type `uv --version`
+uv will automatically download and manage the right version of Python when you create your Haute project.
 
 See [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/) if you run into trouble.
 
@@ -37,10 +29,10 @@ See [uv installation docs](https://docs.astral.sh/uv/getting-started/installatio
 
 ## Troubleshooting
 
-**`command not found` when I type `uv` or `python`**
+**`command not found` when I type `uv`**
 
-The tool isn't on your system PATH. Re-run its installer and make sure you tick **Add to PATH**. Close and reopen VS Code afterwards.
+uv isn't on your system PATH. Close and reopen VS Code after installing. If it still doesn't work, re-run the installer.
 
 ---
 
-Once all three are installed, head to **[Installing Haute](installing-haute.md)**.
+Once both are installed, head to **[Installing Haute](installing-haute.md)**.

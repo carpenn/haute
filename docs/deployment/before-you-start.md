@@ -1,6 +1,6 @@
 # Before You Start
 
-If you're a pricing analyst used to tools like Radar or Emblem, some of the terminology in these docs will be unfamiliar. This page explains the key concepts you'll encounter - **no prior technical knowledge assumed**.
+If you're a pricing analyst, some of the terminology in these docs will be unfamiliar. This page explains the key concepts you'll encounter - **no prior technical knowledge assumed**.
 
 You can skip this page if you're already comfortable with the command line and Git. Otherwise, read it once before diving into the target-specific guides.
 
@@ -24,7 +24,7 @@ The **terminal** (also called the **command line** or **command prompt**) is a t
 The easiest way is to use the **built-in terminal in VS Code**:
 
 1. Open VS Code
-2. Press ++ctrl+grave++ (the backtick key, next to the 1 key) - or go to **Terminal** → **New Terminal** in the menu bar
+2. Go to **Terminal** → **New Terminal** in the menu bar
 3. A terminal panel opens at the bottom of the VS Code window
 
 Alternatively, you can open a standalone terminal by pressing ++win+r++, typing `cmd`, and pressing Enter.
@@ -84,7 +84,7 @@ They'll send you a link that looks something like:
 
 ### Cloning an existing project
 
-If your team already has a repository, **clone** it - this downloads a copy to your computer. Open the VS Code terminal (++ctrl+grave++) and run:
+If your team already has a repository, **clone** it - this downloads a copy to your computer. Open the VS Code terminal and run:
 
 ```powershell
 git clone https://github.com/yourcompany/motor-pricing.git
@@ -202,7 +202,7 @@ Your reviewer can see exactly what you changed, leave comments, and approve or r
 Once approved, you **merge** the pull request. This applies your changes to the main version of the project. On the CI/CD pages, "merge to main" means this step.
 
 !!! info "Why bother with all this?"
-    In Radar or Emblem, you might just click "Deploy" and it goes live. The branch → review → merge process adds a safety layer: someone else checks your work before it reaches production. For pricing, this means a second pair of eyes on rate changes before they affect real quotes.
+    The branch → review → merge process adds a safety layer: someone else checks your work before it reaches production. For pricing, this means a second pair of eyes on rate changes before they affect real quotes.
 
 ### If you're working solo
 
@@ -248,7 +248,7 @@ print(response.json())
 
 ## What are "staging" and "production"?
 
-In Radar or Emblem, there's usually one model - you deploy it and it's live. In Haute, there are **two copies** of your API:
+In Haute, there are **two copies** of your API:
 
 - **Staging** is a **private test copy** that only your team can see. It's where Haute deploys first so you can check everything works, review the impact report, and make sure the premium changes make sense - all without affecting real quotes.
 - **Production** is the **real one** that your policy admin system calls. It serves actual quotes to customers.
@@ -277,7 +277,7 @@ Think of it as an automated checklist that runs every time you make a change:
 7. ✓ Generate an impact report comparing new vs old premiums
 8. → A human reviews the impact report and approves
 
-**In Radar terms:** CI/CD replaces the "click Deploy and hope for the best" workflow with an automated safety process that catches problems before they reach production.
+CI/CD replaces manual deployment with an automated safety process that catches problems before they reach production.
 
 The CI/CD system runs on a service like **GitHub Actions**, **GitLab CI/CD**, or **Azure DevOps Pipelines** - you don't need to install anything on your machine. Haute generates all the configuration files for you.
 

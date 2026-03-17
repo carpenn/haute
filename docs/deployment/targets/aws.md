@@ -19,7 +19,7 @@ This guide covers deploying a Haute pipeline to **AWS Elastic Container Service 
 
 - **Python 3.11+** and **Haute** installed on your machine
 - An **AWS account** with ECS, ECR, and IAM access (your IT team manages this)
-- A Haute project initialised with the AWS ECS target - open your VS Code terminal (++ctrl+grave++) and run:
+- A Haute project initialised with the AWS ECS target - open your VS Code terminal and run:
 
 ```powershell
 haute init --target aws-ecs --ci github

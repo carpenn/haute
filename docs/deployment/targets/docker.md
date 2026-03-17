@@ -36,7 +36,7 @@ Before you start, you need:
 - **Haute** installed (`uv add haute` - see [Installing Haute](../../getting-started/installing-haute.md#installing-extras))
 - A **container registry** - this is an online storage service for Docker images (like a shared drive for containers). Ask your IT team which registry your company uses - they'll give you the registry URL and credentials
 
-If you haven't initialised your project yet, open your VS Code terminal (++ctrl+grave++) and run:
+If you haven't initialised your project yet, open your VS Code terminal and run:
 
 ```powershell
 haute init --target container --ci github

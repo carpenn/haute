@@ -194,14 +194,14 @@ def Rating_Step_1(df: pl.LazyFrame) -> pl.LazyFrame:
 
 ## UI Design
 
-The table editor UI draws from actuarial pricing tool conventions (WTW Radar/Emblem, Earnix, Akur8):
+The table editor UI draws from actuarial pricing tool conventions:
 
 - **Heatmap cell coloring** — cells are tinted by relativity magnitude. Surcharges (>1.0) show warm red/orange, discounts (<1.0) show cool blue. Intensity scales with distance from 1.0, saturating at ±0.5. This gives instant visual feedback on factor impact without needing to read every number.
 - **Relativity bar chart** (1-way tables) — a horizontal bar per row shows the magnitude relative to the table maximum, reinforcing the heatmap with a second visual channel.
 - **Zebra striping** — alternating row backgrounds for dense table readability.
 - **Sticky row headers** (2-way grids) — row labels stay visible when scrolling wide tables horizontally.
 - **Row↓ / Col→ indicators** — the corner header cell labels which factor maps to rows vs columns.
-- **Stats footer** — every table shows `n=`, `min`, `avg`, `max` in color-coded text. This mirrors the summary statistics panels in Emblem/Radar.
+- **Stats footer** — every table shows `n=`, `min`, `avg`, `max` in color-coded text.
 - **Tab badges** — each table tab shows its entry count.
 - **Formula summary** — when 2+ tables exist, a live formula shows the combination expression (e.g. `combined = age × region`). Uses function notation for min/max operations.
 

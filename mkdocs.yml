@@ -8,18 +8,18 @@ theme:
   name: material
   custom_dir: docs/overrides
   palette:
-    - scheme: default
-      primary: black
-      accent: pink
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
     - scheme: slate
       primary: black
       accent: pink
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
+    - scheme: default
+      primary: black
+      accent: pink
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   font:
     text: Inter
     code: JetBrains Mono
@@ -50,12 +50,14 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/pricingfrontier/haute
     - icon: fontawesome/brands/linkedin
-      link: https://www.linkedin.com/company/pricingfrontier
+      link: https://www.linkedin.com/in/ralph-clayton/
 
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; Pricing Frontier
+dev_addr: 127.0.0.1:8001
+
+copyright: Copyright &copy; 2025 Pricing Frontier LTD. Licensed under AGPL-3.0.
 
 markdown_extensions:
   - admonition

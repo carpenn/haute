@@ -19,7 +19,7 @@ This guide covers deploying a Haute pipeline to **Azure Container Apps** - Micro
 
 - **Python 3.11+** and **Haute** installed on your machine
 - An **Azure subscription** (your IT team manages this)
-- A Haute project initialised with the Azure Container Apps target - open your VS Code terminal (++ctrl+grave++) and run:
+- A Haute project initialised with the Azure Container Apps target - open your VS Code terminal and run:
 
 ```powershell
 haute init --target azure-container-apps --ci github

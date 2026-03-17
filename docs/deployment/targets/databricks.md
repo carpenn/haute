@@ -39,7 +39,7 @@ Before you start, you need:
 - **Python 3.11+** installed on your machine
 - **Haute** installed with Databricks extras (`uv add "haute[databricks]"` - see [Installing Haute](../../getting-started/installing-haute.md#installing-extras))
 
-If you haven't initialised your project yet, open your VS Code terminal (++ctrl+grave++) and run:
+If you haven't initialised your project yet, open your VS Code terminal and run:
 
 ```powershell
 haute init --target databricks --ci github

@@ -6,7 +6,7 @@ Make sure you've [set up your environment](environment.md) first (VS Code, Pytho
 
 ## Create a project and install Haute
 
-Open the VS Code terminal (++ctrl+grave++) and run these commands one at a time:
+Open the VS Code terminal and run these commands one at a time:
 
 ```powershell
 uv init my-pricing-project
