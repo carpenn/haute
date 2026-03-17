@@ -30,6 +30,7 @@ export function useSchemaFetch(initialPath?: string) {
 
   // Auto-fetch on mount when path exists
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: fetchForPath sets state asynchronously via .then()
     if (initialPath) fetchForPath(initialPath)
   }, [initialPath, fetchForPath])
 

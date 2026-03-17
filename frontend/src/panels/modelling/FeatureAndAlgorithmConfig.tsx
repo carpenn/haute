@@ -37,7 +37,7 @@ export function FeatureAndAlgorithmConfig({
 }: FeatureAndAlgorithmConfigProps) {
   // GPU toggle lives outside the JSON editor — stripped from display, merged on commit
   const isGpu = (params.task_type as string) === "GPU"
-  const { task_type: _taskType, ...displayParams } = params
+  const { task_type: _taskType, ...displayParams } = params; void _taskType
   const effectiveParams = Object.keys(displayParams).length > 0 ? displayParams : DEFAULT_PARAMS
   const [draft, setDraft] = useState<string>(JSON.stringify(effectiveParams, null, 2))
   const [parseError, setParseError] = useState<string | null>(null)

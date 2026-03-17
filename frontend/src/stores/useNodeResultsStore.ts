@@ -249,7 +249,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
     set((s) => {
       const job = s.solveJobs[nodeId]
       if (!job) return s
-      const { [nodeId]: _, ...remainingJobs } = s.solveJobs
+      const { [nodeId]: _removedJob, ...remainingJobs } = s.solveJobs; void _removedJob
       // Extract frontier data from the result if present
       const rawFrontier = result.frontier
       const frontier: FrontierData | null = rawFrontier && rawFrontier.points?.length
@@ -349,7 +349,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
     set((s) => {
       const job = s.trainJobs[nodeId]
       // Support direct completion (no active job, e.g. sync error/result)
-      const { [nodeId]: _, ...remainingJobs } = s.trainJobs
+      const { [nodeId]: _removedJob, ...remainingJobs } = s.trainJobs; void _removedJob
       return {
         trainJobs: remainingJobs,
         trainResults: {
@@ -408,12 +408,12 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
 
   clearNode: (nodeId) =>
     set((s) => {
-      const { [nodeId]: _p, ...previews } = s.previews
-      const { [nodeId]: _cc, ...columnCache } = s.columnCache
-      const { [nodeId]: _sr, ...solveResults } = s.solveResults
-      const { [nodeId]: _sj, ...solveJobs } = s.solveJobs
-      const { [nodeId]: _tr, ...trainResults } = s.trainResults
-      const { [nodeId]: _tj, ...trainJobs } = s.trainJobs
+      const { [nodeId]: _rp, ...previews } = s.previews; void _rp
+      const { [nodeId]: _rcc, ...columnCache } = s.columnCache; void _rcc
+      const { [nodeId]: _rsr, ...solveResults } = s.solveResults; void _rsr
+      const { [nodeId]: _rsj, ...solveJobs } = s.solveJobs; void _rsj
+      const { [nodeId]: _rtr, ...trainResults } = s.trainResults; void _rtr
+      const { [nodeId]: _rtj, ...trainJobs } = s.trainJobs; void _rtj
       return { previews, columnCache, solveResults, solveJobs, trainResults, trainJobs }
     }),
 }))

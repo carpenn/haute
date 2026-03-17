@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
-import { ReactFlowProvider } from "@xyflow/react"
+import { ReactFlowProvider, type NodeProps } from "@xyflow/react"
 import SubmodelNode, { type SubmodelNodeData } from "../../nodes/SubmodelNode"
 
 afterEach(cleanup)
@@ -51,7 +51,7 @@ function renderNode(
   const props = makeProps(data, opts)
   return render(
     <ReactFlowProvider>
-      <SubmodelNode {...(props as any)} />
+      <SubmodelNode {...(props as unknown as NodeProps)} />
     </ReactFlowProvider>,
   )
 }

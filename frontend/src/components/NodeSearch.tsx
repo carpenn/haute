@@ -47,6 +47,7 @@ export default function NodeSearch({ onClose, onSelectNode }: NodeSearchProps) {
   }, [query, getNodes])
 
   // Reset active index when results change
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- derived state reset: active index must restart when filtered results change
   useEffect(() => { setActiveIndex(0) }, [results.length])
 
   // Focus input on mount

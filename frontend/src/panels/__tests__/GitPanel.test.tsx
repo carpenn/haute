@@ -16,17 +16,17 @@ const mockArchiveBranch = vi.fn()
 const mockDeleteBranch = vi.fn()
 
 vi.mock("../../api/client", () => ({
-  getGitStatus: (...args: any[]) => mockGetStatus(...args),
-  listGitBranches: (...args: any[]) => mockListBranches(...args),
-  createGitBranch: (...args: any[]) => mockCreateBranch(...args),
-  switchGitBranch: (...args: any[]) => mockSwitchBranch(...args),
-  gitSave: (...args: any[]) => mockGitSave(...args),
-  gitSubmit: (...args: any[]) => mockGitSubmit(...args),
-  getGitHistory: (...args: any[]) => mockGetHistory(...args),
-  gitRevert: (...args: any[]) => mockGitRevert(...args),
-  gitPull: (...args: any[]) => mockGitPull(...args),
-  gitArchiveBranch: (...args: any[]) => mockArchiveBranch(...args),
-  gitDeleteBranch: (...args: any[]) => mockDeleteBranch(...args),
+  getGitStatus: (...args: unknown[]) => mockGetStatus(...args),
+  listGitBranches: (...args: unknown[]) => mockListBranches(...args),
+  createGitBranch: (...args: unknown[]) => mockCreateBranch(...args),
+  switchGitBranch: (...args: unknown[]) => mockSwitchBranch(...args),
+  gitSave: (...args: unknown[]) => mockGitSave(...args),
+  gitSubmit: (...args: unknown[]) => mockGitSubmit(...args),
+  getGitHistory: (...args: unknown[]) => mockGetHistory(...args),
+  gitRevert: (...args: unknown[]) => mockGitRevert(...args),
+  gitPull: (...args: unknown[]) => mockGitPull(...args),
+  gitArchiveBranch: (...args: unknown[]) => mockArchiveBranch(...args),
+  gitDeleteBranch: (...args: unknown[]) => mockDeleteBranch(...args),
 }))
 
 const mainStatus = {

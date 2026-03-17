@@ -6,6 +6,7 @@ const OPS = ["<", "<=", ">", ">=", "="]
 
 /** Generate a short unique key for a rule row. */
 let _ruleIdSeq = 0
+// eslint-disable-next-line react-refresh/only-export-components
 export function nextRuleId(): string {
   return `rule_${++_ruleIdSeq}_${Date.now().toString(36)}`
 }

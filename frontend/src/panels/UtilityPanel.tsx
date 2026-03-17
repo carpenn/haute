@@ -54,7 +54,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
   // Auto-save: debounce API calls so we don't fire on every keystroke
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const activeModuleRef = useRef(activeModule)
-  activeModuleRef.current = activeModule
+  useEffect(() => { activeModuleRef.current = activeModule }, [activeModule])
 
   const autoSave = useCallback((module: string, value: string) => {
     clearTimeout(saveTimer.current)
@@ -95,6 +95,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern
   useEffect(() => { loadFiles() }, [loadFiles])
 
   // Load file content
@@ -116,6 +117,7 @@ export default function UtilityPanel({ onClose, onImportAdded }: UtilityPanelPro
   // Auto-select first file
   useEffect(() => {
     if (files.length > 0 && activeModule === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-select on initial load
       loadFile(files[0].module)
     }
   }, [files, activeModule, loadFile])

@@ -126,6 +126,12 @@ function FlowEditor() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string; nodeLabel: string; isSubmodel?: boolean } | null>(null)
   const [preamble, setPreamble] = useState("")
   const lastSelectedNodeRef = useRef<Node | null>(null)
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
+
+  // Keep lastSelectedId in sync — updates only when a node is actively selected
+  useEffect(() => {
+    if (selectedNode) setLastSelectedId(selectedNode.id)
+  }, [selectedNode])
 
   // Node results store — background jobs + cached results
   const bumpGraphVersion = useNodeResultsStore((s) => s.bumpGraphVersion)
@@ -368,7 +374,7 @@ function FlowEditor() {
 
           <ErrorBoundary name="DataPreview">
             {(() => {
-              const activeNodeId = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+              const activeNodeId = selectedNode?.id ?? lastSelectedId
               const modelPreview = activeNodeId ? getModellingPreview(activeNodeId) : null
               if (modelPreview) {
                 return (
@@ -448,7 +454,7 @@ function FlowEditor() {
             ) : (
               <NodePanel
                 node={(() => {
-                  const id = selectedNode?.id ?? lastSelectedNodeRef.current?.id
+                  const id = selectedNode?.id ?? lastSelectedId
                   if (!id) return null
                   return (nodes.find((n) => n.id === id) ?? null) as unknown as SimpleNode | null
                 })()}
@@ -460,9 +466,9 @@ function FlowEditor() {
                 onUpdateNode={onUpdateNode}
                 onDeleteEdge={handleDeleteEdge}
                 onRefreshPreview={() => { if (selectedNode) refreshPreview(selectedNode) }}
-                dimmed={!selectedNode && !!lastSelectedNodeRef.current}
+                dimmed={!selectedNode && !!lastSelectedId}
                 errorLine={
-                  previewData?.nodeId === (selectedNode ?? lastSelectedNodeRef.current)?.id
+                  previewData?.nodeId === (selectedNode?.id ?? lastSelectedId)
                     ? previewData?.error_line ?? null
                     : null
                 }

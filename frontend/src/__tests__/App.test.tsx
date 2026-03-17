@@ -13,12 +13,12 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 // ---------------------------------------------------------------------------
 
 vi.mock("@xyflow/react", () => ({
-  ReactFlow: ({ children, ...props }: any) => (
-    <div data-testid="react-flow" {...(props.onPaneClick ? { onClick: props.onPaneClick } : {})}>
-      {children}
+  ReactFlow: ({ children, ...props }: Record<string, unknown>) => (
+    <div data-testid="react-flow" {...(props.onPaneClick ? { onClick: props.onPaneClick as React.MouseEventHandler } : {})}>
+      {children as React.ReactNode}
     </div>
   ),
-  ReactFlowProvider: ({ children }: any) => <div>{children}</div>,
+  ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Background: () => null,
   useReactFlow: () => ({
     screenToFlowPosition: vi.fn(() => ({ x: 0, y: 0 })),
@@ -172,7 +172,7 @@ vi.mock("../components/BreadcrumbBar", () => ({
 }))
 
 vi.mock("../components/Toolbar", () => ({
-  default: (props: any) => (
+  default: (props: { onOpenUtility?: () => void; onOpenImports?: () => void; onOpenGit?: () => void; onZoomIn?: () => void; onZoomOut?: () => void }) => (
     <div data-testid="toolbar">
       <button data-testid="utility-btn" onClick={props.onOpenUtility}>
         Utility

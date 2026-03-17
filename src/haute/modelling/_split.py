@@ -102,11 +102,17 @@ def split_mask(
             raise ValueError(
                 "Temporal split requires df, date_column, and cutoff_date"
             )
-        return _temporal_mask(df, config.date_column, config.cutoff_date, config.validation_size, config.holdout_size)
+        return _temporal_mask(
+            df, config.date_column, config.cutoff_date,
+            config.validation_size, config.holdout_size,
+        )
     elif config.strategy == "group":
         if df is None or config.group_column is None:
             raise ValueError("Group split requires df and group_column")
-        return _group_mask(df, config.group_column, config.validation_size, config.holdout_size, config.seed)
+        return _group_mask(
+            df, config.group_column,
+            config.validation_size, config.holdout_size, config.seed,
+        )
     else:
         raise ValueError(f"Unknown split strategy: {config.strategy}")
 
@@ -248,7 +254,8 @@ def _temporal_mask(
 
     # Split the non-train portion into validation and holdout
     if holdout_size > 0 and n_non_train > 0:
-        holdout_frac = holdout_size / (validation_size + holdout_size) if (validation_size + holdout_size) > 0 else 1.0
+        total = validation_size + holdout_size
+        holdout_frac = holdout_size / total if total > 0 else 1.0
         # Sort non-train rows by date — holdout = most recent
         non_train_indices = np.where(~is_train.to_numpy())[0]
         # Get date values for sorting
@@ -298,7 +305,8 @@ def _group_mask(
             group_partition[g] = PARTITION_TRAIN
 
     # Ensure at least one group in validation if requested and no groups assigned
-    if validation_size > 0 and PARTITION_VALIDATION not in group_partition.values() and len(unique_groups) > 1:
+    no_validation = PARTITION_VALIDATION not in group_partition.values()
+    if validation_size > 0 and no_validation and len(unique_groups) > 1:
         # Pick the first train group
         for g in unique_groups:
             if group_partition[g] == PARTITION_TRAIN:

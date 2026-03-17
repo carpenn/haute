@@ -28,7 +28,7 @@ type UseNodeHandlersParams = {
 
 export default function useNodeHandlers({
   graphRef,
-  nodeIdCounter,
+  nodeIdCounter: nodeIdCounterRef,
   lastSelectedNodeRef,
   setNodes,
   setEdges,
@@ -54,8 +54,8 @@ export default function useNodeHandlers({
     const { nodes: n } = graphRef.current
     const original = n.find((node) => node.id === id)
     if (!original) return
-    nodeIdCounter.current += 1
-    const newId = `${original.type}_${nodeIdCounter.current}`
+    nodeIdCounterRef.current += 1
+    const newId = `${original.type}_${nodeIdCounterRef.current}`
     const newNode: Node = {
       ...original,
       id: newId,
@@ -65,16 +65,16 @@ export default function useNodeHandlers({
     }
     setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
     setSelectedNode(newNode)
-  }, [graphRef, nodeIdCounter, setNodes, setSelectedNode])
+  }, [graphRef, nodeIdCounterRef, setNodes, setSelectedNode])
 
   const handleCreateInstance = useCallback((id: string) => {
     const { nodes: n } = graphRef.current
     const original = n.find((node) => node.id === id)
     if (!original) return
-    nodeIdCounter.current += 1
+    nodeIdCounterRef.current += 1
     const origData = nodeData(original)
     const origNodeType = origData.nodeType || NODE_TYPES.TRANSFORM
-    const newId = `${origNodeType}_${nodeIdCounter.current}`
+    const newId = `${origNodeType}_${nodeIdCounterRef.current}`
     const newNode: Node = {
       id: newId,
       type: original.type,
@@ -90,7 +90,7 @@ export default function useNodeHandlers({
     setNodes((nds) => [...nds.map((nd) => ({ ...nd, selected: false })), newNode])
     setSelectedNode(newNode)
     addToast("info", `Created instance of "${origData.label}"`)
-  }, [graphRef, nodeIdCounter, setNodes, setSelectedNode, addToast])
+  }, [graphRef, nodeIdCounterRef, setNodes, setSelectedNode, addToast])
 
   const handleRenameNode = useCallback((id: string) => {
     const { nodes: n } = graphRef.current

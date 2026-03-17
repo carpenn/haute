@@ -14,6 +14,7 @@ function TestComponent({ onClose, active }: { onClose: () => void; active: boole
   const ref = useRef<HTMLDivElement>(null)
   useClickOutside(ref, onClose, active)
   return createElement("div", null,
+    // eslint-disable-next-line react-hooks/refs -- ref prop on DOM element is standard React usage
     createElement("div", { ref, "data-testid": "inside" }, "Inside"),
     createElement("div", { "data-testid": "outside" }, "Outside"),
   )

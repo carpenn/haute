@@ -47,6 +47,7 @@ export function useDataInputColumns(
 
   useEffect(() => {
     if (!dataInput) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- cleanup path: clear columns when no data input selected
       setDataInputColumns([])
       return
     }

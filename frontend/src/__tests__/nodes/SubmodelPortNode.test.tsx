@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
-import { ReactFlowProvider } from "@xyflow/react"
+import { ReactFlowProvider, type NodeProps } from "@xyflow/react"
 import SubmodelPortNode, { type SubmodelPortData } from "../../nodes/SubmodelPortNode"
 
 afterEach(cleanup)
@@ -47,7 +47,7 @@ function renderPortNode(
   const props = makeProps(data)
   return render(
     <ReactFlowProvider>
-      <SubmodelPortNode {...(props as any)} />
+      <SubmodelPortNode {...(props as unknown as NodeProps)} />
     </ReactFlowProvider>,
   )
 }

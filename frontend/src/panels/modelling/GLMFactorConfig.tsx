@@ -132,7 +132,7 @@ export function GLMFactorConfig({
   }, [terms, eligibleColumns, onUpdate])
 
   const removeFactor = useCallback((name: string) => {
-    const { [name]: _, ...rest } = terms
+    const { [name]: _removed, ...rest } = terms; void _removed
     onUpdate("terms", rest)
   }, [terms, onUpdate])
 

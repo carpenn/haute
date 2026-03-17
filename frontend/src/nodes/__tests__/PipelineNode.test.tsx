@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
-import { ReactFlowProvider } from "@xyflow/react"
+import { ReactFlowProvider, type NodeProps } from "@xyflow/react"
 import PipelineNode from "../PipelineNode"
 import type { PipelineNodeData } from "../PipelineNode"
 import { NODE_TYPES, nodeTypeLabels } from "../../utils/nodeTypes"
@@ -40,7 +40,7 @@ function renderNode(
   }
   return render(
     <ReactFlowProvider>
-      <PipelineNode {...(props as any)} />
+      <PipelineNode {...(props as unknown as NodeProps)} />
     </ReactFlowProvider>,
   )
 }

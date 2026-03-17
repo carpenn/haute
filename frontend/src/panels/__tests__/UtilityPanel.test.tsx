@@ -4,7 +4,7 @@ import UtilityPanel from "../UtilityPanel"
 
 // Mock the CodeEditor (heavy CodeMirror dependency)
 vi.mock("../editors", () => ({
-  CodeEditor: ({ defaultValue, onChange, placeholder, errorLine }: any) => (
+  CodeEditor: ({ defaultValue, onChange, placeholder, errorLine }: { defaultValue?: string; onChange?: (v: string) => void; placeholder?: string; errorLine?: number }) => (
     <textarea
       data-testid="code-editor"
       defaultValue={defaultValue}
@@ -39,11 +39,11 @@ const { mockListFiles, mockReadFile, mockCreateFile, mockUpdateFile, mockDeleteF
 
 vi.mock("../../api/client", () => ({
   ApiError: MockApiError,
-  listUtilityFiles: (...args: any[]) => mockListFiles(...args),
-  readUtilityFile: (...args: any[]) => mockReadFile(...args),
-  createUtilityFile: (...args: any[]) => mockCreateFile(...args),
-  updateUtilityFile: (...args: any[]) => mockUpdateFile(...args),
-  deleteUtilityFile: (...args: any[]) => mockDeleteFile(...args),
+  listUtilityFiles: (...args: unknown[]) => mockListFiles(...args),
+  readUtilityFile: (...args: unknown[]) => mockReadFile(...args),
+  createUtilityFile: (...args: unknown[]) => mockCreateFile(...args),
+  updateUtilityFile: (...args: unknown[]) => mockUpdateFile(...args),
+  deleteUtilityFile: (...args: unknown[]) => mockDeleteFile(...args),
 }))
 
 describe("UtilityPanel", () => {

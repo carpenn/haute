@@ -77,6 +77,7 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
         if (data.cached) onCacheReady?.(data)
       })
       .catch((e) => { console.warn("cache status fetch failed", e); setCache(null) })
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- stable callback props, including would restart polling
   }, [resourceKey])
 
   // Poll progress while building
@@ -90,6 +91,7 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
         .catch((e) => { console.warn("progress poll failed", e) })
     }, 1000)
     return () => { clearInterval(id); setProgress(null) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- stable callback prop, including would restart interval
   }, [building, resourceKey])
 
   const doFetch = () => {

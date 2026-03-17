@@ -75,7 +75,7 @@ export default function usePipelineAPI({
   graphRef, parentGraphRef, submodelsRef, setNodes,
   setNodesRaw, setEdgesRaw, setPreamble,
   preambleRef, pipelineNameRef, sourceFileRef, lastSavedRef,
-  nodeIdCounter,
+  nodeIdCounter: nodeIdCounterRef,
 }: PipelineAPIParams): PipelineAPIReturn {
   const rowLimit = useSettingsStore((s) => s.rowLimit)
   const activeScenario = useSettingsStore((s) => s.activeScenario)
@@ -90,14 +90,15 @@ export default function usePipelineAPI({
   // Stable refs for values that change across renders but shouldn't
   // trigger re-creation of callbacks. Read at call-time instead.
   const rowLimitRef = useRef(rowLimit)
-  rowLimitRef.current = rowLimit
+  useEffect(() => { rowLimitRef.current = rowLimit }, [rowLimit])
   const activeScenarioRef = useRef(activeScenario)
-  activeScenarioRef.current = activeScenario
+  useEffect(() => { activeScenarioRef.current = activeScenario }, [activeScenario])
 
   // ─── Downstream column propagation ──────────────────────────────
   // After a node's preview returns changed columns, cascade to downstream
   // nodes so their _columns (and thus editor dropdowns) stay fresh.
   const propagatingRef = useRef(new Set<string>())
+  const propagateRef = useRef<(changedNodeId: string) => void>(() => {})
 
   const propagateDownstream = useCallback((changedNodeId: string) => {
     const { edges, nodes } = graphRef.current
@@ -126,7 +127,7 @@ export default function usePipelineAPI({
                 : n,
             ))
             if (!columnsEqual(oldColumns, newColumns)) {
-              propagateDownstream(dsId)
+              propagateRef.current(dsId)
             }
           }
         })
@@ -134,6 +135,8 @@ export default function usePipelineAPI({
         .finally(() => { propagatingRef.current.delete(dsId) })
     }
   }, [graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes, addToast])
+
+  useEffect(() => { propagateRef.current = propagateDownstream }, [propagateDownstream])
 
   // Initial pipeline load
   useEffect(() => {
@@ -157,7 +160,7 @@ export default function usePipelineAPI({
         if (data.active_scenario) {
           useSettingsStore.getState().setActiveScenario(data.active_scenario)
         }
-        nodeIdCounter.current = computeNextNodeId(pipelineNodes)
+        nodeIdCounterRef.current = computeNextNodeId(pipelineNodes)
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
         setLoading(false)
       })
@@ -165,7 +168,7 @@ export default function usePipelineAPI({
         addToast("error", `Failed to load pipeline: ${err.message}`)
         setLoading(false)
       })
-  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, pipelineNameRef, sourceFileRef, submodelsRef, nodeIdCounter, lastSavedRef, addToast])
+  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, pipelineNameRef, sourceFileRef, submodelsRef, nodeIdCounterRef, lastSavedRef, addToast])
 
   const fetchPreviewImmediate = useCallback((node: Node) => {
     // Abort any in-flight preview request
@@ -270,7 +273,7 @@ export default function usePipelineAPI({
     ).then(() => {
       fetchPreviewImmediate(node)
     })
-  }, [fetchPreviewImmediate, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes])
+  }, [fetchPreviewImmediate, graphRef, parentGraphRef, submodelsRef, preambleRef, setNodes, addToast])
 
   const handleSave = useCallback(() => {
     const { nodes: n, edges: e } = graphRef.current
@@ -302,6 +305,7 @@ export default function usePipelineAPI({
 
   // Clear node statuses when nothing is selected
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset derived state on deselect
     if (!selectedNode) setNodeStatuses({})
   }, [selectedNode])
 

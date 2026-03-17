@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { X, Link2, AlertTriangle, RefreshCw } from "lucide-react"
 import { NODE_TYPES, NODE_TYPE_META } from "../utils/nodeTypes"
 import type { NodeTypeValue } from "../utils/nodeTypes"
@@ -222,14 +222,14 @@ function collectUpstreamColumns(nodeId: string, edges: SimpleEdge[], nodeMap: Re
 // ─── NodePanel ────────────────────────────────────────────────────
 
 export default function NodePanel({ node, edges, allNodes, submodels, preamble, onClose, onUpdateNode, onDeleteEdge, onRefreshPreview, dimmed, errorLine }: NodePanelProps) {
-  const config = (node?.data.config || {}) as Record<string, unknown>
+  const config = useMemo(() => (node?.data.config || {}) as Record<string, unknown>, [node?.data.config])
   const [activeTab, setActiveTab] = useState<"config" | "columns">("config")
 
   // Keep config and node in refs so handleConfigUpdate never captures stale values
   const configRef = useRef(config)
-  configRef.current = config
   const nodeRef = useRef(node)
-  nodeRef.current = node
+  useEffect(() => { configRef.current = config }, [config])
+  useEffect(() => { nodeRef.current = node }, [node])
 
   const handleConfigUpdate = useCallback((keyOrUpdates: string | Record<string, unknown>, value?: unknown) => {
     const currentNode = nodeRef.current

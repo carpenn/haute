@@ -106,6 +106,7 @@ export function FileBrowser({ currentPath, onSelect, extensions }: { currentPath
     const cacheKey = `${dir}|${extensions || ""}`
     const cached = getFileListCache(cacheKey)
     if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- cache-hit fast path: show cached file list immediately without async fetch
       setItems(cached as FileItem[])
       setLoading(false)
       return

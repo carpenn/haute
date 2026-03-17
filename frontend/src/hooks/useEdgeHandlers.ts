@@ -54,7 +54,7 @@ type UseEdgeHandlersParams = {
 
 export default function useEdgeHandlers({
   graphRef,
-  nodeIdCounter,
+  nodeIdCounter: nodeIdCounterRef,
   lastSelectedNodeRef,
   setNodes,
   setEdges,
@@ -138,15 +138,15 @@ export default function useEdgeHandlers({
       } catch { /* ignore */ }
 
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      nodeIdCounter.current += 1
-      const id = `${type}_${nodeIdCounter.current}`
+      nodeIdCounterRef.current += 1
+      const id = `${type}_${nodeIdCounterRef.current}`
 
       const newNode: Node = {
         id,
         type,
         position,
         data: {
-          label: `${NODE_TYPE_META[type as NodeTypeValue]?.name || "Node"} ${nodeIdCounter.current}`,
+          label: `${NODE_TYPE_META[type as NodeTypeValue]?.name || "Node"} ${nodeIdCounterRef.current}`,
           description: "",
           nodeType: type,
           config,
@@ -159,7 +159,7 @@ export default function useEdgeHandlers({
       ])
       setSelectedNode(newNode)
     },
-    [screenToFlowPosition, nodeIdCounter, setNodes, setSelectedNode],
+    [screenToFlowPosition, nodeIdCounterRef, setNodes, setSelectedNode],
   )
 
   return {

@@ -41,6 +41,7 @@ export default function OptimiserApplyEditor({
   // Load artifact metadata when file path changes
   useEffect(() => {
     if (sourceType !== "file" || !artifactPath) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- cleanup path: clear metadata when source type changes or path is empty
       if (sourceType === "file") { setMeta(null); setLoadError("") }
       return
     }

@@ -349,7 +349,7 @@ describe("useJobPolling", () => {
 
   describe("multiple jobs", () => {
     it("polls multiple jobs independently", async () => {
-      let pollCalls: string[] = []
+      const pollCalls: string[] = []
       const pollFn = vi.fn<(jobId: string) => Promise<TestStatus>>().mockImplementation((jobId) => {
         pollCalls.push(jobId)
         return Promise.resolve({ status: "running", progress: 0.5, message: "Working" })

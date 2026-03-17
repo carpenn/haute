@@ -339,10 +339,10 @@ export default function OptimiserDataPreview({
 
   // ── Extract column names from optimiser config ──
   const objectiveCol = (config.objective as string) || ""
-  const constraintsMap = (config.constraints ?? {}) as Record<
-    string,
-    Record<string, number>
-  >
+  const constraintsMap = useMemo(
+    () => (config.constraints ?? {}) as Record<string, Record<string, number>>,
+    [config.constraints],
+  )
   const constraintCols = useMemo(
     () => Object.keys(constraintsMap),
     [constraintsMap],
@@ -427,6 +427,7 @@ export default function OptimiserDataPreview({
   )
   const goNext = useCallback(
     () => setCurrentIndex((i) => Math.min(quoteIds.length - 1, i + 1)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteIds.length changes with data; updater fn handles bounds
     [],
   )
   const handleSearchSubmit = useCallback(() => {

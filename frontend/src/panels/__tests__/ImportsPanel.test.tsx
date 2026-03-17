@@ -4,7 +4,7 @@ import ImportsPanel from "../ImportsPanel"
 
 // Mock the CodeEditor (heavy CodeMirror dependency)
 vi.mock("../editors", () => ({
-  CodeEditor: ({ defaultValue, onChange, placeholder }: any) => (
+  CodeEditor: ({ defaultValue, onChange, placeholder }: { defaultValue?: string; onChange?: (v: string) => void; placeholder?: string }) => (
     <textarea
       data-testid="code-editor"
       defaultValue={defaultValue}

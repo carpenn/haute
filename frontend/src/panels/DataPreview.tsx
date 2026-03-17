@@ -41,6 +41,7 @@ export default function DataPreview({ data, onCellClick, tracedCell }: DataPrevi
 
   // Clear search when selected node changes
   const nodeId = data?.nodeId
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- derived state reset: clear column search when user selects a different node
   useEffect(() => { setColumnSearch("") }, [nodeId])
 
   const filteredColumns = useMemo(() => {

@@ -195,6 +195,7 @@ export default function useJobPolling<TJob, TStatus>(
 
   useEffect(() => {
     reconcilePollers(config, pollerState)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- config object is new every render, deps are its stable fields
   }, [
     config.jobs,
     config.pollFn,
