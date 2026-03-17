@@ -23,7 +23,7 @@ dependencies = [
     "catboost>=1.2.8",
     "structlog>=24.1.0",
     "orjson>=3.9.0",
-    "price-contour==0.2.4",
+    "price-contour==0.2.5",
     "rustystats>=0.6.1",
 ]
 
@@ -111,9 +111,6 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = ["tests/", "docs/"]
-
-[tool.uv.sources]
-price-contour = { path = "../price-contour", editable = true }
 
 [[tool.mypy.overrides]]
 module = [
