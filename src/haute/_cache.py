@@ -22,7 +22,7 @@ def _graph_base_fingerprint(graph: PipelineGraph) -> str:
     """
     cached = getattr(graph, _FINGERPRINT_ATTR, None)
     if cached is not None:
-        return cached  # type: ignore[return-value]
+        return cached  # type: ignore[return-value, no-any-return]
 
     parts: list[str] = []
     for n in sorted(graph.nodes, key=lambda n: n.id):

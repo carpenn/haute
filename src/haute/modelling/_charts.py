@@ -663,10 +663,10 @@ def render_residuals_svg(
     bar_w = max(plot_w / n * 0.85, 2)
 
     def x_pos(v: float) -> float:
-        return margin["left"] + plot_w * (v - x_min) / (x_max - x_min)
+        return float(margin["left"] + plot_w * (v - x_min) / (x_max - x_min))
 
     def y_pos(v: float) -> float:
-        return margin["top"] + plot_h * (1 - v / y_max)
+        return float(margin["top"] + plot_h * (1 - v / y_max))
 
     parts: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
@@ -856,7 +856,7 @@ def render_pdp_feature_svg(
     y_max += y_pad
 
     def y_pos(v: float) -> float:
-        return margin["top"] + plot_h * (1 - (v - y_min) / (y_max - y_min))
+        return float(margin["top"] + plot_h * (1 - (v - y_min) / (y_max - y_min)))
 
     parts: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '

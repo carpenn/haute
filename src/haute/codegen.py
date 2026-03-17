@@ -1186,7 +1186,7 @@ def graph_to_code_multi(
         root_node_sources.setdefault(actual_tgt, []).append(src_name)
 
     # Build connect pairs for ALL edges (cross-boundary use real node names)
-    connect_pairs: list[tuple[str, str]] = []
+    root_connect_pairs: list[tuple[str, str]] = []
     for edge in edges:
         src = edge.source
         tgt = edge.target
@@ -1203,7 +1203,7 @@ def graph_to_code_multi(
 
         src_func = root_id_to_func.get(actual_src, _sanitize_func_name(actual_src))
         tgt_func = root_id_to_func.get(actual_tgt, _sanitize_func_name(actual_tgt))
-        connect_pairs.append((src_func, tgt_func))
+        root_connect_pairs.append((src_func, tgt_func))
 
     # Submodel import lines
     sm_imports = [
@@ -1221,7 +1221,7 @@ def graph_to_code_multi(
         sorted_nodes=sorted_root,
         id_to_func=root_id_to_func,
         node_sources=root_node_sources,
-        connect_pairs=connect_pairs,
+        connect_pairs=root_connect_pairs,
         preserved_blocks=all_preserved or None,
         submodel_imports=sm_imports,
         node_to_code_fn=_node_to_code,

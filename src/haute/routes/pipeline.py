@@ -17,6 +17,8 @@ from haute.routes._helpers import (
     raise_pipeline_not_found,
 )
 from haute.schemas import (
+    NodeMemoryInfo,
+    NodeTimingInfo,
     PipelineSummary,
     PreviewNodeRequest,
     PreviewNodeResponse,
@@ -225,21 +227,21 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             relevant = set(results.keys())
 
         timings = [
-            {
-                "node_id": nid,
-                "label": node_map[nid].data.label,
-                "timing_ms": r.timing_ms,
-            }
+            NodeTimingInfo(
+                node_id=nid,
+                label=node_map[nid].data.label,
+                timing_ms=r.timing_ms,
+            )
             for nid, r in results.items()
             if nid in node_map and nid in relevant
         ]
 
         memory = [
-            {
-                "node_id": nid,
-                "label": node_map[nid].data.label,
-                "memory_bytes": r.memory_bytes,
-            }
+            NodeMemoryInfo(
+                node_id=nid,
+                label=node_map[nid].data.label,
+                memory_bytes=r.memory_bytes,
+            )
             for nid, r in results.items()
             if nid in node_map and nid in relevant
         ]

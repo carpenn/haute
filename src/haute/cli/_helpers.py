@@ -1,11 +1,17 @@
 """Shared CLI utilities."""
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from haute.deploy._config import DeployConfig
 
 from haute._logging import get_logger
 
@@ -115,7 +121,7 @@ class TransportInfo:
         self.prod_url = prod_url
 
 
-def resolve_transport(config: "DeployConfig") -> TransportInfo:  # noqa: F821
+def resolve_transport(config: DeployConfig) -> TransportInfo:
     """Determine the transport layer from *config.target*.
 
     Returns a :class:`TransportInfo` with ``kind`` set to one of:
@@ -153,7 +159,7 @@ def _load_deploy_config(
     pipeline_file: str | None = None,
     model_name: str | None = None,
     require_toml: bool = False,
-) -> "DeployConfig":  # noqa: F821 — lazy import below
+) -> DeployConfig:
     """Load a :class:`DeployConfig` from ``haute.toml`` or CLI arguments.
 
     Centralises the repeated pattern of:

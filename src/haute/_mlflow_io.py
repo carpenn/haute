@@ -403,7 +403,9 @@ def load_mlflow_model(
 
     if cache_key in _model_cache:
         logger.info("mlflow_model_cache_hit", key=str(cache_key))
-        return _model_cache.get(cache_key)
+        cached = _model_cache.get(cache_key)
+        assert cached is not None  # guaranteed by __contains__ check above
+        return cached
 
     # Load model based on detected flavor
     if flavor == "catboost":

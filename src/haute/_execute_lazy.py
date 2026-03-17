@@ -255,7 +255,7 @@ def _execute_lazy(
             and (n_parents > 1 or n_children > 1 or feeds_join)
         ):
             tmp = checkpoint_dir / f"{nid}.parquet"
-            safe_sink(lf, tmp)
+            safe_sink(lf if isinstance(lf, pl.LazyFrame) else lf.lazy(), tmp)
 
             # Drop the old LazyFrame (and any cached Arrow buffers it
             # holds) before replacing with a fresh scan reference.
@@ -337,9 +337,9 @@ def _extract_error_line(exc: Exception) -> int | None:
     """
     if isinstance(exc, SyntaxError) and exc.lineno is not None:
         return exc.lineno
-    user_line = getattr(exc, "_user_code_line", None)
+    user_line: int | None = getattr(exc, "_user_code_line", None)
     if user_line is not None:
-        return user_line
+        return int(user_line)
     match = re.search(r"\bline (\d+)\b", str(exc))
     if match:
         return int(match.group(1))
@@ -437,10 +437,11 @@ def _execute_eager_core(
             ]
 
             # Apply selected_columns filter for downstream propagation
-            df = _apply_selected_columns(df, node_map[nid].data.config)
+            filtered = _apply_selected_columns(df, node_map[nid].data.config)
+            df = filtered if isinstance(filtered, pl.DataFrame) else filtered.collect()
 
             eager_outputs[nid] = df
-            memory_bytes[nid] = df.estimated_size("b")
+            memory_bytes[nid] = int(df.estimated_size("b"))
         except Exception as exc:
             if not swallow_errors:
                 raise

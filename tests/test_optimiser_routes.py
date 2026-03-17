@@ -266,11 +266,12 @@ class TestSolveRoute:
         assert "objective" in resp.json()["detail"].lower()
 
     def test_solve_no_constraints(self, client, scored_data):
+        """Solving with no constraints is valid — returns 200 and starts a job."""
         cfg = {"objective": "expected_income", "constraints": {}}
         graph = _make_optimiser_graph(scored_data, config=cfg)
         resp = client.post("/api/optimiser/solve", json={"graph": graph, "node_id": "opt"})
-        assert resp.status_code == 400
-        assert "constraint" in resp.json()["detail"].lower()
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "started"
 
 
 class TestStatusRoute:

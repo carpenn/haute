@@ -112,12 +112,11 @@ class TestExecutor:
         assert result["idx"].to_list() == [0, 1, 2]
 
     def test_defaults(self):
-        """Empty config uses sensible defaults."""
+        """Empty config uses sensible defaults (no value column without column_name)."""
         node = _make_node({})
         _, fn, _ = _build_node_fn(node, source_names=["upstream"])
         input_df = pl.DataFrame({"a": [1]}).lazy()
         result = fn(input_df).collect()
         assert result.shape[0] == 21
-        assert "scenario_value" in result.columns
         assert "scenario_index" in result.columns
 

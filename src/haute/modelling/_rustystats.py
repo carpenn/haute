@@ -448,7 +448,7 @@ class GLMAlgorithm(BaseAlgorithm):
                 categorical_factors=cat_features,
                 continuous_factors=continuous,
             )
-            return diag.to_dict()
+            return dict(diag.to_dict())
         except Exception as exc:
             logger.warning("glm_diagnostics_failed", error=str(exc))
             return {}
@@ -502,7 +502,8 @@ class GLMAlgorithm(BaseAlgorithm):
                 cv=n_folds,
             )
 
-            cv_deviance = float(result.cv_deviance) if hasattr(result, "cv_deviance") else 0.0
+            raw_cv = getattr(result, "cv_deviance", None)
+            cv_deviance = float(raw_cv) if raw_cv is not None else 0.0
             return {
                 "fold_metrics": [],
                 "mean_metrics": {"cv_deviance": cv_deviance},

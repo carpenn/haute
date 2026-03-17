@@ -79,3 +79,5 @@ def deploy(config: DeployConfig) -> DeployResult:
         from haute.deploy._container import deploy_to_platform_container
 
         return deploy_to_platform_container(resolved)
+
+    raise ValueError(f"Unhandled deploy target '{config.target}'")  # pragma: no cover

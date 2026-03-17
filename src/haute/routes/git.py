@@ -11,7 +11,7 @@ them in a thread pool, avoiding event-loop blocking on slow git operations.
 from __future__ import annotations
 
 import dataclasses
-from typing import NoReturn
+from typing import Any, NoReturn, TypeVar
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -51,6 +51,8 @@ from haute.schemas import (
     GitSwitchBranchRequest,
 )
 
+_M = TypeVar("_M", bound=BaseModel)
+
 logger = get_logger(component="server.git")
 
 router = APIRouter(prefix="/api/git", tags=["git"])
@@ -65,7 +67,7 @@ def _handle_git_error(e: GitError) -> NoReturn:
     raise HTTPException(status_code=400, detail=str(e))
 
 
-def _dc_to_pydantic(dc_instance: object, model: type[BaseModel]) -> BaseModel:
+def _dc_to_pydantic(dc_instance: Any, model: type[_M]) -> _M:
     """Convert a dataclass instance to a Pydantic model via ``model_validate``.
 
     Handles nested dataclass fields (e.g. lists of dataclasses) by recursively

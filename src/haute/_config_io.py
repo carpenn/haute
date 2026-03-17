@@ -109,7 +109,7 @@ def load_node_config(
     p = Path(config_path)
     if not p.is_absolute() and base_dir:
         p = base_dir / p
-    return json.loads(p.read_text())
+    return dict(json.loads(p.read_text()))
 
 
 def save_node_config(

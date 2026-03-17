@@ -837,6 +837,7 @@ def _flatten_raw_parquet(
         # Probe first row group to decide Polars vs Python fallback
         table0 = pf.read_row_group(0)
         df0 = pl.from_arrow(table0)
+        assert isinstance(df0, pl.DataFrame)
         del table0
         try:
             flat0 = df0.select(exprs)
@@ -863,6 +864,7 @@ def _flatten_raw_parquet(
 
             table = pf.read_row_group(i)
             df = pl.from_arrow(table)
+            assert isinstance(df, pl.DataFrame)
             del table
 
             if use_polars:
@@ -1134,7 +1136,7 @@ def _resolve_flatten_schema(
         cp = Path(config_path)
         if cp.exists():
             cfg = orjson.loads(cp.read_bytes())
-            from_config = cfg.get("flattenSchema")
+            from_config: dict[str, Any] | None = cfg.get("flattenSchema")
             if from_config is not None:
                 return from_config
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json as _json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, WebSocket
 
@@ -45,13 +45,13 @@ _INTERNAL_ERROR_DETAIL = "Operation failed. Check the server logs for details."
 # ---------------------------------------------------------------------------
 
 
-def raise_node_not_found(node_id: str) -> None:
+def raise_node_not_found(node_id: str) -> NoReturn:
     """Raise 404 for a missing node, with structured logging."""
     logger.warning("node_not_found", node_id=node_id)
     raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
 
 
-def raise_node_type_error(node_id: str, expected: str, got: str) -> None:
+def raise_node_type_error(node_id: str, expected: str, got: str) -> NoReturn:
     """Raise 400 for a node type mismatch, with structured logging."""
     logger.warning("node_type_mismatch", node_id=node_id, expected=expected, got=got)
     raise HTTPException(
@@ -60,13 +60,13 @@ def raise_node_type_error(node_id: str, expected: str, got: str) -> None:
     )
 
 
-def raise_pipeline_not_found(name: str) -> None:
+def raise_pipeline_not_found(name: str) -> NoReturn:
     """Raise 404 for a missing pipeline, with structured logging."""
     logger.warning("pipeline_not_found", name=name)
     raise HTTPException(status_code=404, detail=f"Pipeline '{name}' not found")
 
 
-def raise_validation_error(detail: str) -> None:
+def raise_validation_error(detail: str) -> NoReturn:
     """Raise 400 for a validation failure, with structured logging."""
     logger.warning("validation_error", detail=detail)
     raise HTTPException(status_code=400, detail=detail)
@@ -249,7 +249,7 @@ def load_sidecar(py_path: Path) -> dict[str, Any]:
     sidecar = py_path.with_suffix(".haute.json")
     if sidecar.exists():
         try:
-            return _json.loads(sidecar.read_text())
+            return dict(_json.loads(sidecar.read_text()))
         except (_json.JSONDecodeError, OSError) as e:
             logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}
@@ -257,7 +257,8 @@ def load_sidecar(py_path: Path) -> dict[str, Any]:
 
 def load_sidecar_positions(py_path: Path) -> dict[str, Any]:
     """Return only the positions dict — backward-compatible alias for submodel.py."""
-    return load_sidecar(py_path).get("positions", {})
+    result = load_sidecar(py_path).get("positions", {})
+    return dict(result) if isinstance(result, dict) else {}
 
 
 def save_sidecar(py_path: Path, graph: PipelineGraph) -> None:

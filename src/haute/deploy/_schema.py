@@ -79,7 +79,7 @@ def infer_output_schema(
             cached = _json.loads(cache_path.read_text())
             if cached.get("fingerprint") == fp:
                 logger.info("output_schema_cache_hit", fingerprint=fp[:8])
-                return cached["schema"]
+                return dict(cached["schema"])
         except Exception as exc:
             logger.warning("corrupt_schema_cache", path=str(cache_path), error=str(exc))
 

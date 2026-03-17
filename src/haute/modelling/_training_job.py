@@ -183,7 +183,7 @@ class TrainingJob:
         cv_folds: int | None = None,
     ) -> None:
         self.name = name
-        self._data = data
+        self._data: str | pl.DataFrame | None = data
         self.target = target
         self.weight = weight
         self.exclude = exclude or []
@@ -596,8 +596,8 @@ class TrainingJob:
                 _mem_checkpoint("eval pool built")
 
             _report("Training model", 0.3)
-            fit_result = algo.fit(
-                None, features, cat_features,
+            fit_result = algo.fit(  # type: ignore[call-arg]  # CatBoost uses pool instead of train_df
+                None, features, cat_features,  # type: ignore[arg-type]
                 self.target, self.weight, fit_params, self.task,
                 on_iteration=on_iteration,
                 offset=self.offset,
@@ -870,6 +870,8 @@ class TrainingJob:
             return self._data
         if isinstance(self._data, pl.LazyFrame):
             return self._data.collect()
+        if self._data is None:
+            raise RuntimeError("Training data has already been consumed")
         from haute._io import read_source
 
         path = Path(self._data)

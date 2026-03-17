@@ -127,7 +127,7 @@ def _compile_preamble(preamble: str) -> dict[str, Any]:
         msg = f"Import/preamble error: {exc}"
         if source_file and source_file != "<string>":
             try:
-                rel = _Path(source_file).relative_to(_Path.cwd())
+                rel: str | Path = _Path(source_file).relative_to(_Path.cwd())
             except ValueError:
                 rel = source_file
             msg = f"Error in {rel} line {source_line}: {exc}"
@@ -220,8 +220,8 @@ def _exec_user_code(
         if exc.__traceback__:
             import traceback as _tb
             for frame in reversed(_tb.extract_tb(exc.__traceback__)):
-                if frame.filename == "<string>":
-                    exc._user_code_line = max(1, frame.lineno - line_offset)
+                if frame.filename == "<string>" and frame.lineno is not None:
+                    exc._user_code_line = max(1, frame.lineno - line_offset)  # type: ignore[attr-defined]
                     break
         raise
 

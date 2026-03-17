@@ -72,7 +72,7 @@ class LRUCache(Generic[K, V]):
                     self._timestamps.pop(key, None)
                     return None
             self._data.move_to_end(key)
-            return value
+            return value  # type: ignore[return-value]
 
     def put(self, key: K, value: V) -> None:
         """Insert or update *key*.  Evicts the LRU entry if full."""

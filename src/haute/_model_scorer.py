@@ -155,10 +155,11 @@ class ModelScorer:
             scoring_model, input_path, features,
             self.output_col, self.task,
         )
-        atexit.register(
-            lambda p=scored_path: os.unlink(p)
-            if os.path.exists(p) else None,
-        )
+        def _cleanup(p: str = scored_path) -> None:
+            if os.path.exists(p):
+                os.unlink(p)
+
+        atexit.register(_cleanup)
         os.unlink(input_path)
         return pl.scan_parquet(scored_path)
 
@@ -261,7 +262,11 @@ def _batch_score_to_parquet(
         for batch in pf.iter_batches(
             batch_size=_SCORE_BATCH_SIZE,
         ):
-            chunk = pl.from_arrow(batch)
+            chunk_raw = pl.from_arrow(batch)
+            if isinstance(chunk_raw, pl.Series):
+                chunk = chunk_raw.to_frame()
+            else:
+                chunk = chunk_raw
             x_data = _prepare_predict_frame(
                 chunk, features,
                 cat_feature_names=scoring_model.cat_feature_names,

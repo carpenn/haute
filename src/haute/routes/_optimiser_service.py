@@ -54,7 +54,7 @@ def _find_optimiser_node(graph: PipelineGraph, node_id: str) -> GraphNode:
 
 def _compute_scenario_value_stats(
     solve_result: SolveResultLike,
-) -> tuple[dict[str, float], dict[str, list[float]]]:
+) -> tuple[dict[str, float], dict[str, list[int] | list[float]]]:
     """Compute scenario value distribution statistics and histogram from solve result."""
     if not hasattr(solve_result, "dataframe"):
         return {}, {}
@@ -80,7 +80,7 @@ def _compute_scenario_value_stats(
 
     vals = col.to_numpy()
     counts, edges = np.histogram(vals, bins=_HISTOGRAM_BINS)
-    histogram = {
+    histogram: dict[str, list[int] | list[float]] = {
         "counts": [int(c) for c in counts],
         "edges": [float(e) for e in edges],
     }
@@ -423,7 +423,7 @@ class OptimiserSolveService:
                     detail="Ratebook mode requires factor_columns. Add at least one factor group.",
                 )
 
-        return mode
+        return str(mode)
 
     def _execute_pipeline(
         self, body: OptimiserSolveRequest, job_id: str,
@@ -497,11 +497,11 @@ class OptimiserSolveService:
         """
         import polars as pl
 
-        objective = config["objective"]
+        objective = str(config["objective"])
         constraints = config["constraints"]
-        qid_col = config.get("quote_id", "quote_id")
-        mult_col = config.get("scenario_value", "scenario_value")
-        step_col = config.get("scenario_index", "scenario_index")
+        qid_col = str(config.get("quote_id", "quote_id"))
+        mult_col = str(config.get("scenario_value", "scenario_value"))
+        step_col = str(config.get("scenario_index", "scenario_index"))
 
         available_cols = set(source_lf.collect_schema().names())
         required_cols = {objective, qid_col, mult_col, step_col}
@@ -520,13 +520,13 @@ class OptimiserSolveService:
             c for c in constraint_cols if c in available_cols
         ]
         cast_map: dict[str, pl.DataType] = {
-            qid_col: pl.Utf8,
-            step_col: pl.Int32,
-            mult_col: pl.Float32,
-            objective: pl.Float32,
+            qid_col: pl.Utf8(),
+            step_col: pl.Int32(),
+            mult_col: pl.Float32(),
+            objective: pl.Float32(),
         }
         for c in constraint_cols:
-            cast_map[c] = pl.Float32
+            cast_map[c] = pl.Float32()
         cast_exprs = [pl.col(c).cast(t) for c, t in cast_map.items()]
 
         scored_lf = (

@@ -98,11 +98,12 @@ def score_graph(
                 model_class = config.get("modelClass", "classifier")
                 _src_names = list(source_names)
 
+                _remapped: str = remapped_path  # narrowed by the `is not None` guard above
                 if code:
 
                     def external_fn(
                         *dfs: _Frame,
-                        _p: str = remapped_path,
+                        _p: str = _remapped,
                         _ft: str = file_type,
                         _mc: str = model_class,
                         _code: str = code,
@@ -128,10 +129,11 @@ def score_graph(
             if remap:
                 remapped_path = _remap_artifact(nid, config, remap, "artifact_path")
                 if remapped_path is not None:
+                    _opt_remapped: str = remapped_path
 
                     def optimiser_apply_fn(
                         *dfs: _Frame,
-                        _path: str = remapped_path,
+                        _path: str = _opt_remapped,
                         _version_col: str = _vcol,
                     ) -> _Frame:
                         from haute._optimiser_io import load_optimiser_artifact
@@ -176,6 +178,7 @@ def score_graph(
         if node_type == NodeType.MODEL_SCORE and remap:
             remapped_path = _remap_artifact(nid, config, remap, "artifact_path")
             if remapped_path is not None:
+                _score_remapped: str = remapped_path
                 _task = config.get("task", "regression")
                 _output_col = config.get("output_column", "prediction")
                 _code = config.get("code", "").strip()
@@ -183,7 +186,7 @@ def score_graph(
 
                 def model_score_fn(
                     *dfs: _Frame,
-                    _p: str = remapped_path,
+                    _p: str = _score_remapped,
                     _t: str = _task,
                     _oc: str = _output_col,
                     _c: str = _code,
@@ -212,8 +215,9 @@ def score_graph(
         if node_type == NodeType.DATA_SOURCE and nid not in input_set and remap:
             remapped_path = _remap_artifact(nid, config, remap, "path")
             if remapped_path is not None:
+                _ds_remapped: str = remapped_path
 
-                def static_source(_p: str = remapped_path) -> _Frame:
+                def static_source(_p: str = _ds_remapped) -> _Frame:
                     return read_source(_p)
 
                 return func_name, static_source, True

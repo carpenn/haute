@@ -219,7 +219,7 @@ def _parquet_row_count(path: str) -> int:
     """Row count from parquet metadata (reads only the footer, not data)."""
     import pyarrow.parquet as pq
     meta = pq.read_metadata(path)
-    return meta.num_rows
+    return int(meta.num_rows)
 
 
 def _csv_row_count(path: str) -> int:

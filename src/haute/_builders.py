@@ -123,8 +123,9 @@ def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     path = config.get("path", "")
     flat_schema = config.get("flattenSchema")
 
+    api_source_fn: Callable[..., _Frame]
     if path.endswith((".json", ".jsonl")):
-        def api_source_fn(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
+        def _api_source_json(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
             from haute._json_flatten import _json_cache_path
 
             cache_path = _json_cache_path(_path)
@@ -134,9 +135,11 @@ def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
                 "JSON data has not been cached yet. "
                 "Click 'Cache as Parquet' on the API Input node to process it."
             )
+        api_source_fn = _api_source_json
     else:
-        def api_source_fn() -> _Frame:
+        def _api_source_flat() -> _Frame:
             return read_source(path)
+        api_source_fn = _api_source_flat
 
     return ctx.func_name, api_source_fn, True
 
@@ -149,6 +152,7 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     code = (config.get("code") or "").strip()
     _preamble = dict(ctx.preamble_ns) if ctx.preamble_ns else None
 
+    base_fn: Callable[..., _Frame]
     if source_type == "databricks":
         table = config.get("table", "")
 
@@ -635,7 +639,7 @@ def _apply_online(
         chunk_size=artifact.get("chunk_size", _DEFAULT_CHUNK_SIZE),
     )
     result = applier.apply(df_eager)
-    result_df = result.dataframe
+    result_df: pl.DataFrame = result.dataframe
 
     if version:
         result_df = result_df.with_columns(pl.lit(version).alias(version_col))
