@@ -26,10 +26,6 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-[project.urls]
-Homepage = "https://haute.dev"
-Repository = "https://github.com/PricingFrontier/haute"
-Documentation = "https://haute.dev"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -47,6 +43,11 @@ dependencies = [
     "price-contour==0.2.7",
     "rustystats>=0.6.1",
 ]
+
+[project.urls]
+Homepage = "https://haute.dev"
+Repository = "https://github.com/PricingFrontier/haute"
+Documentation = "https://haute.dev"
 
 [project.optional-dependencies]
 databricks = [
