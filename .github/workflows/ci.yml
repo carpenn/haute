@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - run: uv sync --group dev
+      - run: uv sync --group dev --no-sources
 
       - name: Ruff lint
         run: uv run ruff check src/
