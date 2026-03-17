@@ -9,6 +9,27 @@ description = "Haute - Open-source pricing engine for insurance teams"
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
+authors = [
+    { name = "Pricing Frontier" },
+]
+keywords = ["pricing", "insurance", "actuarial", "rating-engine", "catboost", "polars"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://haute.dev"
+Repository = "https://github.com/PricingFrontier/haute"
+Documentation = "https://haute.dev"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -23,7 +44,7 @@ dependencies = [
     "catboost>=1.2.8",
     "structlog>=24.1.0",
     "orjson>=3.9.0",
-    "price-contour==0.2.5",
+    "price-contour==0.2.7",
     "rustystats>=0.6.1",
 ]
 

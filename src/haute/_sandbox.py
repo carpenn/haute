@@ -331,7 +331,23 @@ _ALLOWED_PICKLE_PREFIXES: list[tuple[str, ...]] = [
     ("polars",),
     ("joblib",),
     ("collections",),
-    ("builtins",),
+    ("builtins", "frozenset"),
+    ("builtins", "set"),
+    ("builtins", "dict"),
+    ("builtins", "list"),
+    ("builtins", "tuple"),
+    ("builtins", "range"),
+    ("builtins", "slice"),
+    ("builtins", "bytes"),
+    ("builtins", "bytearray"),
+    ("builtins", "complex"),
+    ("builtins", "float"),
+    ("builtins", "int"),
+    ("builtins", "bool"),
+    ("builtins", "str"),
+    ("builtins", "True"),
+    ("builtins", "False"),
+    ("builtins", "None"),
     ("_codecs",),
     ("copyreg",),
     ("datetime",),
@@ -347,7 +363,9 @@ class _RestrictedUnpickler(pickle.Unpickler):
 
     def find_class(self, module: str, name: str) -> Any:
         for prefix in _ALLOWED_PICKLE_PREFIXES:
-            if module.startswith(prefix[0]):
+            if len(prefix) == 1 and module.startswith(prefix[0]):
+                return super().find_class(module, name)
+            if len(prefix) == 2 and module == prefix[0] and name == prefix[1]:
                 return super().find_class(module, name)
         raise pickle.UnpicklingError(
             f"Blocked unpickling of {module}.{name} — "

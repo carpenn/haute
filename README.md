@@ -182,7 +182,7 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ```bash
 uv add haute
-haute init my-project
+haute init
 haute serve
 ```
 
