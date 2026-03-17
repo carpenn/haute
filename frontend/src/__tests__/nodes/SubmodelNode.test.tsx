@@ -28,7 +28,7 @@ function makeProps(
   return {
     id: "test-node",
     type: "submodel",
-    data: fullData as Record<string, unknown>,
+    data: fullData as unknown as Record<string, unknown>,
     selected: overrides.selected ?? false,
     isConnectable: true,
     positionAbsoluteX: 0,

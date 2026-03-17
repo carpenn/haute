@@ -685,7 +685,7 @@ describe("ModellingConfig", () => {
 
     it("shows inline warning and toast when RAM estimate fails", async () => {
       mockEstimateTrainingRam.mockRejectedValue(new Error("Network error"))
-      const { container } = renderConfig()
+      renderConfig()
       // Wait for loading to finish and error state to propagate
       await waitFor(() => {
         // The toast store should have received the warning

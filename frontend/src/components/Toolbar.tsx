@@ -7,7 +7,6 @@ import useSettingsStore from "../stores/useSettingsStore"
 import useClickOutside from "../hooks/useClickOutside"
 import { hoverHandlers, hoverBg } from "../utils/hoverHandlers"
 
-const chromeHover = hoverHandlers()
 const bgHover = hoverBg("var(--chrome-hover)")
 const accentBtnHover = hoverHandlers("#60a5fa", "", "var(--accent)", "")
 const greenBtnHover = hoverHandlers("#4ade80", "", "#22c55e", "")

@@ -8,7 +8,6 @@ export default function ScenarioExpanderEditor({
   inputSources,
   onDeleteInput,
   upstreamColumns,
-  accentColor,
   errorLine,
 }: {
   config: Record<string, unknown>
@@ -16,7 +15,6 @@ export default function ScenarioExpanderEditor({
   inputSources: InputSource[]
   onDeleteInput?: (edgeId: string) => void
   upstreamColumns: { name: string; dtype: string }[]
-  accentColor: string
   errorLine?: number | null
 }) {
   const quoteId = configField(config, "quote_id", "")

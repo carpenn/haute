@@ -31,6 +31,7 @@ export interface HauteNodeData {
   _status?: "ok" | "error" | "running"
   _traceActive?: boolean
   _traceDimmed?: boolean
+  _hoverDimmed?: boolean
   _traceValue?: unknown
 }
 

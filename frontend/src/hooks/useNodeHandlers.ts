@@ -23,7 +23,6 @@ type UseNodeHandlersParams = {
   setEdges: (updater: (eds: Edge[]) => Edge[]) => void
   setSelectedNode: (updater: React.SetStateAction<Node | null>) => void
   setPreviewData: (updater: React.SetStateAction<PreviewData | null>) => void
-  onUpdateNode: (id: string, data: Record<string, unknown>) => void
   fitView: (opts?: { padding?: number }) => void
 }
 
@@ -35,7 +34,6 @@ export default function useNodeHandlers({
   setEdges,
   setSelectedNode,
   setPreviewData,
-  onUpdateNode,
   fitView,
 }: UseNodeHandlersParams) {
   const addToast = useToastStore((s) => s.addToast)

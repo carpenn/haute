@@ -19,7 +19,6 @@ function makeParams() {
     setEdges: vi.fn(),
     setSelectedNode: vi.fn(),
     setPreviewData: vi.fn(),
-    onUpdateNode: vi.fn(),
     fitView: vi.fn(),
   }
 }

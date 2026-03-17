@@ -371,8 +371,6 @@ describe("useDataInputColumns", () => {
 
   it("shows toast when API call fails", async () => {
     mockPreview.mockRejectedValue(new Error("Server error"))
-    const toastSpy = vi.spyOn(useToastStore.getState(), "addToast")
-
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(mockPreview).toHaveBeenCalled())
 

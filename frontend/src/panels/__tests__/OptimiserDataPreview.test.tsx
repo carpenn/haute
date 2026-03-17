@@ -252,7 +252,6 @@ describe("OptimiserDataPreview", () => {
     it("collapse and expand work", () => {
       const { container } = renderComponent()
       // Find the collapse button in the header's ml-auto section
-      const headerBar = container.querySelector('[style*="bg-elevated"]')
       // The last button in the header is the collapse button
       const allButtons = container.querySelectorAll("button")
       // Find the one right before the content area (the ChevronDown)

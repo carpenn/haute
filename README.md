@@ -2,7 +2,7 @@
 
 # Haute
 
-### Open-source pricing engine for insurance.
+### Open-source pricing engine.
 
 <br>
 
@@ -18,191 +18,172 @@
 
 ---
 
-Insurance pricing has been stuck for years. The tools are expensive, proprietary, and slow. Models are locked inside platforms you don't control. Deploying a rate change takes weeks. Explaining a price to your regulator means assembling a manual audit trail after the fact. And if you want to leave, your work doesn't come with you.
+Haute is a free, open-source pricing engine. It gives you a visual editor that runs in your browser - you build pricing pipelines by connecting nodes on a canvas rather than writing code from scratch.
 
-Haute is a free, open-source pricing engine that changes how this works. You get a visual editor for building rating pipelines, a data engine fast enough to score 600,000 rows in seconds, price tracing that shows exactly how any output was calculated, and deployment that takes your pipeline live without needing to learn cloud infrastructure. Everything is a Python file on disk - no proprietary format, no lock-in, no annual licence negotiation.
+Everything you build is saved as a standard Python file on disk. Not a proprietary format. Not a binary export. A Python file you can open, read, version, and take with you.
 
 ---
 
-## A visual editor, not a code editor
+## Getting started
 
-Haute opens in your browser. You build rating pipelines by dragging nodes onto a canvas and connecting them - data sources, transforms, model scores, rating steps, outputs. Click any node and its data appears instantly in a preview table below.
+One line to install, one to initialise the project, one to open your model.
 
-There are fifteen node types, each purpose-built for pricing work:
+```bash
+uv add haute
+haute init
+haute serve
+```
 
-| Node | What it does |
-|---|---|
-| **Data Source** | Reads a file or a Databricks table |
-| **API Input** | Receives live quote requests when deployed |
-| **Polars Transform** | Cleans, joins, or reshapes data |
-| **Model Score** | Scores records through a GLM, CatBoost, XGBoost, or any Python model |
-| **Banding** | Groups continuous or categorical values into bands |
-| **Rating Step** | Applies rating factors from a lookup table - multiply, add, cap, floor |
-| **External File** | Loads an external object (pickle, JSON, joblib, CatBoost) with optional code |
-| **Live Switch** | Routes between live API data and batch data |
-| **Modelling** | Trains a model (CatBoost) with MLflow experiment tracking |
-| **Optimiser** | Runs online or ratebook price optimisation with constraints |
-| **Optimiser Apply** | Applies saved optimisation results (lambdas or factor tables) to score data |
-| **Scenario Expander** | Expands each row into multiple scenarios for optimisation |
-| **Output** | Defines the final price fields returned by your API |
-| **Data Sink** | Writes results to a file |
-| **Submodel** | Collapses a group of nodes into a single reusable block |
+---
 
-If you've built rating structures in spreadsheets or used visual pricing tools, this will feel familiar - except it runs on your machine, handles millions of rows, and you own everything.
+## Why open source matters for pricing
+
+Pricing models sit at the centre of regulated businesses. They determine what customers pay, they get scrutinised by regulators, and they need to be understood by people who didn't build them. When the tool that produces those models is a black box, everyone - actuaries, regulators, auditors - has to take it on trust that the numbers are right.
+
+Open source changes that relationship. The engine that calculates your prices is fully visible. Anyone on your team can inspect how it works, verify its behaviour, or extend it. There is no hidden logic, no opaque compilation step, no proprietary runtime sitting between your model and your output.
+
+This also means your work is portable. Your pipelines are Python files. Your models are standard formats. Your data stays in your infrastructure. If you ever want to stop using Haute, everything you've built still works - it's just Python.
+
+Being open source and code means Haute can lean on best-in-class tools and engineering practices instead of reinventing them. Polars, Catboost, MLFlow, GIT, CI/CD, Haute doesn't try to rebuild these things behind a proprietary wall. It connects them and wraps them in an interface designed for pricing work.
+
+---
+
+## A visual editor, and a code editor
+
+Haute opens in your browser. You build pricing pipelines by dragging nodes onto a canvas and connecting them - data sources, transforms, model scores, rating steps, outputs. Click any node and its data appears instantly in a preview table below. For nodes that involve data logic, there's a built-in code editor with line numbers, auto-indentation, and bracket matching - you write small, focused pieces of Python, not entire programs.
+
+The visual editor and the code are always the same thing. Every node you create, every connection you draw, every parameter you set - it's all reflected in a Python file on disk in real time. This means a team can have some members working visually and others working in code, on the same pipeline, at the same time.
+
+If you've built rating structures in spreadsheets or used other pricing tools, this will feel familiar - except everything runs on your machine and you own the output.
 
 ---
 
 ## Click any price. See exactly how it was calculated.
 
-This is the feature that changes everything for regulatory work.
-
-Click any cell in your output table - say, a technical price of £412.50. Haute instantly traces the path through every node that contributed to it, showing the value at each step:
+Click any cell in your output table. Haute traces the path through every node that contributed to it, showing the value at each step:
 
 ```
-base rate £300  →  area factor ×1.2  →  NCD ×0.85  →  frequency load ×1.35  →  £412.50
+base rate → area factor → discount → loading → final price
 ```
 
-The graph lights up. Nodes on the trace path glow. Nodes that didn't contribute fade away. A sidebar shows you what happened at every step - which columns were added, which were modified, what the values were before and after.
+The graph highlights the path visually. Nodes that contributed glow. The rest fade. A sidebar shows what happened at each step - which values were used, what changed, and what the result was.
 
-This isn't a static report you generate after the fact. It's live, interactive, and instant. Click a different row - the trace updates immediately from cache. Click a different column - same thing. First click takes about a second; every click after that is under 10 milliseconds.
+The first click runs through the full pipeline and caches the result. Every click after that pulls from cache - the trace updates instantly. Click a different row, a different column, a different output. Each one is immediate.
 
-For Solvency II, IFRS 17, and FCA pricing practices, you need to show how a price was derived. Haute makes that a click, not a project.
-
----
-
-## Fast enough that you stop waiting
-
-Pricing analysts spend a shocking amount of time waiting. Waiting for a portfolio to score. Waiting for a notebook to run. Waiting for results to refresh after changing one factor.
-
-Haute uses Polars - a data engine built for speed. A 600,000-row portfolio scores in seconds, not minutes. Joining large rating tables, applying banding logic, running model predictions - all of it processes in parallel automatically.
-
-The editor is fast too. When you click between nodes, Haute doesn't re-run everything from scratch. It caches results intelligently, so previewing data at any point in your pipeline is near-instant. Change a rating factor and only the downstream nodes recalculate.
-
-There's a timing breakdown built into the preview panel - a bar chart showing how long each node took, colour-coded green/yellow/red. You always know what's slow and why.
+When you need to show a regulator, a stakeholder, or a colleague exactly how a price was derived, this gives you that answer in a click.
 
 ---
 
-## Connect to your data where it lives
+## Your file on disk is the source of truth
 
-Point a Data Source node at a Databricks Unity Catalog table. Browse your catalogs, schemas, and tables directly from the editor - no SQL required. Pick your SQL warehouse, select a table, click Fetch.
+There is no database behind Haute. No proprietary project file. Every pipeline is a `.py` file on disk.
 
-The data streams down in batches. Even tables with millions of rows download efficiently without exhausting your machine's memory. If a download fails halfway through, nothing is corrupted - the cache only updates when the full download succeeds.
+Edit a node in the visual editor and the Python file updates. Edit the Python file in a text editor and the visual editor updates. Both views stay in sync automatically through a file watcher - changes propagate in under a second.
 
-Once fetched, the data is cached locally. Your pipeline runs at full speed on your machine without needing a live connection to Databricks. You can see row counts, column counts, file sizes, and clear the cache whenever you want.
-
-Need a subset? Write a SQL query directly in the node configuration.
+This means your pipeline works with every tool that understands files: version control, code review, text editors, automated testing. You don't need to learn those tools to use Haute, but they're there when your team is ready for them.
 
 ---
 
-## One wrong factor can misprice an entire book
+## Built to be fast
 
-Haute is opinionated about preventing this.
+When you click a node, you want to see its data now. Haute caches results at every node in the pipeline, so previewing data at any point is near-instant. Change a rating factor and only the downstream nodes recalculate - everything upstream stays cached.
 
-**Before anything goes live**, Haute scores a set of test quotes through your pipeline. If anything breaks - a missing column, a model that won't load, an edge case that produces an error - the deployment stops. You can also set expected outputs with tolerances, so you're testing not just "does it run" but "does it produce the right prices."
+For batch work, Haute builds a full execution plan and optimises it end-to-end before processing your data. This is a different execution strategy to the one used for preview, and it's chosen automatically - you don't need to configure anything.
 
-**Impact analysis is automatic.** When a new version is ready, Haute scores a portfolio sample through both the new model and the current one, and produces a report: how many quotes changed, by how much, which segments moved, what the overall premium impact looks like. It breaks down results by segment - vehicle fuel type, region, driver age band - so you can see exactly where the change hits hardest.
-
-**The path to production is always the same.** Deploy to staging. Verify it works. Review the impact report. Approve the change. Promote to production. Every deployment records what changed, who approved it, the impact numbers, and what version it replaced.
-
-Nobody can push a model to production from their laptop. The only path to live is through the review process.
+There's a built-in timing breakdown that shows how long each step took, colour-coded so you can see at a glance where time is being spent.
 
 ---
 
-## Deploy without learning deployment
+## Built-in price optimisation
 
-Most pricing teams need IT to deploy a model change. That process can take weeks.
+Haute includes a constrained price optimisation engine as a core part of the pipeline.
 
-Haute handles deployment for you. When you're ready, your pipeline gets packaged, validated, and deployed as a live scoring API - a service that returns a price when it receives a quote. You choose the target once during setup:
+You can optimise prices in real time (per-record, gradient-based) or across a ratebook (factor-table, coordinate descent). Set constraints - minimum and maximum prices, factor bounds - and the optimiser finds the best solution within them.
 
-| Target | How it works |
+The results include convergence diagnostics, scenario distributions, and an efficient frontier showing the tradeoff between your objectives. You can save the optimisation output and apply it downstream in the same pipeline.
+
+---
+
+## Any model, same interface
+
+Haute works with any Python model. CatBoost, scikit-learn, LightGBM, XGBoost, Rustystats - if it runs in Python, it works in Haute.
+
+Behind the scenes, every model is wrapped in a uniform interface. You can swap a CatBoost model for an XGBoost model without changing your pipeline configuration. Feature type casting is handled automatically - the model receives data in the format it expects.
+
+Models are loaded with an intelligent cache that watches for file changes. Update a model file and the next pipeline run picks it up automatically.
+
+---
+
+## Safe deployments, built in
+
+When you're ready to go live, Haute packages your pipeline and deploys it as a service that returns a price when it receives a request.
+
+**Before anything goes live**, Haute runs your pipeline against a set of test inputs. If anything breaks, the deployment stops. You can also set expected outputs with tolerances, so you're testing not just "does it run" but "does it produce the right results."
+
+**Before you promote to production**, Haute scores a sample through both the new version and the current one, and produces a segment-level impact report - how many results changed, by how much, and which groups were affected most. You review the report, approve the change, and promote. Every deployment records what changed, who approved it, and what it replaced.
+
+You choose where to deploy during initial setup:
+
+| Target | What it does |
 |---|---|
-| **Databricks** | Packages your pipeline as an MLflow model and deploys it to a Databricks Model Serving endpoint |
-| **Docker** | Builds a container image that runs anywhere |
-| **Azure / AWS / GCP** | Builds and pushes to your cloud provider's container service |
+| **Databricks** | Deploys to a Databricks serving endpoint |
+| **Docker** | Builds a container that runs anywhere |
+| **Azure / AWS / GCP** | Deploys to your cloud provider |
 
-You don't need to know what any of those words mean. The deployment infrastructure is set up once by your team's IT or engineering group. After that, every change you make follows the same automated path: validate, test, stage, review, promote.
-
-A staging environment lets you verify the new version works before it touches production. Smoke tests hit the live endpoint with test quotes to make sure it responds correctly. If everything passes, promoting to production is a single step.
+The infrastructure is set up once by whoever manages your technical environment. After that, every change follows the same path: test, review, deploy.
 
 ---
 
-## Submodels keep complex structures manageable
+## Version control without the learning curve
 
-Real pricing pipelines have dozens of steps. Frequency models, severity models, large loss loads, expense loads, NCD logic, territorial adjustments - the graph gets big.
+Haute includes a built-in panel for saving and managing versions of your work. You don't need to know what Git is - the interface gives you simple actions: save your progress, see your history, go back to a previous version, and submit your work for review.
 
-Submodels let you group a set of nodes into a single collapsible block. In the main view, you see one clean node labelled "Frequency Model." Double-click it to see the internals. Click the breadcrumb to navigate back.
-
-You can reuse a submodel across different pipelines - build your territorial adjustment once and reference it everywhere. If you change your mind, dissolve the submodel and the nodes expand back into the parent pipeline.
+Behind the scenes, it uses Git with guardrails. Protected branches can't be overwritten. Destructive actions create automatic backups. Switching between versions saves your current work first. The complexity is handled for you; you just see a clean history of your changes.
 
 ---
 
-## The same pipeline does everything
+## Knows your machine's limits
+
+Before training a model on a large dataset, Haute probes a sample of your data to estimate how much memory the full run will need. If it would exceed your machine's available memory, it tells you before you start - and suggests a safe dataset size.
+
+This is a small detail, but it prevents the kind of silent crash that can lose work.
+
+---
+
+## Keep complex pipelines manageable
+
+Pricing work often has many steps. Submodels let you group a set of nodes into a single collapsible block. In the main view, you see one clean node. Double-click it to see the internals. Click the breadcrumb to go back.
+
+You can reuse a submodel across different pipelines - build something once and reference it everywhere. If you change your mind, dissolve the submodel and the nodes expand back into the parent pipeline.
+
+---
+
+## One pipeline, many uses
 
 Build it once. Use it five ways:
 
-- **Live quoting** - a single request, sub-second response from your deployed endpoint
-- **Batch scoring** - millions of rows, processed in parallel on your machine
+- **Live pricing** - a single request, real-time response from your deployed service
+- **Batch scoring** - process large datasets on your machine
 - **What-if analysis** - change inputs and watch the price move through every step
-- **Impact analysis** - compare a new model against the current one across your portfolio
+- **Impact analysis** - compare a new version against the current one across your data
 - **Price tracing** - click any output and see exactly how it was calculated
 
 No rebuilding, no re-exporting, no maintaining separate versions for different use cases.
 
 ---
 
-## Built on open source, not instead of it
+## Open source
 
-Haute doesn't re-invent machine learning, data processing, or deployment. It connects the best open-source tools that already exist and wraps them in a visual interface designed for pricing work.
-
-Your models are standard Python - scikit-learn, CatBoost, LightGBM, XGBoost, or anything else that runs in Python. Your data processing uses Polars, the fastest dataframe library available. Your deployment uses MLflow, Docker, and cloud-native services that your engineering team already knows.
-
-Everything is a Python file on disk. There is no proprietary format, no export step, no binary blob locked inside a platform. If you ever want to leave Haute, take your files and go. They're standard Python.
+Licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ---
 
-## What the visual editor looks like in practice
-
-**The canvas** is a dark, minimal workspace with a subtle dot grid. Nodes have colour-coded accent stripes - blue for data sources, green for API inputs, purple for model scores, emerald for rating steps. Connections between nodes glow and animate when you're tracing a price.
-
-**The node palette** sits on the left. Drag a node type onto the canvas to create it. The palette enforces the rules - you can only have one API Input, one Output, and one Live Switch per pipeline.
-
-**The data preview** sits at the bottom. Click any node and its output data appears as a table with type-coloured column headers (integers in blue, decimals in green, text in amber). Row counts, column counts, and execution timing are always visible. Resize the panel by dragging. Collapse it when you need more canvas space.
-
-**The code editor** (for Polars transform nodes) has line numbers, auto-indentation, bracket matching, block commenting, and line duplication. You write small pieces of data logic, not entire programs.
-
-**Right-click any node** to rename it, duplicate it, create a reusable instance, or delete it. **Undo and redo** work across all operations, up to 100 steps. **Snap to grid** keeps your layout clean. **Auto-layout** arranges the entire pipeline automatically.
-
-Every change saves to a Python file on disk. If a developer opens that file in their editor, the visual editor updates in real time. If they change the file, the visual editor reflects it instantly. Both views are always in sync.
-
----
-
-## Free
-
-Haute is free to use. Free for your team, your models, your infrastructure, your production workloads. There is no usage limit, no seat count, no premium tier.
-
-Haute is licensed under the [GNU Affero General Public License v3.0](LICENSE). See [LICENSE](LICENSE) for details.
-
----
-
-## Quick start
+## Getting started
 
 ```bash
-pip install haute
-haute init my-project --target databricks --ci github
-cd my-project
+uv add haute
+haute init my-project
 haute serve
 ```
 
 `haute serve` opens the visual editor in your browser. From there, you're building.
-
----
-
-## Architecture
-
-| Layer | Technology |
-|---|---|
-| **Visual Editor** | React, TypeScript, React Flow |
-| **Backend** | Python, FastAPI, Polars |
-| **Models** | Any Python model (scikit-learn, CatBoost, LightGBM, XGBoost, etc.) |
-| **Deploy Targets** | Databricks · Docker · Azure Container Apps · AWS ECS · GCP Cloud Run |
-| **CI/CD** | GitHub Actions · GitLab CI · Azure DevOps |

@@ -319,7 +319,6 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
             inputSources={inputSources}
             onDeleteInput={onDeleteEdge}
             upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
-            accentColor={accentColor}
             errorLine={errorLine}
           />
         )

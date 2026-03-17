@@ -268,6 +268,17 @@ describe("PipelineNode", () => {
     expect(rawStyle).toContain("opacity: 0.25")
   })
 
+  it("dims node when _hoverDimmed is true", () => {
+    const { container } = renderNode({
+      label: "Hover Dimmed",
+      nodeType: NODE_TYPES.TRANSFORM,
+      _hoverDimmed: true,
+    })
+    const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
+    const rawStyle = nodeEl.getAttribute("style") || ""
+    expect(rawStyle).toContain("opacity: 0.25")
+  })
+
   it("shows trace value when _traceActive and _traceValue are set", () => {
     renderNode({
       label: "Traced",

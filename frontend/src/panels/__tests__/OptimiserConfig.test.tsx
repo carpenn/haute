@@ -463,6 +463,19 @@ describe("OptimiserConfig", () => {
       configHash: "",
       constraints: { loss_ratio: { max: 1.05 } },
       nodeLabel: "Optimiser",
+      originalResult: {
+        total_objective: 1000,
+        baseline_objective: 900,
+        constraints: { loss_ratio: 0.65 },
+        baseline_constraints: { loss_ratio: 0.6 },
+        lambdas: { loss_ratio: 0.005 },
+        converged: true,
+        iterations: 15,
+        n_quotes: 5000,
+        n_steps: 3,
+      },
+      frontier: null,
+      selectedPointIndex: null,
     }
 
     it("shows convergence status when solveResult exists", () => {
@@ -582,6 +595,17 @@ describe("OptimiserConfig", () => {
             configHash: "definitely_stale_hash",
             constraints: {},
             nodeLabel: "Optimiser",
+            originalResult: {
+              total_objective: 1000,
+              baseline_objective: 900,
+              constraints: {},
+              baseline_constraints: {},
+              lambdas: {},
+              converged: true,
+              iterations: 5,
+            },
+            frontier: null,
+            selectedPointIndex: null,
           },
         },
       })

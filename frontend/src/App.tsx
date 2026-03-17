@@ -8,7 +8,6 @@ import {
   type Node,
   type Edge,
   BackgroundVariant,
-  MarkerType,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
@@ -245,7 +244,7 @@ function FlowEditor() {
   } = useNodeHandlers({
     graphRef, nodeIdCounter, lastSelectedNodeRef,
     setNodes, setEdges, setSelectedNode,
-    setPreviewData, onUpdateNode, fitView,
+    setPreviewData, fitView,
   })
 
   const {

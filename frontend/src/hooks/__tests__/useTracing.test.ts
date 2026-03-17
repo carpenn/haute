@@ -249,4 +249,104 @@ describe("useTracing", () => {
     const { result } = renderHook(() => useTracing(params))
     expect(result.current.edgesWithTrace).toBe(params.edges)
   })
+
+  // ── Hover dimming ─────────────────────────────────────────────────
+
+  it("hoverConnectedIds includes hovered node and its direct neighbors", () => {
+    const n1 = makeNode("n1")
+    const n2 = makeNode("n2")
+    const n3 = makeNode("n3")
+    const params = makeParams({
+      nodes: [n1, n2, n3] as Node[],
+      edges: [makeEdge("n1", "n2")] as Edge[],
+      hoveredNodeId: "n1",
+    })
+    const { result } = renderHook(() => useTracing(params))
+    // n1 (hovered) and n2 (connected) should NOT be dimmed
+    const dimMap = Object.fromEntries(
+      result.current.nodesWithStatus.map((n) => [n.id, n.data._hoverDimmed]),
+    )
+    expect(dimMap.n1).toBe(false)
+    expect(dimMap.n2).toBe(false)
+    // n3 (disconnected) should be dimmed
+    expect(dimMap.n3).toBe(true)
+  })
+
+  it("_hoverDimmed is false for all nodes when nothing is hovered", () => {
+    const params = makeParams({ hoveredNodeId: null })
+    const { result } = renderHook(() => useTracing(params))
+    for (const n of result.current.nodesWithStatus) {
+      expect(n.data._hoverDimmed).toBe(false)
+    }
+  })
+
+  it("_hoverDimmed is false when trace is active (trace takes priority)", async () => {
+    const trace = {
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      target_node_id: "n2",
+      row_index: 0,
+      column: "price",
+      output_value: 1,
+      total_nodes_in_pipeline: 2,
+      nodes_in_trace: 1,
+      execution_ms: 10,
+      row_id_column: null,
+      row_id_value: null,
+    }
+    mockTraceCell.mockResolvedValue({ status: "ok", trace })
+    const params = makeParams({ hoveredNodeId: "n1" })
+    const { result } = renderHook(() => useTracing(params))
+    await act(async () => {
+      result.current.handleCellClick(0, "price")
+    })
+    await waitFor(() => expect(result.current.traceResult).not.toBeNull())
+    // With trace active, hover dimming should be disabled
+    for (const n of result.current.nodesWithStatus) {
+      expect(n.data._hoverDimmed).toBe(false)
+    }
+  })
+
+  it("edgesWithTrace brightens connected edges and dims others when hovering", () => {
+    const n1 = makeNode("n1")
+    const n2 = makeNode("n2")
+    const n3 = makeNode("n3")
+    const params = makeParams({
+      nodes: [n1, n2, n3] as Node[],
+      edges: [makeEdge("n1", "n2"), makeEdge("n2", "n3")] as Edge[],
+      hoveredNodeId: "n1",
+    })
+    const { result } = renderHook(() => useTracing(params))
+    const edgeStyles = Object.fromEntries(
+      result.current.edgesWithTrace.map((e) => [`${e.source}-${e.target}`, e.style]),
+    )
+    // n1→n2 is connected to hovered node → bright
+    expect(edgeStyles["n1-n2"]?.strokeWidth).toBe(2)
+    expect(edgeStyles["n1-n2"]?.stroke).toBe("rgba(255,255,255,.55)")
+    // n2→n3 is NOT connected to hovered node → dim
+    expect(edgeStyles["n2-n3"]?.strokeWidth).toBe(1)
+    expect(edgeStyles["n2-n3"]?.stroke).toBe("rgba(255,255,255,.06)")
+  })
+
+  it("_hoverDimmed reverts when hoveredNodeId becomes null", () => {
+    const n1 = makeNode("n1")
+    const n2 = makeNode("n2")
+    const n3 = makeNode("n3")
+    const params = makeParams({
+      nodes: [n1, n2, n3] as Node[],
+      edges: [makeEdge("n1", "n2")] as Edge[],
+      hoveredNodeId: "n1",
+    })
+    const { result, rerender } = renderHook(
+      (p) => useTracing(p),
+      { initialProps: params },
+    )
+    // n3 should be dimmed while hovering n1
+    expect(result.current.nodesWithStatus.find((n) => n.id === "n3")!.data._hoverDimmed).toBe(true)
+    // Clear hover
+    rerender({ ...params, hoveredNodeId: null })
+    // All nodes should be un-dimmed
+    for (const n of result.current.nodesWithStatus) {
+      expect(n.data._hoverDimmed).toBe(false)
+    }
+  })
 })

@@ -105,9 +105,6 @@ describe("BandingRulesGrid", () => {
     ] as unknown as ContinuousRule[]
     render(<BandingRulesGrid factor={makeFactor({ rules })} onUpdateFactor={onUpdate} />)
     // onUpdateFactor should NOT be called for id assignment since _id already exists
-    const idAssignmentCalls = onUpdate.mock.calls.filter(
-      (c) => c[0].rules && c[0].rules[0]?._id === "existing_id"
-    )
     // Either not called at all, or called with the same _id preserved
     if (onUpdate.mock.calls.length > 0 && onUpdate.mock.calls[0][0].rules) {
       expect(onUpdate.mock.calls[0][0].rules[0]._id).toBe("existing_id")

@@ -493,7 +493,7 @@ describe("useNodeResultsStore", () => {
       s.startSolveJob("n1b", "sj2", "Node 1b", {}, "h2")
       // We'll directly inject a solve result for n1
       useNodeResultsStore.setState((prev) => ({
-        solveResults: { ...prev.solveResults, n1: { result: makeSolveResult(), jobId: "sj-old", configHash: "h-old", constraints: {}, nodeLabel: "N1" } },
+        solveResults: { ...prev.solveResults, n1: { result: makeSolveResult(), originalResult: makeSolveResult(), jobId: "sj-old", configHash: "h-old", constraints: {}, nodeLabel: "N1", frontier: null, selectedPointIndex: null } },
         trainResults: { ...prev.trainResults, n1: { result: makeTrainResult(), jobId: "tj-old", configHash: "th-old" } },
       }))
 
