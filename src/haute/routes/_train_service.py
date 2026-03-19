@@ -21,6 +21,7 @@ from haute._logging import get_logger
 from haute._types import GraphNode, PipelineGraph
 from haute.graph_utils import NodeType
 from haute.modelling._algorithms import ALGORITHM_REGISTRY
+from haute.modelling._split import DEFAULT_SPLIT_DICT
 from haute.routes._helpers import find_typed_node
 from haute.routes._job_store import JobStore
 from haute.schemas import TrainRequest, TrainResponse
@@ -30,8 +31,6 @@ logger = get_logger(component="server.modelling")
 # ── Default constants ─────────────────────────────────────────────
 _DEFAULT_BORDER_COUNT = 128  # CatBoost border count for VRAM estimation
 _DEFAULT_DEPTH = 6  # CatBoost tree depth for VRAM estimation
-_DEFAULT_TEST_SIZE = 0.2  # train/test split proportion
-_DEFAULT_SPLIT_SEED = 42  # reproducible random split seed
 
 # GLM config keys live at the top level of ModellingConfig (not inside
 # config.params).  Must be merged into train_params for GLMAlgorithm.
@@ -40,6 +39,44 @@ _GLM_CONFIG_KEYS: tuple[str, ...] = (
     "regularization", "alpha", "l1_ratio", "intercept",
     "var_power", "offset", "cv_folds",
 )
+
+
+# Valid GLM family → link combinations.  The canonical link (used when
+# the user leaves "link" empty) is listed first.
+_VALID_GLM_LINKS: dict[str, tuple[str, ...]] = {
+    "gaussian":  ("identity", "log", "inverse"),
+    "binomial":  ("logit", "probit", "cloglog"),
+    "poisson":   ("log", "identity", "sqrt"),
+    "gamma":     ("inverse", "log", "identity"),
+    "tweedie":   ("log", "identity"),
+    "inverse_gaussian": ("inverse_squared", "inverse", "log", "identity"),
+}
+
+
+def _validate_glm_family_link(family: str, link: str) -> None:
+    """Raise HTTPException(400) if the family/link combination is invalid."""
+    if not family:
+        return  # will use default (gaussian)
+    if family not in _VALID_GLM_LINKS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown GLM family '{family}'. "
+                f"Available: {', '.join(_VALID_GLM_LINKS)}."
+            ),
+        )
+    if not link:
+        return  # canonical link will be used
+    valid = _VALID_GLM_LINKS[family]
+    if link not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Link '{link}' is not valid for the {family} family. "
+                f"Valid links: {', '.join(valid)}. "
+                f"For a binary target like sale_flag, use family='binomial' with link='logit'."
+            ),
+        )
 
 
 class _VramCheck:
@@ -260,6 +297,12 @@ class TrainService:
                 ),
             )
 
+        # GLM: validate family/link combination
+        if algorithm == "glm":
+            family = config.get("family", "")
+            link = config.get("link", "")
+            _validate_glm_family_link(family, link)
+
     def _check_no_concurrent_jobs(self) -> None:
         """Reject if a training job is already running."""
         self._store._evict_stale()
@@ -391,6 +434,8 @@ class TrainService:
         # Free the preview cache to reclaim memory
         from haute.executor import _preview_cache
         _preview_cache.invalidate()
+        from haute.trace import _cache as _trace_cache
+        _trace_cache.invalidate()
         gc.collect()
         _mem_checkpoint("cleared preview cache")
 
@@ -480,11 +525,7 @@ class TrainService:
         target = config["target"]
         algorithm = config.get("algorithm", "catboost")
         name = config.get("name", node_id)
-        split_raw = config.get("split", {
-            "strategy": "random",
-            "test_size": _DEFAULT_TEST_SIZE,
-            "seed": _DEFAULT_SPLIT_SEED,
-        })
+        split_raw = config.get("split", DEFAULT_SPLIT_DICT)
 
         start_time = time.monotonic()
         self._store.update_job(job_id, start_time=start_time)

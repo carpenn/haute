@@ -5,7 +5,7 @@ from __future__ import annotations
 import heapq
 from collections import deque
 
-from haute._types import GraphEdge, HauteError
+from haute._types import GraphEdge, HauteError, build_parents_of
 
 
 class CycleError(HauteError):
@@ -58,10 +58,7 @@ def topo_sort_ids(node_ids: list[str], edges: list[GraphEdge]) -> list[str]:
 
 def ancestors(target_id: str, edges: list[GraphEdge], all_ids: set[str]) -> set[str]:
     """Get all ancestor node IDs of target (inclusive)."""
-    parents: dict[str, list[str]] = {nid: [] for nid in all_ids}
-    for e in edges:
-        if e.target in parents:
-            parents[e.target].append(e.source)
+    parents = build_parents_of(edges, all_ids)
 
     visited: set[str] = set()
     queue = deque([target_id])

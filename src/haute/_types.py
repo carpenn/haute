@@ -449,6 +449,18 @@ class GraphEdge(BaseModel):
     targetHandle: str | None = None  # noqa: N815 — matches React Flow frontend convention
 
 
+def build_parents_of(
+    edges: list[GraphEdge],
+    node_ids: set[str] | None = None,
+) -> dict[str, list[str]]:
+    """Build reverse adjacency list: node_id -> list of parent node_ids."""
+    parents: dict[str, list[str]] = {nid: [] for nid in node_ids} if node_ids else {}
+    for e in edges:
+        if node_ids is None or e.target in parents:
+            parents.setdefault(e.target, []).append(e.source)
+    return parents
+
+
 class PipelineGraph(BaseModel):
     """React Flow graph structure used throughout Haute.
 
@@ -478,10 +490,7 @@ class PipelineGraph(BaseModel):
     @cached_property
     def parents_of(self) -> dict[str, list[str]]:
         """Map each node to its parent node IDs (built from edges)."""
-        result: dict[str, list[str]] = {}
-        for e in self.edges:
-            result.setdefault(e.target, []).append(e.source)
-        return result
+        return build_parents_of(self.edges)
 
 
 def _sanitize_func_name(label: str) -> str:

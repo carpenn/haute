@@ -27,11 +27,12 @@ from typing import Any
 
 from haute._fingerprint_cache import FingerprintCache
 from haute._logging import get_logger
-from haute.executor import _build_node_fn, _compile_preamble
+from haute.executor import _build_node_fn, _compile_preamble, _preview_cache
 from haute.graph_utils import (
     NodeType,
     PipelineGraph,
     _execute_eager_core,
+    _prepare_graph,
     graph_fingerprint,
     topo_sort_ids,
 )
@@ -253,25 +254,67 @@ def execute_trace(
             target=target_node_id,
             prev_fingerprint=(_cache.fingerprint or "")[:8],
         )
-        # Cache miss — execute eagerly via shared core (raises on error)
-        preamble_ns = _compile_preamble(graph.preamble or "")
-        result = _execute_eager_core(
-            graph,
-            _build_node_fn,
-            target_node_id=target_node_id,
-            row_limit=row_limit,
-            swallow_errors=False,
-            preamble_ns=preamble_ns or None,
-            scenario=scenario,
-        )
-        # Trace never swallows errors so all values are DataFrames here.
-        eager_outputs = {
-            nid: df for nid, df in result.outputs.items() if df is not None
-        }
-        order = result.order
-        parents_of = result.parents_of
-        node_map = result.node_map
-        source_ids = {nid for nid in order if not parents_of.get(nid)}
+
+        # --- Try to reuse outputs from the preview cache ----------------
+        # Preview uses fingerprint f"{row_limit}:{scenario}" (no target),
+        # so compute that separately and check if we can skip execution.
+        preview_fp = graph_fingerprint(graph, f"{row_limit}:{scenario}")
+        preview_data = _preview_cache.try_get(preview_fp)
+        reused_preview = False
+
+        if preview_data is not None:
+            prev_outputs = preview_data["eager_outputs"]
+            # Preview uses swallow_errors=True, so some outputs may be
+            # None on error.  Only reuse if target node has a real value.
+            if (
+                target_node_id in prev_outputs
+                and prev_outputs[target_node_id] is not None
+            ):
+                # Graph-structure metadata still needs computing for
+                # the trace-specific fields (parents_of, node_map, etc.)
+                node_map, order, parents_of, _id_to_name = _prepare_graph(
+                    graph, target_node_id, scenario=scenario,
+                )
+                # Verify all nodes in the topo order have non-None outputs
+                if all(
+                    nid in prev_outputs and prev_outputs[nid] is not None
+                    for nid in order
+                ):
+                    eager_outputs = {
+                        nid: prev_outputs[nid] for nid in order
+                    }
+                    source_ids = {
+                        nid for nid in order if not parents_of.get(nid)
+                    }
+                    reused_preview = True
+                    logger.debug(
+                        "trace_reused_preview_cache",
+                        fingerprint=fp[:8],
+                        preview_fingerprint=preview_fp[:8],
+                        target=target_node_id,
+                        reused_nodes=len(eager_outputs),
+                    )
+
+        if not reused_preview:
+            # Cache miss — execute eagerly via shared core (raises on error)
+            preamble_ns = _compile_preamble(graph.preamble or "")
+            result = _execute_eager_core(
+                graph,
+                _build_node_fn,
+                target_node_id=target_node_id,
+                row_limit=row_limit,
+                swallow_errors=False,
+                preamble_ns=preamble_ns or None,
+                scenario=scenario,
+            )
+            # Trace never swallows errors so all values are DataFrames here.
+            eager_outputs = {
+                nid: df for nid, df in result.outputs.items() if df is not None
+            }
+            order = result.order
+            parents_of = result.parents_of
+            node_map = result.node_map
+            source_ids = {nid for nid in order if not parents_of.get(nid)}
 
         # Populate cache
         _cache.store(

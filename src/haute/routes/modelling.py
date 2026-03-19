@@ -75,13 +75,10 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
     node = _find_modelling_node(body.graph, body.node_id)
 
     from haute._ram_estimate import estimate_safe_training_rows
-    from haute.executor import _build_node_fn, _compile_preamble
 
     try:
-        preamble_ns = _compile_preamble(body.graph.preamble or "") or None
         ram_est = estimate_safe_training_rows(
-            body.graph, body.node_id, _build_node_fn,
-            preamble_ns=preamble_ns,
+            body.graph, body.node_id,
             scenario=body.scenario,
         )
     except Exception as exc:
@@ -265,3 +262,17 @@ async def export_script(body: ExportScriptRequest) -> ExportScriptResponse:
     filename = f"train_{config.get('name', 'model')}.py"
 
     return ExportScriptResponse(script=script, filename=filename)
+
+
+@router.delete("/model-cache")
+async def clear_model_cache(run_id: str | None = None) -> dict:
+    """Clear cached model artifacts downloaded from MLflow.
+
+    Pass ``?run_id=...`` to clear a specific run's cache, or omit to
+    clear all cached models.  Also evicts the in-memory model LRU cache
+    so the next scoring request re-downloads fresh artifacts.
+    """
+    from haute._mlflow_io import clear_model_cache as _clear
+
+    removed = _clear(run_id)
+    return {"removed": removed, "run_id": run_id}

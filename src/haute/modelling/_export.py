@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from haute.modelling._split import DEFAULT_SPLIT_DICT
+
 
 def generate_training_script(config: dict[str, Any], data_path: str) -> str:
     """Generate a self-contained Python training script.
@@ -34,7 +36,7 @@ def generate_training_script(config: dict[str, Any], data_path: str) -> str:
     algorithm = config.get("algorithm", "catboost")
     task = config.get("task", "regression")
     params = config.get("params", {})
-    split = config.get("split", {"strategy": "random", "test_size": 0.2, "seed": 42})
+    split = config.get("split", DEFAULT_SPLIT_DICT)
     metrics = config.get("metrics", ["gini", "rmse"])
     mlflow_experiment = config.get("mlflow_experiment")
     model_name = config.get("model_name")

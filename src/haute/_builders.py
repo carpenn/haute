@@ -466,6 +466,9 @@ def _build_modelling(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 @_register(NodeType.MODEL_SCORE)
 def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
+    # Default to "" (not "run") — empty sourceType means the node is
+    # unconfigured and should passthrough.  Codegen and score_from_config
+    # default to "run" because they only execute for configured nodes.
     source_type = config.get("sourceType", "")
     _run_id = config.get("run_id", "")
     _artifact_path = config.get("artifact_path", "")

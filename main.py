@@ -19,7 +19,13 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 @pipeline.node(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    return pl.scan_parquet("output/nb_batch.parquet")
+    df = pl.scan_parquet("output/nb_batch.parquet")
+    # -- user code --
+    df = (
+            df
+            .limit(1000000)
+        )
+    return df
 
 
 @pipeline.node(config="config/data_source/competitor_insights.json")
@@ -133,7 +139,6 @@ def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl
     """Join competitor scoring onto policies"""
     df = (
     policies
-    .limit(1000000)
     .join(
         competitor_scoring,
         on = 'quote_id',
@@ -205,9 +210,9 @@ def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     df = join_premiums
     # -- user code --
     df = (
-                                df
-                                .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
-                            )
+                                            df
+                                            .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
+                                        )
     return df
 
 

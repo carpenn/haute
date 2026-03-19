@@ -337,8 +337,6 @@ class TrainingJob:
         _report: Callable[[str, float], None],
     ) -> _PreparedData:
         """Load data, validate columns, clean null targets, and derive features."""
-        import pyarrow.parquet as pq
-
         from haute.modelling._algorithms import _mem_checkpoint
 
         owns_tmp = False
@@ -373,8 +371,9 @@ class TrainingJob:
 
         # Validate schema from parquet metadata (cheap, no data loaded)
         _report("Validating columns", 0.05)
-        pq_meta = pq.read_metadata(data_path)
-        if pq_meta.num_rows == 0:
+        from haute._polars_utils import read_parquet_metadata
+        pq_meta = read_parquet_metadata(Path(data_path))
+        if pq_meta["row_count"] == 0:
             raise ValueError("DataFrame is empty — cannot train on zero rows")
         schema_lf = pl.scan_parquet(data_path)
         schema_df = schema_lf.head(0).collect()
@@ -413,7 +412,7 @@ class TrainingJob:
             owns_tmp=owns_tmp,
             features=features,
             cat_features=cat_features,
-            total_rows=pq_meta.num_rows,
+            total_rows=pq_meta["row_count"],
         )
 
     def _split_data(

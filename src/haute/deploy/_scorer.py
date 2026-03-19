@@ -192,22 +192,20 @@ def score_graph(
                     _c: str = _code,
                     _sn: list[str] = _src_names,
                 ) -> _Frame:
-                    from haute._mlflow_io import _score_eager, load_local_model
+                    from haute._mlflow_io import load_local_model
+                    from haute._model_scorer import _run_score_pipeline
 
                     scoring_model = load_local_model(_p, _t)
                     lf = dfs[0] if dfs else pl.LazyFrame()
-                    available = set(lf.collect_schema().names())
-                    features = [
-                        f for f in scoring_model.feature_names
-                        if f in available
-                    ]
-                    result_lf = _score_eager(scoring_model, lf, features, _oc, _t)
-                    if _c:
-                        result_lf = _exec_user_code(
-                            _c, _sn, (result_lf,),
-                            extra_ns={"model": scoring_model},
-                        )
-                    return result_lf
+                    return _run_score_pipeline(
+                        scoring_model,
+                        lf,
+                        task=_t,
+                        output_col=_oc,
+                        code=_c,
+                        source_names=_sn,
+                        scenario="live",
+                    )
 
                 return func_name, model_score_fn, False
 

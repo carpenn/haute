@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from haute._logging import get_logger
+from haute._polars_utils import read_parquet_metadata
+from haute._types import build_parents_of
 from haute.graph_utils import GraphNode, NodeType, PipelineGraph
 
 logger = get_logger(component="ram_estimate")
@@ -174,9 +176,8 @@ _BYTES_PER_COL = 8
 
 def _parquet_metadata(path: str) -> tuple[int, int]:
     """Return (row_count, column_count) from parquet footer metadata."""
-    import pyarrow.parquet as pq
-    meta = pq.read_metadata(path)
-    return int(meta.num_rows), meta.num_columns
+    meta = read_parquet_metadata(Path(path))
+    return meta["row_count"], meta["column_count"]
 
 
 def _count_source_rows_for_node(node: GraphNode) -> int | None:
@@ -383,42 +384,54 @@ class RamEstimate(NamedTuple):
     """Number of columns (from source metadata)."""
 
 
-def _resolve_target_schema(
+def _resolve_target_columns(
     graph: PipelineGraph,
     target_node_id: str,
-    build_node_fn,
-    preamble_ns: dict | None,
     scenario: str,
 ) -> int | None:
-    """Resolve the column count at the training node via the lazy plan.
+    """Walk backwards from the target to determine column count.
 
-    Builds the Polars lazy plan up to the target node, then calls
-    ``collect_schema()`` to get column names and dtypes without
-    executing any data.  Returns the column count, or ``None`` if
-    schema resolution fails.
+    BFS from the target through ancestor nodes (respecting scenario
+    pruning).  Returns the column count from the first node that has
+    a definitive schema — either a ``selected_columns`` config or a
+    source parquet file with readable metadata.
     """
-    try:
-        from haute._execute_lazy import _execute_lazy
+    from collections import deque
 
-        lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
-            graph, build_node_fn,
-            target_node_id=target_node_id,
-            preamble_ns=preamble_ns,
-            scenario=scenario,
-        )
-        target_lf = lazy_outputs.get(target_node_id)
-        if target_lf is None:
-            return None
+    from haute._execute_lazy import _prune_live_switch_edges
 
-        import polars as pl
-        if isinstance(target_lf, pl.DataFrame):
-            return target_lf.width
-        # LazyFrame — resolve schema without executing
-        schema = target_lf.collect_schema()
-        return len(schema)
-    except Exception as exc:
-        logger.info("schema_resolution_failed", error=str(exc))
-        return None
+    node_map = {n.id: n for n in graph.nodes}
+    all_ids = set(node_map)
+    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
+
+    parents = build_parents_of(pruned_edges, all_ids)
+
+    visited: set[str] = set()
+    queue = deque([target_node_id])
+    while queue:
+        nid = queue.popleft()
+        if nid in visited:
+            continue
+        visited.add(nid)
+        node = node_map.get(nid)
+        if node is None:
+            continue
+
+        # selected_columns on the node config gives an exact answer
+        sel = node.data.config.get("selected_columns")
+        if sel and isinstance(sel, list) and len(sel) > 0:
+            return len(sel)
+
+        # Source nodes — read parquet metadata
+        if node.data.nodeType in (NodeType.API_INPUT, NodeType.DATA_SOURCE):
+            meta = _source_metadata_for_node(node)
+            if meta is not None:
+                _rows, cols = meta
+                return cols
+
+        queue.extend(parents.get(nid, []))
+
+    return None
 
 
 def estimate_safe_training_rows(
@@ -467,13 +480,9 @@ def estimate_safe_training_rows(
         )
 
     # ── 2. Column count at the training node ─────────────────────────
-    #   Resolve via the lazy plan (captures joins/transforms).
-    #   No fallback — if we can't resolve the schema, the estimate
-    #   would be wrong so we return empty rather than mislead.
-    n_columns = _resolve_target_schema(
-        graph, target_node_id, build_node_fn,
-        preamble_ns, scenario,
-    ) if build_node_fn is not None else None
+    #   Walk backwards through the graph from the target.  Returns the
+    #   count from the first node with selected_columns or source metadata.
+    n_columns = _resolve_target_columns(graph, target_node_id, scenario)
 
     if not n_columns:
         logger.info(

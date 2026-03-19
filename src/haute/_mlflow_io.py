@@ -6,6 +6,7 @@ Supports CatBoost (native ``.cbm``) and any MLflow pyfunc model.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -13,7 +14,7 @@ import polars as pl
 
 from haute._logging import get_logger
 from haute._lru_cache import LRUCache
-from haute._mlflow_utils import resolve_version
+from haute._mlflow_utils import resolve_mlflow_source
 
 if TYPE_CHECKING:
     from catboost import CatBoostClassifier, CatBoostRegressor
@@ -279,7 +280,13 @@ def _resolve_artifact_local(
     Saves downloaded artifacts under ``.cache/models/<run_id>/`` so they
     survive server restarts without re-downloading from remote tracking
     servers (saves ~30 s+ for Databricks-hosted artifacts).
+
+    Downloads to a temp file first then renames atomically, so a partial
+    download (network interruption, timeout) never leaves a corrupt file
+    in the cache.
     """
+    import shutil
+    import tempfile
     from pathlib import Path
 
     cache_dir = Path.cwd() / ".cache" / "models" / run_id
@@ -292,20 +299,78 @@ def _resolve_artifact_local(
         )
         return str(local_path)
 
-    # Cache miss — download from tracking server
+    # Cache miss — download to a temp directory first, then move into
+    # place atomically.  If the download is interrupted the temp dir
+    # is cleaned up and no corrupt file is left in the cache.
     logger.info(
         "mlflow_artifact_downloading",
         run_id=run_id,
         artifact=artifact_path,
     )
-    downloaded = mlflow.artifacts.download_artifacts(
-        f"runs:/{run_id}/{artifact_path}",
-        dst_path=str(cache_dir),
-    )
-    # download_artifacts may nest inside a subdirectory; prefer exact path
-    if local_path.is_file():
-        return str(local_path)
-    return str(downloaded)
+    tmp_dir = None
+    try:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="haute_dl_"))
+        downloaded = mlflow.artifacts.download_artifacts(
+            f"runs:/{run_id}/{artifact_path}",
+            dst_path=str(tmp_dir),
+        )
+        downloaded_path = Path(downloaded)
+        if not downloaded_path.is_file():
+            # download_artifacts may nest; look for the expected filename
+            downloaded_path = tmp_dir / Path(artifact_path).name
+        if not downloaded_path.is_file():
+            raise FileNotFoundError(
+                f"Download completed but artifact not found at {downloaded_path}"
+            )
+
+        # Move into cache atomically
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(downloaded_path), str(local_path))
+        logger.info(
+            "mlflow_artifact_cached",
+            path=str(local_path),
+            size_mb=round(local_path.stat().st_size / 1024**2, 1),
+        )
+    except Exception:
+        # Clean up partial cache entry if it was created
+        if local_path.is_file():
+            local_path.unlink()
+        raise
+    finally:
+        if tmp_dir and tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return str(local_path)
+
+
+def clear_model_cache(run_id: str | None = None) -> int:
+    """Delete cached model artifacts, returning the number of files removed.
+
+    If *run_id* is given, only that run's cache is cleared.
+    Otherwise all cached models are removed.
+    """
+    import shutil
+    from pathlib import Path
+
+    cache_root = Path.cwd() / ".cache" / "models"
+    if not cache_root.exists():
+        return 0
+
+    removed = 0
+    if run_id:
+        target = cache_root / run_id
+        if target.exists():
+            removed = sum(1 for _ in target.glob("*") if _.is_file())
+            shutil.rmtree(target, ignore_errors=True)
+    else:
+        for d in cache_root.iterdir():
+            if d.is_dir():
+                removed += sum(1 for _ in d.glob("*") if _.is_file())
+        shutil.rmtree(cache_root, ignore_errors=True)
+
+    # Also evict from the in-memory LRU cache
+    _model_cache.clear()
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -353,38 +418,14 @@ def load_mlflow_model(
             f"Invalid task {task!r}. Expected one of: {', '.join(valid_tasks)}"
         )
 
-    try:
-        import mlflow  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "mlflow is not installed. Install it with: pip install mlflow"
-        ) from None
-
-    from mlflow.tracking import MlflowClient
-
-    from haute.modelling._mlflow_log import resolve_tracking_backend
-
-    if not tracking_uri:
-        tracking_uri, _backend = resolve_tracking_backend()
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient(tracking_uri=tracking_uri)
-
-    # Resolve concrete run_id and artifact_path depending on source_type
-    resolved_run_id = run_id
+    resolved_run_id, resolved_version, mlflow_mod, client = resolve_mlflow_source(
+        source_type=source_type,
+        run_id=run_id,
+        registered_model=registered_model,
+        version=version,
+        tracking_uri=tracking_uri,
+    )
     resolved_artifact = artifact_path
-    resolved_version = version
-
-    if source_type == "registered":
-        if not registered_model:
-            raise ValueError("registered_model is required when sourceType is 'registered'")
-        resolved_version = resolve_version(client, registered_model, version)
-        mv = client.get_model_version(registered_model, resolved_version)
-        resolved_run_id = mv.run_id or ""
-    elif source_type == "run":
-        if not resolved_run_id:
-            raise ValueError("run_id is required when sourceType is 'run'")
-    else:
-        raise ValueError(f"Invalid sourceType: {source_type!r}. Expected 'run' or 'registered'.")
 
     # Auto-discover artifact if not specified
     if not resolved_artifact:
@@ -407,20 +448,39 @@ def load_mlflow_model(
         assert cached is not None  # guaranteed by __contains__ check above
         return cached
 
-    # Load model based on detected flavor
-    if flavor == "catboost":
+    # Load model based on detected flavor.
+    # If loading fails (corrupt/truncated cache), delete the cached file
+    # and re-download once before giving up.
+    if flavor in ("catboost", "rustystats"):
         local_path = _resolve_artifact_local(
-            mlflow, resolved_run_id, resolved_artifact,
+            mlflow_mod, resolved_run_id, resolved_artifact,
         )
-        raw_model = _load_catboost_model(local_path, task)
-        scoring_model = _wrap_catboost(raw_model)
-    elif flavor == "rustystats":
-        local_path = _resolve_artifact_local(
-            mlflow, resolved_run_id, resolved_artifact,
-        )
-        scoring_model = _load_rustystats_model(local_path)
+        try:
+            if flavor == "catboost":
+                raw_model = _load_catboost_model(local_path, task)
+                scoring_model = _wrap_catboost(raw_model)
+            else:
+                scoring_model = _load_rustystats_model(local_path)
+        except Exception as first_err:
+            # Corrupt cache — delete and retry with a fresh download
+            logger.warning(
+                "model_load_failed_retrying",
+                path=local_path,
+                error=str(first_err),
+            )
+            cached_file = Path(local_path)
+            if cached_file.is_file():
+                cached_file.unlink()
+            local_path = _resolve_artifact_local(
+                mlflow_mod, resolved_run_id, resolved_artifact,
+            )
+            if flavor == "catboost":
+                raw_model = _load_catboost_model(local_path, task)
+                scoring_model = _wrap_catboost(raw_model)
+            else:
+                scoring_model = _load_rustystats_model(local_path)
     else:
-        raw_model = _load_pyfunc_model(mlflow, resolved_run_id, resolved_artifact)
+        raw_model = _load_pyfunc_model(mlflow_mod, resolved_run_id, resolved_artifact)
         scoring_model = _wrap_pyfunc(raw_model)
 
     _model_cache.put(cache_key, scoring_model)

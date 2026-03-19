@@ -20,7 +20,7 @@ from typing import Any
 
 from haute._logging import get_logger
 from haute._lru_cache import LRUCache
-from haute._mlflow_utils import resolve_version
+from haute._mlflow_utils import resolve_mlflow_source
 
 logger = get_logger(component="optimiser_io")
 
@@ -95,40 +95,13 @@ def load_mlflow_optimiser_artifact(
     Returns:
         Parsed artifact dict (same shape as ``load_optimiser_artifact``).
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError(
-            "mlflow is not installed. Install it with: pip install mlflow"
-        ) from None
-
-    from mlflow.tracking import MlflowClient
-
-    from haute.modelling._mlflow_log import resolve_tracking_backend
-
-    if not tracking_uri:
-        tracking_uri, _backend = resolve_tracking_backend()
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient(tracking_uri=tracking_uri)
-
-    resolved_run_id = run_id
-    resolved_version = version
-
-    if source_type == "registered":
-        if not registered_model:
-            raise ValueError(
-                "registered_model is required when sourceType is 'registered'"
-            )
-        resolved_version = resolve_version(client, registered_model, version)
-        mv = client.get_model_version(registered_model, resolved_version)
-        resolved_run_id = mv.run_id or ""
-    elif source_type == "run":
-        if not resolved_run_id:
-            raise ValueError("run_id is required when sourceType is 'run'")
-    else:
-        raise ValueError(
-            f"Invalid sourceType: {source_type!r}. Expected 'run' or 'registered'."
-        )
+    resolved_run_id, resolved_version, mlflow, _client = resolve_mlflow_source(
+        source_type=source_type,
+        run_id=run_id,
+        registered_model=registered_model,
+        version=version,
+        tracking_uri=tracking_uri,
+    )
 
     cache_key = (source_type, resolved_run_id, resolved_version)
     if cache_key in _mlflow_cache:

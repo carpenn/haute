@@ -21,6 +21,7 @@ from haute._types import (
     PipelineGraph,
     _Frame,
     _sanitize_func_name,
+    build_parents_of,
     resolve_orig_source_names,
 )
 
@@ -135,10 +136,7 @@ def _prepare_graph(
     relevant_edges = [e for e in edges if e.source in needed and e.target in needed]
     order = topo_sort_ids([nid for nid in all_ids if nid in needed], relevant_edges)
 
-    parents_of: dict[str, list[str]] = {nid: [] for nid in order}
-    for e in relevant_edges:
-        if e.target in parents_of:
-            parents_of[e.target].append(e.source)
+    parents_of = build_parents_of(relevant_edges, set(order))
 
     id_to_name: dict[str, str] = {}
     for nid in order:

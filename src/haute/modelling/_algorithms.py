@@ -262,39 +262,24 @@ def _build_pool(
     tag = f"_build_pool({n_rows:,} rows)"
     _mem_checkpoint(f"{tag} start")
 
+    from haute._mlflow_io import _prepare_predict_frame
+
     cat_set = set(cat_features or [])
-    numeric_cols = [f for f in features if f not in cat_set]
     cat_indices = [i for i, f in enumerate(features) if f in cat_set]
 
-    # Select only the feature columns (may be a no-op if df already has
-    # only features, e.g. when the caller pre-selects).
+    # Select only features present in the DataFrame (may differ when the
+    # caller pre-selects columns).
     cols_to_select = [f for f in features if f in df.columns]
     selected = df.select(cols_to_select) if cols_to_select != df.columns else df
-    if numeric_cols:
-        selected = selected.with_columns(
-            [pl.col(c).cast(pl.Float32) for c in numeric_cols if c in selected.columns]
-        )
-    _mem_checkpoint(f"{tag} after float32 cast")
 
-    if cat_set:
-        # Cast String → Categorical before to_pandas().  Polars Categorical
-        # stores int32 codes + a small dictionary; .to_pandas() preserves
-        # this as Pandas CategoricalDtype (~12× smaller than object dtype,
-        # which allocates a Python string object per cell).
-        selected = selected.with_columns(
-            [
-                pl.col(c).fill_null("_MISSING_").cast(pl.Categorical)
-                for c in cat_set if c in selected.columns
-            ]
-        )
-        x_data = selected.to_pandas()
-    else:
-        # Pure numeric: skip Pandas, go straight to numpy float32
-        x_data = selected.to_numpy()
+    x_data = _prepare_predict_frame(
+        selected, cols_to_select,
+        cat_feature_names=frozenset(cat_set), flavor="catboost",
+    )
     del selected
     gc.collect()
     _malloc_trim()
-    _mem_checkpoint(f"{tag} after to_pandas/numpy")
+    _mem_checkpoint(f"{tag} after data preparation")
 
     # Extract labels from df if not pre-supplied by the caller.
     # Cast to Float64 before to_numpy to avoid Python None values
@@ -491,26 +476,16 @@ class CatBoostAlgorithm(BaseAlgorithm):
     def predict(
         self, model: Any, df: pl.DataFrame, features: list[str],
     ) -> np.ndarray:
+        from haute._mlflow_io import _prepare_predict_frame
+
         selected = df.select(features)
-        cat_cols = {
+        cat_cols = frozenset(
             c for c in features
             if selected[c].dtype in (pl.Utf8, pl.Categorical, pl.String)
-        }
-        numeric_cols = [c for c in features if c not in cat_cols]
-        if numeric_cols:
-            selected = selected.with_columns(
-                [pl.col(c).cast(pl.Float32) for c in numeric_cols]
-            )
-        if cat_cols:
-            selected = selected.with_columns(
-                [
-                    pl.col(c).fill_null("_MISSING_").cast(pl.Categorical)
-                    for c in cat_cols
-                ]
-            )
-            x_data = selected.to_pandas()
-        else:
-            x_data = selected.to_numpy()
+        )
+        x_data = _prepare_predict_frame(
+            selected, features, cat_feature_names=cat_cols, flavor="catboost",
+        )
         del selected
         preds: np.ndarray = model.predict(x_data).flatten()
         del x_data

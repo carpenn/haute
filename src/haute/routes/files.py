@@ -135,14 +135,14 @@ async def get_databricks_schema(table: str) -> SchemaResponse:
         )
 
     try:
-        import pyarrow.parquet as pq
-
+        from haute._polars_utils import read_parquet_metadata
         from haute.schemas import ColumnInfo
 
         df = pl.scan_parquet(p).head(1000).collect()
         columns = [ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns]
         preview_df = df.head(5)
-        row_count = pq.read_metadata(str(p)).num_rows
+        meta = read_parquet_metadata(p)
+        row_count = meta["row_count"]
 
         return SchemaResponse(
             path=table,

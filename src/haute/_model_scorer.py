@@ -26,6 +26,85 @@ _scenario_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 _SCORE_BATCH_SIZE = 500_000
 
 
+def _run_score_pipeline(
+    scoring_model: Any,
+    lf: pl.LazyFrame,
+    *,
+    task: str,
+    output_col: str,
+    code: str = "",
+    source_names: list[str] | None = None,
+    extra_dfs: tuple[_Frame, ...] = (),
+    scenario: str = "live",
+    row_limit: int | None = None,
+) -> _Frame:
+    """Core scoring logic shared by ``ModelScorer.score()`` and deploy scorer.
+
+    1. Intersect model features with available columns.
+    2. Run eager or batched prediction.
+    3. Optionally execute user post-processing code.
+
+    Parameters
+    ----------
+    scoring_model
+        A pre-loaded ``ScoringModel`` (from MLflow or local disk).
+    lf
+        The input LazyFrame to score.
+    task, output_col, code, source_names
+        Scoring configuration (same semantics as ``ModelScorer`` attributes).
+    extra_dfs
+        Additional upstream LazyFrames passed through to user code.
+    scenario
+        ``"live"`` → eager path; anything else → batched path.
+    row_limit
+        When set, forces the eager path regardless of scenario.
+    """
+    from haute._mlflow_io import _score_eager as score_eager_
+
+    available_cols = set(lf.collect_schema().names())
+    features = [f for f in scoring_model.feature_names if f in available_cols]
+
+    if scenario == "live" or row_limit:
+        result_lf = score_eager_(scoring_model, lf, features, output_col, task)
+    else:
+        result_lf = _score_batched_standalone(scoring_model, lf, features, output_col, task)
+
+    if code:
+        from haute.executor import _exec_user_code
+
+        all_dfs = (result_lf,) + extra_dfs
+        result_lf = _exec_user_code(
+            code, source_names or [], all_dfs,
+            extra_ns={"model": scoring_model},
+        )
+    return result_lf
+
+
+def _score_batched_standalone(
+    scoring_model: Any,
+    lf: pl.LazyFrame,
+    features: list[str],
+    output_col: str,
+    task: str,
+) -> pl.LazyFrame:
+    """Sink → batch score → lazy scan (low-memory path)."""
+    import atexit
+    import os
+
+    input_path = _sink_to_temp(lf)
+    scored_path = _batch_score_to_parquet(
+        scoring_model, input_path, features, output_col, task,
+    )
+
+    def _cleanup(p: str = scored_path) -> None:
+        if os.path.exists(p):
+            os.unlink(p)
+
+    atexit.register(_cleanup)
+    os.unlink(input_path)
+    return pl.scan_parquet(scored_path)
+
+
 class ModelScorer:
     """Load an MLflow model and score a LazyFrame.
 
@@ -111,25 +190,16 @@ class ModelScorer:
         )
 
         lf = dfs[0] if dfs else pl.LazyFrame()
-        available_cols = set(lf.collect_schema().names())
-        features = [f for f in scoring_model.feature_names if f in available_cols]
-
-        # Eager path: "live" scenario or row-limited preview/trace
-        # (data is small, no need for disk round-trip).
-        # Batched path: non-live production scoring (large data, low memory).
-        if self.scenario == "live" or self.row_limit:
-            result_lf = self._score_eager(scoring_model, lf, features)
-        else:
-            result_lf = self._score_batched(scoring_model, lf, features)
-
-        if self.code:
-            from haute.executor import _exec_user_code
-
-            result_lf = _exec_user_code(
-                self.code, self.source_names, (result_lf,),
-                extra_ns={"model": scoring_model},
-            )
-        return result_lf
+        return _run_score_pipeline(
+            scoring_model,
+            lf,
+            task=self.task,
+            output_col=self.output_col,
+            code=self.code,
+            source_names=self.source_names,
+            scenario=self.scenario,
+            row_limit=self.row_limit,
+        )
 
     # ------------------------------------------------------------------
     # Scoring strategies

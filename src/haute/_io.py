@@ -97,16 +97,11 @@ def _load_external_object_uncached(
 
         return safe_joblib_load(path)
     elif file_type == "catboost":
-        if model_class == "regressor":
-            from catboost import CatBoostRegressor
+        from haute._mlflow_io import _load_catboost_model
 
-            m = CatBoostRegressor()
-        else:
-            from catboost import CatBoostClassifier
-
-            m = CatBoostClassifier()
-        m.load_model(path)
-        return m
+        class_to_task = {"regressor": "regression", "classifier": "classification"}
+        task = class_to_task.get(model_class, "regression")
+        return _load_catboost_model(path, task)
     else:  # pickle
         from haute._sandbox import safe_unpickle
 

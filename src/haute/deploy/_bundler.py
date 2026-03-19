@@ -145,27 +145,14 @@ def _resolve_registered_model(
         ValueError: If the model or version cannot be found, or if the
             resolved model version has no associated run.
     """
-    try:
-        import mlflow
-    except ImportError:
-        raise ImportError(
-            "mlflow is required to bundle MODEL_SCORE artifacts. "
-            "Install it with: pip install mlflow"
-        ) from None
-
-    from mlflow.tracking import MlflowClient
-
     from haute._mlflow_io import _find_model_artifact
-    from haute._mlflow_utils import resolve_version
-    from haute.modelling._mlflow_log import resolve_tracking_backend
+    from haute._mlflow_utils import resolve_mlflow_source
 
-    tracking_uri, _ = resolve_tracking_backend()
-    mlflow.set_tracking_uri(tracking_uri)
-    client = MlflowClient(tracking_uri=tracking_uri)
-
-    resolved_version = resolve_version(client, registered_model, version)
-    mv = client.get_model_version(registered_model, resolved_version)
-    run_id = mv.run_id or ""
+    run_id, resolved_version, _mlflow, client = resolve_mlflow_source(
+        source_type="registered",
+        registered_model=registered_model,
+        version=version,
+    )
 
     if not run_id:
         raise ValueError(

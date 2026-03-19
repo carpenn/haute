@@ -2,19 +2,14 @@
   "algorithm": "glm",
   "target": "sale_flag",
   "family": "binomial",
-  "link": "log",
+  "link": "logit",
   "metrics": [
     "auc",
     "logloss"
   ],
   "terms": {
-    "premium": {
-      "type": "bs",
-      "monotonicity": "decreasing"
-    },
     "difference_to_market": {
-      "type": "bs",
-      "monotonicity": "decreasing"
+      "type": "ns"
     }
   },
   "split": {

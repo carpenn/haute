@@ -833,12 +833,13 @@ def _resolve_node_config(
     decorator_kwargs = dict(decorator_kwargs)
     config_ref = decorator_kwargs.pop("config", None)
     if config_ref:
+        config_ref = config_ref.replace("\\", "/")
         node_type_hint = infer_node_type_from_config_path(config_ref)
         base = base_dir or Path.cwd()
         try:
             loaded = load_node_config(config_ref, base_dir=base)
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            logger.warning("config_load_failed", path=config_ref, error=str(exc))
+        except (FileNotFoundError, json.JSONDecodeError):
+            logger.warning("config_path_fallback", original_path=config_ref, func_name=func_name)
             # On Windows the config path may be mangled by backslash
             # escape interpretation (e.g. \b→backspace, \r→CR).  Recover
             # by scanning config folders for a file matching func_name.
