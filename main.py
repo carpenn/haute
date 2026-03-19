@@ -19,25 +19,25 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 @pipeline.node(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    return pl.scan_parquet("data/batch_quotes.parquet")
+    return pl.scan_parquet("output\nb_batch.parquet")
 
 
 @pipeline.node(config="config/data_source/competitor_insights.json")
 def competitor_insights() -> pl.LazyFrame:
     """competitor_insights node"""
-    return pl.scan_parquet("data/competitor_insight.parquet")
+    return pl.scan_parquet("data\competitor_premiums\competitor_insight.parquet")
 
 
 @pipeline.node(config="config/data_source/policy_data.json")
 def policy_data() -> pl.LazyFrame:
     """policy_data node"""
-    return pl.scan_parquet("data/britsure_policies.parquet")
+    return pl.scan_parquet("data\claims\britsure_policies.parquet")
 
 
 @pipeline.node(config="config/data_source/quoted_premiums.json")
 def quoted_premiums() -> pl.LazyFrame:
     """quoted_premiums node"""
-    return pl.scan_parquet("data/britsure_premiums.parquet")
+    return pl.scan_parquet("data\competitor_premiums\britsure_premiums.parquet")
 
 
 @pipeline.node(config="config/quote_input/quotes.json")
@@ -205,9 +205,9 @@ def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     df = join_premiums
     # -- user code --
     df = (
-                df
-                .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
-            )
+                    df
+                    .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
+                )
     return df
 
 

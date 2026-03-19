@@ -1,5 +1,5 @@
 {
-  "path": "data/britsure_policies.parquet",
+  "path": "data\\claims\\britsure_policies.parquet",
   "selected_columns": [
     "policy_id",
     "quote_id"
