@@ -1022,6 +1022,28 @@ class TestResolveNodeConfig:
                 _resolve_node_config(kwargs, "", [], 0, None)
         assert kwargs == original
 
+    def test_mangled_config_path_recovered_by_func_name(self, tmp_path):
+        """When the config path is mangled (e.g. Windows backslash escapes),
+        _resolve_node_config should recover by scanning config folders for
+        a JSON file matching the function name."""
+        # Write a valid config file for a banding node
+        cfg = {"factors": [{"column": "age", "banding": "continuous"}]}
+        cfg_dir = tmp_path / "config" / "banding"
+        cfg_dir.mkdir(parents=True)
+        cfg_file = cfg_dir / "age_band.json"
+        cfg_file.write_text(json.dumps(cfg))
+
+        # Simulate a mangled path (e.g. \b interpreted as backspace)
+        mangled_path = "config/\x08anding/age_band.json"
+        with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
+            node_type, loaded = _resolve_node_config(
+                {"config": mangled_path},
+                "", ["df"], 1, tmp_path,
+                func_name="age_band",
+            )
+        assert node_type == NodeType.BANDING
+        assert loaded.get("factors") == cfg["factors"]
+
 
 # ===========================================================================
 # _strip_docstring — additional edge cases

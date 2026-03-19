@@ -337,7 +337,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
     node_type = node.data.nodeType
     if has_config_folder(node_type):
         func_name = _sanitize_func_name(node.data.label)
-        cfg_path = str(config_path_for_node(node_type, func_name))
+        cfg_path = config_path_for_node(node_type, func_name).as_posix()
         try:
             def_idx = code.index("\ndef ")
             code = f'@pipeline.node(config="{cfg_path}")' + code[def_idx:]
@@ -376,7 +376,7 @@ def _gen_api_input(node: GraphNode, source_names: list[str]) -> str:
     row_id_kw = ""
     if config.get("row_id_column"):
         row_id_kw = f', row_id_column="{config["row_id_column"]}"'
-    cfg_path = str(config_path_for_node(node.data.nodeType, func_name))
+    cfg_path = config_path_for_node(node.data.nodeType, func_name).as_posix()
     template = _api_input_template(path)
     return template.format(
         func_name=func_name,
@@ -473,7 +473,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
     user_code = (config.get("code") or "").strip()
     params = _build_params(source_names)
     first_param = _first_source(source_names)
-    cfg_path = str(config_path_for_node(NodeType.MODEL_SCORE, func_name))
+    cfg_path = config_path_for_node(NodeType.MODEL_SCORE, func_name).as_posix()
 
     # Build decorator kwargs (post-processed to config= by _post_process_node_code)
     if source_type == "registered":
@@ -1101,7 +1101,7 @@ def graph_to_code_multi(
 
     for sm_name, sm_meta in submodels.items():
         sm_graph = sm_meta.get("graph", {})
-        sm_file = sm_meta.get("file", f"modules/{sm_name}.py")
+        sm_file = sm_meta.get("file", f"modules/{sm_name}.py").replace("\\", "/")
         raw_nodes = sm_graph.get("nodes", [])
         raw_edges = sm_graph.get("edges", [])
         sm_nodes = [
@@ -1206,10 +1206,10 @@ def graph_to_code_multi(
         root_connect_pairs.append((src_func, tgt_func))
 
     # Submodel import lines
-    sm_imports = [
-        f'pipeline.submodel("{sm_meta.get("file", f"modules/{sm_name}.py")}")'
-        for sm_name, sm_meta in submodels.items()
-    ]
+    sm_imports = []
+    for sm_name, sm_meta in submodels.items():
+        sm_path = sm_meta.get("file", f"modules/{sm_name}.py").replace("\\", "/")
+        sm_imports.append(f'pipeline.submodel("{sm_path}")')
 
     all_preserved = preserved_blocks if preserved_blocks is not None else graph.preserved_blocks
 

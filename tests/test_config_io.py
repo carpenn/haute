@@ -235,3 +235,17 @@ class TestCollectNodeConfigs:
         graph = make_graph({"nodes": nodes, "edges": []})
         configs = collect_node_configs(graph)
         assert len(configs) == 14
+
+    def test_config_paths_always_use_forward_slashes(self):
+        """Config path keys must use forward slashes (not OS-dependent backslashes)."""
+        graph = make_graph({
+            "nodes": [
+                {"id": "b", "data": {"label": "age_band", "nodeType": "banding", "config": {"factors": []}}},
+                {"id": "r", "data": {"label": "area_rate", "nodeType": "ratingStep", "config": {"tables": []}}},
+            ],
+            "edges": [],
+        })
+        configs = collect_node_configs(graph)
+        for path in configs:
+            assert "\\" not in path, f"Config path contains backslash: {path}"
+            assert path.startswith("config/"), f"Config path should start with config/: {path}"

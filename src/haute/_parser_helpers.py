@@ -16,7 +16,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from haute._config_io import infer_node_type_from_config_path, load_node_config
+from haute._config_io import (
+    find_config_by_func_name,
+    infer_node_type_from_config_path,
+    load_node_config,
+)
 from haute._config_validation import warn_unrecognized_config_keys
 from haute._logging import get_logger
 from haute.graph_utils import (
@@ -183,6 +187,7 @@ def _extract_decorated_nodes(
 
         node_type, config = _resolve_node_config(
             decorator_kwargs, body, param_names, n_params, base_dir,
+            func_name=func_name,
         )
 
         raw_nodes.append(
@@ -815,6 +820,7 @@ def _resolve_node_config(
     param_names: list[str],
     n_params: int,
     base_dir: Path | None,
+    func_name: str = "",
 ) -> tuple[NodeType, dict[str, Any]]:
     """Resolve node type and config from decorator kwargs.
 
@@ -833,7 +839,14 @@ def _resolve_node_config(
             loaded = load_node_config(config_ref, base_dir=base)
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             logger.warning("config_load_failed", path=config_ref, error=str(exc))
+            # On Windows the config path may be mangled by backslash
+            # escape interpretation (e.g. \b→backspace, \r→CR).  Recover
+            # by scanning config folders for a file matching func_name.
             loaded = {}
+            if func_name:
+                recovered = find_config_by_func_name(func_name, base)
+                if recovered is not None:
+                    loaded, node_type_hint = recovered
         node_type = node_type_hint or _infer_node_type(decorator_kwargs, n_params)
         config = dict(loaded)
         # Code lives in the .py function body, not in the JSON file

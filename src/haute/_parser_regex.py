@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import ast
 import re
+from pathlib import Path
 from typing import Any
 
+from haute._config_io import find_config_by_func_name
 from haute._logging import get_logger
 from haute._parser_helpers import (
     _build_edges,
@@ -142,6 +144,9 @@ def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> 
     Extracts all @pipeline.node functions, marks broken ones with an error
     in their config, and still returns the full graph.
     """
+    # Resolve base_dir from source_file for config loading
+    base_dir = Path(source_file).parent if source_file else Path.cwd()
+
     # Pipeline metadata via regex
     meta_match = _RE_PIPELINE_META.search(source)
     pipeline_name = meta_match.group(1) if meta_match else "main"
@@ -157,6 +162,17 @@ def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> 
         param_names = block["param_names"]
         n_params = len(param_names)
         node_type = _infer_node_type(decorator_kwargs, n_params)
+
+        # If the decorator references an external config file, try to
+        # load it.  The config= path in the source may be mangled by
+        # Windows backslash escapes (the reason we are in the regex
+        # fallback), so reconstruct it from the function name.
+        config_kwarg = decorator_kwargs.pop("config", None)
+        loaded_config: dict | None = None
+        if config_kwarg and func_name:
+            recovered = find_config_by_func_name(func_name, base_dir)
+            if recovered is not None:
+                loaded_config, node_type = recovered
 
         # Try to parse the function individually to get the docstring
         params_str = ", ".join(param_names)
@@ -176,7 +192,9 @@ def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> 
             has_syntax_error = True
 
         body = block["body_text"] if not has_syntax_error else ""
-        config = _build_node_config(node_type, decorator_kwargs, body, param_names)
+        config = loaded_config if loaded_config is not None else _build_node_config(
+            node_type, decorator_kwargs, body, param_names,
+        )
 
         raw_nodes.append(
             {

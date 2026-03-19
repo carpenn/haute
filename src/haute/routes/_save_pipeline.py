@@ -183,7 +183,7 @@ class SavePipelineService:
             if not folder_path.is_dir():
                 continue
             for json_file in folder_path.glob("*.json"):
-                rel = str(json_file.relative_to(self._root))
+                rel = json_file.relative_to(self._root).as_posix()
                 if rel not in config_files:
                     json_file.unlink()
                     logger.info("stale_config_removed", path=rel)

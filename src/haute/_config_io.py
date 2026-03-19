@@ -150,6 +150,37 @@ def remove_config_file(
     return False
 
 
+def find_config_by_func_name(
+    func_name: str,
+    base_dir: Path,
+) -> tuple[dict[str, Any], NodeType] | None:
+    """Scan config folders for a JSON file matching *func_name*.
+
+    Used as a recovery path when the ``config=`` path in a ``.py`` file is
+    mangled by Windows backslash escape interpretation (e.g. ``\\b`` →
+    backspace).  The function name is always a valid Python identifier and
+    unaffected by path escapes, so we can reconstruct the correct file.
+
+    Returns ``(config_dict, node_type)`` on success, or ``None``.
+    """
+    for folder, node_type in FOLDER_TO_NODE_TYPE.items():
+        candidate = base_dir / "config" / folder / f"{func_name}.json"
+        if candidate.is_file():
+            try:
+                config = dict(json.loads(candidate.read_text()))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning(
+                    "config_recovery_failed",
+                    func=func_name,
+                    path=str(candidate),
+                    error=str(exc),
+                )
+                return None
+            logger.info("config_recovered", func=func_name, path=str(candidate))
+            return config, node_type
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Graph-level helpers
 # ---------------------------------------------------------------------------
@@ -172,7 +203,7 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
         if node.data.config.get("instanceOf"):
             continue
         func_name = _sanitize_func_name(node.data.label)
-        rel_path = str(config_path_for_node(nt, func_name))
+        rel_path = config_path_for_node(nt, func_name).as_posix()
         filtered = {k: v for k, v in node.data.config.items() if k not in _CODE_KEYS}
         configs[rel_path] = json.dumps(filtered, indent=2, ensure_ascii=False) + "\n"
     return configs
