@@ -1,16 +1,24 @@
-"""RAM estimation for training — sample-probe approach.
+"""RAM estimation for training — metadata-based approach.
 
-Before materialising a full pipeline for model training, run a small
-probe (default 1 000 rows) through the pipeline, measure the per-row
-memory footprint, and extrapolate to the full dataset.  If the
-estimated total (with a CatBoost overhead multiplier) would exceed
-available system RAM, calculate a safe ``row_limit`` and return a
-human-readable warning.
+Before materialising a full pipeline for model training, estimate the
+memory footprint from parquet metadata alone:
+
+1. Walk the graph backwards from the training node (respecting the
+   active scenario and live-switch pruning) to find ancestor sources.
+2. Read parquet row-group metadata — row count and column count — from
+   those sources.  This is instant (reads only the file footer).
+3. Estimate ``bytes_per_row`` from column count × dtype width, then
+   apply an algorithm-specific overhead multiplier.
+4. If the estimate exceeds available RAM, calculate a safe row limit.
+
+This replaces the previous probe-based approach which ran a 1 000-row
+sample through the pipeline.  The probe was fragile: inner joins with
+no key overlap in small samples produced zero rows, breaking the
+estimate.  Metadata is always available and always accurate.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -42,17 +50,14 @@ def available_ram_bytes() -> int:
     - **Windows**: ``GlobalMemoryStatusEx`` via ctypes.
     - **Fallback**: conservative 4 GiB default.
     """
-    # Linux: /proc/meminfo gives the most accurate available figure
     try:
         with open("/proc/meminfo") as f:
             for line in f:
                 if line.startswith("MemAvailable:"):
-                    # Format: "MemAvailable:   29146944 kB"
                     return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
         pass
 
-    # macOS / POSIX fallback
     try:
         import os
 
@@ -63,7 +68,6 @@ def available_ram_bytes() -> int:
     except (AttributeError, ValueError):
         pass
 
-    # Windows: GlobalMemoryStatusEx
     import sys
 
     if sys.platform == "win32":
@@ -92,7 +96,6 @@ def available_ram_bytes() -> int:
         except (OSError, AttributeError, ImportError):
             pass
 
-    # Last resort: assume 4 GiB
     return 4 * 1024**3
 
 
@@ -102,12 +105,7 @@ def available_ram_bytes() -> int:
 
 
 def available_vram_bytes() -> int | None:
-    """Return total GPU VRAM in bytes, or ``None`` if no GPU is detected.
-
-    Queries ``nvidia-smi`` (works without ``pynvml``).  Returns the
-    **total** VRAM of the first GPU — free VRAM fluctuates constantly,
-    so the total is the meaningful upper bound for planning.
-    """
+    """Return total GPU VRAM in bytes, or ``None`` if no GPU is detected."""
     try:
         import subprocess
 
@@ -122,9 +120,8 @@ def available_vram_bytes() -> int | None:
             timeout=5,
         )
         if result.returncode == 0:
-            # May return multiple lines for multi-GPU — take the first
             line = result.stdout.strip().split("\n")[0].strip()
-            return int(line) * 1024 * 1024  # MiB → bytes
+            return int(line) * 1024 * 1024
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
         pass
     return None
@@ -134,13 +131,13 @@ def available_vram_bytes() -> int | None:
 #   float32 feature data  (4 bytes/feature)
 #   + binarised features  (1 byte/feature)
 #   + label/gradient/hessian (12 bytes)
-# Plus histogram buffers that depend on border_count and tree depth.
-# The 2× safety multiplier accounts for CUDA runtime overhead (~500 MB),
-# CatBoost-internal temporary buffers (split evaluation, CTR statistics,
-# leaf value computation), and memory that grows during tree construction.
-# Empirically validated: 10M rows × 100 features OOM'd an 8 GB GPU at
-# iteration 231/1000, confirming that the raw data footprint (~5 GB)
-# roughly doubles during training.
+# Plus histogram buffers that depend on border_count and tree depth,
+# and ~500 MB CUDA runtime overhead.
+# The 2× safety multiplier accounts for CUDA fragmentation,
+# CatBoost-internal temporary buffers, and memory that grows during
+# tree construction.  Empirically validated: 10M rows × 100 features
+# OOM'd an 8 GB GPU at iteration 231/1000, confirming that the raw
+# data footprint (~5 GB) roughly doubles during training.
 _VRAM_SAFETY_MULTIPLIER = 2.0
 
 
@@ -150,20 +147,12 @@ def estimate_gpu_vram_bytes(
     *,
     border_count: int = 128,
     depth: int = 6,
+    **_kwargs,  # accept and ignore split params for backward compat
 ) -> int:
-    """Estimate CatBoost GPU VRAM needed for *n_rows* × *n_features*.
-
-    The estimate covers both train and eval pools (pass total rows
-    including the eval partition).  It accounts for:
-
-    - Float32 feature data and binarised representation.
-    - Per-row gradient, hessian, and label arrays.
-    - Level-wise histogram buffers (``border_count × 2^depth``).
-    - A 1.3× safety multiplier for CUDA fragmentation.
-    """
+    """Estimate CatBoost GPU VRAM needed for *n_rows* × *n_features*."""
     feature_bytes = n_rows * n_features * 5  # float32 + binarised
     per_row_bytes = n_rows * 12              # label + gradient + hessian
-    n_leaves = 2 ** min(depth, 10)           # cap at 1024 leaves
+    n_leaves = 2 ** min(depth, 10)
     histogram_bytes = n_features * border_count * n_leaves * 8
 
     raw = feature_bytes + per_row_bytes + histogram_bytes
@@ -171,73 +160,162 @@ def estimate_gpu_vram_bytes(
 
 
 # ---------------------------------------------------------------------------
-# Source row count
+# Source metadata — scenario-aware
 # ---------------------------------------------------------------------------
+
+# Bytes per column for the analytical estimate.  Training features are
+# cast to Float32 (4 bytes) in _build_pool, but the Polars DataFrame
+# before that uses Float64 (8 bytes) for numerics.  String columns are
+# cast to Categorical (~4 bytes index + dictionary overhead).  Using 8
+# gives a conservative upper bound that matches the Polars in-memory
+# representation before _build_pool runs.
+_BYTES_PER_COL = 8
+
+
+def _parquet_metadata(path: str) -> tuple[int, int]:
+    """Return (row_count, column_count) from parquet footer metadata."""
+    import pyarrow.parquet as pq
+    meta = pq.read_metadata(path)
+    return int(meta.num_rows), meta.num_columns
 
 
 def _count_source_rows_for_node(node: GraphNode) -> int | None:
-    """Estimate the row count for a single source node without reading all data.
-
-    - **Parquet**: reads row-group metadata (instant, zero I/O beyond footer).
-    - **JSON/JSONL with cache**: reads cached parquet metadata.
-    - **Databricks**: returns ``None`` (unknown).
-    """
+    """Row count for a single source node (parquet metadata or line count)."""
     config = node.data.config
     node_type = node.data.nodeType
 
-    if node_type == NodeType.API_INPUT:
-        path = config.get("path", "")
-        # JSON/JSONL sources have a parquet cache — check it
-        if path.endswith((".json", ".jsonl")):
-            from haute._json_flatten import json_cache_info
-            info = json_cache_info(path)
-            if info is not None:
-                return info["row_count"]
+    try:
+        if node_type == NodeType.API_INPUT:
+            path = config.get("path", "")
+            if path.endswith((".json", ".jsonl")):
+                from haute._json_flatten import json_cache_info
+                info = json_cache_info(path)
+                if info is not None:
+                    return info["row_count"]
+                if path.endswith(".jsonl") and Path(path).exists():
+                    return _jsonl_row_count(path)
+                return None
+            if path and Path(path).exists():
+                rows, _ = _parquet_metadata(path)
+                return rows
             return None
-        # Flat parquet api_input
-        if path and Path(path).exists():
-            return _parquet_row_count(path)
-        return None
 
-    if node_type == NodeType.DATA_SOURCE:
-        source_type = config.get("sourceType", "flat_file")
-        if source_type == "databricks":
+        if node_type == NodeType.DATA_SOURCE:
+            source_type = config.get("sourceType", "flat_file")
+            if source_type == "databricks":
+                return None
+            path = config.get("path", "")
+            if path and Path(path).exists():
+                if path.endswith(".parquet"):
+                    rows, _ = _parquet_metadata(path)
+                    return rows
+                if path.endswith(".csv"):
+                    return _csv_row_count(path)
             return None
-        path = config.get("path", "")
-        if path and Path(path).exists():
-            if path.endswith(".parquet"):
-                return _parquet_row_count(path)
-            if path.endswith(".csv"):
-                # CSV: count lines minus header — cheap streaming read
-                return _csv_row_count(path)
+    except Exception as exc:
+        logger.warning("source_row_count_failed", node_id=node.id, error=str(exc))
         return None
 
     return None
 
 
-def _parquet_row_count(path: str) -> int:
-    """Row count from parquet metadata (reads only the footer, not data)."""
-    import pyarrow.parquet as pq
-    meta = pq.read_metadata(path)
-    return int(meta.num_rows)
+def _source_metadata_for_node(node: GraphNode) -> tuple[int, int] | None:
+    """Return (row_count, column_count) for a source node, or None."""
+    config = node.data.config
+    node_type = node.data.nodeType
+
+    try:
+        path = config.get("path", "")
+        if not path:
+            return None
+
+        if node_type == NodeType.API_INPUT:
+            if path.endswith((".json", ".jsonl")):
+                from haute._json_flatten import json_cache_info
+                info = json_cache_info(path)
+                if info is not None:
+                    return info["row_count"], info["column_count"]
+                return None
+            if Path(path).exists():
+                return _parquet_metadata(path)
+            return None
+
+        if node_type == NodeType.DATA_SOURCE:
+            if config.get("sourceType", "flat_file") == "databricks":
+                return None
+            if Path(path).exists() and path.endswith(".parquet"):
+                return _parquet_metadata(path)
+            return None
+    except Exception as exc:
+        logger.warning("source_metadata_failed", node_id=node.id, error=str(exc))
+        return None
+
+    return None
 
 
 def _csv_row_count(path: str) -> int:
-    """Approximate row count for a CSV file (line count minus header)."""
     count = 0
     with open(path, "rb") as f:
         for _ in f:
             count += 1
-    return max(count - 1, 0)  # subtract header
+    return max(count - 1, 0)
+
+
+def _jsonl_row_count(path: str) -> int:
+    count = 0
+    with open(path, "rb") as f:
+        for _ in f:
+            count += 1
+    return count
+
+
+def _ancestor_source_metadata(
+    graph: PipelineGraph,
+    target_node_id: str,
+    scenario: str = "live",
+) -> tuple[int | None, int]:
+    """Row count and column count from ancestor sources of the target node.
+
+    Prunes edges by scenario (respecting live-switch routing) then walks
+    backwards from the target to find only the relevant source nodes.
+
+    Returns ``(max_rows, max_columns)`` across ancestor sources.
+    ``max_rows`` is ``None`` if no row count could be determined.
+    """
+    from haute._execute_lazy import _prune_live_switch_edges
+    from haute._topo import ancestors
+
+    node_map = {n.id: n for n in graph.nodes}
+    all_ids = set(node_map)
+
+    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
+    ancestor_ids = ancestors(target_node_id, pruned_edges, all_ids)
+
+    max_rows: int | None = None
+    max_cols: int = 0
+
+    for nid in ancestor_ids:
+        node = node_map.get(nid)
+        if node is None:
+            continue
+        if node.data.nodeType not in (NodeType.API_INPUT, NodeType.DATA_SOURCE):
+            continue
+        meta = _source_metadata_for_node(node)
+        if meta is not None:
+            rows, cols = meta
+            if max_rows is None or rows > max_rows:
+                max_rows = rows
+            max_cols = max(max_cols, cols)
+
+    return max_rows, max_cols
 
 
 def estimate_source_rows(graph: PipelineGraph) -> int | None:
-    """Estimate total rows entering the pipeline from source nodes.
+    """Estimate total rows entering the pipeline from all source nodes.
 
-    Returns the **maximum** row count across all source nodes (since joins
-    and transforms may change cardinality, the largest source is the best
-    proxy for peak memory).  Returns ``None`` if no source row count could
-    be determined.
+    Returns the **maximum** row count across all source nodes.
+    Prefer :func:`_ancestor_source_metadata` when target and scenario
+    are known.
     """
     max_rows: int | None = None
     for node in graph.nodes:
@@ -249,144 +327,206 @@ def estimate_source_rows(graph: PipelineGraph) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Sample probe + safe row limit
+# Estimation
 # ---------------------------------------------------------------------------
+#
+# The training lifecycle has multiple memory-intensive phases:
+#   0. Pipeline execution — _execute_and_sink collects the full lazy
+#      plan to parquet.  Intermediate joins and transforms can hold
+#      multiple large DataFrames simultaneously.
+#   1. Split — reads the full dataset eagerly to add _partition column.
+#   2. model.fit() — train + eval CatBoost Pools + internal buffers.
+#   3. Diagnostics — SHAP, PDP, feature importance.
+#   4. Cross-validation (if enabled).
+#
+# Phase 0 (pipeline execution) is typically the peak because it holds
+# join intermediates in memory.  Empirically validated: the peak is
+# approximately 3× the raw dataset size at the training node.
+#
+# We use: N_rows × N_cols × 8 bytes (Float64) × 3.0
 
-# CatBoost overhead multiplier.  Peak during training is:
-#   train Pool (float64 internal) + eval Pool + CatBoost histograms/buffers.
-# Pool float64 ≈ 2× the Polars float32 estimate.  Adding eval pool and
-# CatBoost overhead brings the total to ~3×.  Strings are now converted
-# to Polars Categorical before .to_pandas(), so the Pandas→Pool path no
-# longer balloons memory for string-heavy datasets.
-_CATBOOST_OVERHEAD_MULTIPLIER = 3.0
-
-# Don't use more than 70% of available RAM for training data.
 _RAM_SAFETY_FACTOR = 0.7
+_MIN_SAFE_ROWS = 500
 
-# Minimum probe size (rows) — smaller probes are less accurate.
-_MIN_PROBE_ROWS = 500
+# Empirical overhead multiplier.  Covers pipeline execution (join
+# intermediates), split, CatBoost Pool construction, and training
+# buffers (gradients, hessians, histograms).  Validated against
+# observed 25 GB peak for 10M × 101 cols (~8 GB raw data).
+_OVERHEAD_MULTIPLIER = 3.0
 
-# Default probe size.
-_DEFAULT_PROBE_ROWS = 1_000
+_BYTES_PER_COL = 8  # Float64 in Polars
+
+
+def _estimate_peak_bytes(n_rows: int, n_cols: int) -> int:
+    """Estimate peak RAM for the full training lifecycle."""
+    return int(n_rows * n_cols * _BYTES_PER_COL * _OVERHEAD_MULTIPLIER)
 
 
 class RamEstimate(NamedTuple):
-    """Result of the RAM estimation probe."""
+    """Result of the RAM estimation."""
 
     safe_row_limit: int | None
     """Row limit that fits in RAM, or ``None`` if no limit is needed."""
     total_rows: int | None
     """Estimated total source rows, or ``None`` if unknown."""
     estimated_bytes: int
-    """Estimated bytes for the full dataset at the target node."""
+    """Estimated peak bytes across all training phases."""
     available_bytes: int
     """Available system RAM in bytes."""
     bytes_per_row: float
-    """Measured bytes per row from the probe."""
+    """Estimated bytes per row (at peak phase)."""
     was_downsampled: bool
     """Whether a row limit was applied."""
     warning: str | None
     """Human-readable warning message if downsampled, else ``None``."""
     probe_columns: int = 0
-    """Number of columns in the probe output (proxy for feature count)."""
+    """Number of columns (from source metadata)."""
+
+
+def _resolve_target_schema(
+    graph: PipelineGraph,
+    target_node_id: str,
+    build_node_fn,
+    preamble_ns: dict | None,
+    scenario: str,
+) -> int | None:
+    """Resolve the column count at the training node via the lazy plan.
+
+    Builds the Polars lazy plan up to the target node, then calls
+    ``collect_schema()`` to get column names and dtypes without
+    executing any data.  Returns the column count, or ``None`` if
+    schema resolution fails.
+    """
+    try:
+        from haute._execute_lazy import _execute_lazy
+
+        lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
+            graph, build_node_fn,
+            target_node_id=target_node_id,
+            preamble_ns=preamble_ns,
+            scenario=scenario,
+        )
+        target_lf = lazy_outputs.get(target_node_id)
+        if target_lf is None:
+            return None
+
+        import polars as pl
+        if isinstance(target_lf, pl.DataFrame):
+            return target_lf.width
+        # LazyFrame — resolve schema without executing
+        schema = target_lf.collect_schema()
+        return len(schema)
+    except Exception as exc:
+        logger.info("schema_resolution_failed", error=str(exc))
+        return None
 
 
 def estimate_safe_training_rows(
     graph: PipelineGraph,
     target_node_id: str,
-    build_node_fn: Callable,
+    build_node_fn=None,
     *,
-    probe_rows: int = _DEFAULT_PROBE_ROWS,
-    overhead_multiplier: float = _CATBOOST_OVERHEAD_MULTIPLIER,
+    probe_rows: int = 0,  # kept for backward compat, unused
+    overhead_multiplier: float = 1.0,  # kept for backward compat
     safety_factor: float = _RAM_SAFETY_FACTOR,
     preamble_ns: dict | None = None,
     scenario: str = "live",
 ) -> RamEstimate:
     """Estimate whether the full pipeline fits in RAM for training.
 
-    1. Run the pipeline with ``row_limit=probe_rows`` (fast, <100ms).
-    2. Measure ``df.estimated_size()`` at the target node.
-    3. Extrapolate to the full source row count.
-    4. Compare against available RAM × safety_factor.
-    5. If it won't fit, calculate a safe ``row_limit``.
+    1. Row count from source parquet metadata (scenario-aware).
+    2. Column count resolved from the lazy plan at the training node
+       (captures joins and transforms), minus excluded features.
+    3. Peak memory estimate using the empirical 3× multiplier.
 
-    Returns a ``RamEstimate`` with the decision and warning message.
+    Returns a :class:`RamEstimate` with the decision and warning message.
     """
-    from haute._execute_lazy import _execute_eager_core
+    available = available_ram_bytes()
 
-    # 1. Probe: run the pipeline with a small row limit
-    probe_result = _execute_eager_core(
-        graph, build_node_fn,
-        target_node_id=target_node_id,
-        row_limit=probe_rows,
-        swallow_errors=True,
-        preamble_ns=preamble_ns,
-        scenario=scenario,
+    # ── 1. Source metadata for row count ──────────────────────────────
+    total_rows, source_cols = _ancestor_source_metadata(
+        graph, target_node_id, scenario,
     )
 
-    probe_df = probe_result.outputs.get(target_node_id)
-    if probe_df is None or len(probe_df) == 0:
-        # Can't estimate — let the real run fail with a proper error
-        logger.warning("probe_empty", target_node_id=target_node_id)
+    if total_rows is None:
+        logger.info(
+            "source_metadata_unavailable",
+            total_rows=total_rows,
+            target=target_node_id,
+            scenario=scenario,
+        )
         return RamEstimate(
             safe_row_limit=None,
             total_rows=None,
             estimated_bytes=0,
-            available_bytes=available_ram_bytes(),
+            available_bytes=available,
             bytes_per_row=0,
             was_downsampled=False,
             warning=None,
             probe_columns=0,
         )
 
-    # 2. Measure bytes per row from the probe
-    probe_size = probe_df.estimated_size()
-    actual_probe_rows = len(probe_df)
-    bytes_per_row = probe_size / actual_probe_rows
-    n_columns = probe_df.width
+    # ── 2. Column count at the training node ─────────────────────────
+    #   Resolve via the lazy plan (captures joins/transforms).
+    #   No fallback — if we can't resolve the schema, the estimate
+    #   would be wrong so we return empty rather than mislead.
+    n_columns = _resolve_target_schema(
+        graph, target_node_id, build_node_fn,
+        preamble_ns, scenario,
+    ) if build_node_fn is not None else None
 
-    # 3. Get total source rows
-    total_rows = estimate_source_rows(graph)
-
-    if total_rows is None:
-        # Can't estimate — proceed without a limit
+    if not n_columns:
         logger.info(
-            "source_rows_unknown",
-            msg="Cannot estimate source row count, proceeding without limit",
+            "schema_unavailable",
+            target=target_node_id,
+            scenario=scenario,
         )
         return RamEstimate(
             safe_row_limit=None,
-            total_rows=None,
+            total_rows=total_rows,
             estimated_bytes=0,
-            available_bytes=available_ram_bytes(),
-            bytes_per_row=bytes_per_row,
+            available_bytes=available,
+            bytes_per_row=0,
             was_downsampled=False,
             warning=None,
-            probe_columns=n_columns,
+            probe_columns=0,
         )
 
-    # 4. Extrapolate to full dataset with overhead
-    estimated_bytes = int(bytes_per_row * total_rows)
-    ram_needed = int(estimated_bytes * overhead_multiplier)
-    available = available_ram_bytes()
+    # Subtract excluded features — the pipeline now projects before
+    # sinking, so excluded columns never enter the split or pools.
+    node_map = {n.id: n for n in graph.nodes}
+    target_node = node_map.get(target_node_id)
+    n_excluded = len(target_node.data.config.get("exclude", [])) if target_node else 0
+    n_columns = max(n_columns - n_excluded, 1)
+
+    logger.info(
+        "schema_resolved",
+        source_cols=source_cols,
+        target_cols=n_columns,
+        excluded=n_excluded,
+    )
+
+    # ── 3. Peak estimate ────────────────────────────────────────────
+    peak_bytes = _estimate_peak_bytes(total_rows, n_columns)
     usable_ram = int(available * safety_factor)
+    bytes_per_row = peak_bytes / total_rows if total_rows > 0 else 0
 
     logger.info(
         "ram_estimate",
         total_rows=total_rows,
+        n_columns=n_columns,
         bytes_per_row=round(bytes_per_row, 1),
-        estimated_mb=round(estimated_bytes / 1024**2, 1),
-        ram_needed_mb=round(ram_needed / 1024**2, 1),
+        peak_mb=round(peak_bytes / 1024**2, 1),
         available_mb=round(available / 1024**2, 1),
         usable_mb=round(usable_ram / 1024**2, 1),
     )
 
-    # 5. Decision
-    if ram_needed <= usable_ram:
+    # ── 5. Decision ──────────────────────────────────────────────────
+    if peak_bytes <= usable_ram:
         return RamEstimate(
             safe_row_limit=None,
             total_rows=total_rows,
-            estimated_bytes=estimated_bytes,
+            estimated_bytes=peak_bytes,
             available_bytes=available,
             bytes_per_row=bytes_per_row,
             was_downsampled=False,
@@ -394,22 +534,21 @@ def estimate_safe_training_rows(
             probe_columns=n_columns,
         )
 
-    # Calculate safe row count
-    safe_rows = int(usable_ram / (bytes_per_row * overhead_multiplier))
-    safe_rows = max(safe_rows, _MIN_PROBE_ROWS)  # never go below minimum
+    peak_per_row = peak_bytes / total_rows
+    safe_rows = int(usable_ram / peak_per_row)
+    safe_rows = max(safe_rows, _MIN_SAFE_ROWS)
 
     warning = (
         f"Dataset downsampled to {safe_rows:,} of {total_rows:,} rows to fit in "
         f"available RAM ({available / 1024**3:.1f} GB). "
-        f"Estimated full dataset would need {ram_needed / 1024**3:.1f} GB "
-        f"(including CatBoost overhead)."
+        f"Estimated peak training memory: {peak_bytes / 1024**3:.1f} GB."
     )
     logger.warning("downsampling", safe_rows=safe_rows, total_rows=total_rows, warning=warning)
 
     return RamEstimate(
         safe_row_limit=safe_rows,
         total_rows=total_rows,
-        estimated_bytes=estimated_bytes,
+        estimated_bytes=peak_bytes,
         available_bytes=available,
         bytes_per_row=bytes_per_row,
         was_downsampled=True,

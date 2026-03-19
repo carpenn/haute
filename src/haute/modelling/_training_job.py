@@ -896,12 +896,20 @@ class TrainingJob:
                 f"Offset column '{self.offset}' not found. "
                 f"Available: {df.columns}"
             )
+        # Excluded columns may already have been projected out during
+        # pipeline execution — only flag genuinely unknown columns.
+        available = set(df.columns)
+        non_feature_cols = {self.target}
+        if self.weight:
+            non_feature_cols.add(self.weight)
+        if self.offset:
+            non_feature_cols.add(self.offset)
         for col in self.exclude:
-            if col not in df.columns:
-                raise ValueError(
-                    f"Exclude column '{col}' not found. "
-                    f"Available: {df.columns}"
-                )
+            if col not in available and col not in non_feature_cols:
+                # Column is neither in the data nor a known non-feature —
+                # it may be a stale exclude entry.  Log and skip rather
+                # than failing training.
+                logger.info("exclude_column_already_dropped", column=col)
 
     def _derive_features(self, df: pl.DataFrame) -> tuple[list[str], list[str]]:
         """Derive feature list: all columns minus {target, weight, *exclude}.

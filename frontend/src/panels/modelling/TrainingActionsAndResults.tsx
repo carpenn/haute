@@ -4,8 +4,9 @@ import type { TrainResult, TrainProgress } from "../../stores/useNodeResultsStor
 import type { TrainEstimate } from "../../api/client"
 import { TrainingProgress as TrainingProgressPanel } from "./TrainingProgress"
 
-/** Must match _CATBOOST_OVERHEAD_MULTIPLIER in _ram_estimate.py */
-const CATBOOST_OVERHEAD = 3.0
+// The backend's bytes_per_row already includes full phase-model overhead
+// (split, pools, CatBoost internals, diagnostics, CV).  No extra multiplier.
+const TRAINING_OVERHEAD = 1.0
 
 function formatMb(mb: number): string {
   return mb < 1024 ? `${mb.toFixed(0)} MB` : `${(mb / 1024).toFixed(1)} GB`
@@ -50,7 +51,7 @@ export function TrainingActionsAndResults({
     if (hasUserLimit) rows = Math.min(rows, rowLimit)
     if (ramEstimate.safe_row_limit != null) rows = Math.min(rows, ramEstimate.safe_row_limit)
 
-    const trainingMb = rows * ramEstimate.bytes_per_row * CATBOOST_OVERHEAD / (1024 * 1024)
+    const trainingMb = rows * ramEstimate.bytes_per_row * TRAINING_OVERHEAD / (1024 * 1024)
     const isLimited = rows < sourceRows
 
     // Amber when RAM requires downsampling, unless the user's limit

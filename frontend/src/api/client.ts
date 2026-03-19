@@ -265,17 +265,17 @@ export function trainModel(
 }
 
 export function estimateTrainingRam(
-  payload: { graph: GraphPayload; node_id: string },
+  payload: { graph: GraphPayload; node_id: string; scenario?: string },
   options?: { signal?: AbortSignal },
 ): Promise<TrainEstimate> {
-  return post("/api/modelling/estimate", payload, { timeout: 30_000, ...options })
+  return post("/api/modelling/estimate", { ...payload, scenario: payload.scenario ?? "live" }, { timeout: 30_000, ...options })
 }
 
 export function logToMlflow(
   payload: { job_id: string; experiment_name?: string | null; model_name?: string | null },
   options?: { signal?: AbortSignal },
 ): Promise<MlflowLogResponse> {
-  return post("/api/modelling/mlflow/log", payload, { timeout: 120_000, ...options })
+  return post("/api/modelling/mlflow/log", payload, { timeout: 600_000, ...options })
 }
 
 // ---------------------------------------------------------------------------

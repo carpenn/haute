@@ -43,7 +43,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   const currentConfigHash = useMemo(() => hashConfig(config), [config])
   const isStale = !!cachedResult && cachedResult.configHash !== currentConfigHash
 
-  // ── RAM estimate (fetched once when modelling node selected) ──
+  // ── RAM + VRAM estimate (re-fetched when GPU is toggled) ──
   const [ramEstimate, setRamEstimate] = useState<TrainEstimate | null>(null)
   const [ramEstimateLoading, setRamEstimateLoading] = useState(false)
   const [ramEstimateError, setRamEstimateError] = useState<string | null>(null)
@@ -52,6 +52,10 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
   // Ref to capture latest graph inputs without re-triggering the effect
   const graphInputsRef = useRef({ allNodes, edges, submodels, preamble })
   graphInputsRef.current = { allNodes, edges, submodels, preamble }
+
+  // Track config that affects the estimate so it re-fetches
+  const isGpu = String((config.params as Record<string, unknown>)?.task_type ?? "").toUpperCase() === "GPU"
+  const excludeCount = (configField<string[]>(config, "exclude", [])).length
 
   useEffect(() => {
     if (!nodeId) return
@@ -66,7 +70,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
     const { allNodes: n, edges: e, submodels: s, preamble: p } = graphInputsRef.current
     estimateTrainingRam(
-      { graph: buildGraph(n, e, s, p), node_id: nodeId },
+      { graph: buildGraph(n, e, s, p), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario },
       { signal: controller.signal },
     )
       .then((est) => {
@@ -84,7 +88,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
       })
 
     return () => controller.abort()
-  }, [nodeId, addToast])
+  }, [nodeId, isGpu, excludeCount, addToast])
 
   // Collapse state from UI store (persisted)
   const featuresOpen = useSettingsStore((s) => s.isSectionOpen("modelling.features"))

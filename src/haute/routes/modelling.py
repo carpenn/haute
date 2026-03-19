@@ -68,19 +68,17 @@ async def train_status(job_id: str) -> TrainStatusResponse:
 def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
     """Estimate RAM and row requirements for training a modelling node.
 
-    Runs a small probe (1 000 rows) through the pipeline to measure
-    per-row memory, then extrapolates to the full dataset.  Returns
-    immediately — typically <1 s.  Also estimates GPU VRAM if the
-    node's params specify ``task_type: GPU``.
+    Reads parquet metadata from ancestor source nodes to estimate
+    dataset size analytically.  Returns immediately — typically <100 ms.
+    Also estimates GPU VRAM if the node's params specify ``task_type: GPU``.
     """
     node = _find_modelling_node(body.graph, body.node_id)
 
     from haute._ram_estimate import estimate_safe_training_rows
     from haute.executor import _build_node_fn, _compile_preamble
 
-    preamble_ns = _compile_preamble(body.graph.preamble or "") or None
-
     try:
+        preamble_ns = _compile_preamble(body.graph.preamble or "") or None
         ram_est = estimate_safe_training_rows(
             body.graph, body.node_id, _build_node_fn,
             preamble_ns=preamble_ns,
@@ -90,10 +88,10 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
         logger.warning("estimate_failed", error=str(exc), node_id=body.node_id)
         return TrainEstimateResponse()
 
-    from haute._ram_estimate import _CATBOOST_OVERHEAD_MULTIPLIER
-
+    # estimated_bytes already includes all training phases (split, pools,
+    # CatBoost internals, diagnostics SHAP/PDP, CV if enabled).
     data_mb = ram_est.estimated_bytes / 1024**2
-    training_mb = data_mb * _CATBOOST_OVERHEAD_MULTIPLIER
+    training_mb = data_mb  # phase model already accounts for overhead
 
     # Apply user row limit to the estimate
     user_limit = node.data.config.get("row_limit")
@@ -112,12 +110,19 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
         warning = None
         was_downsampled = False
 
-    # GPU VRAM estimation
+    # GPU VRAM estimation — use feature count (not total columns),
+    # since CatBoost only loads features to GPU.
     vram_check = _VramCheck()
     node_params = node.data.config.get("params", {})
     if str(node_params.get("task_type", "")).upper() == "GPU":
-        effective_rows = safe_limit or ram_est.total_rows or 0
-        vram_check = _check_gpu_vram(effective_rows, ram_est.probe_columns, node_params)
+        effective_rows = ram_est.total_rows or 0
+        # Feature count = total cols - excluded - target - weight
+        n_excluded = len(node.data.config.get("exclude", []))
+        n_non_feature = n_excluded + 1  # +1 for target
+        if node.data.config.get("weight"):
+            n_non_feature += 1
+        n_features = max(ram_est.probe_columns - n_non_feature, 1)
+        vram_check = _check_gpu_vram(effective_rows, n_features, node_params)
         if vram_check.warning:
             vram_check.warning += " Training will fall back to CPU automatically."
 

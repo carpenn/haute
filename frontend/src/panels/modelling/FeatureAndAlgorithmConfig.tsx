@@ -90,7 +90,30 @@ export function FeatureAndAlgorithmConfig({
         </button>
         {featuresOpen && (
           <div className="mt-1.5 space-y-1">
-            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Toggle columns to include or exclude from training</div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Toggle columns to include or exclude from training</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onUpdate("exclude", [])}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                  style={{ background: "rgba(34,197,94,.1)", color: "#22c55e", border: "1px solid rgba(34,197,94,.2)" }}
+                >
+                  Select all
+                </button>
+                <button
+                  onClick={() => {
+                    const allFeatures = columns
+                      .filter(c => c.name !== target && c.name !== weight)
+                      .map(c => c.name)
+                    onUpdate("exclude", allFeatures)
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                  style={{ background: "rgba(239,68,68,.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,.2)" }}
+                >
+                  Deselect all
+                </button>
+              </div>
+            </div>
             {columns
               .filter(c => c.name !== target && c.name !== weight)
               .sort((a, b) => a.name.localeCompare(b.name))

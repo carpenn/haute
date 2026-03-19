@@ -16,6 +16,7 @@ import gc
 import re
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,12 @@ logger = get_logger(component="executor")
 
 # ── Default constants ─────────────────────────────────────────────
 _MAX_PREVIEW_ROWS = 10_000  # safety cap for execute_graph JSON payload
+
+# Lock to prevent concurrent module eviction + re-import in _compile_preamble.
+# Without this, two threads (e.g. preview + estimate) can race: one evicts
+# "utility" from sys.modules while the other is mid-import, causing a KeyError
+# inside importlib._bootstrap._load_unlocked.
+_preamble_lock = threading.Lock()
 
 
 class PreambleError(HauteError):
@@ -92,49 +99,51 @@ def _compile_preamble(preamble: str) -> dict[str, Any]:
         sys.path.insert(0, cwd)
     # Evict cached utility modules so edits in the GUI are picked up
     # on every run instead of serving stale bytecode from sys.modules.
-    for mod_name in [k for k in sys.modules if k == "utility" or k.startswith("utility.")]:
-        del sys.modules[mod_name]
-
+    # The lock prevents a concurrent request from seeing partially-evicted
+    # state (which causes KeyError inside importlib._load_unlocked).
     ns = safe_globals(pl=pl, allow_imports=True)
     base_keys = set(ns.keys())
-    try:
-        exec(preamble, ns)  # noqa: S102  — single dict = shared globals
-    except Exception as exc:
-        # Extract the most useful line number and source file from
-        # the traceback or exception attributes.
-        import traceback as _tb
-        from pathlib import Path as _Path
+    with _preamble_lock:
+        for mod_name in [k for k in sys.modules if k == "utility" or k.startswith("utility.")]:
+            del sys.modules[mod_name]
+        try:
+            exec(preamble, ns)  # noqa: S102  — single dict = shared globals
+        except Exception as exc:
+            # Extract the most useful line number and source file from
+            # the traceback or exception attributes.
+            import traceback as _tb
+            from pathlib import Path as _Path
 
-        source_line: int | None = None
-        source_file: str | None = None
+            source_line: int | None = None
+            source_file: str | None = None
 
-        # SyntaxError carries .filename and .lineno directly
-        if isinstance(exc, SyntaxError) and exc.filename:
-            source_file = exc.filename
-            source_line = exc.lineno
+            # SyntaxError carries .filename and .lineno directly
+            if isinstance(exc, SyntaxError) and exc.filename:
+                source_file = exc.filename
+                source_line = exc.lineno
 
-        # For runtime errors, walk the traceback to find the utility frame
-        if source_file is None and exc.__traceback__:
-            for frame in reversed(_tb.extract_tb(exc.__traceback__)):
-                if "utility" in frame.filename:
-                    source_line = frame.lineno
-                    source_file = frame.filename
-                    break
-                if frame.filename == "<string>":
-                    source_line = frame.lineno
-                    break
+            # For runtime errors, walk the traceback to find the utility frame
+            if source_file is None and exc.__traceback__:
+                for frame in reversed(_tb.extract_tb(exc.__traceback__)):
+                    if "utility" in frame.filename:
+                        source_line = frame.lineno
+                        source_file = frame.filename
+                        break
+                    if frame.filename == "<string>":
+                        source_line = frame.lineno
+                        break
 
-        msg = f"Import/preamble error: {exc}"
-        if source_file and source_file != "<string>":
-            try:
-                rel: str | Path = _Path(source_file).relative_to(_Path.cwd())
-            except ValueError:
-                rel = source_file
-            msg = f"Error in {rel} line {source_line}: {exc}"
-        elif source_line:
-            msg = f"Preamble line {source_line}: {exc}"
+            msg = f"Import/preamble error: {exc}"
+            if source_file and source_file != "<string>":
+                try:
+                    rel: str | Path = _Path(source_file).relative_to(_Path.cwd())
+                except ValueError:
+                    rel = source_file
+                msg = f"Error in {rel} line {source_line}: {exc}"
+            elif source_line:
+                msg = f"Preamble line {source_line}: {exc}"
 
-        raise PreambleError(msg, source_line=source_line) from exc
+            raise PreambleError(msg, source_line=source_line) from exc
 
     return {k: v for k, v in ns.items() if k not in base_keys}
 

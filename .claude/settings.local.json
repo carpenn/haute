@@ -9,7 +9,15 @@
       "Bash(uv sync:*)",
       "Bash(powershell -Command \"[Environment]::GetEnvironmentVariable\\('Path', 'User'\\)\")",
       "Bash(tr ';' '\\\\n')",
-      "Bash(powershell -Command \"npm --version\" 2>&1)"
+      "Bash(powershell -Command \"npm --version\" 2>&1)",
+      "Bash(npm run:*)",
+      "Bash(cmd.exe /c \"where npm\")",
+      "Bash(\"/c/Program Files/nodejs/npm.cmd\" run build)",
+      "Bash(export PATH=\"/c/Program Files/nodejs:$PATH\")",
+      "Bash(python -c \"from haute._ram_estimate import estimate_safe_training_rows, _ancestor_source_rows, RamEstimate; print\\(''imports OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from haute._ram_estimate import estimate_safe_training_rows, _ancestor_source_rows, RamEstimate; print\\(''imports OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from haute.executor import _compile_preamble, _preamble_lock; print\\(''executor OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \":*)"
     ]
   }
 }

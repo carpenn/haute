@@ -107,6 +107,9 @@ def _check_gpu_vram(
     effective_rows: int,
     probe_columns: int,
     params: dict[str, Any],
+    *,
+    validation_size: float = 0.2,
+    holdout_size: float = 0.0,
 ) -> _VramCheck:
     """Estimate GPU VRAM requirements and return a check result."""
     if effective_rows <= 0 or probe_columns <= 0:
@@ -118,6 +121,8 @@ def _check_gpu_vram(
         effective_rows, probe_columns,
         border_count=params.get("border_count", _DEFAULT_BORDER_COUNT),
         depth=params.get("depth", _DEFAULT_DEPTH),
+        validation_size=validation_size,
+        holdout_size=holdout_size,
     )
     estimated_mb = round(vram_needed / 1024**2, 1)
 
@@ -200,13 +205,28 @@ class TrainService:
             if k in config and k not in train_params:
                 train_params[k] = config[k]
 
+        split_cfg = config.get("split", {})
         ram_warning = self._check_gpu_fallback(
             train_params, row_limit, total_source_rows, probe_columns,
             ram_warning, job_id,
+            validation_size=float(split_cfg.get("validation_size",
+                                  split_cfg.get("test_size", 0.2))),
+            holdout_size=float(split_cfg.get("holdout_size", 0.0)),
         )
+
+        # Build the list of columns that must survive projection
+        # (target, weight, offset — even if they're in the exclude list).
+        excluded = config.get("exclude", [])
+        keep_cols: list[str] = [config["target"]]
+        if config.get("weight"):
+            keep_cols.append(config["weight"])
+        if config.get("offset"):
+            keep_cols.append(config["offset"])
 
         tmp_parquet = self._execute_and_sink(
             body, preamble_ns, row_limit, job_id,
+            exclude=excluded or None,
+            keep_columns=keep_cols,
         )
 
         self._launch_background(
@@ -305,6 +325,9 @@ class TrainService:
         probe_columns: int,
         ram_warning: str | None,
         job_id: str,
+        *,
+        validation_size: float = 0.2,
+        holdout_size: float = 0.0,
     ) -> str | None:
         """Check GPU VRAM; fall back to CPU if insufficient.
 
@@ -315,7 +338,11 @@ class TrainService:
 
         try:
             effective_rows = row_limit or (total_source_rows or 0)
-            vram_check = _check_gpu_vram(effective_rows, probe_columns, train_params)
+            vram_check = _check_gpu_vram(
+                effective_rows, probe_columns, train_params,
+                validation_size=validation_size,
+                holdout_size=holdout_size,
+            )
             if vram_check.warning:
                 train_params["task_type"] = "CPU"
                 gpu_warning = f"{vram_check.warning} Falling back to CPU."
@@ -341,8 +368,15 @@ class TrainService:
         preamble_ns: dict[str, Any] | None,
         row_limit: int | None,
         job_id: str,
+        *,
+        exclude: list[str] | None = None,
+        keep_columns: list[str] | None = None,
     ) -> str:
         """Execute the pipeline lazily and sink to a temp parquet file.
+
+        If *exclude* and *keep_columns* are provided, projects down to
+        only the needed columns before sinking.  This reduces peak memory
+        by dropping columns that won't be used for training.
 
         Returns the path to the temp parquet file.
         Raises ``HTTPException`` on failure (cleans up temp file first).
@@ -386,6 +420,24 @@ class TrainService:
 
             if row_limit:
                 target_lf = target_lf.head(row_limit)
+
+            # Project down to only the columns needed for training.
+            # This reduces peak memory during sink and all subsequent
+            # phases (split, pool construction, diagnostics).
+            if exclude and keep_columns:
+                import polars as pl
+                all_cols = (
+                    target_lf.collect_schema().names()
+                    if isinstance(target_lf, pl.LazyFrame)
+                    else target_lf.columns
+                )
+                drop_cols = [
+                    c for c in all_cols
+                    if c in exclude and c not in keep_columns
+                ]
+                if drop_cols:
+                    target_lf = target_lf.drop(drop_cols)
+                    _mem_checkpoint(f"projected: dropped {len(drop_cols)} excluded columns")
 
             from haute._polars_utils import _malloc_trim, safe_sink
 
