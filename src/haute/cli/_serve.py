@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from haute.cli._helpers import _find_frontend_dir, _open_browser
+from haute.cli._helpers import _find_frontend_dir, _node_env, _npm, _open_browser
 
 
 @click.command()
@@ -29,10 +29,11 @@ def serve(host: str, port: int, no_browser: bool) -> None:
         click.echo(f"  Backend  -> http://{host}:{port}   (API only)")
         click.echo("")
         vite_proc = subprocess.Popen(
-            ["npm", "run", "dev"],
+            [_npm(), "run", "dev"],
             cwd=str(frontend_dir),
             stdout=sys.stdout,
             stderr=sys.stderr,
+            env=_node_env(),
         )
 
         def _cleanup(signum: int, frame: object) -> None:

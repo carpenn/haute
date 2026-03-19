@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -88,6 +90,35 @@ def _open_browser(url: str) -> None:
             webbrowser.open(url)
     except Exception:
         webbrowser.open(url)
+
+
+def _node_env() -> dict[str, str] | None:
+    """Return an env dict with Node.js on PATH, or *None* if already available."""
+    if shutil.which("node"):
+        return None  # already on PATH, no override needed
+    if sys.platform == "win32":
+        nodejs_dir = Path(r"C:\Program Files\nodejs")
+        if (nodejs_dir / "node.exe").exists():
+            env = os.environ.copy()
+            env["PATH"] = f"{nodejs_dir};{env.get('PATH', '')}"
+            return env
+    return None
+
+
+def _npm() -> str:
+    """Return the npm executable, resolving common Windows install paths."""
+    found = shutil.which("npm")
+    if found:
+        return found
+    if sys.platform == "win32":
+        candidate = Path(r"C:\Program Files\nodejs\npm.cmd")
+        if candidate.exists():
+            return str(candidate)
+    msg = (
+        "npm not found on PATH. Install Node.js from https://nodejs.org "
+        "and restart your terminal."
+    )
+    raise click.ClickException(msg)
 
 
 def _find_frontend_dir() -> Path | None:

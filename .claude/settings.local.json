@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where npm:*)",
+      "Bash(where node:*)",
+      "Bash(winget install:*)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/nodejs\")",
+      "Bash(npm --version)",
+      "Bash(uv sync:*)",
+      "Bash(powershell -Command \"[Environment]::GetEnvironmentVariable\\('Path', 'User'\\)\")",
+      "Bash(tr ';' '\\\\n')",
+      "Bash(powershell -Command \"npm --version\" 2>&1)"
+    ]
+  }
+}
