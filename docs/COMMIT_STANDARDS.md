@@ -400,6 +400,86 @@ The only exception is the public PyPI package interface (`haute` CLI and core AP
 
 ---
 
+## Local Verification (Preflight)
+
+CI catches issues after you push, but failed CI wastes time. Run checks **locally** before pushing to catch problems in seconds rather than minutes.
+
+### Preflight script
+
+The repo includes a one-command verification script that mirrors CI exactly:
+
+```bash
+# Full check: lint + types + tests (~5 min)
+./scripts/preflight.sh
+
+# Quick check: lint + types only (~30s)
+./scripts/preflight.sh --quick
+```
+
+The script runs these checks in order and stops on first failure:
+
+| Check | What it catches | Approximate time |
+|-------|----------------|-----------------|
+| `ruff check src/` | Python lint errors | 1s |
+| `ruff format --check src/ tests/` | Python formatting | 1s |
+| `mypy src/haute/` | Python type errors | 5s |
+| `tsc -b --noEmit` (frontend) | TypeScript type errors | 5s |
+| `eslint .` (frontend) | JS/TS lint errors (no-explicit-any, unused vars, React hooks rules) | 3s |
+| `pytest tests/` | Python test failures, coverage < 85% | 4 min |
+| `vitest run` (frontend) | Frontend test failures | 20s |
+
+Use `--quick` during active development (catches ~80% of CI failures in 15 seconds). Run the full version before opening a PR.
+
+### Pre-commit hooks
+
+Pre-commit hooks run automatically on `git commit`. Install them once:
+
+```bash
+uv run pre-commit install
+```
+
+The hooks run:
+- **Ruff lint + format** on changed `.py` files
+- **Mypy** on changed `.py` files in `src/haute/`
+- **TypeScript type check** on changed `.ts`/`.tsx` files
+- **ESLint** on changed `.ts`/`.tsx` files
+
+Hooks do **not** run tests (too slow for commit-time). Run tests via the preflight script or manually.
+
+### Manual checks for specific changes
+
+If you only touched backend Python:
+```bash
+uv run ruff check src/ && uv run mypy src/haute/ && uv run pytest tests/ -q
+```
+
+If you only touched frontend TypeScript:
+```bash
+cd frontend && npx tsc -b --noEmit && npx eslint . && npx vitest run
+```
+
+If you added a new test file:
+```bash
+# Verify it compiles, passes lint, and actually runs
+uv run pytest tests/test_your_new_file.py -v   # backend
+cd frontend && npx vitest run src/__tests__/your_new_file.test.ts  # frontend
+```
+
+### Common CI failures and how to catch them locally
+
+| CI failure | Local command to catch it | Root cause |
+|-----------|-------------------------|-----------|
+| `error TS2591: Cannot find name 'require'` | `npx tsc -b --noEmit` | Used `require()` instead of `import` in a `.ts` file |
+| `error TS6133: declared but never read` | `npx tsc -b --noEmit` | Unused import or variable |
+| `@typescript-eslint/no-explicit-any` | `npx eslint .` | Used `any` type — use a specific type or `unknown` |
+| `react-hooks/refs` | `npx eslint .` | Passed a ref to JSX via `createElement` — use JSX syntax or callback refs |
+| `prefer-const` | `npx eslint .` | Used `let` for a variable that's never reassigned |
+| `FAILED ... DID NOT RAISE` | `uv run pytest tests/test_file.py -v` | Test expects an exception on one platform but not another |
+| `xfail(strict=True) XPASS` | `uv run pytest tests/test_file.py -v` | Race condition test passed unexpectedly — use `strict=False` |
+| `coverage fail_under=85` | `uv run pytest --cov=src/haute --cov-fail-under=85` | New code without tests, or test file not discovered |
+
+---
+
 ## Quick Checklist
 
 Copy into PR descriptions:
@@ -458,4 +538,8 @@ LLM Code Review
 Backward Compatibility
 - [ ] No compatibility shims, version flags, or migration code
 - [ ] Bad APIs are replaced, not versioned alongside
+
+Preflight
+- [ ] `./scripts/preflight.sh --quick` passes (lint + types)
+- [ ] `./scripts/preflight.sh` passes (full check with tests) — required before merge
 ```

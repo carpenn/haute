@@ -63,8 +63,8 @@ def available_ram_bytes() -> int:
     try:
         import os
 
-        pages = os.sysconf("SC_AVPHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
+        pages: int = os.sysconf("SC_AVPHYS_PAGES")  # type: ignore[attr-defined]
+        page_size: int = os.sysconf("SC_PAGE_SIZE")  # type: ignore[attr-defined]
         if pages > 0 and page_size > 0:
             return pages * page_size
     except (AttributeError, ValueError):

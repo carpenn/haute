@@ -219,7 +219,9 @@
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/.bin/tsc.cmd -b --noEmit)",
       "Bash(cmd.exe //c \"npx tsc -b --noEmit 2>&1\")",
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/typescript/bin/tsc -b --noEmit)",
-      "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/eslint/bin/eslint.js .)"
+      "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/eslint/bin/eslint.js .)",
+      "Bash(chmod:*)",
+      "Bash(git stash:*)"
     ]
   }
 }
