@@ -367,12 +367,12 @@ describe("4. Rapid undo/redo", () => {
   // We mock useNodesState/useEdgesState since the real hook requires ReactFlow context
   vi.mock("@xyflow/react", async () => {
     const actual = await vi.importActual("@xyflow/react") as Record<string, unknown>
+    const React = await import("react")
     return {
       ...actual,
       useNodesState: (initial: Node[]) => {
-        const { useState, useCallback } = require("react")
-        const [nodes, setNodes] = useState(initial)
-        const onNodesChange = useCallback((changes: any[]) => {
+        const [nodes, setNodes] = React.useState(initial)
+        const onNodesChange = React.useCallback((changes: any[]) => {
           setNodes((prev: Node[]) => {
             let next = [...prev]
             for (const change of changes) {
@@ -388,9 +388,8 @@ describe("4. Rapid undo/redo", () => {
         return [nodes, setNodes, onNodesChange] as const
       },
       useEdgesState: (initial: Edge[]) => {
-        const { useState, useCallback } = require("react")
-        const [edges, setEdges] = useState(initial)
-        const onEdgesChange = useCallback((changes: any[]) => {
+        const [edges, setEdges] = React.useState(initial)
+        const onEdgesChange = React.useCallback((changes: any[]) => {
           setEdges((prev: Edge[]) => {
             let next = [...prev]
             for (const change of changes) {

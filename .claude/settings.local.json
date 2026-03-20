@@ -215,7 +215,10 @@
       "Bash(ls /c/Users/prici/haute/frontend/node_modules/.bin/vitest*)",
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/.bin/vitest run)",
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/vitest/vitest.mjs run)",
-      "Bash(.venv/Scripts/python -m pytest tests/test_path_traversal_advanced.py::TestConfigIOLoadTraversal tests/test_path_traversal_advanced.py::TestConfigPathForNodeTraversal tests/test_path_traversal_advanced.py::TestModelScorerConfigTraversal tests/test_path_traversal_advanced.py::TestWindowsMixedSeparatorTraversal::test_config_path_for_node_backslash_in_name tests/test_path_traversal_advanced.py::TestNullByteInjection::test_null_byte_in_config_path_for_node tests/test_partial_failure.py::TestCorruptSidecar::test_valid_json_but_wrong_type_returns_empty tests/test_databricks_io.py::TestSQLCommentInjection::test_inline_block_comment_hides_keyword tests/test_model_scorer.py::TestScoreFromConfig::test_reads_config_and_delegates tests/test_model_scorer.py::TestScoreFromConfig::test_base_dir_validates_absolute_config -v)"
+      "Bash(.venv/Scripts/python -m pytest tests/test_path_traversal_advanced.py::TestConfigIOLoadTraversal tests/test_path_traversal_advanced.py::TestConfigPathForNodeTraversal tests/test_path_traversal_advanced.py::TestModelScorerConfigTraversal tests/test_path_traversal_advanced.py::TestWindowsMixedSeparatorTraversal::test_config_path_for_node_backslash_in_name tests/test_path_traversal_advanced.py::TestNullByteInjection::test_null_byte_in_config_path_for_node tests/test_partial_failure.py::TestCorruptSidecar::test_valid_json_but_wrong_type_returns_empty tests/test_databricks_io.py::TestSQLCommentInjection::test_inline_block_comment_hides_keyword tests/test_model_scorer.py::TestScoreFromConfig::test_reads_config_and_delegates tests/test_model_scorer.py::TestScoreFromConfig::test_base_dir_validates_absolute_config -v)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/.bin/tsc.cmd -b --noEmit)",
+      "Bash(cmd.exe //c \"npx tsc -b --noEmit 2>&1\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/typescript/bin/tsc -b --noEmit)"
     ]
   }
 }

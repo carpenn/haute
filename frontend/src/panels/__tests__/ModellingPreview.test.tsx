@@ -4,7 +4,7 @@
  * ModellingPreview uses Zustand stores (useNodeResultsStore, useSettingsStore)
  * and useDragResize, so we mock them to keep tests focused on render logic.
  */
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { ModellingPreview } from "../ModellingPreview"
 import type { ModellingPreviewData } from "../ModellingPreview"
@@ -12,14 +12,17 @@ import { makeTrainResult } from "../../test-utils/factories"
 
 // Mock stores
 vi.mock("../../stores/useNodeResultsStore", () => {
-  const store = vi.fn(() => null)
-  store.getState = vi.fn(() => ({ trainJobs: {} }))
+  const store = Object.assign(vi.fn(() => null), {
+    getState: vi.fn(() => ({ trainJobs: {} })),
+  })
   return { default: store, __esModule: true }
 })
 
 vi.mock("../../stores/useSettingsStore", () => {
-  const store = vi.fn(() => ({ status: "disconnected", backend: "", host: "" }))
-  store.getState = vi.fn(() => ({ mlflow: { status: "disconnected", backend: "", host: "" } }))
+  const store = Object.assign(
+    vi.fn(() => ({ status: "disconnected", backend: "", host: "" })),
+    { getState: vi.fn(() => ({ mlflow: { status: "disconnected", backend: "", host: "" } })) },
+  )
   return { default: store, __esModule: true }
 })
 
@@ -100,9 +103,7 @@ describe("ModellingPreview", () => {
     render(<ModellingPreview data={makeData()} nodeId="n1" />)
     // Find and click collapse button (ChevronDown)
     const collapseButtons = screen.getAllByRole("button")
-    const collapseBtn = collapseButtons.find(b => b.querySelector('[class*="lucide-chevron-down"]') || b.title === "")
-    // The last button in the header area should be the collapse button
-    // Click the last non-tab button
+    // Click the last non-tab button (the collapse/expand toggle)
     const headerButtons = collapseButtons.filter(b => !["Summary", "Features"].includes(b.textContent || ""))
     if (headerButtons.length > 0) {
       fireEvent.click(headerButtons[headerButtons.length - 1])
