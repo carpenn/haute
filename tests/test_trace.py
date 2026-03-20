@@ -387,7 +387,7 @@ class TestTraceResultToDict:
                 TraceStep(
                     node_id="t",
                     node_name="Transform",
-                    node_type="transform",
+                    node_type="polars",
                     schema_diff=SchemaDiff(
                         columns_added=["x"],
                         columns_removed=[],

@@ -32,7 +32,7 @@ class NodeType(StrEnum):
 
     API_INPUT = "apiInput"
     DATA_SOURCE = "dataSource"
-    TRANSFORM = "transform"
+    POLARS = "polars"
     MODEL_SCORE = "modelScore"
     BANDING = "banding"
     RATING_STEP = "ratingStep"
@@ -52,7 +52,7 @@ class NodeType(StrEnum):
 DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
     "data_source": NodeType.DATA_SOURCE,
     "api_input": NodeType.API_INPUT,
-    "transform": NodeType.TRANSFORM,
+    "polars": NodeType.POLARS,
     "model_score": NodeType.MODEL_SCORE,
     "banding": NodeType.BANDING,
     "rating_step": NodeType.RATING_STEP,
@@ -65,7 +65,7 @@ DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
     "scenario_expander": NodeType.SCENARIO_EXPANDER,
     "optimiser_apply": NodeType.OPTIMISER_APPLY,
     "constant": NodeType.CONSTANT,
-    "instance": NodeType.TRANSFORM,  # instances default to transform; real type resolved at runtime
+    "instance": NodeType.POLARS,  # instances default to polars; real type resolved at runtime
 }
 
 NODE_TYPE_TO_DECORATOR: dict[NodeType, str] = {
@@ -450,7 +450,7 @@ class NodeData(BaseModel):
 
     label: str = "Unnamed"
     description: str = ""
-    nodeType: NodeType = NodeType.TRANSFORM  # noqa: N815 — matches React Flow frontend convention
+    nodeType: NodeType = NodeType.POLARS  # noqa: N815 — matches React Flow frontend convention
     config: dict[str, Any] = Field(default_factory=dict)
 
 

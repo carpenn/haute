@@ -42,7 +42,7 @@ def make_transform_node(nid: str, code: str = "") -> GraphNode:
     """Build a minimal transform node."""
     return GraphNode(
         id=nid,
-        data=NodeData(label=nid, nodeType="transform", config={"code": code}),
+        data=NodeData(label=nid, nodeType="polars", config={"code": code}),
     )
 
 

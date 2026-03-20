@@ -113,8 +113,8 @@ class NodeRegistry:
         """Decorator alias for data-source nodes."""
         return self._register_node(fn, **config)
 
-    def transform(self, fn: Callable | None = None, **config: Any) -> Callable:
-        """Decorator alias for transform nodes."""
+    def polars(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for polars nodes."""
         return self._register_node(fn, **config)
 
     def model_score(self, fn: Callable | None = None, **config: Any) -> Callable:
@@ -198,7 +198,7 @@ class Pipeline(NodeRegistry):
         @pipeline.data_source(path="data.parquet")
         def read_data() -> pl.DataFrame: ...
 
-        @pipeline.transform
+        @pipeline.polars
         def transform(df: pl.DataFrame) -> pl.DataFrame: ...
 
         pipeline.connect("read_data", "transform")
@@ -311,7 +311,7 @@ class Pipeline(NodeRegistry):
             elif is_last:
                 rf_type = NodeType.OUTPUT
             else:
-                rf_type = NodeType.TRANSFORM
+                rf_type = NodeType.POLARS
 
             nodes.append(
                 {

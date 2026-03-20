@@ -323,21 +323,21 @@ class TestBuildNodeConfig:
 
     def test_transform(self):
         body = '    """doc"""\n    return df'
-        config = _build_node_config("transform", {}, body, ["df"])
+        config = _build_node_config("polars", {}, body, ["df"])
         assert "code" in config
 
     def test_transform_with_selected_columns(self):
         """selected_columns in decorator kwargs must round-trip through the parser."""
         body = '    """doc"""\n    return df'
         sel = ["quote_id", "premium", "sale_flag"]
-        config = _build_node_config("transform", {"selected_columns": sel}, body, ["df"])
+        config = _build_node_config("polars", {"selected_columns": sel}, body, ["df"])
         assert config["selected_columns"] == sel
         assert "code" in config
 
     def test_transform_without_selected_columns(self):
         """When no selected_columns kwarg, config should not contain the key."""
         body = '    """doc"""\n    return df'
-        config = _build_node_config("transform", {}, body, ["df"])
+        config = _build_node_config("polars", {}, body, ["df"])
         assert "selected_columns" not in config
 
 
@@ -397,14 +397,14 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform
+@pipeline.polars
 def bad_node(df: pl.DataFrame) -> pl.DataFrame:
     """This has a syntax error."""
     return df.with_columns(
         # missing closing paren
 
 
-@pipeline.transform
+@pipeline.polars
 def good_node(df: pl.DataFrame) -> pl.DataFrame:
     """This is fine."""
     return df
@@ -433,7 +433,7 @@ pipeline = haute.Pipeline("edges")
 def a() -> pl.DataFrame:
     return pl.DataFrame(
 
-@pipeline.transform
+@pipeline.polars
 def b(a: pl.DataFrame) -> pl.DataFrame:
     return a
 
@@ -468,7 +468,7 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Clean data."""
     df = (
@@ -556,7 +556,7 @@ def source() -> pl.LazyFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform(selected_columns=['quote_id', 'premium', 'sale_flag'])
+@pipeline.polars(selected_columns=['quote_id', 'premium', 'sale_flag'])
 def features(source: pl.LazyFrame) -> pl.LazyFrame:
     """features node"""
     return source
@@ -606,7 +606,7 @@ def source() -> pl.LazyFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform
+@pipeline.polars
 def clean(source: pl.LazyFrame) -> pl.LazyFrame:
     """clean node"""
     return source

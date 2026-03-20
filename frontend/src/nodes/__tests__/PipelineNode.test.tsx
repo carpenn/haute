@@ -55,9 +55,9 @@ describe("PipelineNode", () => {
   // ── Render per node type ───────────────────────────────────────────
 
   it("renders a transform node with label and type badge", () => {
-    renderNode({ label: "Clean Data", nodeType: NODE_TYPES.TRANSFORM })
+    renderNode({ label: "Clean Data", nodeType: NODE_TYPES.POLARS })
     expect(screen.getByText("Clean Data")).toBeInTheDocument()
-    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.TRANSFORM])).toBeInTheDocument()
+    expect(screen.getByText(nodeTypeLabels[NODE_TYPES.POLARS])).toBeInTheDocument()
   })
 
   it("renders a dataSource node", () => {
@@ -130,7 +130,7 @@ describe("PipelineNode", () => {
   })
 
   it("transform nodes render both source and target handles", () => {
-    const { container } = renderNode({ label: "Transform", nodeType: NODE_TYPES.TRANSFORM })
+    const { container } = renderNode({ label: "Transform", nodeType: NODE_TYPES.POLARS })
     expect(container.querySelector(".react-flow__handle-left")).not.toBeNull()
     expect(container.querySelector(".react-flow__handle-right")).not.toBeNull()
   })
@@ -139,7 +139,7 @@ describe("PipelineNode", () => {
 
   it("applies accent border when selected", () => {
     const { container } = renderNode(
-      { label: "Selected", nodeType: NODE_TYPES.TRANSFORM },
+      { label: "Selected", nodeType: NODE_TYPES.POLARS },
       true,
     )
     // The outer rendered div is the node root with inline style
@@ -152,7 +152,7 @@ describe("PipelineNode", () => {
 
   it("applies default border when not selected", () => {
     const { container } = renderNode(
-      { label: "Not Selected", nodeType: NODE_TYPES.TRANSFORM },
+      { label: "Not Selected", nodeType: NODE_TYPES.POLARS },
       false,
     )
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
@@ -164,7 +164,7 @@ describe("PipelineNode", () => {
   // ── Node label ─────────────────────────────────────────────────────
 
   it("displays the node label text", () => {
-    renderNode({ label: "My Custom Label", nodeType: NODE_TYPES.TRANSFORM })
+    renderNode({ label: "My Custom Label", nodeType: NODE_TYPES.POLARS })
     expect(screen.getByText("My Custom Label")).toBeInTheDocument()
   })
 
@@ -173,7 +173,7 @@ describe("PipelineNode", () => {
   it("shows a status indicator for ok status", () => {
     const { container } = renderNode({
       label: "OK Node",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _status: "ok",
     })
     // jsdom converts hex to rgb: #22c55e -> rgb(34, 197, 94)
@@ -188,7 +188,7 @@ describe("PipelineNode", () => {
   it("shows a status indicator for error status", () => {
     const { container } = renderNode({
       label: "Error Node",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _status: "error",
     })
     // #ef4444 -> rgb(239, 68, 68)
@@ -203,7 +203,7 @@ describe("PipelineNode", () => {
   it("shows a pulsing dot for running status", () => {
     const { container } = renderNode({
       label: "Running Node",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _status: "running",
     })
     const dot = container.querySelector(".animate-pulse-dot") as HTMLElement
@@ -218,7 +218,7 @@ describe("PipelineNode", () => {
   it("shows Instance badge when config.instanceOf is set", () => {
     renderNode({
       label: "Instance Node",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       config: { instanceOf: "base_transform" },
     })
     expect(screen.getByText("Instance")).toBeInTheDocument()
@@ -227,7 +227,7 @@ describe("PipelineNode", () => {
   it("uses dashed border for instance nodes", () => {
     const { container } = renderNode({
       label: "Instance",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       config: { instanceOf: "base" },
     })
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
@@ -260,7 +260,7 @@ describe("PipelineNode", () => {
   it("dims node when _traceDimmed is true", () => {
     const { container } = renderNode({
       label: "Dimmed",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _traceDimmed: true,
     })
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
@@ -271,7 +271,7 @@ describe("PipelineNode", () => {
   it("dims node when _hoverDimmed is true", () => {
     const { container } = renderNode({
       label: "Hover Dimmed",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _hoverDimmed: true,
     })
     const nodeEl = container.querySelector(".rounded-xl") as HTMLElement
@@ -282,7 +282,7 @@ describe("PipelineNode", () => {
   it("shows trace value when _traceActive and _traceValue are set", () => {
     renderNode({
       label: "Traced",
-      nodeType: NODE_TYPES.TRANSFORM,
+      nodeType: NODE_TYPES.POLARS,
       _traceActive: true,
       _traceValue: 42.5,
     })

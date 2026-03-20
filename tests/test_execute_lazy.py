@@ -52,7 +52,7 @@ def _source_node(nid: str, label: str | None = None) -> GraphNode:
 def _transform_node(nid: str, label: str | None = None, **extra_config) -> GraphNode:
     return GraphNode(
         id=nid,
-        data=NodeData(label=label or nid, nodeType=NodeType.TRANSFORM, config=extra_config),
+        data=NodeData(label=label or nid, nodeType=NodeType.POLARS, config=extra_config),
     )
 
 

@@ -156,7 +156,7 @@ class TestAncestors:
 def _make_graph(nodes_data: list[tuple[str, str]], edges_data: list[tuple[str, str]]) -> PipelineGraph:
     """Helper to build a minimal PipelineGraph."""
     nodes = [
-        GraphNode(id=nid, data=NodeData(label=label, nodeType="transform"))
+        GraphNode(id=nid, data=NodeData(label=label, nodeType="polars"))
         for nid, label in nodes_data
     ]
     edges = [_e(s, t) for s, t in edges_data]
@@ -216,7 +216,7 @@ class TestExecuteLazy:
         )
         g = PipelineGraph(
             nodes=[GraphNode(id="src", data=NodeData(label="Source", nodeType="dataSource")),
-                   GraphNode(id="t", data=NodeData(label="Transform", nodeType="transform"))],
+                   GraphNode(id="t", data=NodeData(label="Transform", nodeType="polars"))],
             edges=g.edges,
         )
 
@@ -234,8 +234,8 @@ class TestExecuteLazy:
         )
         g = PipelineGraph(
             nodes=[GraphNode(id="a", data=NodeData(label="A", nodeType="dataSource")),
-                   GraphNode(id="b", data=NodeData(label="B", nodeType="transform")),
-                   GraphNode(id="c", data=NodeData(label="C", nodeType="transform"))],
+                   GraphNode(id="b", data=NodeData(label="B", nodeType="polars")),
+                   GraphNode(id="c", data=NodeData(label="C", nodeType="polars"))],
             edges=g.edges,
         )
 
@@ -252,7 +252,7 @@ class TestExecuteLazy:
 
         g = PipelineGraph(
             nodes=[GraphNode(id="src", data=NodeData(label="Src", nodeType="dataSource")),
-                   GraphNode(id="t", data=NodeData(label="T", nodeType="transform"))],
+                   GraphNode(id="t", data=NodeData(label="T", nodeType="polars"))],
             edges=[_e("src", "t")],
         )
 
@@ -279,7 +279,7 @@ class TestExecuteLazy:
         # Two nodes, no edge — "t" must not silently grab src's output
         g = PipelineGraph(
             nodes=[GraphNode(id="src", data=NodeData(label="Src", nodeType="dataSource")),
-                   GraphNode(id="t", data=NodeData(label="T", nodeType="transform"))],
+                   GraphNode(id="t", data=NodeData(label="T", nodeType="polars"))],
             edges=[],
         )
 
@@ -351,7 +351,7 @@ class TestExecuteLazyMultiInput:
         g = PipelineGraph(
             nodes=[GraphNode(id="a", data=NodeData(label="A", nodeType="dataSource")),
                    GraphNode(id="b", data=NodeData(label="B", nodeType="dataSource")),
-                   GraphNode(id="c", data=NodeData(label="C", nodeType="transform"))],
+                   GraphNode(id="c", data=NodeData(label="C", nodeType="polars"))],
             edges=[_e("a", "c"), _e("b", "c")],
         )
 

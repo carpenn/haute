@@ -24,7 +24,7 @@ function makeBandingNode(
 }
 
 /** Shorthand to build a non-banding node. */
-function makeOtherNode(id: string, nodeType = "transform"): SimpleNode {
+function makeOtherNode(id: string, nodeType = "polars"): SimpleNode {
   return {
     id,
     data: {
@@ -39,7 +39,7 @@ function makeOtherNode(id: string, nodeType = "transform"): SimpleNode {
 
 describe("extractBandingLevelsForNode", () => {
   it("returns empty object for a non-banding node", () => {
-    const nodes: SimpleNode[] = [makeOtherNode("n1", "transform")]
+    const nodes: SimpleNode[] = [makeOtherNode("n1", "polars")]
     expect(extractBandingLevelsForNode(nodes, "n1")).toEqual({})
   })
 
@@ -180,7 +180,7 @@ describe("extractBandingLevelsForNode", () => {
 describe("extractBandingLevels", () => {
   it("returns empty object when no banding nodes exist", () => {
     const nodes: SimpleNode[] = [
-      makeOtherNode("n1", "transform"),
+      makeOtherNode("n1", "polars"),
       makeOtherNode("n2", "output"),
     ]
     expect(extractBandingLevels(nodes)).toEqual({})

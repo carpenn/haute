@@ -500,7 +500,7 @@ def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, scorer.score, False
 
 
-@_register(NodeType.TRANSFORM)
+@_register(NodeType.POLARS)
 def _build_transform(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     code = config.get("code", "").strip()

@@ -15,8 +15,8 @@ def _simple_graph():
         "pipeline_name": "test",
         "nodes": [
             {"id": "src", "data": {"label": "src", "nodeType": "dataSource", "config": {"path": "x.parquet"}}},
-            {"id": "t1", "data": {"label": "t1", "nodeType": "transform", "config": {}}},
-            {"id": "t2", "data": {"label": "t2", "nodeType": "transform", "config": {}}},
+            {"id": "t1", "data": {"label": "t1", "nodeType": "polars", "config": {}}},
+            {"id": "t2", "data": {"label": "t2", "nodeType": "polars", "config": {}}},
         ],
         "edges": [
             {"id": "e1", "source": "src", "target": "t1"},
@@ -68,7 +68,7 @@ class TestCreateSubmodelGraph:
             "pipeline_name": "test",
             "nodes": [
                 {"id": "src", "data": {"label": "src", "nodeType": "dataSource", "config": {"path": "x.parquet"}}},
-                {"id": "t1", "data": {"label": "t1", "nodeType": "transform", "config": {}}},
+                {"id": "t1", "data": {"label": "t1", "nodeType": "polars", "config": {}}},
                 {"id": "out", "data": {"label": "out", "nodeType": "output", "config": {}}},
             ],
             "edges": [
@@ -104,8 +104,8 @@ class TestCreateSubmodelGraph:
         graph = make_graph({
             "pipeline_name": "test",
             "nodes": [
-                {"id": "a", "data": {"label": "a", "nodeType": "transform", "config": {}}},
-                {"id": "b", "data": {"label": "b", "nodeType": "transform", "config": {}}},
+                {"id": "a", "data": {"label": "a", "nodeType": "polars", "config": {}}},
+                {"id": "b", "data": {"label": "b", "nodeType": "polars", "config": {}}},
             ],
             "edges": [{"id": "e1", "source": "a", "target": "b"}],
             "submodels": {"existing": {"file": "modules/existing.py", "childNodeIds": []}},
@@ -120,10 +120,10 @@ class TestCreateSubmodelGraph:
         graph = make_graph({
             "pipeline_name": "test",
             "nodes": [
-                {"id": "a", "data": {"label": "a", "nodeType": "transform", "config": {}}},
-                {"id": "b", "data": {"label": "b", "nodeType": "transform", "config": {}}},
-                {"id": "c", "data": {"label": "c", "nodeType": "transform", "config": {}}},
-                {"id": "d", "data": {"label": "d", "nodeType": "transform", "config": {}}},
+                {"id": "a", "data": {"label": "a", "nodeType": "polars", "config": {}}},
+                {"id": "b", "data": {"label": "b", "nodeType": "polars", "config": {}}},
+                {"id": "c", "data": {"label": "c", "nodeType": "polars", "config": {}}},
+                {"id": "d", "data": {"label": "d", "nodeType": "polars", "config": {}}},
             ],
             "edges": [
                 {"id": "e1", "source": "a", "target": "b"},

@@ -51,7 +51,7 @@ def _make_transform_node(
         position={"x": 0, "y": 100},
         data=NodeData(
             label=label,
-            nodeType="transform",
+            nodeType="polars",
             config=config or {},
         ),
     )

@@ -60,7 +60,7 @@ class TestLintEdgeCases:
                 ),
                 GraphNode(
                     id="b",
-                    data=NodeData(label="b", nodeType="transform", config={}),
+                    data=NodeData(label="b", nodeType="polars", config={}),
                 ),
             ],
             edges=[GraphEdge(id="e1", source="a", target="b")],

@@ -115,10 +115,10 @@ class TestRaiseNodeNotFound:
 class TestRaiseNodeTypeError:
     def test_raises_400(self):
         with pytest.raises(HTTPException) as exc_info:
-            raise_node_type_error("n1", "dataSource", "transform")
+            raise_node_type_error("n1", "dataSource", "polars")
         assert exc_info.value.status_code == 400
         assert "dataSource" in exc_info.value.detail
-        assert "transform" in exc_info.value.detail
+        assert "polars" in exc_info.value.detail
 
 
 class TestRaisePipelineNotFound:
@@ -276,7 +276,7 @@ class TestSaveSidecar:
         graph = PipelineGraph(
             nodes=[
                 GraphNode(id="a", position={"x": 1.0, "y": 2.0},
-                          data=NodeData(label="alpha", nodeType=NodeType.TRANSFORM)),
+                          data=NodeData(label="alpha", nodeType=NodeType.POLARS)),
                 GraphNode(id="b", position={"x": 3.0, "y": 4.0},
                           data=NodeData(label="beta", nodeType=NodeType.OUTPUT)),
             ],
@@ -297,7 +297,7 @@ class TestSaveSidecar:
         graph = PipelineGraph(
             nodes=[
                 GraphNode(id="n1", position={"x": 10.0, "y": 20.0},
-                          data=NodeData(label="My Node", nodeType=NodeType.TRANSFORM)),
+                          data=NodeData(label="My Node", nodeType=NodeType.POLARS)),
             ],
         )
         save_sidecar(py_path, graph)
@@ -375,7 +375,7 @@ class TestScenarioNormalization:
         py_path.write_text(
             "import haute\n"
             "pipeline = haute.Pipeline('test')\n"
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def transform(df):\n"
             "    return df\n"
         )

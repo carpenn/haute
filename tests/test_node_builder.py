@@ -17,7 +17,7 @@ from tests.conftest import make_node
 # ---------------------------------------------------------------------------
 
 
-def _make_node(label: str, node_type: str = "transform") -> GraphNode:
+def _make_node(label: str, node_type: str = "polars") -> GraphNode:
     return make_node({
         "id": label,
         "data": {"label": label, "nodeType": node_type, "config": {}},

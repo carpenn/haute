@@ -12,7 +12,7 @@ import { makeNode } from "../../test-utils/factories"
 const mockSetCenter = vi.fn()
 const mockNodes = [
   makeNode("n1", NODE_TYPES.DATA_SOURCE, { data: { label: "Load Claims", nodeType: NODE_TYPES.DATA_SOURCE, config: {} } }),
-  makeNode("n2", NODE_TYPES.TRANSFORM, { data: { label: "Clean Data", nodeType: NODE_TYPES.TRANSFORM, config: {} }, position: { x: 200, y: 100 } }),
+  makeNode("n2", NODE_TYPES.POLARS, { data: { label: "Clean Data", nodeType: NODE_TYPES.POLARS, config: {} }, position: { x: 200, y: 100 } }),
   makeNode("n3", NODE_TYPES.MODEL_SCORE, { data: { label: "Score Model", nodeType: NODE_TYPES.MODEL_SCORE, config: {} } }),
 ]
 

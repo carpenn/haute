@@ -39,7 +39,7 @@ def load_data() -> pl.DataFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(load_data: pl.DataFrame) -> pl.DataFrame:
     """Transform the data."""
     return load_data
@@ -57,7 +57,7 @@ pipeline.connect("load_data", "transform")
         # Check node types inferred correctly
         node_map = {n.id: n for n in graph.nodes}
         assert node_map["load_data"].data.nodeType == "dataSource"
-        assert node_map["transform"].data.nodeType == "transform"
+        assert node_map["transform"].data.nodeType == "polars"
 
     def test_pipeline_name_extracted(self, tmp_path):
         code = '''\
@@ -83,7 +83,7 @@ def a() -> pl.DataFrame:
     return pl.DataFrame()
 
 
-@pipeline.transform
+@pipeline.polars
 def b(a: pl.DataFrame) -> pl.DataFrame:
     return a
 
@@ -108,7 +108,7 @@ def source() -> pl.DataFrame:
     return pl.DataFrame()
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     return source
 '''
@@ -143,7 +143,7 @@ import haute
 pipeline = haute.Pipeline("doc_test")
 
 
-@pipeline.transform
+@pipeline.polars
 def my_node() -> pl.DataFrame:
     """This is the description."""
     return pl.DataFrame()
@@ -169,7 +169,7 @@ DATA_DIR = Path("data")
 pipeline = haute.Pipeline("preamble_test")
 
 
-@pipeline.transform
+@pipeline.polars
 def src() -> pl.DataFrame:
     return pl.DataFrame()
 '''
@@ -198,7 +198,7 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Transform."""
     return source

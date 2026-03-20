@@ -72,7 +72,7 @@ def policies() -> pl.LazyFrame:
 pipeline.submodel("modules/model_scoring.py")
 
 
-@pipeline.transform
+@pipeline.polars
 def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFrame) -> pl.LazyFrame:
     """calculate_premium node"""
     df = (
@@ -196,7 +196,7 @@ When the graph is loaded, submodel child nodes are **not** in the parent graph. 
     },
     {
       "id": "calculate_premium",
-      "type": "transform",
+      "type": "polars",
       "data": { ... }
     },
     {
@@ -286,8 +286,8 @@ class Submodel:
         self._node_map: dict[str, Node] = {}
         self._edges: list[tuple[str, str]] = []
 
-    def transform(self, fn=None):
-        """Register a transform node. Same API pattern as Pipeline."""
+    def polars(self, fn=None):
+        """Register a polars node. Same API pattern as Pipeline."""
         ...
 
     def data_source(self, **config):
@@ -708,7 +708,7 @@ Alternative: the flattening could happen server-side. The frontend sends the hie
 
 ### 8.1 Node Name Collisions
 
-Two submodels might define nodes with the same name (e.g. both have a `transform` node). **Phase 1**: `haute lint` warns about collisions and blocks submodel creation if collisions exist. **Phase 2**: optional namespacing prefix (`model_scoring__transform`).
+Two submodels might define nodes with the same name (e.g. both have a `polars_node` node). **Phase 1**: `haute lint` warns about collisions and blocks submodel creation if collisions exist. **Phase 2**: optional namespacing prefix (`model_scoring__transform`).
 
 ### 8.2 Circular Submodel References
 

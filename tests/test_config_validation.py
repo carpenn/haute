@@ -37,7 +37,7 @@ class TestValidKeysRegistry:
         expected = {
             NodeType.API_INPUT,
             NodeType.DATA_SOURCE,
-            NodeType.TRANSFORM,
+            NodeType.POLARS,
             NodeType.MODEL_SCORE,
             NodeType.BANDING,
             NodeType.RATING_STEP,
@@ -129,14 +129,14 @@ class TestWarnUnrecognizedConfigKeys:
     def test_input_mapping_always_valid(self):
         """inputMapping is a universal key, valid for any node type."""
         bad = warn_unrecognized_config_keys(
-            NodeType.TRANSFORM,
+            NodeType.POLARS,
             {"code": "x", "inputMapping": {"a": "b"}},
         )
         assert bad == []
 
     def test_empty_config_no_warning(self):
         """Empty config dict should produce no warnings."""
-        bad = warn_unrecognized_config_keys(NodeType.TRANSFORM, {})
+        bad = warn_unrecognized_config_keys(NodeType.POLARS, {})
         assert bad == []
 
     def test_string_node_type_accepted(self):
@@ -286,7 +286,7 @@ class TestBuildNodeConfigProducesValidKeys:
                 id="constant",
             ),
             pytest.param(
-                NodeType.TRANSFORM,
+                NodeType.POLARS,
                 {},
                 '    """doc"""\n    return df',
                 ["df"],
@@ -308,12 +308,12 @@ class TestBuildNodeConfigProducesValidKeys:
         from haute._parser_helpers import _build_node_config
 
         config = _build_node_config(
-            NodeType.TRANSFORM,
+            NodeType.POLARS,
             {"selected_columns": ["col_a", "col_b"]},
             '    """doc"""\n    return df',
             ["df"],
         )
-        bad = warn_unrecognized_config_keys(NodeType.TRANSFORM, config)
+        bad = warn_unrecognized_config_keys(NodeType.POLARS, config)
         assert bad == [], f"selected_columns should be valid: {bad}"
         assert config["selected_columns"] == ["col_a", "col_b"]
 

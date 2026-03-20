@@ -38,7 +38,7 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("{data / 'input.parquet'}")
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Add a column."""
     return source.with_columns(y=pl.col("x") * 2)
@@ -350,7 +350,7 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("{data / 'd.parquet'}")
 
 
-@pipeline.transform
+@pipeline.polars
 def bad(source: pl.DataFrame) -> pl.DataFrame:
     return source.select("nonexistent_column")
 

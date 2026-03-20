@@ -4,7 +4,7 @@ import PolarsIcon from "../components/PolarsIcon"
 export const NODE_TYPES = {
   API_INPUT: "apiInput",
   DATA_SOURCE: "dataSource",
-  TRANSFORM: "transform",
+  POLARS: "polars",
   MODEL_SCORE: "modelScore",
   BANDING: "banding",
   RATING_STEP: "ratingStep",
@@ -56,7 +56,7 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
   [NODE_TYPES.EXTERNAL_FILE]:      { icon: FileArchive,        color: "#B07AA1", label: "LOAD FILE",      name: "Load File",            description: "Load a pickle, JSON, or joblib file and use in code",         defaultConfig: { path: "", fileType: "pickle", code: "" } },
   [NODE_TYPES.CONSTANT]:           { icon: Hash,               color: "#94a3b8", label: "CONSTANT",       name: "Constant",             description: "Named constant values (1-row DataFrame)",                     defaultConfig: { values: [{ name: "constant_1", value: "1.0" }] } },
   // Transform group (sky blue) — process/reshape data
-  [NODE_TYPES.TRANSFORM]:          { icon: PolarsIcon,         color: "#56B4E9", label: "POLARS",         name: "Polars",               description: "Polars transform / feature engineering",                      defaultConfig: {} },
+  [NODE_TYPES.POLARS]:          { icon: PolarsIcon,         color: "#56B4E9", label: "POLARS",         name: "Polars",               description: "Polars transform / feature engineering",                      defaultConfig: {} },
   [NODE_TYPES.BANDING]:            { icon: SlidersHorizontal,  color: "#56B4E9", label: "BANDING",        name: "Banding",              description: "Group numerical or categorical values into bands",             defaultConfig: { factors: [{ banding: "continuous", column: "", outputColumn: "", rules: [], default: null }] }, maxInputs: 1 },
   [NODE_TYPES.SCENARIO_EXPANDER]:  { icon: Rows3,              color: "#56B4E9", label: "EXPANDER",       name: "Expander",             description: "Cross-join rows with scenario values (price, tier, etc.)",    defaultConfig: {}, maxInputs: 1 },
   [NODE_TYPES.RATING_STEP]:        { icon: TableProperties,    color: "#56B4E9", label: "RATING",         name: "Rating Step",          description: "Lookup, factor, cap/floor",                                   defaultConfig: { tables: [{ name: "Table 1", factors: [], outputColumn: "", defaultValue: "1.0", entries: [] }], operation: "multiply", combinedColumn: "" }, maxInputs: 1 },
@@ -89,7 +89,7 @@ export const SINK_ONLY_TYPES = new Set<string>([
 export const PALETTE_TYPES: NodeTypeValue[] = [
   NODE_TYPES.API_INPUT, NODE_TYPES.LIVE_SWITCH, NODE_TYPES.OUTPUT,
   NODE_TYPES.DATA_SOURCE, NODE_TYPES.DATA_SINK, NODE_TYPES.EXTERNAL_FILE, NODE_TYPES.CONSTANT,
-  NODE_TYPES.TRANSFORM, NODE_TYPES.SCENARIO_EXPANDER, NODE_TYPES.BANDING, NODE_TYPES.RATING_STEP,
+  NODE_TYPES.POLARS, NODE_TYPES.SCENARIO_EXPANDER, NODE_TYPES.BANDING, NODE_TYPES.RATING_STEP,
   NODE_TYPES.MODELLING, NODE_TYPES.MODEL_SCORE,
   NODE_TYPES.OPTIMISER, NODE_TYPES.OPTIMISER_APPLY,
 ]

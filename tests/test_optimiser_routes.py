@@ -659,7 +659,7 @@ def _make_expander_graph(data_path: str) -> dict:
                 "id": "transform",
                 "data": {
                     "label": "compute_metrics",
-                    "nodeType": "transform",
+                    "nodeType": "polars",
                     "config": {
                         "code": (
                             "df = df.with_columns([\n"

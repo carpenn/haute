@@ -337,7 +337,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
         func_name = _sanitize_func_name(node.data.label)
         cfg_path = config_path_for_node(node_type, func_name).as_posix()
         try:
-            dec_name = NODE_TYPE_TO_DECORATOR.get(node_type, "transform")
+            dec_name = NODE_TYPE_TO_DECORATOR.get(node_type, "polars")
             def_idx = code.index("\ndef ")
             code = f'@pipeline.{dec_name}(config="{cfg_path}")' + code[def_idx:]
         except ValueError:
@@ -739,7 +739,7 @@ def _gen_output(node: GraphNode, source_names: list[str]) -> str:
     )
 
 
-@_register_codegen(NodeType.TRANSFORM)
+@_register_codegen(NodeType.POLARS)
 def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
     func_name, description, config = _common_node_fields(node)
     code = (config.get("code") or "").strip()
@@ -748,9 +748,9 @@ def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
     sel = config.get("selected_columns", [])
 
     if sel:
-        decorator = f"@pipeline.transform(selected_columns={sel!r})"
+        decorator = f"@pipeline.polars(selected_columns={sel!r})"
     else:
-        decorator = "@pipeline.transform"
+        decorator = "@pipeline.polars"
 
     return (
         f"{decorator}\n"

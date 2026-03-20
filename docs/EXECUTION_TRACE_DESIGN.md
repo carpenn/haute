@@ -90,7 +90,7 @@ class TraceRequest:
 class TraceStep:
     node_id: str
     node_name: str
-    node_type: str                 # dataSource, transform, modelScore, ratingStep, output
+    node_type: str                 # dataSource, polars, modelScore, ratingStep, output
 
     # Schema changes at this node
     columns_added: list[str]
@@ -200,7 +200,7 @@ Strategy by node type:
 
 | Node type | Cardinality | Row tracking strategy |
 |-----------|-------------|----------------------|
-| **Transform** (map) | 1:1 | Same row index. Input row N → output row N. |
+| **Polars** (map) | 1:1 | Same row index. Input row N → output row N. |
 | **Filter** | N:M (M≤N) | Track via a hidden `__trace_row_id` column injected before execution. |
 | **Join** | N:M (fan-out/reduce) | Track via join key values. Find matching rows in both branches. |
 | **Group_by** | N:M (M≤N) | Track via group key values. Record "this group had K source rows". |

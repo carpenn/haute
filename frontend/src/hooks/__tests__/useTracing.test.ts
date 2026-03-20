@@ -83,7 +83,7 @@ describe("useTracing", () => {
 
   it("handleCellClick calls traceCell and sets result on success", async () => {
     const trace = {
-      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
       target_node_id: "n2",
       row_index: 0,
       column: "price",
@@ -140,7 +140,7 @@ describe("useTracing", () => {
 
   it("nodesWithStatus dims nodes not in trace via _traceDimmed data flag only", async () => {
     const trace = {
-      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
       target_node_id: "n2",
       row_index: 0,
       column: "price",
@@ -167,8 +167,8 @@ describe("useTracing", () => {
   it("nodesWithStatus does not set style.opacity on traced nodes either", async () => {
     const trace = {
       steps: [
-        { node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
-        { node_id: "n2", node_name: "N2", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+        { node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+        { node_id: "n2", node_name: "N2", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
       ],
       target_node_id: "n2",
       row_index: 0,
@@ -194,7 +194,7 @@ describe("useTracing", () => {
 
   it("nodesWithStatus preserves transition on style", async () => {
     const trace = {
-      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
       target_node_id: "n2",
       row_index: 0,
       column: "price",
@@ -220,8 +220,8 @@ describe("useTracing", () => {
   it("edgesWithTrace highlights edges between traced nodes", async () => {
     const trace = {
       steps: [
-        { node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
-        { node_id: "n2", node_name: "N2", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+        { node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
+        { node_id: "n2", node_name: "N2", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 },
       ],
       target_node_id: "n2",
       row_index: 0,
@@ -282,7 +282,7 @@ describe("useTracing", () => {
 
   it("_hoverDimmed is false when trace is active (trace takes priority)", async () => {
     const trace = {
-      steps: [{ node_id: "n1", node_name: "N1", node_type: "transform", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
+      steps: [{ node_id: "n1", node_name: "N1", node_type: "polars", schema_diff: { columns_added: [], columns_removed: [], columns_modified: [], columns_passed: [] }, input_values: {}, output_values: {}, column_relevant: true, execution_ms: 5 }],
       target_node_id: "n2",
       row_index: 0,
       column: "price",

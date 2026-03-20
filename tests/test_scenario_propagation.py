@@ -52,7 +52,7 @@ def _transform_node(nid: str, label: str | None = None, **extra_config) -> Graph
         id=nid,
         data=NodeData(
             label=label or nid,
-            nodeType=NodeType.TRANSFORM,
+            nodeType=NodeType.POLARS,
             config=extra_config,
         ),
     )
@@ -329,14 +329,14 @@ class TestInstanceNodeDanglingReferences:
             id="inst1",
             data=NodeData(
                 label="my_instance",
-                nodeType=NodeType.TRANSFORM,
+                nodeType=NodeType.POLARS,
                 config={"instanceOf": "deleted_node"},
             ),
         )
         node_map = {"inst1": instance}  # original not in map
         result = resolve_instance_node(instance, node_map)
         # Should return unchanged — no merge with original
-        assert result.data.nodeType == NodeType.TRANSFORM
+        assert result.data.nodeType == NodeType.POLARS
         assert result.data.config.get("instanceOf") == "deleted_node"
 
     def test_valid_instance_of_merges_config(self):
@@ -353,7 +353,7 @@ class TestInstanceNodeDanglingReferences:
             id="inst1",
             data=NodeData(
                 label="my_instance",
-                nodeType=NodeType.TRANSFORM,
+                nodeType=NodeType.POLARS,
                 config={"instanceOf": "orig"},
             ),
         )
@@ -374,7 +374,7 @@ class TestInstanceNodeDanglingReferences:
             id="inst1",
             data=NodeData(
                 label="my_instance",
-                nodeType=NodeType.TRANSFORM,
+                nodeType=NodeType.POLARS,
                 config={"instanceOf": "orig"},
             ),
         )
@@ -389,7 +389,7 @@ class TestInstanceNodeDanglingReferences:
             id="n1",
             data=NodeData(
                 label="node",
-                nodeType=NodeType.TRANSFORM,
+                nodeType=NodeType.POLARS,
                 config={"instanceOf": ""},
             ),
         )
@@ -400,7 +400,7 @@ class TestInstanceNodeDanglingReferences:
         """Node without instanceOf in config is returned as-is."""
         node = GraphNode(
             id="n1",
-            data=NodeData(label="node", nodeType=NodeType.TRANSFORM, config={}),
+            data=NodeData(label="node", nodeType=NodeType.POLARS, config={}),
         )
         result = resolve_instance_node(node, {"n1": node})
         assert result is node

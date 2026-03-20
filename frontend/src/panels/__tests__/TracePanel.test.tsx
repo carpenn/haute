@@ -7,7 +7,7 @@ function makeStep(overrides: Partial<TraceStep> = {}): TraceStep {
   return {
     node_id: "n1",
     node_name: "Transform 1",
-    node_type: "transform",
+    node_type: "polars",
     schema_diff: {
       columns_added: [],
       columns_removed: [],

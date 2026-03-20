@@ -380,7 +380,7 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
       case NODE_TYPES.CONSTANT:
         return <ConstantEditor config={config} onUpdate={handleConfigUpdate} />
 
-      case NODE_TYPES.TRANSFORM:
+      case NODE_TYPES.POLARS:
         return <TransformEditor config={config} onUpdate={handleConfigUpdate} inputSources={inputSources} onDeleteInput={onDeleteEdge} errorLine={errorLine} />
 
       case NODE_TYPES.SUBMODEL:

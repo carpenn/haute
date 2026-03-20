@@ -36,7 +36,7 @@ function makeNode(overrides: Partial<SimpleNode> = {}): SimpleNode {
     data: {
       label: "My Node",
       description: "",
-      nodeType: "transform",
+      nodeType: "polars",
       config: {},
     },
     ...overrides,
@@ -90,7 +90,7 @@ describe("NodePanel", () => {
   })
 
   it("renders TransformEditor for transform nodes", () => {
-    renderPanel({ node: makeNode({ data: { label: "T", description: "", nodeType: "transform", config: {} } }) })
+    renderPanel({ node: makeNode({ data: { label: "T", description: "", nodeType: "polars", config: {} } }) })
     expect(screen.getByTestId("TransformEditor")).toBeInTheDocument()
   })
 
@@ -191,10 +191,10 @@ describe("NodePanel", () => {
   })
 
   it("instance node shows 'Instance of' panel instead of editor", () => {
-    const origNode = makeNode({ id: "orig_1", data: { label: "Original", description: "", nodeType: "transform", config: {} } })
+    const origNode = makeNode({ id: "orig_1", data: { label: "Original", description: "", nodeType: "polars", config: {} } })
     const instanceNode = makeNode({
       id: "inst_1",
-      data: { label: "Instance", description: "", nodeType: "transform", config: { instanceOf: "orig_1" } },
+      data: { label: "Instance", description: "", nodeType: "polars", config: { instanceOf: "orig_1" } },
     })
     renderPanel({ node: instanceNode, allNodes: [origNode, instanceNode] })
     expect(screen.getByText("Instance of")).toBeInTheDocument()
@@ -221,7 +221,7 @@ describe("NodePanel", () => {
     it("renders mapping dropdowns when instance has edges", () => {
       const origNode = makeNode({
         id: "orig_1",
-        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+        data: { label: "Original", description: "", nodeType: "polars", config: {} },
       })
       const upstreamOrigNode = makeNode({
         id: "up_orig",
@@ -233,7 +233,7 @@ describe("NodePanel", () => {
       })
       const instanceNode = makeNode({
         id: "inst_1",
-        data: { label: "Instance", description: "", nodeType: "transform", config: { instanceOf: "orig_1" } },
+        data: { label: "Instance", description: "", nodeType: "polars", config: { instanceOf: "orig_1" } },
       })
 
       const edges: SimpleEdge[] = [
@@ -258,14 +258,14 @@ describe("NodePanel", () => {
     it("renders schema warnings when _schemaWarnings is set", () => {
       const origNode = makeNode({
         id: "orig_1",
-        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+        data: { label: "Original", description: "", nodeType: "polars", config: {} },
       })
       const instanceNode = makeNode({
         id: "inst_1",
         data: {
           label: "Instance",
           description: "",
-          nodeType: "transform",
+          nodeType: "polars",
           config: { instanceOf: "orig_1" },
           _schemaWarnings: [
             { column: "col_a", status: "missing" },
@@ -288,11 +288,11 @@ describe("NodePanel", () => {
     it("renders no mapping section when both origInputs and instInputs are empty", () => {
       const origNode = makeNode({
         id: "orig_1",
-        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+        data: { label: "Original", description: "", nodeType: "polars", config: {} },
       })
       const instanceNode = makeNode({
         id: "inst_1",
-        data: { label: "Instance", description: "", nodeType: "transform", config: { instanceOf: "orig_1" } },
+        data: { label: "Instance", description: "", nodeType: "polars", config: { instanceOf: "orig_1" } },
       })
 
       renderPanel({
@@ -308,7 +308,7 @@ describe("NodePanel", () => {
     it("updates inputMapping config when mapping dropdown changes", () => {
       const origNode = makeNode({
         id: "orig_1",
-        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+        data: { label: "Original", description: "", nodeType: "polars", config: {} },
       })
       const upOrig = makeNode({
         id: "up_orig",
@@ -320,7 +320,7 @@ describe("NodePanel", () => {
       })
       const instanceNode = makeNode({
         id: "inst_1",
-        data: { label: "Instance", description: "", nodeType: "transform", config: { instanceOf: "orig_1" } },
+        data: { label: "Instance", description: "", nodeType: "polars", config: { instanceOf: "orig_1" } },
       })
 
       const edges: SimpleEdge[] = [
@@ -409,7 +409,7 @@ describe("NodePanel", () => {
         data: {
           label: "Old Label",
           description: "desc",
-          nodeType: "transform",
+          nodeType: "polars",
           config: { existing: "value" },
         },
       })
@@ -421,7 +421,7 @@ describe("NodePanel", () => {
       expect(props.onUpdateNode).toHaveBeenCalledWith("n1", {
         label: "New Label",
         description: "desc",
-        nodeType: "transform",
+        nodeType: "polars",
         config: { existing: "value" },
       })
     })
@@ -432,7 +432,7 @@ describe("NodePanel", () => {
         data: {
           label: "Label",
           description: "",
-          nodeType: "transform",
+          nodeType: "polars",
           config: {},
           _columns: [{ name: "x", dtype: "Float64" }],
         },
@@ -457,7 +457,7 @@ describe("NodePanel", () => {
     it("uses updated config when node prop changes between renders", () => {
       const origNode = makeNode({
         id: "orig_1",
-        data: { label: "Original", description: "", nodeType: "transform", config: {} },
+        data: { label: "Original", description: "", nodeType: "polars", config: {} },
       })
       const upOrig = makeNode({
         id: "up_orig",
@@ -474,7 +474,7 @@ describe("NodePanel", () => {
         data: {
           label: "Instance",
           description: "",
-          nodeType: "transform",
+          nodeType: "polars",
           config: { instanceOf: "orig_1", existingKey: "v1" },
         },
       })
@@ -504,7 +504,7 @@ describe("NodePanel", () => {
         data: {
           label: "Instance",
           description: "",
-          nodeType: "transform",
+          nodeType: "polars",
           config: { instanceOf: "orig_1", existingKey: "v2", newKey: "added" },
         },
       })

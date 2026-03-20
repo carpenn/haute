@@ -22,7 +22,7 @@ const allNodes = [
     data: {
       label: "Upstream Node",
       description: "",
-      nodeType: "transform",
+      nodeType: "polars",
       _columns: UPSTREAM_COLUMNS,
     },
   },
@@ -56,7 +56,7 @@ describe("OutputEditor", () => {
 
   it("shows empty state when upstream node has no _columns", () => {
     const noColumnsNodes = [
-      { id: "upstream", data: { label: "Empty", description: "", nodeType: "transform" } },
+      { id: "upstream", data: { label: "Empty", description: "", nodeType: "polars" } },
     ]
     render(<OutputEditor {...DEFAULT_PROPS} allNodes={noColumnsNodes} edges={edges} />)
     expect(screen.getByText("Preview or run the upstream node to see columns")).toBeTruthy()

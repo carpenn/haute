@@ -35,7 +35,7 @@ def _simple_graph() -> dict:
             },
             {
                 "id": "calc",
-                "data": {"label": "calc", "nodeType": "transform", "config": {"code": "return df"}},
+                "data": {"label": "calc", "nodeType": "polars", "config": {"code": "return df"}},
             },
         ],
         "edges": [{"id": "e1", "source": "load", "target": "calc"}],
@@ -76,7 +76,7 @@ def _graph_with_submodel() -> dict:
                     "nodes": [
                         {
                             "id": "base_rate",
-                            "data": {"label": "base_rate", "nodeType": "transform", "config": {"code": "return df"}},
+                            "data": {"label": "base_rate", "nodeType": "polars", "config": {"code": "return df"}},
                         },
                     ],
                     "edges": [],
@@ -160,7 +160,7 @@ import haute
 
 submodel = haute.Submodel("pricing", description="Test submodel")
 
-@submodel.transform
+@submodel.polars
 def base_rate(df: pl.LazyFrame) -> pl.LazyFrame:
     return df
 ''')

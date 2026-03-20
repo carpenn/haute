@@ -298,7 +298,7 @@ class TestFindTypedNode:
         from haute.graph_utils import NodeType
         from haute.routes._helpers import find_typed_node
 
-        graph = self._make_graph_with_node("transform")
+        graph = self._make_graph_with_node("polars")
         with pytest.raises(HTTPException) as exc_info:
             find_typed_node(graph, "n1", NodeType.MODELLING, "modelling")
         assert exc_info.value.status_code == 400

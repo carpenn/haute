@@ -22,7 +22,7 @@ from haute._parser_regex import (
 class TestFindFunctionBlocks:
     def test_single_decorated_function(self) -> None:
         source = (
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def my_func(df):\n"
             "    return df\n"
         )
@@ -34,11 +34,11 @@ class TestFindFunctionBlocks:
 
     def test_multiple_functions(self) -> None:
         source = (
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def alpha(df):\n"
             "    return df\n"
             "\n"
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def beta(df):\n"
             "    return df\n"
         )
@@ -49,7 +49,7 @@ class TestFindFunctionBlocks:
 
     def test_multiple_params(self) -> None:
         source = (
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def join(left, right):\n"
             "    return left\n"
         )
@@ -58,7 +58,7 @@ class TestFindFunctionBlocks:
 
     def test_typed_params_strips_annotations(self) -> None:
         source = (
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def transform(df: pl.LazyFrame) -> pl.LazyFrame:\n"
             "    return df\n"
         )
@@ -76,7 +76,7 @@ class TestFindFunctionBlocks:
 
     def test_body_with_multiple_lines(self) -> None:
         source = (
-            "@pipeline.transform()\n"
+            "@pipeline.polars()\n"
             "def calc(df):\n"
             "    x = 1\n"
             "    y = 2\n"
@@ -115,9 +115,9 @@ class TestFindFunctionBlocks:
         assert blocks == []
 
     def test_bare_decorator(self) -> None:
-        """@pipeline.transform (no parens) should be matched."""
+        """@pipeline.polars (no parens) should be matched."""
         source = (
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def my_func(df):\n"
             "    return df\n"
         )
@@ -150,7 +150,7 @@ class TestParseDecoratorKwargsRegex:
         assert result["name"] == "load"
 
     def test_boolean_kwargs(self) -> None:
-        text = "@pipeline.transform(api_input=True, output=False)"
+        text = "@pipeline.polars(api_input=True, output=False)"
         result = _parse_decorator_kwargs_regex(text)
         assert result["api_input"] is True
         assert result["output"] is False
@@ -162,12 +162,12 @@ class TestParseDecoratorKwargsRegex:
         assert result["output"] is True
 
     def test_bare_decorator_returns_empty(self) -> None:
-        text = "@pipeline.transform"
+        text = "@pipeline.polars"
         result = _parse_decorator_kwargs_regex(text)
         assert result == {}
 
     def test_empty_parens(self) -> None:
-        text = "@pipeline.transform()"
+        text = "@pipeline.polars()"
         result = _parse_decorator_kwargs_regex(text)
         assert result == {}
 
@@ -207,7 +207,7 @@ class TestRegexPatterns:
         assert matches == [("x", "y")]
 
     def test_decorator_pattern_bare(self) -> None:
-        source = "@pipeline.transform\ndef foo(df):\n    pass\n"
+        source = "@pipeline.polars\ndef foo(df):\n    pass\n"
         matches = list(_RE_DECORATOR.finditer(source))
         assert len(matches) == 1
 
@@ -239,7 +239,7 @@ import haute
 
 pipeline = haute.Pipeline("test_pipe", description="A test")
 
-@pipeline.transform()
+@pipeline.polars()
 def transform(df):
     return df
 
@@ -270,7 +270,7 @@ x = {unclosed
         assert graph.nodes == []
 
     def test_pipeline_name_fallback(self) -> None:
-        source = "@pipeline.transform()\ndef foo(df):\n    return df\n"
+        source = "@pipeline.polars()\ndef foo(df):\n    return df\n"
         err = SyntaxError("oops")
         err.lineno = 1
         graph = fallback_parse(source, "file.py", err)
@@ -281,11 +281,11 @@ x = {unclosed
 import haute
 pipeline = haute.Pipeline("p")
 
-@pipeline.transform()
+@pipeline.polars()
 def a(df):
     return df
 
-@pipeline.transform()
+@pipeline.polars()
 def b(a):
     return a
 
@@ -309,11 +309,11 @@ pipeline.connect("a", "b")
 import haute
 pipeline = haute.Pipeline("p")
 
-@pipeline.transform()
+@pipeline.polars()
 def good(df):
     return df
 
-@pipeline.transform()
+@pipeline.polars()
 def bad(df):
     x = {unclosed
 '''

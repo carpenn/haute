@@ -169,7 +169,7 @@ class TestPruner:
                         },
                     },
                 },
-                {"id": "score", "data": {"label": "score", "nodeType": "transform", "config": {}}},
+                {"id": "score", "data": {"label": "score", "nodeType": "polars", "config": {}}},
                 {"id": "out", "data": {"label": "out", "nodeType": "output", "config": {}}},
             ],
             "edges": [

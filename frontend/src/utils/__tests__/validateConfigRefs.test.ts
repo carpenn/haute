@@ -3,7 +3,7 @@ import { validateConfigRefs, formatConfigRefWarnings } from "../validateConfigRe
 import type { Node } from "@xyflow/react"
 
 function makeNode(id: string, label: string, config: Record<string, unknown> = {}): Node {
-  return { id, position: { x: 0, y: 0 }, data: { label, nodeType: "transform", config } }
+  return { id, position: { x: 0, y: 0 }, data: { label, nodeType: "polars", config } }
 }
 
 describe("validateConfigRefs", () => {

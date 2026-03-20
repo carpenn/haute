@@ -35,7 +35,7 @@ class TestMappings:
 
     def test_all_non_transform_non_submodel_types_mapped(self):
         excluded = {
-            NodeType.TRANSFORM,
+            NodeType.POLARS,
             NodeType.SUBMODEL,
             NodeType.SUBMODEL_PORT,
         }
@@ -67,7 +67,7 @@ class TestConfigPathForNode:
 
     def test_transform_raises(self):
         with pytest.raises(ValueError, match="No config folder"):
-            config_path_for_node(NodeType.TRANSFORM, "my_transform")
+            config_path_for_node(NodeType.POLARS, "my_transform")
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ class TestRemoveConfigFile:
         assert not remove_config_file(NodeType.DATA_SOURCE, "nope", tmp_path)
 
     def test_remove_transform_returns_false(self, tmp_path):
-        assert not remove_config_file(NodeType.TRANSFORM, "t", tmp_path)
+        assert not remove_config_file(NodeType.POLARS, "t", tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ class TestCollectNodeConfigs:
         graph = make_graph({
             "nodes": [
                 {"id": "src", "data": {"label": "src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "t", "data": {"label": "clean", "nodeType": "transform", "config": {"code": ".filter()"}}},
+                {"id": "t", "data": {"label": "clean", "nodeType": "polars", "config": {"code": ".filter()"}}},
             ],
             "edges": [{"id": "e1", "source": "src", "target": "t"}],
         })

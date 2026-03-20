@@ -107,18 +107,18 @@ Edges can be expressed two ways:
 
 **Explicit** (complex DAGs):
 ```python
-pipeline.connect("read_data", "transform")
+pipeline.connect("read_data", "polars_node")
 pipeline.connect("read_data", "enrich")
-pipeline.connect("transform", "output")
+pipeline.connect("polars_node", "output")
 pipeline.connect("enrich", "output")
 ```
 
 **Implicit** (parameter names match node names):
 ```python
 @pipeline.output()
-def output(transform: pl.DataFrame, enrich: pl.DataFrame) -> pl.DataFrame:
-    # parameter names "transform" and "enrich" match node names → implicit edges
-    return transform.join(enrich, on="id")
+def output(polars_node: pl.DataFrame, enrich: pl.DataFrame) -> pl.DataFrame:
+    # parameter names "polars_node" and "enrich" match node names → implicit edges
+    return polars_node.join(enrich, on="id")
 ```
 
 The parser supports both. Explicit `connect()` calls take precedence. If no `connect()` calls exist and parameter names match node names, infer edges from signatures.
@@ -232,7 +232,7 @@ motor.haute.json       ← UI metadata (positions, layout preferences)
 {
   "positions": {
     "read_data": { "x": 0, "y": 100 },
-    "transform": { "x": 300, "y": 100 },
+    "polars_node": { "x": 300, "y": 100 },
     "output": { "x": 600, "y": 100 }
   },
   "viewport": { "x": 0, "y": 0, "zoom": 1 }

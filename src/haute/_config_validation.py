@@ -41,7 +41,7 @@ logger = get_logger(component="config_validation")
 _TYPED_DICT_BY_NODE_TYPE: dict[NodeType, type] = {
     NodeType.API_INPUT: ApiInputConfig,
     NodeType.DATA_SOURCE: DataSourceConfig,
-    NodeType.TRANSFORM: TransformConfig,
+    NodeType.POLARS: TransformConfig,
     NodeType.MODEL_SCORE: ModelScoreConfig,
     NodeType.BANDING: BandingConfig,
     NodeType.RATING_STEP: RatingStepConfig,

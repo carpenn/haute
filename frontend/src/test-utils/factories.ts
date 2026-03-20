@@ -16,12 +16,12 @@ import type { SimpleNode, SimpleEdge } from "../panels/editors/_shared"
  *
  * @param id        – Node ID (required).
  * @param nodeType  – The application node type stored in `data.nodeType`.
- *                    Defaults to `"transform"`.
+ *                    Defaults to `"polars"`.
  * @param overrides – Any additional fields to merge (position, data, etc.).
  */
 export function makeNode(
   id: string,
-  nodeType = "transform",
+  nodeType = "polars",
   overrides: Partial<Node> = {},
 ): Node {
   const { data: dataOverrides, ...rest } = overrides
@@ -68,13 +68,13 @@ export function makeEdge(
  * Create a `SimpleNode` (the lighter type used in graph-building utils).
  *
  * @param id        – Node ID (required).
- * @param nodeType  – Application node type. Defaults to `"transform"`.
+ * @param nodeType  – Application node type. Defaults to `"polars"`.
  * @param overrides – Partial overrides including `type`, `config`, or any
  *                    extra `data` fields.
  */
 export function makeSimpleNode(
   id: string,
-  nodeType = "transform",
+  nodeType = "polars",
   overrides: {
     type?: string
     config?: Record<string, unknown>

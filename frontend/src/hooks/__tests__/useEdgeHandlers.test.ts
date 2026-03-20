@@ -145,7 +145,7 @@ describe("useEdgeHandlers", () => {
     const params = makeParams()
     const transformNode = {
       id: "t1",
-      data: { label: "Transform", nodeType: NODE_TYPES.TRANSFORM },
+      data: { label: "Transform", nodeType: NODE_TYPES.POLARS },
     } as unknown as Node
     params.graphRef.current.nodes = [transformNode]
     params.graphRef.current.edges = [
@@ -230,7 +230,7 @@ describe("useEdgeHandlers", () => {
 
   it("onNodeContextMenu sets context menu with correct data", () => {
     const params = makeParams()
-    const node = { id: "n1", data: { label: "Test Node", nodeType: "transform" } } as unknown as Node
+    const node = { id: "n1", data: { label: "Test Node", nodeType: "polars" } } as unknown as Node
     const { result } = renderHook(() => useEdgeHandlers(params))
     const event = { preventDefault: vi.fn(), clientX: 100, clientY: 200 } as unknown as React.MouseEvent
     act(() => {
@@ -255,7 +255,7 @@ describe("useEdgeHandlers", () => {
       clientY: 400,
       dataTransfer: {
         getData: vi.fn((key: string) => {
-          if (key === "application/reactflow-type") return NODE_TYPES.TRANSFORM
+          if (key === "application/reactflow-type") return NODE_TYPES.POLARS
           if (key === "application/reactflow-config") return "{}"
           return ""
         }),

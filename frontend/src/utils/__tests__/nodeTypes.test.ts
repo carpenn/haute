@@ -5,7 +5,7 @@ describe("NODE_TYPES", () => {
   it("contains all expected node types", () => {
     expect(NODE_TYPES.API_INPUT).toBe("apiInput")
     expect(NODE_TYPES.DATA_SOURCE).toBe("dataSource")
-    expect(NODE_TYPES.TRANSFORM).toBe("transform")
+    expect(NODE_TYPES.POLARS).toBe("polars")
     expect(NODE_TYPES.MODEL_SCORE).toBe("modelScore")
     expect(NODE_TYPES.BANDING).toBe("banding")
     expect(NODE_TYPES.RATING_STEP).toBe("ratingStep")
@@ -59,7 +59,7 @@ describe("SINGLETON_TYPES", () => {
   })
 
   it("does not contain non-singleton types", () => {
-    expect(SINGLETON_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
+    expect(SINGLETON_TYPES.has(NODE_TYPES.POLARS)).toBe(false)
     expect(SINGLETON_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(false)
     expect(SINGLETON_TYPES.has(NODE_TYPES.LIVE_SWITCH)).toBe(false)
   })
@@ -77,7 +77,7 @@ describe("SOURCE_ONLY_TYPES", () => {
   })
 
   it("does not contain non-source types", () => {
-    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
+    expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.POLARS)).toBe(false)
     expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.OUTPUT)).toBe(false)
     expect(SOURCE_ONLY_TYPES.has(NODE_TYPES.DATA_SINK)).toBe(false)
   })
@@ -96,7 +96,7 @@ describe("SINK_ONLY_TYPES", () => {
   })
 
   it("does not contain non-sink types", () => {
-    expect(SINK_ONLY_TYPES.has(NODE_TYPES.TRANSFORM)).toBe(false)
+    expect(SINK_ONLY_TYPES.has(NODE_TYPES.POLARS)).toBe(false)
     expect(SINK_ONLY_TYPES.has(NODE_TYPES.DATA_SOURCE)).toBe(false)
     expect(SINK_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(false)
   })

@@ -39,9 +39,9 @@ const zoomSelector = (s: { transform: [number, number, number] }) => {
 
 function PipelineNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PipelineNodeData
-  const nodeType = nodeData.nodeType || NODE_TYPES.TRANSFORM
+  const nodeType = nodeData.nodeType || NODE_TYPES.POLARS
   const Icon = nodeTypeIcons[nodeType] || PolarsIcon
-  const accent = nodeTypeColors[nodeType] || nodeTypeColors[NODE_TYPES.TRANSFORM]
+  const accent = nodeTypeColors[nodeType] || nodeTypeColors[NODE_TYPES.POLARS]
   const typeLabel = nodeTypeLabels[nodeType] || "NODE"
   const isDeployInput = nodeType === NODE_TYPES.API_INPUT
   const isLiveSwitch = nodeType === NODE_TYPES.LIVE_SWITCH

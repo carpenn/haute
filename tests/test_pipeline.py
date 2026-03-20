@@ -59,7 +59,7 @@ class TestPipeline:
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1, 2, 3]})
 
-        @p.transform
+        @p.polars
         def transform(source: pl.DataFrame) -> pl.DataFrame:
             return source.with_columns(y=pl.col("x") * 2)
 
@@ -94,11 +94,11 @@ class TestPipeline:
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
-        @p.transform
+        @p.polars
         def c(b: pl.DataFrame) -> pl.DataFrame:
             return b
 
@@ -127,7 +127,7 @@ class TestPipeline:
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
@@ -142,7 +142,7 @@ class TestPipeline:
         def first() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def second(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
@@ -159,7 +159,7 @@ class TestPipeline:
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
@@ -175,7 +175,7 @@ class TestPipeline:
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1, 2]})
 
-        @p.transform
+        @p.polars
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") * 3)
 
@@ -192,7 +192,7 @@ class TestPipeline:
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [0]})
 
-        @p.transform
+        @p.polars
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") + 100)
 
@@ -220,11 +220,11 @@ class TestPipeline:
         def a() -> pl.DataFrame:
             return pl.DataFrame()
 
-        @p.transform
+        @p.polars
         def b(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
-        @p.transform
+        @p.polars
         def c(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
@@ -244,7 +244,7 @@ class TestPipeline:
             captured.append(_scenario_ctx.get())
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             captured.append(_scenario_ctx.get())
             return df
@@ -268,7 +268,7 @@ class TestPipeline:
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             captured.append(_scenario_ctx.get())
             return df
@@ -287,7 +287,7 @@ class TestPipeline:
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.transform
+        @p.polars
         def boom(df: pl.DataFrame) -> pl.DataFrame:
             raise RuntimeError("kaboom")
 
@@ -304,7 +304,7 @@ class TestPipeline:
         def a() -> pl.DataFrame:
             return pl.DataFrame()
 
-        @p.transform
+        @p.polars
         def b(df: pl.DataFrame) -> pl.DataFrame:
             return df
 

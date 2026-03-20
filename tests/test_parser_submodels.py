@@ -88,12 +88,12 @@ import haute
 
 submodel = haute.Submodel("pricing", description="Pricing submodel")
 
-@submodel.transform
+@submodel.polars
 def base_rate(df: pl.LazyFrame) -> pl.LazyFrame:
     """Calculate base rate."""
     return df.with_columns(pl.lit(100.0).alias("base"))
 
-@submodel.transform
+@submodel.polars
 def adjust(base_rate: pl.LazyFrame) -> pl.LazyFrame:
     """Apply adjustment."""
     return base_rate.with_columns((pl.col("base") * 1.1).alias("adjusted"))
@@ -140,7 +140,7 @@ import haute
 
 submodel = haute.Submodel("unnamed")
 
-@submodel.transform
+@submodel.polars
 def only_node(df: pl.LazyFrame) -> pl.LazyFrame:
     return df
 '''
@@ -174,11 +174,11 @@ def _make_child_graph() -> PipelineGraph:
     """Build a simple submodel graph with 2 nodes."""
     cn1 = GraphNode(
         id="child_a",
-        data=NodeData(label="child_a", nodeType="transform", config={"code": "pass"}),
+        data=NodeData(label="child_a", nodeType="polars", config={"code": "pass"}),
     )
     cn2 = GraphNode(
         id="child_b",
-        data=NodeData(label="child_b", nodeType="transform", config={"code": "pass"}),
+        data=NodeData(label="child_b", nodeType="polars", config={"code": "pass"}),
     )
     ce = GraphEdge(id="e_child_a_child_b", source="child_a", target="child_b")
     return PipelineGraph(
@@ -275,7 +275,7 @@ class TestMergeSubmodels:
         child1 = _make_child_graph()
         cn3 = GraphNode(
             id="child_c",
-            data=NodeData(label="child_c", nodeType="transform", config={}),
+            data=NodeData(label="child_c", nodeType="polars", config={}),
         )
         child2 = PipelineGraph(nodes=[cn3], edges=[], pipeline_name="sub2")
 

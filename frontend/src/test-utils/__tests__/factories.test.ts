@@ -6,9 +6,9 @@ describe("makeNode", () => {
     const node = makeNode("n1")
     expect(node.id).toBe("n1")
     expect(node.position).toEqual({ x: 0, y: 0 })
-    expect(node.type).toBe("transform")
+    expect(node.type).toBe("polars")
     expect(node.data.label).toBe("Node n1")
-    expect(node.data.nodeType).toBe("transform")
+    expect(node.data.nodeType).toBe("polars")
     expect(node.data.config).toEqual({})
   })
 
@@ -19,14 +19,14 @@ describe("makeNode", () => {
   })
 
   it("accepts position override", () => {
-    const node = makeNode("n3", "transform", { position: { x: 10, y: 20 } })
+    const node = makeNode("n3", "polars", { position: { x: 10, y: 20 } })
     expect(node.position).toEqual({ x: 10, y: 20 })
   })
 
   it("accepts data overrides that merge with defaults", () => {
-    const node = makeNode("n4", "transform", { data: { label: "Custom" } })
+    const node = makeNode("n4", "polars", { data: { label: "Custom" } })
     expect(node.data.label).toBe("Custom")
-    expect(node.data.nodeType).toBe("transform")
+    expect(node.data.nodeType).toBe("polars")
   })
 
   it("each call returns a distinct object", () => {
@@ -64,7 +64,7 @@ describe("makeSimpleNode", () => {
     expect(node.id).toBe("s1")
     expect(node.data.label).toBe("Node s1")
     expect(node.data.description).toBe("")
-    expect(node.data.nodeType).toBe("transform")
+    expect(node.data.nodeType).toBe("polars")
     expect(node.type).toBeUndefined()
   })
 
@@ -80,7 +80,7 @@ describe("makeSimpleNode", () => {
   })
 
   it("accepts description override", () => {
-    const node = makeSimpleNode("s4", "transform", { description: "A node" })
+    const node = makeSimpleNode("s4", "polars", { description: "A node" })
     expect(node.data.description).toBe("A node")
   })
 })

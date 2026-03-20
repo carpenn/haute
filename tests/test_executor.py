@@ -471,7 +471,7 @@ class TestPruneLiveSwitchEdges:
                 config={"path": "data/q.jsonl"},
             )),
             GraphNode(id="feat", data=NodeData(
-                label="feature_processing", nodeType="transform",
+                label="feature_processing", nodeType="polars",
                 config={"code": ""},
             )),
             GraphNode(id="batch", data=NodeData(
@@ -486,7 +486,7 @@ class TestPruneLiveSwitchEdges:
                 }},
             )),
             GraphNode(id="down", data=NodeData(
-                label="downstream", nodeType="transform",
+                label="downstream", nodeType="polars",
                 config={"code": ""},
             )),
         ], edges=[
@@ -1126,7 +1126,7 @@ class TestExecuteSink:
                     "id": "join",
                     "data": {
                         "label": "join",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"code": "s1.join(s2, on='key', how='left')"},
                     },
                 }),
@@ -1308,7 +1308,7 @@ class TestInstanceAliasInjection:
                     "id": "joiner_inst",
                     "data": {
                         "label": "joiner_inst",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"instanceOf": "joiner"},
                     },
                 }),
@@ -1604,7 +1604,7 @@ class TestSelectedColumns:
                     "id": "t",
                     "data": {
                         "label": "t",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {
                             "code": ".with_columns(d=pl.col('a') + pl.col('b'))",
                             "selected_columns": ["a", "d"],
@@ -1634,7 +1634,7 @@ class TestSelectedColumns:
                     "id": "t",
                     "data": {
                         "label": "t",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"code": "", "selected_columns": []},
                     },
                 }),

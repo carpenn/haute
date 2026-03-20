@@ -9,7 +9,7 @@ describe("buildGraph", () => {
   it("builds correct graph shape from nodes and edges", () => {
     const nodes: SimpleNode[] = [
       makeSimpleNode("n1", "dataSource", { type: "custom" }),
-      makeSimpleNode("n2", "transform", { type: "custom" }),
+      makeSimpleNode("n2", "polars", { type: "custom" }),
     ]
     const edges: SimpleEdge[] = [makeSimpleEdge("e1", "n1", "n2")]
 
@@ -54,7 +54,7 @@ describe("buildGraph", () => {
 
   it("prefers n.type over n.data.nodeType when both are present", () => {
     const nodes: SimpleNode[] = [
-      makeSimpleNode("n1", "transform", { type: "custom" }),
+      makeSimpleNode("n1", "polars", { type: "custom" }),
     ]
 
     const result = buildGraph(nodes, [])
@@ -118,7 +118,7 @@ describe("buildGraph", () => {
 
   it("always sets position to {x: 0, y: 0}", () => {
     const nodes: SimpleNode[] = [
-      makeSimpleNode("n1", "transform", { type: "custom" }),
+      makeSimpleNode("n1", "polars", { type: "custom" }),
       makeSimpleNode("n2", "output", { type: "custom" }),
       makeSimpleNode("n3", "banding"),
     ]

@@ -94,7 +94,7 @@ def _graph_with_submodel() -> dict:
                             "id": "base_rate",
                             "data": {
                                 "label": "base_rate",
-                                "nodeType": "transform",
+                                "nodeType": "polars",
                                 "config": {"code": "return df"},
                             },
                         },
@@ -640,7 +640,7 @@ class TestCreateSubmodelPathTraversal:
                         "id": "step_a",
                         "data": {
                             "label": "step_a",
-                            "nodeType": "transform",
+                            "nodeType": "polars",
                             "config": {"code": "return df"},
                         },
                     },
@@ -648,7 +648,7 @@ class TestCreateSubmodelPathTraversal:
                         "id": "step_b",
                         "data": {
                             "label": "step_b",
-                            "nodeType": "transform",
+                            "nodeType": "polars",
                             "config": {"code": "return df"},
                         },
                     },
@@ -656,7 +656,7 @@ class TestCreateSubmodelPathTraversal:
                         "id": "step_c",
                         "data": {
                             "label": "step_c",
-                            "nodeType": "transform",
+                            "nodeType": "polars",
                             "config": {"code": "return df"},
                         },
                     },

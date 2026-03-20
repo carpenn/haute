@@ -753,7 +753,7 @@ class TestScoreGraphBadInput:
                 }},
                 {"id": "calc", "data": {
                     "label": "calc",
-                    "nodeType": "transform",
+                    "nodeType": "polars",
                     "config": {"code": '.with_columns(result=pl.col("VehPower").cast(pl.Float64) * 2)'},
                 }},
                 {"id": "out", "data": {
@@ -1669,7 +1669,7 @@ class TestCondaEnvAndPipRequirements:
             "nodes": [
                 {"id": "t", "data": {
                     "label": "t",
-                    "nodeType": "transform",
+                    "nodeType": "polars",
                     "config": {},
                 }},
             ],

@@ -184,7 +184,7 @@ class TestTripleQuoteInjection:
 
     @pytest.mark.parametrize("node_type,config", [
         ("dataSource", {"path": "data.parquet"}),
-        ("transform", {"code": ".drop_nulls()"}),
+        ("polars", {"code": ".drop_nulls()"}),
         ("dataSink", {"path": "out.parquet", "format": "parquet"}),
         ("banding", {"factors": [{"banding": "continuous", "column": "x",
                                    "outputColumn": "x_f", "rules": []}]}),
@@ -214,7 +214,7 @@ class TestTripleQuoteInjection:
     def test_triple_quote_in_transform_description(self):
         """Transform node with triple-quote description compiles."""
         node = _make_node(
-            "transform",
+            "polars",
             {"code": ".with_columns(y=pl.lit(1))"},
             description='Load the """premium""" data',
         )
@@ -235,7 +235,7 @@ class TestTripleQuoteInjection:
     def test_triple_quote_only_description(self):
         """Description that is nothing but triple quotes."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='"""',
         )
         code = _node_to_code(node)
@@ -244,7 +244,7 @@ class TestTripleQuoteInjection:
     def test_six_quotes_description(self):
         """Description with six consecutive double quotes (two triple-quotes)."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='""""""',
         )
         code = _node_to_code(node)
@@ -253,7 +253,7 @@ class TestTripleQuoteInjection:
     def test_triple_quote_at_start(self):
         """Triple quote at the very start of description."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='"""Starts with quotes',
         )
         code = _node_to_code(node)
@@ -262,7 +262,7 @@ class TestTripleQuoteInjection:
     def test_triple_quote_at_end(self):
         """Triple quote at the very end of description."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='Ends with quotes"""',
         )
         code = _node_to_code(node)
@@ -271,7 +271,7 @@ class TestTripleQuoteInjection:
     def test_single_quotes_in_description_unchanged(self):
         """Single and double quotes (not triple) should pass through unchanged."""
         node = _make_node(
-            "transform",
+            "polars",
             {"code": ""},
             description="Has 'single' and \"double\" quotes",
         )
@@ -283,7 +283,7 @@ class TestTripleQuoteInjection:
     def test_instance_node_triple_quote_description(self):
         """Instance nodes also handle triple-quote descriptions."""
         node = _make_node(
-            "transform", {"code": "", "instanceOf": "original"},
+            "polars", {"code": "", "instanceOf": "original"},
             label="Instance1",
             description='Instance """special"""',
         )
@@ -358,7 +358,7 @@ class TestTripleQuoteInjection:
     def test_backslash_before_closing_triple_quote(self):
         """Description ending with backslash would escape the closing triple-quote."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description="ends with backslash\\",
         )
         code = _node_to_code(node)
@@ -368,7 +368,7 @@ class TestTripleQuoteInjection:
     def test_mixed_triple_and_single_quotes(self):
         """Description with both triple double-quotes and single quotes."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description="""Has ''' and \"\"\", both""",
         )
         code = _node_to_code(node)
@@ -378,7 +378,7 @@ class TestTripleQuoteInjection:
     def test_trailing_double_quote_in_description(self):
         """Description ending with a double-quote must not break docstring."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='ends with a quote"',
         )
         code = _node_to_code(node)
@@ -399,7 +399,7 @@ class TestTripleQuoteInjection:
     def test_trailing_backslash_then_quote_in_description(self):
         r"""Description ending with ``\"`` (backslash then quote)."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='path is C:\\"',
         )
         code = _node_to_code(node)
@@ -408,7 +408,7 @@ class TestTripleQuoteInjection:
 
     @pytest.mark.parametrize("node_type,config", [
         ("dataSource", {"path": "data.parquet"}),
-        ("transform", {"code": ""}),
+        ("polars", {"code": ""}),
         ("dataSink", {"path": "out.parquet", "format": "parquet"}),
         ("output", {"fields": ["a"]}),
         ("constant", {"values": [{"name": "v", "value": "1"}]}),
@@ -544,7 +544,7 @@ class TestCurlyBracesInValues:
     def test_description_with_braces_in_transform(self):
         """Transform description with {braces} (f-string path)."""
         node = _make_node(
-            "transform",
+            "polars",
             {"code": ""},
             description="Transform {step_1} output",
         )
@@ -666,7 +666,7 @@ class TestCombinedInjection:
                     "id": "t",
                     "data": {
                         "label": "Clean",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"code": ".drop_nulls()"},
                         "description": 'Clean """dirty""" records',
                     },
@@ -701,7 +701,7 @@ class TestDescriptionRegression:
 
     def test_normal_description_unchanged(self):
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description="Normal description text",
         )
         code = _node_to_code(node)
@@ -709,7 +709,7 @@ class TestDescriptionRegression:
         _compile_node_code(code)
 
     def test_default_description_uses_label(self):
-        node = _make_node("transform", {"code": ""}, label="MyLabel")
+        node = _make_node("polars", {"code": ""}, label="MyLabel")
         code = _node_to_code(node)
         assert "MyLabel node" in code
         _compile_node_code(code)
@@ -717,7 +717,7 @@ class TestDescriptionRegression:
     def test_description_with_newlines(self):
         """Newlines in descriptions are OK inside triple-quoted docstrings."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description="Line 1\nLine 2",
         )
         code = _node_to_code(node)
@@ -726,7 +726,7 @@ class TestDescriptionRegression:
     def test_description_with_single_double_quote(self):
         """A single double-quote in description is fine."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='Has a "quoted" word',
         )
         code = _node_to_code(node)
@@ -736,7 +736,7 @@ class TestDescriptionRegression:
     def test_description_with_two_double_quotes(self):
         """Two consecutive double-quotes in description is fine."""
         node = _make_node(
-            "transform", {"code": ""},
+            "polars", {"code": ""},
             description='Has "" empty quotes',
         )
         code = _node_to_code(node)

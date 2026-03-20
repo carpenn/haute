@@ -47,7 +47,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("preserves original position for nodes not in ELK output", async () => {
-    const nodes = [makeNode("a", "transform", { position: { x: 10, y: 20 } }), makeNode("b", "transform", { position: { x: 30, y: 40 } })]
+    const nodes = [makeNode("a", "polars", { position: { x: 10, y: 20 } }), makeNode("b", "polars", { position: { x: 30, y: 40 } })]
 
     mockLayout.mockResolvedValue({
       children: [{ id: "a", x: 100, y: 200 }],
@@ -98,7 +98,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("defaults to x=0, y=0 when ELK returns undefined coordinates", async () => {
-    const nodes = [makeNode("a", "transform", { position: { x: 99, y: 99 } })]
+    const nodes = [makeNode("a", "polars", { position: { x: 99, y: 99 } })]
 
     mockLayout.mockResolvedValue({
       children: [{ id: "a", x: undefined, y: undefined }],
@@ -110,7 +110,7 @@ describe("getLayoutedElements", () => {
   })
 
   it("handles ELK returning null children array", async () => {
-    const nodes = [makeNode("a", "transform", { position: { x: 5, y: 10 } })]
+    const nodes = [makeNode("a", "polars", { position: { x: 5, y: 10 } })]
 
     mockLayout.mockResolvedValue({ children: null })
 

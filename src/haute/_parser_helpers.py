@@ -911,13 +911,13 @@ def _resolve_node_config(
     JSON file) and the legacy inline-kwargs format.
 
     The *explicit_node_type* is provided by the type-specific decorator
-    (e.g. ``@pipeline.transform``) and is used directly as the node type.
+    (e.g. ``@pipeline.polars``) and is used directly as the node type.
 
     Returns ``(node_type, config_dict)``.
     """
     # Work on a copy to avoid mutating the caller's dict.
     decorator_kwargs = dict(decorator_kwargs)
-    node_type = explicit_node_type or NodeType.TRANSFORM
+    node_type = explicit_node_type or NodeType.POLARS
     config_ref = decorator_kwargs.pop("config", None)
     if config_ref:
         config_ref = config_ref.replace("\\", "/")
@@ -940,7 +940,7 @@ def _resolve_node_config(
             config["code"] = _extract_model_score_user_code(body) if body else ""
         elif node_type == NodeType.EXTERNAL_FILE:
             config["code"] = _extract_external_user_code(body, param_names) if body else ""
-        elif node_type == NodeType.TRANSFORM:
+        elif node_type == NodeType.POLARS:
             config["code"] = _extract_user_code(body, param_names) if body else ""
         elif node_type == NodeType.DATA_SOURCE:
             config["code"] = _extract_source_user_code(body) if body else ""

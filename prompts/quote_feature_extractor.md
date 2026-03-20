@@ -436,7 +436,7 @@ def quotes() -> pl.LazyFrame:
     return read_json_flat("data/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
-@pipeline.transform
+@pipeline.polars
 def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Feature engineering for insurance pricing"""
 

@@ -32,7 +32,7 @@ from tests.conftest import make_edge as _make_edge
 def _make_node(
     nid: str,
     label: str,
-    node_type: str = "transform",
+    node_type: str = "polars",
     config: dict | None = None,
 ) -> GraphNode:
     return GraphNode(
@@ -56,7 +56,7 @@ class TestValidateSingletons:
         graph = _make_graph(
             _make_node("a", "Api Input", "apiInput", {"path": "data.parquet"}),
             _make_node("o", "Output", "output", {"fields": []}),
-            _make_node("t", "Transform", "transform"),
+            _make_node("t", "Transform", "polars"),
         )
         # Should not raise
         SavePipelineService._validate_singletons(graph)
@@ -98,8 +98,8 @@ class TestValidateSingletons:
     def test_no_singletons_passes(self) -> None:
         """A graph with only transform nodes passes validation."""
         graph = _make_graph(
-            _make_node("t1", "T1", "transform"),
-            _make_node("t2", "T2", "transform"),
+            _make_node("t1", "T1", "polars"),
+            _make_node("t2", "T2", "polars"),
         )
         SavePipelineService._validate_singletons(graph)
 
@@ -148,7 +148,7 @@ class TestSaveSimpleGraph:
         svc = SavePipelineService(tmp_path)
         graph = _make_graph(
             _make_node("src", "Source", "dataSource", {"path": "data.parquet"}),
-            _make_node("t1", "Transform", "transform", {"code": "return source"}),
+            _make_node("t1", "Transform", "polars", {"code": "return source"}),
             edges=[_make_edge("src", "t1")],
         )
         body = SavePipelineRequest(
@@ -215,7 +215,7 @@ class TestWriteCodeMultiFile:
         graph.submodels = {
             "scoring": {
                 "nodes": [
-                    {"id": "s1", "data": {"label": "S1", "nodeType": "transform", "config": {}}},
+                    {"id": "s1", "data": {"label": "S1", "nodeType": "polars", "config": {}}},
                 ],
                 "edges": [],
             },
@@ -417,7 +417,7 @@ class TestSaveEndpointIntegration:
                     "position": {"x": 200, "y": 0},
                     "data": {
                         "label": "Transform",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {},
                     },
                 },

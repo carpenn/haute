@@ -237,7 +237,7 @@ def _pipeline_graph_strategy():
                 id=nid,
                 data=NodeData(
                     label=f"Step{i}",
-                    nodeType=NodeType.TRANSFORM,
+                    nodeType=NodeType.POLARS,
                     config={"code": ""},
                 ),
             ))
@@ -365,7 +365,7 @@ def _valid_pipeline_source_strategy():
         for i in range(n_transforms):
             name = f"step_{i}"
             lines.extend([
-                "@pipeline.transform",
+                "@pipeline.polars",
                 f"def {name}({prev}: pl.LazyFrame) -> pl.LazyFrame:",
                 f"    return {prev}",
                 "",

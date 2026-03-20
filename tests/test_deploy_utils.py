@@ -27,7 +27,7 @@ def _make_graph(
     nodes = [
         GraphNode(
             id=f"n{i}",
-            data=NodeData(label=f"node_{i}", nodeType="transform", config={}),
+            data=NodeData(label=f"node_{i}", nodeType="polars", config={}),
         )
         for i in range(nodes_count)
     ]

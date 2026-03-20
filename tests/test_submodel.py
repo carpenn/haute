@@ -35,8 +35,8 @@ def flat_graph() -> PipelineGraph:
         "nodes": [
             {"id": "src", "type": "dataSource", "position": {"x": 0, "y": 0},
              "data": {"label": "Source", "nodeType": "dataSource", "config": {"path": "data/in.parquet"}}},
-            {"id": "tx", "type": "transform", "position": {"x": 200, "y": 0},
-             "data": {"label": "Transform", "nodeType": "transform", "config": {"code": ".select('x')"}}},
+            {"id": "tx", "type": "polars", "position": {"x": 200, "y": 0},
+             "data": {"label": "Transform", "nodeType": "polars", "config": {"code": ".select('x')"}}},
             {"id": "out", "type": "output", "position": {"x": 400, "y": 0},
              "data": {"label": "Output", "nodeType": "output", "config": {"fields": ["x"]}}},
         ],
@@ -74,8 +74,8 @@ def submodel_graph() -> PipelineGraph:
                 "outputPorts": ["out"],
                 "graph": {
                     "nodes": [
-                        {"id": "tx", "type": "transform", "position": {"x": 0, "y": 0},
-                         "data": {"label": "Transform", "nodeType": "transform", "config": {"code": ".select('x')"}}},
+                        {"id": "tx", "type": "polars", "position": {"x": 0, "y": 0},
+                         "data": {"label": "Transform", "nodeType": "polars", "config": {"code": ".select('x')"}}},
                         {"id": "out", "type": "output", "position": {"x": 200, "y": 0},
                          "data": {"label": "Output", "nodeType": "output", "config": {"fields": ["x"]}}},
                     ],
@@ -179,7 +179,7 @@ class TestParserSubmodel:
 
             submodel = haute.Submodel("scoring")
 
-            @submodel.transform
+            @submodel.polars
             def Transform(Source: pl.LazyFrame) -> pl.LazyFrame:
                 return Source.select("x")
         """)
@@ -216,7 +216,7 @@ class TestParserSubmodel:
             def Source() -> pl.LazyFrame:
                 return pl.scan_parquet("data/in.parquet")
 
-            @pipeline.transform
+            @pipeline.polars
             def Transform(Source: pl.LazyFrame) -> pl.LazyFrame:
                 return Source.select("x")
 

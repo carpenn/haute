@@ -113,7 +113,15 @@
       "Bash(.venv/Scripts/python.exe -c \"from haute._parser_helpers import _resolve_node_config, _extract_decorated_nodes; from haute._parser_regex import fallback_parse; from haute._config_io import FOLDER_TO_NODE_TYPE, NODE_TYPE_TO_FOLDER, has_config_folder, find_config_by_func_name; from haute.pipeline import Pipeline, Submodel, NodeRegistry; print\\(''All imports OK''\\)\")",
       "Bash(.venv/Scripts/python.exe -c \"from haute._parser_helpers import _infer_node_type\")",
       "Bash(.venv/Scripts/python.exe -c \"from haute._config_io import infer_node_type_from_config_path\")",
-      "Bash(.venv/Scripts/python.exe -c \"from haute.pipeline import Pipeline; p = Pipeline\\(''t''\\); print\\(hasattr\\(p, ''node''\\), hasattr\\(p, ''_register_node''\\), hasattr\\(p, ''transform''\\)\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"from haute.pipeline import Pipeline; p = Pipeline\\(''t''\\); print\\(hasattr\\(p, ''node''\\), hasattr\\(p, ''_register_node''\\), hasattr\\(p, ''transform''\\)\\)\")",
+      "Bash(npx vitest:*)",
+      "Bash(node node_modules/.bin/vitest run)",
+      "Bash(\"C:/Program Files/nodejs/node.exe\" node_modules/.bin/vitest run)",
+      "Bash(\"C:/Program Files/nodejs/npx.cmd\" vitest run)",
+      "Bash(\"C:/Program Files/nodejs/node.exe\" ./node_modules/vitest/vitest.mjs run)",
+      "Bash(sed -i 's/\"\"node_type\"\": \"\"transform\"\"/\"\"node_type\"\": \"\"polars\"\"/g' tests/test_parser_helpers.py tests/test_trace.py)",
+      "Bash(sed -i 's/node_type=\"\"transform\"\"/node_type=\"\"polars\"\"/g' tests/test_trace.py)",
+      "Bash(sed -i 's/node_type: str = \"\"transform\"\"/node_type: str = \"\"polars\"\"/g' tests/test_node_builder.py tests/test_route_save_pipeline.py)"
     ]
   }
 }

@@ -604,7 +604,7 @@ class TestGraphToCodeWithBuilders:
                     "id": "t",
                     "data": {
                         "label": "Process",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"code": ".with_columns(y=pl.lit(1))"},
                     },
                 },
@@ -835,7 +835,7 @@ class TestCodegenExecValidation:
         import polars as pl
 
         node = _make_codegen_node(
-            "transform",
+            "polars",
             {"code": '.with_columns(doubled=pl.col("x") * 2)'},
             label="double_it",
         )

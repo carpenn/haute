@@ -139,7 +139,7 @@ class TestNodeToCode:
             "id": "t",
             "data": {
                 "label": "Clean",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ".filter(pl.col('x') > 0)"},
             },
         })
@@ -152,7 +152,7 @@ class TestNodeToCode:
     def test_transform_without_code_uses_first_source(self):
         node = _n({
             "id": "t",
-            "data": {"label": "Pass", "nodeType": "transform", "config": {}},
+            "data": {"label": "Pass", "nodeType": "polars", "config": {}},
         })
         code = _node_to_code(node, source_names=["upstream"])
         assert "def Pass(upstream: pl.LazyFrame)" in code
@@ -162,7 +162,7 @@ class TestNodeToCode:
     def test_transform_without_code_no_sources_returns_df(self):
         node = _n({
             "id": "t",
-            "data": {"label": "Pass", "nodeType": "transform", "config": {}},
+            "data": {"label": "Pass", "nodeType": "polars", "config": {}},
         })
         code = _node_to_code(node, source_names=[])
         assert "def Pass(df: pl.LazyFrame)" in code
@@ -347,7 +347,7 @@ class TestGraphToCode:
                     "id": "t",
                     "data": {
                         "label": "Transform",
-                        "nodeType": "transform",
+                        "nodeType": "polars",
                         "config": {"code": ".with_columns(y=pl.col('x'))"},
                     },
                 },
@@ -395,7 +395,7 @@ class TestGraphToCode:
         graph = _g({
             "nodes": [
                 {"id": "a", "data": {"label": "Read", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "b", "data": {"label": "Clean", "nodeType": "transform", "config": {"code": ".drop_nulls()"}}},
+                {"id": "b", "data": {"label": "Clean", "nodeType": "polars", "config": {"code": ".drop_nulls()"}}},
                 {"id": "c", "data": {"label": "Out", "nodeType": "output", "config": {"fields": ["x"]}}},
             ],
             "edges": [
@@ -587,7 +587,7 @@ class TestSelectedColumnsCodegen:
             "id": "t1",
             "data": {
                 "label": "my_transform",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {
                     "code": ".with_columns(y=pl.col('x') * 2)",
                     "selected_columns": ["x", "y"],
@@ -602,17 +602,17 @@ class TestSelectedColumnsCodegen:
         assert not any(".select(" in l for l in body_lines)
 
     def test_transform_no_decorator_kwarg_when_empty(self):
-        """Transform without selected_columns uses bare @pipeline.transform."""
+        """Transform without selected_columns uses bare @pipeline.polars."""
         node = _n({
             "id": "t1",
             "data": {
                 "label": "my_transform",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ""},
             },
         })
         code = _node_to_code(node, [])
-        assert code.startswith("@pipeline.transform\n")
+        assert code.startswith("@pipeline.polars\n")
 
 
 class TestCodegenEdgeCases:
@@ -632,7 +632,7 @@ class TestCodegenEdgeCases:
             "id": "special",
             "data": {
                 "label": "My Node (v2) - Final!",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ".with_columns(y=pl.lit(1))"},
             },
         })
@@ -648,7 +648,7 @@ class TestCodegenEdgeCases:
             "id": "unicode",
             "data": {
                 "label": "price_update_cafe",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ".with_columns(y=pl.lit(1))"},
             },
         })
@@ -661,7 +661,7 @@ class TestCodegenEdgeCases:
             "id": "empty",
             "data": {
                 "label": "EmptyConfig",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": None},
             },
         })
@@ -675,7 +675,7 @@ class TestCodegenEdgeCases:
             "id": "empty",
             "data": {
                 "label": "EmptyCode",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ""},
             },
         })
@@ -705,7 +705,7 @@ class TestCodegenEdgeCases:
             "id": "long",
             "data": {
                 "label": long_label,
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"code": ".with_columns(y=pl.lit(1))"},
             },
         })
@@ -1090,7 +1090,7 @@ class TestDataSourceJsonCodegen:
         graph = _g({
             "nodes": [
                 {"id": "s", "data": {"label": "JsonData", "nodeType": "dataSource", "config": {"path": "data.json"}}},
-                {"id": "t", "data": {"label": "Clean", "nodeType": "transform", "config": {"code": ".drop_nulls()"}}},
+                {"id": "t", "data": {"label": "Clean", "nodeType": "polars", "config": {"code": ".drop_nulls()"}}},
             ],
             "edges": [{"id": "e1", "source": "s", "target": "t"}],
         })
@@ -1105,7 +1105,7 @@ class TestDataSourceJsonCodegen:
         graph = _g({
             "nodes": [
                 {"id": "s", "data": {"label": "EventLog", "nodeType": "dataSource", "config": {"path": "events.jsonl"}}},
-                {"id": "t", "data": {"label": "Filter", "nodeType": "transform", "config": {"code": ".filter(pl.col('x') > 0)"}}},
+                {"id": "t", "data": {"label": "Filter", "nodeType": "polars", "config": {"code": ".filter(pl.col('x') > 0)"}}},
             ],
             "edges": [{"id": "e1", "source": "s", "target": "t"}],
         })
@@ -1237,7 +1237,7 @@ def {func_name}({params}) -> pl.LazyFrame:
             "id": "x",
             "data": {
                 "label": "My Node",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"alpha": 42, "beta": "hello"},
             },
         })
@@ -1261,7 +1261,7 @@ def {func_name}({params}) -> pl.LazyFrame:
             "id": "x",
             "data": {
                 "label": "Skip",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {"a": None, "b": "", "c": [], "d": "keep"},
             },
         })
@@ -1284,7 +1284,7 @@ def {func_name}({params}) -> pl.LazyFrame:
             "id": "x",
             "data": {
                 "label": "Bare",
-                "nodeType": "transform",
+                "nodeType": "polars",
                 "config": {},
             },
         })
@@ -1303,7 +1303,7 @@ def {func_name}({params}) -> pl.LazyFrame:
         builder = _make_passthrough_builder(template, ())
         node = _n({
             "id": "x",
-            "data": {"label": "Join", "nodeType": "transform", "config": {}},
+            "data": {"label": "Join", "nodeType": "polars", "config": {}},
         })
         code = builder(node, ["left", "right"])
         assert "def Join(left: pl.LazyFrame, right: pl.LazyFrame)" in code

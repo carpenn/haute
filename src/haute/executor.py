@@ -523,7 +523,7 @@ def _eager_execute(
     if preamble_error:
         # Inject the preamble error only into nodes whose builders use it
         # (transforms and live-switch nodes), not data sources / model scores.
-        preamble_types = {NodeType.TRANSFORM, NodeType.LIVE_SWITCH}
+        preamble_types = {NodeType.POLARS, NodeType.LIVE_SWITCH}
         node_map = {n.id: n for n in graph.nodes}
         for nid in result.order:
             nd = node_map.get(nid)

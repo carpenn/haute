@@ -627,7 +627,7 @@ class TestNodeFailureLogLevel:
         g = PipelineGraph(
             nodes=[
                 GraphNode(id="src", data=NodeData(label="src", nodeType=NodeType.DATA_SOURCE)),
-                GraphNode(id="t", data=NodeData(label="t", nodeType=NodeType.TRANSFORM)),
+                GraphNode(id="t", data=NodeData(label="t", nodeType=NodeType.POLARS)),
             ],
             edges=[GraphEdge(id="e_src_t", source="src", target="t")],
         )
@@ -672,7 +672,7 @@ class TestNodeFailureLogLevel:
         g = PipelineGraph(
             nodes=[
                 GraphNode(id="src", data=NodeData(label="src", nodeType=NodeType.DATA_SOURCE)),
-                GraphNode(id="t", data=NodeData(label="t", nodeType=NodeType.TRANSFORM)),
+                GraphNode(id="t", data=NodeData(label="t", nodeType=NodeType.POLARS)),
             ],
             edges=[GraphEdge(id="e_src_t", source="src", target="t")],
         )

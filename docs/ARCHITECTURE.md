@@ -69,7 +69,7 @@ Nodes are the building blocks. Each node is a decorated Python function with def
 
 | Node Type | Enum | Purpose |
 |---|---|---|
-| **Transform** | `transform` | Polars transform / feature engineering (user code) |
+| **Polars** | `polars` | Polars transform / feature engineering (user code) |
 | **Banding** | `banding` | Group numerical or categorical values into bands |
 | **Scenario Expander** | `scenarioExpander` | Cross-join rows with scenario values for what-if analysis |
 | **Rating Step** | `ratingStep` | Rating table lookup, factor application, cap/floor |
@@ -102,7 +102,7 @@ def vehicle_age_band(df):
     ...
 ```
 
-14 of the 17 node types store external config (all except `transform`, `submodel`, and `submodelPort`). The folder-per-type mapping is defined in `_config_io.py`:
+14 of the 17 node types store external config (all except `polars`, `submodel`, and `submodelPort`). The folder-per-type mapping is defined in `_config_io.py`:
 
 | Node Type | Config Folder |
 |---|---|
@@ -121,7 +121,7 @@ def vehicle_age_band(df):
 | Scenario Expander | `config/expander/` |
 | Constant | `config/constant/` |
 
-Transform nodes store all logic in their Python function body (no config file). The `code` key always lives in the `.py` function body, never in JSON.
+Polars nodes store all logic in their Python function body (no config file). The `code` key always lives in the `.py` function body, never in JSON.
 
 The parser is backward-compatible — it still handles old inline decorator kwargs for existing pipelines.
 
@@ -146,7 +146,7 @@ pipeline.connect("load_claims", "feature_engineering")
 import haute
 submodel = haute.Submodel("model_scoring")
 
-@submodel.transform
+@submodel.polars
 def feature_engineering(df): ...
 
 @submodel.model_score(model="models/freq.cbm")
@@ -317,7 +317,7 @@ uv add haute
 | **UI framework** | React 19 | |
 | **Graph/flow editor** | @xyflow/react (React Flow) | Core visual pipeline editor |
 | **Graph layout** | elkjs | ELK auto-layout engine for node positioning |
-| **Code editor** | CodeMirror v6 | Python code editing in transform/imports panels (6 packages) |
+| **Code editor** | CodeMirror v6 | Python code editing in polars/imports panels (6 packages) |
 | **Bundler** | Vite | |
 | **Styling** | Tailwind CSS v4 | All custom components, no external UI library |
 | **Icons** | lucide-react | |
@@ -771,9 +771,9 @@ def load_claims():
     """Source node — reads claims data."""
     return pl.scan_parquet("data/claims.parquet")
 
-@pipeline.transform
+@pipeline.polars
 def clean_vehicle(df: pl.LazyFrame) -> pl.LazyFrame:
-    """Transform node — standardise vehicle codes."""
+    """Polars node — standardise vehicle codes."""
     return df.with_columns(...)
 
 @pipeline.model_score(config="config/model_scoring/freq.json")

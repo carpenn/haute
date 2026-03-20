@@ -47,7 +47,7 @@ from haute.parser import parse_pipeline_source
 # Types that round-trip cleanly via codegen -> parse
 ROUNDTRIP_TYPES: list[NodeType] = [
     NodeType.DATA_SOURCE,
-    NodeType.TRANSFORM,
+    NodeType.POLARS,
     NodeType.OUTPUT,
     NodeType.CONSTANT,
     NodeType.DATA_SINK,
@@ -58,7 +58,7 @@ ROUNDTRIP_TYPES: list[NodeType] = [
 
 # Types that require upstream inputs (params > 0)
 _NEEDS_UPSTREAM = {
-    NodeType.TRANSFORM,
+    NodeType.POLARS,
     NodeType.OUTPUT,
     NodeType.DATA_SINK,
     NodeType.BANDING,
@@ -272,7 +272,7 @@ def _rating_step_config() -> st.SearchStrategy[dict[str, Any]]:
 _CONFIG_STRATEGY: dict[NodeType, st.SearchStrategy[dict[str, Any]]] = {
     NodeType.DATA_SOURCE: _data_source_config(),
     NodeType.API_INPUT: _api_input_config(),
-    NodeType.TRANSFORM: _transform_config(),
+    NodeType.POLARS: _transform_config(),
     NodeType.OUTPUT: _output_config(),
     NodeType.CONSTANT: _constant_config(),
     NodeType.DATA_SINK: _data_sink_config(),
@@ -427,7 +427,7 @@ def _assert_config_equivalence(
             f"[{node_id}] path mismatch: {parsed.get('path')!r} != {orig.get('path')!r}"
         )
 
-    elif node_type == NodeType.TRANSFORM:
+    elif node_type == NodeType.POLARS:
         # Code round-trip: codegen wraps chain-style code with the upstream
         # param name, and the parser extracts it back including that name.
         # We strip the upstream prefix before comparing.
@@ -678,7 +678,7 @@ class TestEdgeCases:
                     id="clean",
                     data=NodeData(
                         label="clean",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": '.filter(pl.col("x") > 0)'},
                     ),
                 ),
@@ -735,7 +735,7 @@ class TestEdgeCases:
                     id="calc",
                     data=NodeData(
                         label="calc",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": '.select(pl.all())'},
                     ),
                 ),
@@ -933,7 +933,7 @@ class TestEdgeCases:
                     id="process",
                     data=NodeData(
                         label="process",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": '.select(pl.all())'},
                     ),
                 ),
@@ -960,7 +960,7 @@ class TestEdgeCases:
                     id="clean",
                     data=NodeData(
                         label="clean",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": '.filter(pl.col("valid") == 1)'},
                     ),
                 ),
@@ -1037,7 +1037,7 @@ class TestEdgeCases:
                     id="passthrough",
                     data=NodeData(
                         label="passthrough",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": ""},
                     ),
                 ),
@@ -1050,13 +1050,13 @@ class TestEdgeCases:
         assert len(parsed.nodes) == 2
         parsed_types = {n.data.nodeType for n in parsed.nodes}
         assert NodeType.DATA_SOURCE in parsed_types
-        assert NodeType.TRANSFORM in parsed_types
+        assert NodeType.POLARS in parsed_types
         # Edge: at least the original edge is present
         orig_edges = _edge_pairs(graph.edges)
         parsed_edges = _edge_pairs(parsed.edges)
         assert orig_edges.issubset(parsed_edges)
         # Empty code becomes the upstream name after round-trip
-        transform_node = next(n for n in parsed.nodes if n.data.nodeType == NodeType.TRANSFORM)
+        transform_node = next(n for n in parsed.nodes if n.data.nodeType == NodeType.POLARS)
         parsed_code = (transform_node.data.config.get("code") or "").strip()
         assert parsed_code == "source"  # upstream name extracted from "return source"
 
@@ -1103,7 +1103,7 @@ class TestEdgeCases:
                     id="clean_up",
                     data=NodeData(
                         label="clean up",
-                        nodeType=NodeType.TRANSFORM,
+                        nodeType=NodeType.POLARS,
                         config={"code": '.select(pl.all())'},
                     ),
                 ),

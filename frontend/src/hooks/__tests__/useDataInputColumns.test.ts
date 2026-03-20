@@ -23,7 +23,7 @@ const sampleColumns = [
 
 const nodes = [
   { id: "ds1", data: { label: "DS1", description: "", nodeType: "dataSource" } },
-  { id: "t1", data: { label: "T1", description: "", nodeType: "transform" } },
+  { id: "t1", data: { label: "T1", description: "", nodeType: "polars" } },
 ]
 
 const edges = [{ id: "e1", source: "ds1", target: "t1" }]

@@ -61,7 +61,7 @@ describe("NodePalette", () => {
     fireEvent.dragStart(transformItem, {
       dataTransfer: { setData, effectAllowed: "" },
     })
-    expect(setData).toHaveBeenCalledWith("application/reactflow-type", NODE_TYPES.TRANSFORM)
+    expect(setData).toHaveBeenCalledWith("application/reactflow-type", NODE_TYPES.POLARS)
     expect(setData).toHaveBeenCalledWith("application/reactflow-config", expect.any(String))
   })
 

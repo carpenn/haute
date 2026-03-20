@@ -52,7 +52,7 @@ def quotes() -> pl.LazyFrame:
     return read_json_flat("data/quotes/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
-@pipeline.transform
+@pipeline.polars
 def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Feature engineering for insurance pricing"""
     cols = quotes.collect_schema().names()
@@ -98,7 +98,7 @@ def policies(feature_processing: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl
     return feature_processing
 
 
-@pipeline.transform
+@pipeline.polars
 def competitor_join(policies: pl.LazyFrame, competitor_insights: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_join node"""
     df = (
@@ -127,7 +127,7 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     return score_from_config(policies, config="config/model_scoring/competitor_scoring.json", base_dir=base)
 
 
-@pipeline.transform
+@pipeline.polars
 def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl.LazyFrame:
     """Join competitor scoring onto policies"""
     df = (
@@ -141,7 +141,7 @@ def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl
     return df
 
 
-@pipeline.transform
+@pipeline.polars
 def join_policy_data(join_scoring: pl.LazyFrame, policy_data: pl.LazyFrame) -> pl.LazyFrame:
     """Join policy data"""
     df = (
@@ -155,7 +155,7 @@ def join_policy_data(join_scoring: pl.LazyFrame, policy_data: pl.LazyFrame) -> p
     return df
 
 
-@pipeline.transform
+@pipeline.polars
 def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """Join quoted premiums and derive sale_flag"""
     df = (
@@ -173,7 +173,7 @@ def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame)
     return df
 
 
-@pipeline.transform(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type', 'margin', 'burn_cost'])
+@pipeline.polars(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type', 'margin', 'burn_cost'])
 def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
     df = (
@@ -217,7 +217,7 @@ def conversion_scoring(competitor_features_scenarios: pl.LazyFrame) -> pl.LazyFr
     return score_from_config(competitor_features_scenarios, config="config/model_scoring/conversion_scoring.json", base_dir=base)
 
 
-@pipeline.transform
+@pipeline.polars
 def optimiser_input(conversion_scoring: pl.LazyFrame) -> pl.LazyFrame:
     """Polars 8 node"""
     df = (

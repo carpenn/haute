@@ -37,7 +37,7 @@ def source() -> pl.DataFrame:
     return pl.scan_parquet("{data_path}")
 
 
-@pipeline.transform
+@pipeline.polars
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Transform."""
     return source
@@ -1375,11 +1375,11 @@ pipeline = haute.Pipeline("rewire_test", description="Rewire test")
 def source() -> pl.LazyFrame:
     return pl.scan_parquet("data/input.parquet")
 
-@pipeline.transform
+@pipeline.polars
 def middle(source: pl.LazyFrame) -> pl.LazyFrame:
     return source
 
-@pipeline.transform
+@pipeline.polars
 def final(middle: pl.LazyFrame) -> pl.LazyFrame:
     return middle
 

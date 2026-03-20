@@ -1,7 +1,7 @@
 """Fixture pipeline for tests — self-contained, no external model dependencies.
 
 This pipeline mirrors the structure of a real pricing pipeline (apiInput,
-dataSource, liveSwitch, transform, externalFile, output, dataSink) but uses
+dataSource, liveSwitch, polars, externalFile, output, dataSink) but uses
 only simple Polars expressions and a JSON lookup file so tests don't depend
 on CatBoost or the user's main.py.
 """
@@ -48,7 +48,7 @@ def area_lookup(policies: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.transform
+@pipeline.polars
 def calculate_premium(area_lookup: pl.LazyFrame) -> pl.LazyFrame:
     """Simple premium calculation."""
     df = area_lookup.with_columns(

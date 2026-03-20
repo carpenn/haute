@@ -152,10 +152,10 @@ class TestIsPipelineNodeDecorator:
         return tree.body[0].decorator_list[0]
 
     def test_bare_attribute(self):
-        assert _is_pipeline_node_decorator(self._dec("@pipeline.transform\ndef f(): pass"))
+        assert _is_pipeline_node_decorator(self._dec("@pipeline.polars\ndef f(): pass"))
 
     def test_call(self):
-        assert _is_pipeline_node_decorator(self._dec("@pipeline.transform()\ndef f(): pass"))
+        assert _is_pipeline_node_decorator(self._dec("@pipeline.polars()\ndef f(): pass"))
 
     def test_call_with_kwargs(self):
         assert _is_pipeline_node_decorator(
@@ -188,9 +188,9 @@ class TestIsPipelineNodeDecorator:
         )
 
     def test_submodel_does_not_match_pipeline(self):
-        """@submodel.transform should NOT match the pipeline checker."""
+        """@submodel.polars should NOT match the pipeline checker."""
         assert not _is_pipeline_node_decorator(
-            self._dec("@submodel.transform\ndef f(): pass")
+            self._dec("@submodel.polars\ndef f(): pass")
         )
 
     def test_submodel_call_does_not_match_pipeline(self):
@@ -211,10 +211,10 @@ class TestIsSubmodelNodeDecorator:
         return tree.body[0].decorator_list[0]
 
     def test_bare_submodel_transform(self):
-        assert _is_submodel_node_decorator(self._dec("@submodel.transform\ndef f(): pass"))
+        assert _is_submodel_node_decorator(self._dec("@submodel.polars\ndef f(): pass"))
 
     def test_submodel_call(self):
-        assert _is_submodel_node_decorator(self._dec("@submodel.transform()\ndef f(): pass"))
+        assert _is_submodel_node_decorator(self._dec("@submodel.polars()\ndef f(): pass"))
 
     def test_submodel_data_source(self):
         assert _is_submodel_node_decorator(
@@ -223,7 +223,7 @@ class TestIsSubmodelNodeDecorator:
 
     def test_pipeline_transform_is_not_submodel(self):
         assert not _is_submodel_node_decorator(
-            self._dec("@pipeline.transform\ndef f(): pass")
+            self._dec("@pipeline.polars\ndef f(): pass")
         )
 
     def test_other_object_is_not_submodel(self):
@@ -385,7 +385,7 @@ class TestExtractConnectCalls:
 class TestBuildEdges:
     @staticmethod
     def _raw(name: str, params: list[str]) -> dict:
-        return {"func_name": name, "param_names": params, "node_type": "transform"}
+        return {"func_name": name, "param_names": params, "node_type": "polars"}
 
     def test_explicit_edges(self):
         nodes = [self._raw("a", []), self._raw("b", ["a"])]
@@ -450,7 +450,7 @@ class TestBuildRfNodes:
         raw = [
             {"func_name": "a", "node_type": "dataSource", "description": "desc A", "config": {}},
             {
-                "func_name": "b", "node_type": "transform",
+                "func_name": "b", "node_type": "polars",
                 "description": "", "config": {"code": "x"},
             },
         ]
@@ -460,14 +460,14 @@ class TestBuildRfNodes:
         assert nodes[0].data.label == "a"
         assert nodes[0].data.description == "desc A"
         assert nodes[0].data.nodeType == "dataSource"
-        assert nodes[1].data.nodeType == "transform"
+        assert nodes[1].data.nodeType == "polars"
         assert nodes[0].position == {"x": 0, "y": 0}
         assert nodes[1].position == {"x": 300, "y": 0}
 
     def test_custom_spacing(self):
         raw = [
-            {"func_name": "a", "node_type": "transform", "description": "", "config": {}},
-            {"func_name": "b", "node_type": "transform", "description": "", "config": {}},
+            {"func_name": "a", "node_type": "polars", "description": "", "config": {}},
+            {"func_name": "b", "node_type": "polars", "description": "", "config": {}},
         ]
         nodes = _build_rf_nodes(raw, x_spacing=500)
         assert nodes[1].position == {"x": 500, "y": 0}
@@ -559,7 +559,7 @@ class TestExtractPreambleEdgeCases:
             "\n"
             "MY_CONST = 10\n"
             "\n"
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def f(): pass\n"
         )
         preamble = _extract_preamble(source)
@@ -809,7 +809,7 @@ class TestBuildNodeConfigExtended:
 
     def test_instance_of_added_to_config(self):
         config = _build_node_config(
-            NodeType.TRANSFORM,
+            NodeType.POLARS,
             {"instance_of": "original_node"},
             "", [],
         )
@@ -1218,7 +1218,7 @@ class TestExtractDecoratedNodes:
             '    """Load data."""\n'
             "    return pl.scan_parquet('data.parquet')\n"
             "\n"
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def transform(source):\n"
             "    return source\n"
         )
@@ -1238,7 +1238,7 @@ class TestExtractDecoratedNodes:
             "import haute\n"
             'submodel = haute.Submodel("freq")\n'
             "\n"
-            "@submodel.transform\n"
+            "@submodel.polars\n"
             "def calc(data):\n"
             "    return data\n"
         )
@@ -1256,7 +1256,7 @@ class TestExtractDecoratedNodes:
             "def ignored():\n"
             "    pass\n"
             "\n"
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def matched():\n"
             "    return 1\n"
         )
@@ -1272,7 +1272,7 @@ class TestExtractDecoratedNodes:
         source = (
             "x = 1\n"
             "y = 2\n"
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def only_func():\n"
             "    return 1\n"
         )
@@ -1293,7 +1293,7 @@ class TestExtractDecoratedNodes:
 
     def test_extracts_param_names(self):
         source = (
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def transform(a, b, c):\n"
             "    return a\n"
         )
@@ -1306,7 +1306,7 @@ class TestExtractDecoratedNodes:
 
     def test_extracts_docstring(self):
         source = (
-            "@pipeline.transform\n"
+            "@pipeline.polars\n"
             "def transform(a):\n"
             '    """My transform doc."""\n'
             "    return a\n"
@@ -1320,18 +1320,18 @@ class TestExtractDecoratedNodes:
 
     def test_pipeline_checker_does_not_match_submodel(self):
         source = (
-            "@submodel.transform\n"
+            "@submodel.polars\n"
             "def calc(x):\n"
             "    return x\n"
         )
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
-            # submodel checker matches @submodel.transform
+            # submodel checker matches @submodel.polars
             nodes = _extract_decorated_nodes(
                 tree, _is_submodel_node_decorator, bodies, None,
             )
             assert len(nodes) == 1
-            # pipeline checker must NOT match @submodel.transform —
+            # pipeline checker must NOT match @submodel.polars —
             # it checks decorator.value.id == "pipeline"
             nodes2 = _extract_decorated_nodes(
                 tree, _is_pipeline_node_decorator, bodies, None,

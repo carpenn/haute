@@ -57,7 +57,7 @@ def _sink_node(
 def _transform_node(nid: str, label: str | None = None) -> GraphNode:
     return GraphNode(
         id=nid,
-        data=NodeData(label=label or nid, nodeType=NodeType.TRANSFORM),
+        data=NodeData(label=label or nid, nodeType=NodeType.POLARS),
     )
 
 

@@ -37,7 +37,7 @@ class TestNodeType:
     EXPECTED_MEMBERS = {
         "API_INPUT": "apiInput",
         "DATA_SOURCE": "dataSource",
-        "TRANSFORM": "transform",
+        "POLARS": "polars",
         "MODEL_SCORE": "modelScore",
         "BANDING": "banding",
         "RATING_STEP": "ratingStep",
@@ -98,7 +98,7 @@ class TestNodeData:
         nd = NodeData()
         assert nd.label == "Unnamed"
         assert nd.description == ""
-        assert nd.nodeType == NodeType.TRANSFORM
+        assert nd.nodeType == NodeType.POLARS
         assert nd.config == {}
 
     def test_custom_values(self):
@@ -152,7 +152,7 @@ class TestGraphNode:
     def test_model_validate(self):
         raw = {
             "id": "n1",
-            "data": {"label": "N1", "nodeType": "transform", "config": {"code": "x"}},
+            "data": {"label": "N1", "nodeType": "polars", "config": {"code": "x"}},
         }
         node = GraphNode.model_validate(raw)
         assert node.id == "n1"

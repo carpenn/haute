@@ -33,7 +33,7 @@ class TestNodeBuildContextProperties:
             id="n1",
             data=NodeData(
                 label=label,
-                nodeType="transform",
+                nodeType="polars",
                 config=config or {},
             ),
         )
@@ -614,7 +614,7 @@ class TestBuildNodeFnFallback:
     def test_unknown_type_passthrough(self) -> None:
         node = _n({
             "id": "n1",
-            "data": {"label": "Unknown", "nodeType": "transform", "config": {}},
+            "data": {"label": "Unknown", "nodeType": "polars", "config": {}},
         })
         func_name, fn, is_source = _build_node_fn(node, source_names=["upstream"])
         assert func_name == "Unknown"
@@ -673,7 +673,7 @@ class TestBuildOptimiser:
         })
         data_node = _n({
             "id": "data_1",
-            "data": {"label": "Scored Data", "nodeType": "transform", "config": {}},
+            "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
         })
         opt_node = _n({
             "id": "opt_1",
@@ -745,7 +745,7 @@ class TestBuildOptimiser:
         raise rather than silently falling back."""
         data_node = _n({
             "id": "data_1",
-            "data": {"label": "Scored Data", "nodeType": "transform", "config": {}},
+            "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
         })
         opt_node = _n({
             "id": "opt_1",

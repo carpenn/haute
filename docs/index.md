@@ -92,7 +92,7 @@ def frequency(policies: pl.LazyFrame) -> pl.LazyFrame:
     from haute.graph_utils import score_from_config
     return score_from_config(policies, config="config/model_scoring/frequency.json")
 
-@pipeline.transform
+@pipeline.polars
 def premium(frequency: pl.LazyFrame) -> pl.LazyFrame:
     return frequency.with_columns(
         premium=pl.col("pred_freq") * pl.col("pred_sev") * 1.15,

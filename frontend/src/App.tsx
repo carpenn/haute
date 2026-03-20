@@ -59,7 +59,7 @@ import { PanelLeftOpen } from "lucide-react"
 const nodeTypes = {
   [NODE_TYPES.API_INPUT]: PipelineNode,
   [NODE_TYPES.DATA_SOURCE]: PipelineNode,
-  [NODE_TYPES.TRANSFORM]: PipelineNode,
+  [NODE_TYPES.POLARS]: PipelineNode,
   [NODE_TYPES.MODEL_SCORE]: PipelineNode,
   [NODE_TYPES.RATING_STEP]: PipelineNode,
   [NODE_TYPES.BANDING]: PipelineNode,

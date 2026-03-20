@@ -73,7 +73,7 @@ export default function useNodeHandlers({
     if (!original) return
     nodeIdCounterRef.current += 1
     const origData = nodeData(original)
-    const origNodeType = origData.nodeType || NODE_TYPES.TRANSFORM
+    const origNodeType = origData.nodeType || NODE_TYPES.POLARS
     const newId = `${origNodeType}_${nodeIdCounterRef.current}`
     const newNode: Node = {
       id: newId,
