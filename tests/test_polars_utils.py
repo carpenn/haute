@@ -189,13 +189,17 @@ class TestMallocTrimDispatch:
         mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
 
     def test_windows_calls_heap_compact(self, monkeypatch):
+        import ctypes
         from unittest.mock import MagicMock
 
         mock_kernel32 = MagicMock()
         mock_kernel32.GetProcessHeap.return_value = 12345
         mock_windll = MagicMock(kernel32=mock_kernel32)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.windll", mock_windll)
+        if not hasattr(ctypes, "windll"):
+            monkeypatch.setattr(ctypes, "windll", mock_windll, raising=False)
+        else:
+            monkeypatch.setattr("ctypes.windll", mock_windll)
         _malloc_trim()
         mock_kernel32.GetProcessHeap.assert_called_once()
         mock_kernel32.HeapCompact.assert_called_once_with(12345, 0)
@@ -223,12 +227,16 @@ class TestMallocTrimDispatch:
 
     def test_windows_graceful_on_attribute_error(self, monkeypatch):
         """If kernel32.HeapCompact is missing, _malloc_trim must not raise."""
+        import ctypes
         from unittest.mock import MagicMock, PropertyMock
 
         mock_windll = MagicMock()
         type(mock_windll).kernel32 = PropertyMock(side_effect=AttributeError)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.windll", mock_windll)
+        if not hasattr(ctypes, "windll"):
+            monkeypatch.setattr(ctypes, "windll", mock_windll, raising=False)
+        else:
+            monkeypatch.setattr("ctypes.windll", mock_windll)
         _malloc_trim()  # should not raise
 
 

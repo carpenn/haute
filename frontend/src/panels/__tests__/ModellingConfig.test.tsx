@@ -611,12 +611,12 @@ describe("ModellingConfig", () => {
     })
 
     it("shows RAM estimate data when resolved", async () => {
-      // bytes_per_row=700 → 700 * 100k * 3.0 / 1024² ≈ 200 MB
+      // bytes_per_row=700 → 700 * 100k * 1.0 / 1024² ≈ 67 MB
       mockEstimateTrainingRam.mockResolvedValue({
         total_rows: 100000,
         safe_row_limit: null,
         estimated_mb: 50,
-        training_mb: 200,
+        training_mb: 67,
         available_mb: 8192,
         bytes_per_row: 700,
         was_downsampled: false,
@@ -625,7 +625,7 @@ describe("ModellingConfig", () => {
       await waitFor(() => {
         expect(screen.getByText("Dataset fits in memory")).toBeTruthy()
         expect(screen.getByText("100,000")).toBeTruthy()
-        expect(screen.getByText("200 MB")).toBeTruthy()
+        expect(screen.getByText("67 MB")).toBeTruthy()
       })
     })
 

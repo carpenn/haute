@@ -895,7 +895,11 @@ class TestReleaseMemory:
         mock_kernel32.GetProcessHeap.return_value = 12345
         mock_windll = MagicMock(kernel32=mock_kernel32)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.windll", mock_windll)
+        import ctypes
+        if not hasattr(ctypes, "windll"):
+            monkeypatch.setattr(ctypes, "windll", mock_windll, raising=False)
+        else:
+            monkeypatch.setattr("ctypes.windll", mock_windll)
         mod._release_memory()
         mock_kernel32.GetProcessHeap.assert_called_once()
         mock_kernel32.HeapCompact.assert_called_once_with(12345, 0)
