@@ -133,6 +133,15 @@ function FlowEditor() {
     if (selectedNode) setLastSelectedId(selectedNode.id)
   }, [selectedNode])
 
+  const closePanel = useCallback(() => {
+    setSelectedNode(null)
+    lastSelectedNodeRef.current = null
+    setLastSelectedId(null)
+    setUtilityOpen(false)
+    setImportsOpen(false)
+    setGitOpen(false)
+  }, [setUtilityOpen, setImportsOpen, setGitOpen])
+
   // Node results store — background jobs + cached results
   const bumpGraphVersion = useNodeResultsStore((s) => s.bumpGraphVersion)
   const getOptimiserPreview = useNodeResultsStore((s) => s.getOptimiserPreview)
@@ -227,6 +236,7 @@ function FlowEditor() {
     graphRef, clipboard, nodeIdCounter,
     setSelectedNode, setPreviewData: (d: null) => setPreviewData(d),
     clearTrace,
+    closePanel,
   })
 
   // Background polling for optimiser/training jobs (survives panel unmount)
@@ -347,7 +357,7 @@ function FlowEditor() {
                     handleDrillIntoSubmodel(node.id)
                   }
                 }}
-                onPaneClick={() => { setContextMenu(null); clearTrace(); setSelectedNode(null); lastSelectedNodeRef.current = null; setUtilityOpen(false); setImportsOpen(false); setGitOpen(false) }}
+                onPaneClick={() => { setContextMenu(null); clearTrace(); closePanel() }}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 nodeTypes={nodeTypes}
@@ -462,7 +472,7 @@ function FlowEditor() {
                 allNodes={nodes as unknown as SimpleNode[]}
                 submodels={submodelsSnapshot}
                 preamble={preamble}
-                onClose={() => { setSelectedNode(null); lastSelectedNodeRef.current = null }}
+                onClose={closePanel}
                 onUpdateNode={onUpdateNode}
                 onDeleteEdge={handleDeleteEdge}
                 onRefreshPreview={() => { if (selectedNode) refreshPreview(selectedNode) }}

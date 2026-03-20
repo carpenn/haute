@@ -16,12 +16,13 @@ interface KeyboardShortcutsParams {
   setSelectedNode: (node: Node | null) => void
   setPreviewData: (data: null) => void
   clearTrace: () => void
+  closePanel: () => void
 }
 
 export default function useKeyboardShortcuts({
   handleSave, setNodes, setEdges, undo, redo, fitView,
   graphRef, clipboard, nodeIdCounter,
-  setSelectedNode, setPreviewData, clearTrace,
+  setSelectedNode, setPreviewData, clearTrace, closePanel,
 }: KeyboardShortcutsParams) {
   const { addToast } = useToastStore()
   const { setShortcutsOpen, setSubmodelDialog, setNodeSearchOpen } = useUIStore()
@@ -122,9 +123,10 @@ export default function useKeyboardShortcuts({
         return
       }
 
-      // Escape → clear trace
+      // Escape → clear trace + close panel
       if (e.key === "Escape") {
         clearTrace()
+        closePanel()
         return
       }
 
@@ -169,7 +171,7 @@ export default function useKeyboardShortcuts({
   }, [
     handleSave, setNodes, setEdges, undo, redo, fitView,
     graphRef, clipboard, nodeIdCounter,
-    setSelectedNode, setPreviewData, clearTrace,
+    setSelectedNode, setPreviewData, clearTrace, closePanel,
     addToast, setShortcutsOpen, setSubmodelDialog, setNodeSearchOpen,
   ])
 }
