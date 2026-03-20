@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 
@@ -139,7 +139,7 @@ def safe_sink(
     immediately and then deleted.
     """
     path = Path(path)
-    compression = "lz4" if fast_checkpoint else "zstd"
+    compression: Literal["lz4", "zstd"] = "lz4" if fast_checkpoint else "zstd"
     try:
         if fmt == "csv":
             lf.sink_csv(path)

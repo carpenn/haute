@@ -149,7 +149,7 @@ def estimate_gpu_vram_bytes(
     *,
     border_count: int = 128,
     depth: int = 6,
-    **_kwargs,  # accept and ignore split params for backward compat
+    **_kwargs: object,  # accept and ignore split params for backward compat
 ) -> int:
     """Estimate CatBoost GPU VRAM needed for *n_rows* × *n_features*."""
     feature_bytes = n_rows * n_features * 5  # float32 + binarised
@@ -437,7 +437,7 @@ def _resolve_target_columns(
 def estimate_safe_training_rows(
     graph: PipelineGraph,
     target_node_id: str,
-    build_node_fn=None,
+    build_node_fn: object | None = None,
     *,
     probe_rows: int = 0,  # kept for backward compat, unused
     overhead_multiplier: float = 1.0,  # kept for backward compat
