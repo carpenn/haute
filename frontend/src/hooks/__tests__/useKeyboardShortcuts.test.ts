@@ -19,6 +19,7 @@ function makeParams(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
     setSelectedNode: vi.fn(),
     setPreviewData: vi.fn(),
     clearTrace: vi.fn(),
+    closePanel: vi.fn(),
     ...overrides,
   }
 }

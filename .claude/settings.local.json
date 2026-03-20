@@ -121,7 +121,9 @@
       "Bash(\"C:/Program Files/nodejs/node.exe\" ./node_modules/vitest/vitest.mjs run)",
       "Bash(sed -i 's/\"\"node_type\"\": \"\"transform\"\"/\"\"node_type\"\": \"\"polars\"\"/g' tests/test_parser_helpers.py tests/test_trace.py)",
       "Bash(sed -i 's/node_type=\"\"transform\"\"/node_type=\"\"polars\"\"/g' tests/test_trace.py)",
-      "Bash(sed -i 's/node_type: str = \"\"transform\"\"/node_type: str = \"\"polars\"\"/g' tests/test_node_builder.py tests/test_route_save_pipeline.py)"
+      "Bash(sed -i 's/node_type: str = \"\"transform\"\"/node_type: str = \"\"polars\"\"/g' tests/test_node_builder.py tests/test_route_save_pipeline.py)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc -b)"
     ]
   }
 }
