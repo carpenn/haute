@@ -100,7 +100,7 @@ class TestEndToEnd:
         code = graph_to_code(graph, pipeline_name="roundtrip")
         compile(code, "<test_codegen>", "exec")
         assert "Pipeline" in code
-        assert "@pipeline.node" in code
+        assert "@pipeline." in code
 
     def test_codegen_roundtrip_preserves_structure(self, tmp_path):
         """parse → codegen → re-parse preserves node types."""

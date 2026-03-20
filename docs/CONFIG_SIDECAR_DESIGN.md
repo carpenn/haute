@@ -35,7 +35,7 @@ Each node gets one file: `config/<type_folder>/<node_name>.json`.
 The decorator references the file instead of carrying inline config:
 
 ```python
-@pipeline.node(config="config/banding/optimiser_banding.json")
+@pipeline.banding(config="config/banding/optimiser_banding.json")
 def optimiser_banding(data_source):
     ...
 ```

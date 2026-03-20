@@ -380,8 +380,8 @@ class TestGraphToCode:
         assert "import polars as pl" in code
         assert "import haute" in code
         assert "Pipeline" in code
-        # No nodes, so no @pipeline.node or pipeline.connect
-        assert "@pipeline.node" not in code
+        # No nodes, so no @pipeline.<type> decorators or pipeline.connect
+        assert not any(line.strip().startswith("@pipeline.") for line in code.splitlines())
         assert "pipeline.connect" not in code
         compile(code, "<test>", "exec")
 
@@ -454,10 +454,10 @@ class TestLiveSwitchCodegen:
         full_code = (
             "import polars as pl\nimport haute\n"
             'pipeline = haute.Pipeline("test")\n\n'
-            '@pipeline.node(path="a.parquet")\n'
+            '@pipeline.data_source(path="a.parquet")\n'
             "def live_src() -> pl.LazyFrame:\n"
             '    return pl.scan_parquet("a.parquet")\n\n'
-            '@pipeline.node(path="b.parquet")\n'
+            '@pipeline.data_source(path="b.parquet")\n'
             "def batch_src() -> pl.LazyFrame:\n"
             '    return pl.scan_parquet("b.parquet")\n\n'
             f"{code}\n"
@@ -602,7 +602,7 @@ class TestSelectedColumnsCodegen:
         assert not any(".select(" in l for l in body_lines)
 
     def test_transform_no_decorator_kwarg_when_empty(self):
-        """Transform without selected_columns uses bare @pipeline.node."""
+        """Transform without selected_columns uses bare @pipeline.transform."""
         node = _n({
             "id": "t1",
             "data": {
@@ -612,7 +612,7 @@ class TestSelectedColumnsCodegen:
             },
         })
         code = _node_to_code(node, [])
-        assert code.startswith("@pipeline.node\n")
+        assert code.startswith("@pipeline.transform\n")
 
 
 class TestCodegenEdgeCases:
@@ -623,7 +623,6 @@ class TestCodegenEdgeCases:
         code = graph_to_code(_g({"nodes": [], "edges": []}))
         assert "import polars as pl" in code
         assert "import haute" in code
-        assert "@pipeline.node" not in code
         assert "pipeline.connect" not in code
         compile(code, "<test>", "exec")
 
@@ -1217,7 +1216,7 @@ class TestMakePassthroughBuilder:
 
     def test_factory_returns_callable(self):
         template = """\
-@pipeline.node(foo=True{extra_kwargs})
+@pipeline.test({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     \"\"\"{description}\"\"\"
     return {first}
@@ -1228,7 +1227,7 @@ def {func_name}({params}) -> pl.LazyFrame:
     def test_factory_produces_valid_code(self):
         """A builder from the factory should produce compilable code."""
         template = """\
-@pipeline.node(test=True{extra_kwargs})
+@pipeline.test({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     \"\"\"{description}\"\"\"
     return {first}
@@ -1244,7 +1243,6 @@ def {func_name}({params}) -> pl.LazyFrame:
         })
         code = builder(node, ["upstream"])
         assert "def My_Node(upstream: pl.LazyFrame)" in code
-        assert "test=True" in code
         assert "alpha=42" in code
         assert "beta='hello'" in code
         assert "return upstream" in code
@@ -1253,7 +1251,7 @@ def {func_name}({params}) -> pl.LazyFrame:
     def test_factory_skips_empty_config_values(self):
         """None, empty string, and empty list config values are omitted."""
         template = """\
-@pipeline.node(t=True{extra_kwargs})
+@pipeline.test({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     \"\"\"{description}\"\"\"
     return {first}
@@ -1276,7 +1274,7 @@ def {func_name}({params}) -> pl.LazyFrame:
     def test_factory_no_extra_kwargs(self):
         """When all config keys are absent, no trailing comma appears."""
         template = """\
-@pipeline.node(t=True{extra_kwargs})
+@pipeline.test({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     \"\"\"{description}\"\"\"
     return {first}
@@ -1291,13 +1289,13 @@ def {func_name}({params}) -> pl.LazyFrame:
             },
         })
         code = builder(node, [])
-        assert "t=True)" in code
+        assert "@pipeline.test()" in code
         assert "missing_key" not in code
 
     def test_factory_multiple_sources(self):
         """Builder should list all upstream params and return the first."""
         template = """\
-@pipeline.node(t=True{extra_kwargs})
+@pipeline.test({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     \"\"\"{description}\"\"\"
     return {first}
@@ -1314,32 +1312,32 @@ def {func_name}({params}) -> pl.LazyFrame:
     # -- integration tests for the four registered builders ------------------
 
     @pytest.mark.parametrize(
-        "node_type, decorator_flag, config_key_sample, config_folder",
+        "node_type, decorator_name, config_key_sample, config_folder",
         [
             pytest.param(
                 "scenarioExpander",
-                "scenario_expander=True",
+                "scenario_expander",
                 {"quote_id": "qid", "column_name": "col1"},
                 "expander",
                 id="scenario_expander",
             ),
             pytest.param(
                 "optimiser",
-                "optimiser=True",
+                "optimiser",
                 {"mode": "minimize", "tolerance": 0.01},
                 "optimisation",
                 id="optimiser",
             ),
             pytest.param(
                 "optimiserApply",
-                "optimiser_apply=True",
+                "optimiser_apply",
                 {"artifact_path": "models/opt", "version": "3"},
                 "apply_optimisation",
                 id="optimiser_apply",
             ),
             pytest.param(
                 "modelling",
-                "modelling=True",
+                "modelling",
                 {"target": "loss_ratio", "algorithm": "catboost"},
                 "model_training",
                 id="modelling",
@@ -1347,10 +1345,10 @@ def {func_name}({params}) -> pl.LazyFrame:
         ],
     )
     def test_passthrough_node_basic(
-        self, node_type, decorator_flag, config_key_sample, config_folder,
+        self, node_type, decorator_name, config_key_sample, config_folder,
     ):
-        """Each passthrough builder generates code with the correct decorator
-        flag, config kwargs, and a passthrough return statement."""
+        """Each passthrough builder generates code with the correct type-specific
+        decorator, config kwargs, and a passthrough return statement."""
         node = _n({
             "id": "n1",
             "data": {
@@ -1361,7 +1359,7 @@ def {func_name}({params}) -> pl.LazyFrame:
         })
         # _generate_node_code preserves the inline decorator (pre-config rewrite)
         raw_code = _generate_node_code(node, source_names=["upstream"])
-        assert decorator_flag in raw_code
+        assert f"@pipeline.{decorator_name}(" in raw_code
         for key, val in config_key_sample.items():
             assert f"{key}={val!r}" in raw_code
         assert "def My_Step(upstream: pl.LazyFrame)" in raw_code
@@ -1373,15 +1371,15 @@ def {func_name}({params}) -> pl.LazyFrame:
         _compile_node_code(final_code)
 
     @pytest.mark.parametrize(
-        "node_type, decorator_flag",
+        "node_type, decorator_name",
         [
-            ("scenarioExpander", "scenario_expander=True"),
-            ("optimiser", "optimiser=True"),
-            ("optimiserApply", "optimiser_apply=True"),
-            ("modelling", "modelling=True"),
+            ("scenarioExpander", "scenario_expander"),
+            ("optimiser", "optimiser"),
+            ("optimiserApply", "optimiser_apply"),
+            ("modelling", "modelling"),
         ],
     )
-    def test_passthrough_node_empty_config(self, node_type, decorator_flag):
+    def test_passthrough_node_empty_config(self, node_type, decorator_name):
         """Passthrough builders work correctly with an empty config dict."""
         node = _n({
             "id": "n1",
@@ -1392,7 +1390,7 @@ def {func_name}({params}) -> pl.LazyFrame:
             },
         })
         raw_code = _generate_node_code(node, source_names=[])
-        assert decorator_flag in raw_code
+        assert f"@pipeline.{decorator_name}(" in raw_code
         assert "def Empty(df: pl.LazyFrame)" in raw_code
         assert "return df" in raw_code
 

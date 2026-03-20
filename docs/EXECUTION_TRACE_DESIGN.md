@@ -250,7 +250,7 @@ Three approaches, used in combination:
    can declare column dependencies:
 
    ```python
-   @pipeline.node(
+   @pipeline.model_score(
        inputs=["driver_age", "vehicle_age", "postcode"],
        outputs=["predicted_frequency"],
    )

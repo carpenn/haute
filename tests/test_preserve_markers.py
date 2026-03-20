@@ -61,7 +61,7 @@ def _make_pipeline(
         lines.append(preserved)
         lines.append("")
     lines.append("")
-    lines.append('@pipeline.node(path="data.parquet")')
+    lines.append('@pipeline.data_source(path="data.parquet")')
     lines.append("def source() -> pl.LazyFrame:")
     lines.append('    """Load data."""')
     lines.append('    return pl.scan_parquet("data.parquet")')
@@ -206,7 +206,7 @@ class TestCodegenEmitsPreservedBlocks:
         graph.preserved_blocks = ["BEFORE_NODES = True"]
         code = graph_to_code(graph, pipeline_name="test")
         preserve_idx = code.index("BEFORE_NODES = True")
-        node_idx = code.index("@pipeline.node")
+        node_idx = code.index("@pipeline.data_source")
         assert preserve_idx < node_idx
 
     def test_preserved_blocks_after_pipeline_def(self):

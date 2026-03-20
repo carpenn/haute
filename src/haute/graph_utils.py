@@ -34,8 +34,10 @@ from haute._optimiser_io import load_optimiser_artifact as load_optimiser_artifa
 from haute._topo import CycleError as CycleError
 from haute._topo import ancestors as ancestors
 from haute._topo import topo_sort_ids as topo_sort_ids
+from haute._types import DECORATOR_TO_NODE_TYPE as DECORATOR_TO_NODE_TYPE
 from haute._types import MODEL_SCORE_CONFIG_KEYS as MODEL_SCORE_CONFIG_KEYS
 from haute._types import MODELLING_CONFIG_KEYS as MODELLING_CONFIG_KEYS
+from haute._types import NODE_TYPE_TO_DECORATOR as NODE_TYPE_TO_DECORATOR
 from haute._types import OPTIMISER_APPLY_CONFIG_KEYS as OPTIMISER_APPLY_CONFIG_KEYS
 from haute._types import OPTIMISER_CONFIG_KEYS as OPTIMISER_CONFIG_KEYS
 from haute._types import SCENARIO_EXPANDER_CONFIG_KEYS as SCENARIO_EXPANDER_CONFIG_KEYS

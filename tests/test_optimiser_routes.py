@@ -10,7 +10,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from haute._parser_helpers import _build_node_config, _infer_node_type
+from haute._parser_helpers import _build_node_config
 from haute._sandbox import set_project_root
 from haute.graph_utils import NodeType
 from haute.routes._optimiser_service import _compute_scenario_value_stats
@@ -144,11 +144,6 @@ class TestNodeTypeRegistration:
 
 
 class TestParserInference:
-    def test_infer_optimiser_type(self):
-        kwargs = {"optimiser": True, "objective": "expected_income"}
-        result = _infer_node_type(kwargs, n_params=1)
-        assert result == NodeType.OPTIMISER
-
     def test_build_optimiser_config(self):
         kwargs = {
             "optimiser": True,

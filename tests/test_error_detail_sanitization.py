@@ -162,7 +162,7 @@ class TestPipelineRoutesSafeDetail:
 import haute
 pipeline = haute.Pipeline("test")
 
-@pipeline.node(type="dataSource", path="{data_path}")
+@pipeline.data_source(path="{data_path}")
 def source(config):
     pass
 """
@@ -255,7 +255,7 @@ class TestPipelineRoutesLogOnError:
 import haute
 pipeline = haute.Pipeline("test")
 
-@pipeline.node(type="dataSource", path="{data_path}")
+@pipeline.data_source(path="{data_path}")
 def source(config):
     pass
 """

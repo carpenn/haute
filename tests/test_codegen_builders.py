@@ -718,7 +718,7 @@ class TestCodegenExecValidation:
             f"{code}\n",
             ns,
         )
-        # Find all functions defined via @pipeline.node
+        # Find all functions defined via @pipeline.<type> decorators
         func_names = [
             name for name, obj in ns.items()
             if callable(obj) and not name.startswith("_") and name not in (

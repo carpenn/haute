@@ -233,7 +233,7 @@ import haute
 
 pipeline = haute.Pipeline("test")
 
-@pipeline.node(banding="continuous", column="age", output_column="age_band", rules=[{"op1": "<=", "val1": 25, "assignment": "young"}])
+@pipeline.banding(banding="continuous", column="age", output_column="age_band", rules=[{"op1": "<=", "val1": 25, "assignment": "young"}])
 def band_age(df: pl.LazyFrame) -> pl.LazyFrame:
     """Band age into age_band"""
     return df
@@ -260,7 +260,7 @@ import haute
 
 pipeline = haute.Pipeline("test")
 
-@pipeline.node(banding="categorical", column="prop", output_column="prop_band", rules=[{"value": "House", "assignment": "Residential"}])
+@pipeline.banding(banding="categorical", column="prop", output_column="prop_band", rules=[{"value": "House", "assignment": "Residential"}])
 def band_prop(df: pl.LazyFrame) -> pl.LazyFrame:
     """Band property type"""
     return df

@@ -1,6 +1,6 @@
 """Parser: .py pipeline file → React Flow graph JSON.
 
-Uses Python's ast module to extract @pipeline.node decorated functions
+Uses Python's ast module to extract @pipeline.<type> decorated functions
 and pipeline.connect() calls, producing the same graph JSON format
 that the frontend expects.
 
@@ -110,7 +110,7 @@ def parse_pipeline_source(
     # Pipeline metadata
     pipeline_name, pipeline_desc = _extract_pipeline_meta(tree)
 
-    # Find @pipeline.node decorated functions
+    # Find @pipeline.<type> decorated functions
     func_bodies = _extract_function_bodies(source, tree=tree)
     raw_nodes = _extract_decorated_nodes(
         tree, _is_pipeline_node_decorator, func_bodies, _base_dir,

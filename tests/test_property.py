@@ -14,7 +14,6 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from haute._parser_helpers import _infer_node_type
 from haute.graph_utils import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
 from haute.codegen import graph_to_code
 from haute.executor import _apply_banding
@@ -342,42 +341,6 @@ class TestCodegenRoundtripProperties:
 
 
 # ---------------------------------------------------------------------------
-# _infer_node_type properties
-# ---------------------------------------------------------------------------
-
-
-# Strategy for decorator kwargs dicts that should map to known node types
-_KNOWN_TYPE_KWARGS = {
-    "externalFile": {"external": "model.pkl"},
-    "dataSink": {"sink": "out.parquet"},
-    "output": {"output": True},
-    "modelScore": {"model_score": True},
-    "ratingStep": {"table": "t", "key": "k"},
-    "dataSource": {"path": "data.parquet"},
-    "liveSwitch": {"live_switch": True},
-    "apiInput": {"api_input": True, "path": "d.json"},
-}
-
-
-class TestInferNodeTypeProperties:
-    @pytest.mark.parametrize("expected_type,kwargs", list(_KNOWN_TYPE_KWARGS.items()))
-    def test_known_kwargs_map_to_expected_type(self, expected_type, kwargs):
-        """Each known decorator kwarg set maps to the correct node type."""
-        result = _infer_node_type(kwargs, n_params=1)
-        assert result == expected_type
-
-    @given(n_params=st.integers(min_value=0, max_value=10))
-    @settings(max_examples=50)
-    def test_empty_kwargs_is_source_or_transform(self, n_params):
-        """With no decorator kwargs, only source (0 params) or transform."""
-        result = _infer_node_type({}, n_params)
-        if n_params == 0:
-            assert result == "dataSource"
-        else:
-            assert result == "transform"
-
-
-# ---------------------------------------------------------------------------
 # Parser robustness: valid pipeline strings always parse without crash
 # ---------------------------------------------------------------------------
 
@@ -393,7 +356,7 @@ def _valid_pipeline_source_strategy():
             "",
             'pipeline = haute.Pipeline("fuzz")',
             "",
-            '@pipeline.node(path="data.parquet")',
+            '@pipeline.data_source(path="data.parquet")',
             "def source() -> pl.LazyFrame:",
             '    return pl.scan_parquet("data.parquet")',
             "",
@@ -402,7 +365,7 @@ def _valid_pipeline_source_strategy():
         for i in range(n_transforms):
             name = f"step_{i}"
             lines.extend([
-                "@pipeline.node",
+                "@pipeline.transform",
                 f"def {name}({prev}: pl.LazyFrame) -> pl.LazyFrame:",
                 f"    return {prev}",
                 "",
@@ -413,7 +376,7 @@ def _valid_pipeline_source_strategy():
         # Output node
         lines.extend([
             "",
-            "@pipeline.node(output=True)",
+            "@pipeline.output()",
             f"def output({prev}: pl.LazyFrame) -> pl.LazyFrame:",
             f"    return {prev}",
             "",

@@ -85,7 +85,7 @@ def _compile_preamble(
     """Compile user-defined preamble code into a namespace dict.
 
     The preamble (helper functions, constants, lambdas) is defined at the
-    top of a pipeline file between imports and the first ``@pipeline.node``.
+    top of a pipeline file between imports and the first ``@pipeline.<type>`` decorator.
     This compiles it once and returns a dict of bindings that can be
     injected into ``_exec_user_code`` via ``extra_ns``.
 

@@ -83,16 +83,16 @@ import polars as pl
 
 pipeline = haute.Pipeline("motor_pricing")
 
-@pipeline.node(config="config/data_source/policies.json")
+@pipeline.data_source(config="config/data_source/policies.json")
 def policies() -> pl.LazyFrame:
     return pl.scan_parquet("data/policies.parquet")
 
-@pipeline.node(config="config/model_scoring/frequency.json")
+@pipeline.model_score(config="config/model_scoring/frequency.json")
 def frequency(policies: pl.LazyFrame) -> pl.LazyFrame:
     from haute.graph_utils import score_from_config
     return score_from_config(policies, config="config/model_scoring/frequency.json")
 
-@pipeline.node
+@pipeline.transform
 def premium(frequency: pl.LazyFrame) -> pl.LazyFrame:
     return frequency.with_columns(
         premium=pl.col("pred_freq") * pl.col("pred_sev") * 1.15,

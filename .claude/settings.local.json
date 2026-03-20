@@ -93,7 +93,27 @@
       "Bash(.venv/Scripts/python -m pytest tests/test_codegen.py tests/test_codegen_builders.py tests/test_model_score_codegen.py tests/test_parser_helpers.py tests/test_parser_internals.py tests/test_executor.py -x -q --tb=short)",
       "Bash(.venv/Scripts/python -m ruff check src/haute/_execute_lazy.py src/haute/_fingerprint_cache.py src/haute/_polars_utils.py src/haute/executor.py src/haute/_model_scorer.py src/haute/_mlflow_io.py src/haute/_parser_helpers.py src/haute/codegen.py src/haute/deploy/_utils.py src/haute/routes/_optimiser_service.py src/haute/_json_flatten.py)",
       "Bash(.venv/Scripts/python -m ruff check src/haute/routes/_optimiser_service.py --fix)",
-      "Bash(.venv/Scripts/python -m ruff check src/haute/)"
+      "Bash(.venv/Scripts/python -m ruff check src/haute/)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_parser_helpers.py tests/test_parser_regex.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -x -q --timeout=30)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_codegen.py tests/test_codegen_builders.py tests/test_codegen_injection.py tests/test_modelling_codegen.py tests/test_model_score_codegen.py tests/test_pipeline.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -x -q)",
+      "Bash(.venv/Scripts/python -c \"import haute; print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_parser_regex.py tests/test_parser_helpers.py tests/test_parser.py tests/test_parser_internals.py -x -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_codegen.py tests/test_codegen_builders.py tests/test_codegen_injection.py tests/test_modelling_codegen.py tests/test_model_score_codegen.py tests/test_pipeline.py tests/test_submodel.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_parser_regex.py tests/test_parser_helpers.py tests/test_parser.py tests/test_parser_internals.py -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_codegen.py tests/test_codegen_builders.py tests/test_codegen_injection.py tests/test_modelling_codegen.py tests/test_model_score_codegen.py tests/test_pipeline.py -q)",
+      "Bash(uv run:*)",
+      "Bash(ls C:/Users/prici/haute/.venv/Scripts/python*)",
+      "Bash(ls C:/Users/prici/haute/.venv/bin/python*)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_parser_helpers.py tests/test_parser_internals.py tests/test_config_io.py tests/test_pipeline.py tests/test_optimiser_apply.py tests/test_optimiser_routes.py tests/test_model_score_codegen.py tests/test_scenario_expander.py tests/test_property.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest -x -q --timeout=120)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -x -q --ignore=tests/test_property.py)",
+      "Bash(.venv/Scripts/python.exe -c \"from haute._parser_helpers import _resolve_node_config, _extract_decorated_nodes; from haute._parser_regex import fallback_parse; from haute._config_io import FOLDER_TO_NODE_TYPE, NODE_TYPE_TO_FOLDER, has_config_folder, find_config_by_func_name; from haute.pipeline import Pipeline, Submodel, NodeRegistry; print\\(''All imports OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from haute._parser_helpers import _infer_node_type\")",
+      "Bash(.venv/Scripts/python.exe -c \"from haute._config_io import infer_node_type_from_config_path\")",
+      "Bash(.venv/Scripts/python.exe -c \"from haute.pipeline import Pipeline; p = Pipeline\\(''t''\\); print\\(hasattr\\(p, ''node''\\), hasattr\\(p, ''_register_node''\\), hasattr\\(p, ''transform''\\)\\)\")"
     ]
   }
 }

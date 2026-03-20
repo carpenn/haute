@@ -3,7 +3,7 @@
 import polars as pl
 import pytest
 
-from haute._parser_helpers import _build_node_config, _infer_node_type
+from haute._parser_helpers import _build_node_config
 from haute._types import GraphNode, NodeData, NodeType
 from haute.codegen import _node_to_code
 from haute.executor import _build_node_fn
@@ -19,16 +19,6 @@ def _make_node(config: dict, label: str = "test_expander") -> GraphNode:
             config=config,
         ),
     )
-
-
-class TestInferType:
-    def test_infer_type(self):
-        result = _infer_node_type({"scenario_expander": True}, 1)
-        assert result == NodeType.SCENARIO_EXPANDER
-
-    def test_does_not_infer_without_flag(self):
-        result = _infer_node_type({}, 1)
-        assert result != NodeType.SCENARIO_EXPANDER
 
 
 class TestBuildConfig:

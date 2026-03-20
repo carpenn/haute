@@ -179,7 +179,7 @@ class TestParserSubmodel:
 
             submodel = haute.Submodel("scoring")
 
-            @submodel.node()
+            @submodel.transform
             def Transform(Source: pl.LazyFrame) -> pl.LazyFrame:
                 return Source.select("x")
         """)
@@ -190,7 +190,7 @@ class TestParserSubmodel:
 
             pipeline = haute.Pipeline("test")
 
-            @pipeline.node(path="data/in.parquet")
+            @pipeline.data_source(path="data/in.parquet")
             def Source() -> pl.LazyFrame:
                 return pl.scan_parquet("data/in.parquet")
 
@@ -212,11 +212,11 @@ class TestParserSubmodel:
 
             pipeline = haute.Pipeline("basic")
 
-            @pipeline.node(path="data/in.parquet")
+            @pipeline.data_source(path="data/in.parquet")
             def Source() -> pl.LazyFrame:
                 return pl.scan_parquet("data/in.parquet")
 
-            @pipeline.node()
+            @pipeline.transform
             def Transform(Source: pl.LazyFrame) -> pl.LazyFrame:
                 return Source.select("x")
 

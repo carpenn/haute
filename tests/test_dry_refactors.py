@@ -339,7 +339,7 @@ class TestCompileNodeCodeShared:
 
         # Should not raise
         compile_node_code(
-            "@pipeline.node(path='data.parquet')\n"
+            "@pipeline.data_source(path='data.parquet')\n"
             "def load_data() -> pl.LazyFrame:\n"
             "    return pl.scan_parquet('data.parquet')\n"
         )

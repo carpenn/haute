@@ -4,7 +4,7 @@ Each pipeline node's declarative config (everything except user code in
 the function body) is stored in a JSON file under
 ``config/<type_folder>/<node_name>.json``.  The decorator references it::
 
-    @pipeline.node(config="config/banding/optimiser_banding.json")
+    @pipeline.banding(config="config/banding/optimiser_banding.json")
 
 This module provides:
 
@@ -78,19 +78,6 @@ def config_path_for_node(
     if base_dir:
         return base_dir / rel
     return rel
-
-
-def infer_node_type_from_config_path(config_path: str | Path) -> NodeType | None:
-    """Extract the node type from the config path's folder name.
-
-    E.g. ``"config/banding/optimiser_banding.json"`` → ``NodeType.BANDING``.
-    """
-    parts = Path(config_path).parts
-    # Expected: config/<type_folder>/<name>.json  (or just <type_folder>/<name>.json)
-    for part in reversed(parts[:-1]):
-        if part in FOLDER_TO_NODE_TYPE:
-            return FOLDER_TO_NODE_TYPE[part]
-    return None
 
 
 # ---------------------------------------------------------------------------

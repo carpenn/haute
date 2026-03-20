@@ -22,7 +22,7 @@ from haute._parser_regex import (
 class TestFindFunctionBlocks:
     def test_single_decorated_function(self) -> None:
         source = (
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def my_func(df):\n"
             "    return df\n"
         )
@@ -34,11 +34,11 @@ class TestFindFunctionBlocks:
 
     def test_multiple_functions(self) -> None:
         source = (
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def alpha(df):\n"
             "    return df\n"
             "\n"
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def beta(df):\n"
             "    return df\n"
         )
@@ -49,7 +49,7 @@ class TestFindFunctionBlocks:
 
     def test_multiple_params(self) -> None:
         source = (
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def join(left, right):\n"
             "    return left\n"
         )
@@ -58,7 +58,7 @@ class TestFindFunctionBlocks:
 
     def test_typed_params_strips_annotations(self) -> None:
         source = (
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def transform(df: pl.LazyFrame) -> pl.LazyFrame:\n"
             "    return df\n"
         )
@@ -67,7 +67,7 @@ class TestFindFunctionBlocks:
 
     def test_no_params(self) -> None:
         source = (
-            "@pipeline.node(api_input='true')\n"
+            "@pipeline.data_source(path='input.csv')\n"
             "def api_input():\n"
             "    pass\n"
         )
@@ -76,7 +76,7 @@ class TestFindFunctionBlocks:
 
     def test_body_with_multiple_lines(self) -> None:
         source = (
-            "@pipeline.node()\n"
+            "@pipeline.transform()\n"
             "def calc(df):\n"
             "    x = 1\n"
             "    y = 2\n"
@@ -96,13 +96,45 @@ class TestFindFunctionBlocks:
 
     def test_decorator_with_kwargs(self) -> None:
         source = (
-            '@pipeline.node(path="data.csv")\n'
+            '@pipeline.data_source(path="data.csv")\n'
             "def load(df):\n"
             "    return df\n"
         )
         blocks = _find_function_blocks(source)
         assert len(blocks) == 1
         assert 'path="data.csv"' in blocks[0]["decorator_text"]
+
+    def test_unrecognised_method_skipped(self) -> None:
+        """@pipeline.connect(...) should not be matched as a node decorator."""
+        source = (
+            '@pipeline.connect("a", "b")\n'
+            "def not_a_node(df):\n"
+            "    return df\n"
+        )
+        blocks = _find_function_blocks(source)
+        assert blocks == []
+
+    def test_bare_decorator(self) -> None:
+        """@pipeline.transform (no parens) should be matched."""
+        source = (
+            "@pipeline.transform\n"
+            "def my_func(df):\n"
+            "    return df\n"
+        )
+        blocks = _find_function_blocks(source)
+        assert len(blocks) == 1
+        assert blocks[0]["func_name"] == "my_func"
+
+    def test_explicit_node_type_set(self) -> None:
+        """Each block should carry the explicit NodeType from the decorator."""
+        source = (
+            "@pipeline.banding()\n"
+            "def band(df):\n"
+            "    return df\n"
+        )
+        blocks = _find_function_blocks(source)
+        assert len(blocks) == 1
+        assert blocks[0]["explicit_node_type"] == "banding"
 
 
 # ---------------------------------------------------------------------------
@@ -112,35 +144,35 @@ class TestFindFunctionBlocks:
 
 class TestParseDecoratorKwargsRegex:
     def test_string_kwargs(self) -> None:
-        text = '@pipeline.node(path="data.csv", name="load")'
+        text = '@pipeline.data_source(path="data.csv", name="load")'
         result = _parse_decorator_kwargs_regex(text)
         assert result["path"] == "data.csv"
         assert result["name"] == "load"
 
     def test_boolean_kwargs(self) -> None:
-        text = "@pipeline.node(api_input=True, output=False)"
+        text = "@pipeline.transform(api_input=True, output=False)"
         result = _parse_decorator_kwargs_regex(text)
         assert result["api_input"] is True
         assert result["output"] is False
 
     def test_mixed_kwargs(self) -> None:
-        text = '@pipeline.node(path="x.csv", output=True)'
+        text = '@pipeline.data_source(path="x.csv", output=True)'
         result = _parse_decorator_kwargs_regex(text)
         assert result["path"] == "x.csv"
         assert result["output"] is True
 
     def test_bare_decorator_returns_empty(self) -> None:
-        text = "@pipeline.node"
+        text = "@pipeline.transform"
         result = _parse_decorator_kwargs_regex(text)
         assert result == {}
 
     def test_empty_parens(self) -> None:
-        text = "@pipeline.node()"
+        text = "@pipeline.transform()"
         result = _parse_decorator_kwargs_regex(text)
         assert result == {}
 
     def test_single_quoted_values(self) -> None:
-        text = "@pipeline.node(path='data.csv')"
+        text = "@pipeline.data_source(path='data.csv')"
         result = _parse_decorator_kwargs_regex(text)
         assert result["path"] == "data.csv"
 
@@ -175,15 +207,23 @@ class TestRegexPatterns:
         assert matches == [("x", "y")]
 
     def test_decorator_pattern_bare(self) -> None:
-        source = "@pipeline.node\ndef foo(df):\n    pass\n"
+        source = "@pipeline.transform\ndef foo(df):\n    pass\n"
         matches = list(_RE_DECORATOR.finditer(source))
         assert len(matches) == 1
 
     def test_decorator_pattern_with_args(self) -> None:
-        source = '@pipeline.node(path="x")\ndef bar(df):\n    pass\n'
+        source = '@pipeline.data_source(path="x")\ndef bar(df):\n    pass\n'
         matches = list(_RE_DECORATOR.finditer(source))
         assert len(matches) == 1
-        assert matches[0].group(2) == "bar"
+        assert matches[0].group(3) == "bar"
+
+    def test_decorator_pattern_does_not_match_connect(self) -> None:
+        """The regex matches any @pipeline.<method>, but _find_function_blocks filters."""
+        source = '@pipeline.connect("a", "b")\ndef not_a_node(df):\n    pass\n'
+        # The regex itself matches (connect is \w+), but _find_function_blocks filters it
+        matches = list(_RE_DECORATOR.finditer(source))
+        assert len(matches) == 1
+        assert matches[0].group(2) == "connect"
 
 
 # ---------------------------------------------------------------------------
@@ -199,11 +239,11 @@ import haute
 
 pipeline = haute.Pipeline("test_pipe", description="A test")
 
-@pipeline.node()
+@pipeline.transform()
 def transform(df):
     return df
 
-@pipeline.node()
+@pipeline.output()
 def output_node(transform):
     return transform
 
@@ -230,7 +270,7 @@ x = {unclosed
         assert graph.nodes == []
 
     def test_pipeline_name_fallback(self) -> None:
-        source = "@pipeline.node()\ndef foo(df):\n    return df\n"
+        source = "@pipeline.transform()\ndef foo(df):\n    return df\n"
         err = SyntaxError("oops")
         err.lineno = 1
         graph = fallback_parse(source, "file.py", err)
@@ -241,11 +281,11 @@ x = {unclosed
 import haute
 pipeline = haute.Pipeline("p")
 
-@pipeline.node()
+@pipeline.transform()
 def a(df):
     return df
 
-@pipeline.node()
+@pipeline.transform()
 def b(a):
     return a
 
@@ -269,11 +309,11 @@ pipeline.connect("a", "b")
 import haute
 pipeline = haute.Pipeline("p")
 
-@pipeline.node()
+@pipeline.transform()
 def good(df):
     return df
 
-@pipeline.node()
+@pipeline.transform()
 def bad(df):
     x = {unclosed
 '''

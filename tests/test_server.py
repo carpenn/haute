@@ -31,13 +31,13 @@ import haute
 pipeline = haute.Pipeline("test_pipeline", description="A test pipeline")
 
 
-@pipeline.node(path="{data_path}")
+@pipeline.data_source(path="{data_path}")
 def source() -> pl.DataFrame:
     """Read data."""
     return pl.scan_parquet("{data_path}")
 
 
-@pipeline.node
+@pipeline.transform
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Transform."""
     return source
@@ -1371,15 +1371,15 @@ import haute
 
 pipeline = haute.Pipeline("rewire_test", description="Rewire test")
 
-@pipeline.node(path="data/input.parquet")
+@pipeline.data_source(path="data/input.parquet")
 def source() -> pl.LazyFrame:
     return pl.scan_parquet("data/input.parquet")
 
-@pipeline.node
+@pipeline.transform
 def middle(source: pl.LazyFrame) -> pl.LazyFrame:
     return source
 
-@pipeline.node
+@pipeline.transform
 def final(middle: pl.LazyFrame) -> pl.LazyFrame:
     return middle
 

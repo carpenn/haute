@@ -15,7 +15,7 @@ from haute._optimiser_io import (
     _artifact_cache,
     load_optimiser_artifact,
 )
-from haute._parser_helpers import _build_node_config, _infer_node_type
+from haute._parser_helpers import _build_node_config
 from haute._types import GraphNode, NodeData, NodeType
 from haute.codegen import _node_to_code
 from haute.executor import _apply_online, _apply_ratebook, _build_node_fn
@@ -103,25 +103,6 @@ class TestEnumValue:
 
     def test_distinct_from_optimiser(self):
         assert NodeType.OPTIMISER_APPLY != NodeType.OPTIMISER
-
-
-class TestInferType:
-    def test_infer_type(self):
-        result = _infer_node_type({"optimiser_apply": True}, 1)
-        assert result == NodeType.OPTIMISER_APPLY
-
-    def test_does_not_infer_without_flag(self):
-        result = _infer_node_type({}, 1)
-        assert result != NodeType.OPTIMISER_APPLY
-
-    def test_optimiser_apply_before_optimiser(self):
-        """optimiser_apply=True takes precedence over optimiser=True."""
-        result = _infer_node_type({"optimiser_apply": True, "optimiser": True}, 1)
-        assert result == NodeType.OPTIMISER_APPLY
-
-    def test_optimiser_still_works(self):
-        result = _infer_node_type({"optimiser": True}, 1)
-        assert result == NodeType.OPTIMISER
 
 
 # ---------------------------------------------------------------------------

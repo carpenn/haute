@@ -88,12 +88,12 @@ import haute
 
 submodel = haute.Submodel("pricing", description="Pricing submodel")
 
-@submodel.node()
+@submodel.transform
 def base_rate(df: pl.LazyFrame) -> pl.LazyFrame:
     """Calculate base rate."""
     return df.with_columns(pl.lit(100.0).alias("base"))
 
-@submodel.node()
+@submodel.transform
 def adjust(base_rate: pl.LazyFrame) -> pl.LazyFrame:
     """Apply adjustment."""
     return base_rate.with_columns((pl.col("base") * 1.1).alias("adjusted"))
@@ -140,7 +140,7 @@ import haute
 
 submodel = haute.Submodel("unnamed")
 
-@submodel.node()
+@submodel.transform
 def only_node(df: pl.LazyFrame) -> pl.LazyFrame:
     return df
 '''

@@ -13,25 +13,25 @@ import haute
 pipeline = haute.Pipeline("test_pipeline", description="Test fixture pipeline")
 
 
-@pipeline.node(api_input=True, path="tests/fixtures/data/api_input.json", row_id_column="IDpol")
+@pipeline.api_input(path="tests/fixtures/data/api_input.json", row_id_column="IDpol")
 def quotes() -> pl.LazyFrame:
     """API input source."""
     return pl.read_json("tests/fixtures/data/api_input.json").lazy()
 
 
-@pipeline.node(path="tests/fixtures/data/policies.parquet")
+@pipeline.data_source(path="tests/fixtures/data/policies.parquet")
 def batch_quotes() -> pl.LazyFrame:
     """Batch data source."""
     return pl.scan_parquet("tests/fixtures/data/policies.parquet")
 
 
-@pipeline.node(live_switch=True, input_scenario_map={"quotes": "live", "batch_quotes": "test_batch"})
+@pipeline.live_switch(input_scenario_map={"quotes": "live", "batch_quotes": "test_batch"})
 def policies(quotes: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Live/batch switch."""
     return quotes
 
 
-@pipeline.node(external="tests/fixtures/data/area_factors.json", file_type="json")
+@pipeline.external_file(path="tests/fixtures/data/area_factors.json", file_type="json")
 def area_lookup(policies: pl.LazyFrame) -> pl.LazyFrame:
     """External file node — loads a JSON lookup table.
 
@@ -48,7 +48,7 @@ def area_lookup(policies: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node
+@pipeline.transform
 def calculate_premium(area_lookup: pl.LazyFrame) -> pl.LazyFrame:
     """Simple premium calculation."""
     df = area_lookup.with_columns(
@@ -57,13 +57,13 @@ def calculate_premium(area_lookup: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@pipeline.node(output=True)
+@pipeline.output()
 def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """Output node."""
     return calculate_premium
 
 
-@pipeline.node(sink="tests/fixtures/output/results.parquet", format="parquet")
+@pipeline.data_sink(path="tests/fixtures/output/results.parquet", format="parquet")
 def results_write(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """Sink node."""
     return calculate_premium

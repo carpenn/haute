@@ -14,7 +14,6 @@ from haute._config_io import (
     collect_node_configs,
     config_path_for_node,
     has_config_folder,
-    infer_node_type_from_config_path,
     load_node_config,
     remove_config_file,
     save_node_config,
@@ -69,36 +68,6 @@ class TestConfigPathForNode:
     def test_transform_raises(self):
         with pytest.raises(ValueError, match="No config folder"):
             config_path_for_node(NodeType.TRANSFORM, "my_transform")
-
-
-class TestInferNodeType:
-    @pytest.mark.parametrize(
-        "path, expected",
-        [
-            ("config/banding/banding.json", NodeType.BANDING),
-            ("config/rating_step/lookup.json", NodeType.RATING_STEP),
-            ("config/data_source/source.json", NodeType.DATA_SOURCE),
-            ("config/model_scoring/Score.json", NodeType.MODEL_SCORE),
-            ("config/optimisation/opt.json", NodeType.OPTIMISER),
-            ("config/apply_optimisation/apply.json", NodeType.OPTIMISER_APPLY),
-            ("config/expander/expand.json", NodeType.SCENARIO_EXPANDER),
-            ("config/quote_response/out.json", NodeType.OUTPUT),
-            ("config/data_sink/write.json", NodeType.DATA_SINK),
-            ("config/load_file/model.json", NodeType.EXTERNAL_FILE),
-            ("config/model_training/train.json", NodeType.MODELLING),
-            ("config/constant/const.json", NodeType.CONSTANT),
-            ("config/quote_input/quotes.json", NodeType.API_INPUT),
-            ("config/source_switch/switch.json", NodeType.LIVE_SWITCH),
-        ],
-    )
-    def test_infer_from_path(self, path, expected):
-        assert infer_node_type_from_config_path(path) is expected
-
-    def test_unknown_folder_returns_none(self):
-        assert infer_node_type_from_config_path("config/unknown/x.json") is None
-
-    def test_bare_filename_returns_none(self):
-        assert infer_node_type_from_config_path("x.json") is None
 
 
 # ---------------------------------------------------------------------------

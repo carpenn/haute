@@ -220,7 +220,7 @@ class TestRatingStepParser:
 import polars as pl
 from haute import pipeline
 
-@pipeline.node(tables=[
+@pipeline.rating_step(tables=[
     {"name": "T1", "factors": ["age"], "output_column": "af",
      "default_value": 1.0, "entries": [{"age": "young", "value": 1.5}]},
 ])
@@ -244,7 +244,7 @@ def rating(df: pl.LazyFrame) -> pl.LazyFrame:
 import polars as pl
 from haute import pipeline
 
-@pipeline.node(tables=[])
+@pipeline.rating_step(tables=[])
 def rating(df: pl.LazyFrame) -> pl.LazyFrame:
     """Empty."""
     return df
@@ -259,7 +259,7 @@ def rating(df: pl.LazyFrame) -> pl.LazyFrame:
 import polars as pl
 from haute import pipeline
 
-@pipeline.node(tables=[
+@pipeline.rating_step(tables=[
     {"name": "T1", "factors": ["band"], "output_column": "f1",
      "entries": [{"band": "A", "value": 1.0}]},
     {"name": "T2", "factors": ["band"], "output_column": "f2",

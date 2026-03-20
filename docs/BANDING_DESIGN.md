@@ -39,7 +39,7 @@ A new `banding` node type that supports **multiple factors per node**, each inde
 
 - **Executor** (`executor.py`): `_normalise_banding_factors` reads the `factors` array. The handler loops over factors, calling `_apply_banding` for each. Continuous rules build a Polars `when/then/otherwise` chain. Categorical rules use `replace_strict`.
 - **Parser** (`_parser_helpers.py`): Detects `banding=` or `factors=` in the decorator → infers `"banding"` node type. Always normalises to `factors: [...]` in config (permissive parsing).
-- **Codegen** (`codegen.py`): Single factor → clean decorator `@pipeline.node(banding=..., column=..., ...)`. Multiple factors → `@pipeline.node(factors=[...])`.
+- **Codegen** (`codegen.py`): Single factor → clean decorator `@pipeline.banding(banding=..., column=..., ...)`. Multiple factors → `@pipeline.banding(factors=[...])`.
 
 ### Frontend
 
@@ -51,13 +51,13 @@ A new `banding` node type that supports **multiple factors per node**, each inde
 
 Single factor (clean):
 ```python
-@pipeline.node(banding="continuous", column="age",
-               output_column="age_band", rules=[...])
+@pipeline.banding(banding="continuous", column="age",
+                  output_column="age_band", rules=[...])
 ```
 
 Multiple factors:
 ```python
-@pipeline.node(factors=[{"banding": "continuous", "column": "age", ...}, ...])
+@pipeline.banding(factors=[{"banding": "continuous", "column": "age", ...}, ...])
 ```
 
 The parser accepts both; the codegen emits whichever is appropriate.

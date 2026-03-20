@@ -375,7 +375,7 @@ class TestScenarioNormalization:
         py_path.write_text(
             "import haute\n"
             "pipeline = haute.Pipeline('test')\n"
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def transform(df):\n"
             "    return df\n"
         )

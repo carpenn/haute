@@ -32,13 +32,13 @@ import haute
 pipeline = haute.Pipeline("test_cli", description="CLI test pipeline")
 
 
-@pipeline.node(path="{data / 'input.parquet'}")
+@pipeline.data_source(path="{data / 'input.parquet'}")
 def source() -> pl.DataFrame:
     """Read data."""
     return pl.scan_parquet("{data / 'input.parquet'}")
 
 
-@pipeline.node
+@pipeline.transform
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Add a column."""
     return source.with_columns(y=pl.col("x") * 2)
@@ -325,7 +325,7 @@ class TestRun:
         )
 
     def test_run_empty_pipeline(self, runner: CliRunner, tmp_path: Path):
-        """A .py file with no @pipeline.node functions should fail."""
+        """A .py file with no pipeline node functions should fail."""
         empty = tmp_path / "empty.py"
         empty.write_text("import polars as pl\nimport haute\npipeline = haute.Pipeline('e')\n")
         result = runner.invoke(cli, ["run", str(empty)])
@@ -345,12 +345,12 @@ import haute
 pipeline = haute.Pipeline("broken")
 
 
-@pipeline.node(path="{data / 'd.parquet'}")
+@pipeline.data_source(path="{data / 'd.parquet'}")
 def source() -> pl.DataFrame:
     return pl.scan_parquet("{data / 'd.parquet'}")
 
 
-@pipeline.node
+@pipeline.transform
 def bad(source: pl.DataFrame) -> pl.DataFrame:
     return source.select("nonexistent_column")
 

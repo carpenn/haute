@@ -55,11 +55,11 @@ class TestPipeline:
     def _simple_pipeline(self) -> Pipeline:
         p = Pipeline("test", description="test pipeline")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1, 2, 3]})
 
-        @p.node
+        @p.transform
         def transform(source: pl.DataFrame) -> pl.DataFrame:
             return source.with_columns(y=pl.col("x") * 2)
 
@@ -90,15 +90,15 @@ class TestPipeline:
     def test_connect_chaining(self):
         p = Pipeline("chain")
 
-        @p.node
+        @p.data_source
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
-        @p.node
+        @p.transform
         def c(b: pl.DataFrame) -> pl.DataFrame:
             return b
 
@@ -108,7 +108,7 @@ class TestPipeline:
     def test_node_decorator_with_config(self):
         p = Pipeline("cfg")
 
-        @p.node(path="data.parquet")
+        @p.data_source(path="data.parquet")
         def read_data() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
@@ -123,11 +123,11 @@ class TestPipeline:
     def test_topo_order_delegates_to_graph_utils(self):
         p = Pipeline("topo")
 
-        @p.node
+        @p.data_source
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
@@ -138,11 +138,11 @@ class TestPipeline:
     def test_no_edges_falls_back_to_registration_order(self):
         p = Pipeline("no_edges")
 
-        @p.node
+        @p.data_source
         def first() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def second(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
@@ -155,11 +155,11 @@ class TestPipeline:
 
         p = Pipeline("cycle")
 
-        @p.node
+        @p.data_source
         def a() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def b(a: pl.DataFrame) -> pl.DataFrame:
             return a
 
@@ -171,11 +171,11 @@ class TestPipeline:
         """Without explicit edges, run() feeds last output as input."""
         p = Pipeline("implicit")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1, 2]})
 
-        @p.node
+        @p.transform
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") * 3)
 
@@ -188,11 +188,11 @@ class TestPipeline:
         """score() without edges should chain nodes sequentially."""
         p = Pipeline("score_implicit")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [0]})
 
-        @p.node
+        @p.transform
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") + 100)
 
@@ -216,15 +216,15 @@ class TestPipeline:
         """Without explicit edges, to_graph() infers a linear chain."""
         p = Pipeline("chain")
 
-        @p.node
+        @p.data_source
         def a() -> pl.DataFrame:
             return pl.DataFrame()
 
-        @p.node
+        @p.transform
         def b(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
-        @p.node
+        @p.transform
         def c(df: pl.DataFrame) -> pl.DataFrame:
             return df
 
@@ -239,12 +239,12 @@ class TestPipeline:
         captured: list[str] = []
         p = Pipeline("ctx_batch")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             captured.append(_scenario_ctx.get())
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             captured.append(_scenario_ctx.get())
             return df
@@ -264,11 +264,11 @@ class TestPipeline:
         captured: list[str] = []
         p = Pipeline("ctx_live")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             captured.append(_scenario_ctx.get())
             return df
@@ -283,11 +283,11 @@ class TestPipeline:
         """_scenario_ctx must be reset even if a node raises."""
         p = Pipeline("ctx_err")
 
-        @p.node
+        @p.data_source
         def source() -> pl.DataFrame:
             return pl.DataFrame({"x": [1]})
 
-        @p.node
+        @p.transform
         def boom(df: pl.DataFrame) -> pl.DataFrame:
             raise RuntimeError("kaboom")
 
@@ -300,11 +300,11 @@ class TestPipeline:
         """Nodes should be positioned with x_spacing."""
         p = Pipeline("pos")
 
-        @p.node
+        @p.data_source
         def a() -> pl.DataFrame:
             return pl.DataFrame()
 
-        @p.node
+        @p.transform
         def b(df: pl.DataFrame) -> pl.DataFrame:
             return df
 

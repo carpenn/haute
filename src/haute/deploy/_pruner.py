@@ -113,7 +113,7 @@ def find_output_node(graph: PipelineGraph) -> str:
             candidates.append(n.id)
 
     if len(candidates) == 0:
-        raise ValueError("No output node found. Mark a node with @pipeline.node(output=True).")
+        raise ValueError("No output node found. Mark a node with @pipeline.output().")
     if len(candidates) > 1:
         raise ValueError(
             f"Multiple output nodes found: {candidates}. "

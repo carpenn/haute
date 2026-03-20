@@ -18,11 +18,11 @@ from typing import Any
 
 from haute._config_io import (
     find_config_by_func_name,
-    infer_node_type_from_config_path,
     load_node_config,
 )
 from haute._config_validation import warn_unrecognized_config_keys
 from haute._logging import get_logger
+from haute._types import DECORATOR_TO_NODE_TYPE
 from haute.graph_utils import (
     MODEL_SCORE_CONFIG_KEYS,
     MODELLING_CONFIG_KEYS,
@@ -36,54 +36,6 @@ from haute.graph_utils import (
 )
 
 logger = get_logger(component="parser_helpers")
-
-# ---------------------------------------------------------------------------
-# Node type inference
-# ---------------------------------------------------------------------------
-
-
-def _infer_node_type(decorator_kwargs: dict[str, Any], n_params: int) -> NodeType:
-    """Infer the GUI node type from decorator config and param count."""
-    if "instance_of" in decorator_kwargs:
-        # Instance nodes borrow their type from the original at runtime;
-        # default to transform here — the executor resolves the real type.
-        return NodeType.TRANSFORM
-    if "external" in decorator_kwargs:
-        return NodeType.EXTERNAL_FILE
-    if "sink" in decorator_kwargs:
-        return NodeType.DATA_SINK
-    if decorator_kwargs.get("api_input"):
-        return NodeType.API_INPUT
-    if decorator_kwargs.get("live_switch"):
-        return NodeType.LIVE_SWITCH
-    if decorator_kwargs.get("output"):
-        return NodeType.OUTPUT
-    if decorator_kwargs.get("scenario_expander"):
-        return NodeType.SCENARIO_EXPANDER
-    if decorator_kwargs.get("optimiser_apply"):
-        return NodeType.OPTIMISER_APPLY
-    if decorator_kwargs.get("optimiser"):
-        return NodeType.OPTIMISER
-    if decorator_kwargs.get("constant"):
-        return NodeType.CONSTANT
-    if decorator_kwargs.get("modelling"):
-        return NodeType.MODELLING
-    if decorator_kwargs.get("model_score"):
-        return NodeType.MODEL_SCORE
-    if "registered_model" in decorator_kwargs or (
-        "source_type" in decorator_kwargs and "run_id" in decorator_kwargs
-    ):
-        return NodeType.MODEL_SCORE
-    if "banding" in decorator_kwargs or "factors" in decorator_kwargs:
-        return NodeType.BANDING
-    if "tables" in decorator_kwargs:
-        return NodeType.RATING_STEP
-    if "table" in decorator_kwargs and "key" in decorator_kwargs:
-        return NodeType.RATING_STEP
-    if "path" in decorator_kwargs or n_params == 0:
-        return NodeType.DATA_SOURCE
-    return NodeType.TRANSFORM
-
 
 # ---------------------------------------------------------------------------
 # AST helpers
@@ -101,7 +53,7 @@ def _eval_ast_literal(node: ast.expr) -> Any:
 def _get_decorator_kwargs(decorator: ast.expr) -> dict[str, Any]:
     """Extract keyword arguments from a decorator.
 
-    Handles both @pipeline.node and @pipeline.node(key=val, ...).
+    Handles both @pipeline.<type> and @pipeline.<type>(key=val, ...).
     """
     if isinstance(decorator, ast.Call):
         kwargs: dict[str, Any] = {}
@@ -113,25 +65,38 @@ def _get_decorator_kwargs(decorator: ast.expr) -> dict[str, Any]:
 
 
 def _is_pipeline_node_decorator(decorator: ast.expr) -> bool:
-    """Check if a decorator is @pipeline.node or @pipeline.node(...)."""
-    # @pipeline.node
+    """Check if a decorator is @pipeline.<type>(...) for any type in DECORATOR_TO_NODE_TYPE."""
     if isinstance(decorator, ast.Attribute):
         if (isinstance(decorator.value, ast.Name)
                 and decorator.value.id == "pipeline"
-                and decorator.attr == "node"):
+                and decorator.attr in DECORATOR_TO_NODE_TYPE):
             return True
 
-    # @pipeline.node(...)
     if isinstance(decorator, ast.Call):
         return _is_pipeline_node_decorator(decorator.func)
 
     return False
 
 
-def _is_submodel_node_decorator(decorator: ast.expr) -> bool:
-    """Check if a decorator is @submodel.node or @submodel.node(...)."""
+def _get_decorator_node_type(decorator: ast.expr) -> NodeType | None:
+    """Extract the NodeType from a pipeline decorator's attribute name.
+
+    Returns ``None`` if the decorator is not a recognized pipeline decorator.
+    """
     if isinstance(decorator, ast.Attribute):
-        if isinstance(decorator.value, ast.Name) and decorator.attr == "node":
+        if (isinstance(decorator.value, ast.Name)
+                and decorator.value.id in ("pipeline", "submodel")
+                and decorator.attr in DECORATOR_TO_NODE_TYPE):
+            return DECORATOR_TO_NODE_TYPE[decorator.attr]
+    if isinstance(decorator, ast.Call):
+        return _get_decorator_node_type(decorator.func)
+    return None
+
+
+def _is_submodel_node_decorator(decorator: ast.expr) -> bool:
+    """Check if a decorator is @submodel.<type>(...) for any type in DECORATOR_TO_NODE_TYPE."""
+    if isinstance(decorator, ast.Attribute):
+        if isinstance(decorator.value, ast.Name) and decorator.attr in DECORATOR_TO_NODE_TYPE:
             return decorator.value.id == "submodel"
     if isinstance(decorator, ast.Call):
         return _is_submodel_node_decorator(decorator.func)
@@ -184,10 +149,12 @@ def _extract_decorated_nodes(
         n_params = len(param_names)
         description = _get_docstring(stmt)
         body = func_bodies.get(func_name, "")
+        explicit_node_type = _get_decorator_node_type(matched_decorator)
 
         node_type, config = _resolve_node_config(
             decorator_kwargs, body, param_names, n_params, base_dir,
             func_name=func_name,
+            explicit_node_type=explicit_node_type,
         )
 
         raw_nodes.append(
@@ -700,10 +667,10 @@ def _build_node_config(
             for v in (raw_values if isinstance(raw_values, list) else [])
         ]
     elif node_type == NodeType.DATA_SINK:
-        config["path"] = decorator_kwargs.get("sink", "")
+        config["path"] = decorator_kwargs.get("path", decorator_kwargs.get("sink", ""))
         config["format"] = decorator_kwargs.get("format", "parquet")
     elif node_type == NodeType.EXTERNAL_FILE:
-        config["path"] = decorator_kwargs.get("external", "")
+        config["path"] = decorator_kwargs.get("path", decorator_kwargs.get("external", ""))
         config["fileType"] = decorator_kwargs.get("file_type", "pickle")
         if config["fileType"] == "catboost":
             config["modelClass"] = decorator_kwargs.get("model_class", "classifier")
@@ -718,6 +685,8 @@ def _build_node_config(
     # Instance reference (works for any node type)
     if "instance_of" in decorator_kwargs:
         config["instanceOf"] = decorator_kwargs["instance_of"]
+    elif "of" in decorator_kwargs:
+        config["instanceOf"] = decorator_kwargs["of"]
     return config
 
 
@@ -840,7 +809,7 @@ def _extract_preamble(source: str) -> str:
 
     The preamble is any code that appears after the standard imports
     (``import polars as pl``, ``import haute``) but before the first
-    ``@pipeline.node`` decorator or ``pipeline = haute.Pipeline(...)`` line.
+    ``@pipeline.<type>`` decorator or ``pipeline = haute.Pipeline(...)`` line.
     """
     lines = source.splitlines()
     # Find the end of standard imports region
@@ -853,7 +822,7 @@ def _extract_preamble(source: str) -> str:
     if last_standard_idx == -1:
         return ""
 
-    # Find the start of pipeline code (pipeline = ... or @pipeline.node)
+    # Find the start of pipeline code (pipeline = ... or @pipeline.<type>)
     pipeline_start_idx = len(lines)
     for i in range(last_standard_idx + 1, len(lines)):
         stripped = lines[i].strip()
@@ -863,9 +832,13 @@ def _extract_preamble(source: str) -> str:
         if is_pipeline_def:
             pipeline_start_idx = i
             break
-        if stripped.startswith("@pipeline.node"):
-            pipeline_start_idx = i
-            break
+        if stripped.startswith("@pipeline."):
+            # Check if the decorator name after @pipeline. is a known type
+            dot_rest = stripped[len("@pipeline."):]
+            dec_name = dot_rest.split("(")[0].split()[0] if dot_rest else ""
+            if dec_name in DECORATOR_TO_NODE_TYPE:
+                pipeline_start_idx = i
+                break
 
     # Extract lines between standard imports and pipeline code
     preamble_lines = lines[last_standard_idx + 1 : pipeline_start_idx]
@@ -930,20 +903,24 @@ def _resolve_node_config(
     n_params: int,
     base_dir: Path | None,
     func_name: str = "",
+    explicit_node_type: NodeType | None = None,
 ) -> tuple[NodeType, dict[str, Any]]:
     """Resolve node type and config from decorator kwargs.
 
     Handles both the new ``config="config/…/name.json"`` format (external
     JSON file) and the legacy inline-kwargs format.
 
+    The *explicit_node_type* is provided by the type-specific decorator
+    (e.g. ``@pipeline.transform``) and is used directly as the node type.
+
     Returns ``(node_type, config_dict)``.
     """
     # Work on a copy to avoid mutating the caller's dict.
     decorator_kwargs = dict(decorator_kwargs)
+    node_type = explicit_node_type or NodeType.TRANSFORM
     config_ref = decorator_kwargs.pop("config", None)
     if config_ref:
         config_ref = config_ref.replace("\\", "/")
-        node_type_hint = infer_node_type_from_config_path(config_ref)
         base = base_dir or Path.cwd()
         try:
             loaded = load_node_config(config_ref, base_dir=base)
@@ -956,8 +933,7 @@ def _resolve_node_config(
             if func_name:
                 recovered = find_config_by_func_name(func_name, base)
                 if recovered is not None:
-                    loaded, node_type_hint = recovered
-        node_type = node_type_hint or _infer_node_type(decorator_kwargs, n_params)
+                    loaded, _recovered_type = recovered
         config = dict(loaded)
         # Code lives in the .py function body, not in the JSON file
         if node_type == NodeType.MODEL_SCORE:
@@ -971,7 +947,6 @@ def _resolve_node_config(
         elif node_type == NodeType.SCENARIO_EXPANDER:
             config["code"] = _extract_source_user_code(body) if body else ""
     else:
-        node_type = _infer_node_type(decorator_kwargs, n_params)
         config = _build_node_config(node_type, decorator_kwargs, body, param_names)
 
     warn_unrecognized_config_keys(node_type, config)

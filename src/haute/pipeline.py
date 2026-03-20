@@ -76,16 +76,11 @@ class NodeRegistry:
         self._edges: list[tuple[str, str]] = []
         self._submodel_files: list[str] = []
 
-    def node(self, fn: Callable | None = None, **config: Any) -> Callable:
-        """Decorator to register a function as a node.
+    def _register_node(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Internal decorator to register a function as a node.
 
-        Can be used bare or with config::
-
-            @registry.node
-            def my_node(df): ...
-
-            @registry.node(path="data.parquet")
-            def read_data(): ...
+        Type-specific public decorators (``transform``, ``data_source``, etc.)
+        delegate to this method.
         """
 
         def _register(f: Callable) -> Callable:
@@ -107,6 +102,72 @@ class NodeRegistry:
         if fn is not None:
             return _register(fn)
         return _register
+
+    # -- Type-specific decorators -------------------------------------------
+
+    def api_input(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for API-input nodes."""
+        return self._register_node(fn, **config)
+
+    def data_source(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for data-source nodes."""
+        return self._register_node(fn, **config)
+
+    def transform(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for transform nodes."""
+        return self._register_node(fn, **config)
+
+    def model_score(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for model-score nodes."""
+        return self._register_node(fn, **config)
+
+    def banding(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for banding nodes."""
+        return self._register_node(fn, **config)
+
+    def rating_step(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for rating-step nodes."""
+        return self._register_node(fn, **config)
+
+    def output(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for output nodes."""
+        return self._register_node(fn, **config)
+
+    def data_sink(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for data-sink nodes."""
+        return self._register_node(fn, **config)
+
+    def external_file(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for external-file nodes."""
+        return self._register_node(fn, **config)
+
+    def live_switch(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for live-switch nodes."""
+        return self._register_node(fn, **config)
+
+    def modelling(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for modelling (training) nodes."""
+        return self._register_node(fn, **config)
+
+    def optimiser(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for optimiser nodes."""
+        return self._register_node(fn, **config)
+
+    def scenario_expander(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for scenario-expander nodes."""
+        return self._register_node(fn, **config)
+
+    def optimiser_apply(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for optimiser-apply nodes."""
+        return self._register_node(fn, **config)
+
+    def constant(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for constant nodes."""
+        return self._register_node(fn, **config)
+
+    def instance(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for instance nodes."""
+        return self._register_node(fn, **config)
 
     def connect(self, source: str, target: str) -> Self:
         """Declare an edge: source node's output feeds into target node.
@@ -134,10 +195,10 @@ class Pipeline(NodeRegistry):
     Usage:
         pipeline = Pipeline("main")
 
-        @pipeline.node(path="data.parquet")
+        @pipeline.data_source(path="data.parquet")
         def read_data() -> pl.DataFrame: ...
 
-        @pipeline.node
+        @pipeline.transform
         def transform(df: pl.DataFrame) -> pl.DataFrame: ...
 
         pipeline.connect("read_data", "transform")
@@ -316,7 +377,7 @@ class Submodel(NodeRegistry):
 
         submodel = haute.Submodel("model_scoring")
 
-        @submodel.node(external="models/freq.cbm", file_type="catboost")
+        @submodel.external_file(path="models/freq.cbm", file_type="catboost")
         def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame: ...
 
         submodel.connect("policies", "frequency_model")

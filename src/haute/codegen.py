@@ -8,6 +8,7 @@ from haute._config_io import config_path_for_node, has_config_folder
 from haute._logging import get_logger
 from haute._types import (
     MODELLING_CONFIG_KEYS,
+    NODE_TYPE_TO_DECORATOR,
     OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
@@ -131,21 +132,21 @@ def _api_input_template(path: str) -> str:
         body = '    return pl.scan_parquet("{path}")'
 
     return (
-        '@pipeline.node(api_input=True, path="{path}"{row_id_kw})\n'
+        '@pipeline.api_input(path="{path}"{row_id_kw})\n'
         'def {func_name}() -> pl.LazyFrame:\n'
         '    """{description}"""\n'
         + body + '\n'
     )
 
 _LIVE_SWITCH = '''\
-@pipeline.node(live_switch=True, input_scenario_map={input_scenario_map_repr})
+@pipeline.live_switch(input_scenario_map={input_scenario_map_repr})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {active_param}
 '''
 
 _MODEL_SCORE = '''\
-@pipeline.node({decorator_kwargs})
+@pipeline.model_score({decorator_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from pathlib import Path
@@ -172,30 +173,30 @@ def _data_source_parts(config: dict) -> tuple[str, str, str]:
             parts.append(f'http_path="{http_path}"')
         if query:
             parts.append(f'query="{query}"')
-        decorator = f"@pipeline.node({', '.join(parts)})"
+        decorator = f"@pipeline.data_source({', '.join(parts)})"
         imports = "    from haute._databricks_io import read_cached_table\n"
         load_expr = f'read_cached_table("{table}")'
     elif path.lower().endswith(".csv"):
-        decorator = f'@pipeline.node(path="{path}")'
+        decorator = f'@pipeline.data_source(path="{path}")'
         imports = ""
         load_expr = f'pl.scan_csv("{path}")'
     elif path.lower().endswith(".jsonl"):
-        decorator = f'@pipeline.node(path="{path}")'
+        decorator = f'@pipeline.data_source(path="{path}")'
         imports = ""
         load_expr = f'pl.scan_ndjson("{path}")'
     elif path.lower().endswith(".json"):
-        decorator = f'@pipeline.node(path="{path}")'
+        decorator = f'@pipeline.data_source(path="{path}")'
         imports = ""
         load_expr = f'pl.read_json("{path}").lazy()'
     else:
-        decorator = f'@pipeline.node(path="{path}")'
+        decorator = f'@pipeline.data_source(path="{path}")'
         imports = ""
         load_expr = f'pl.scan_parquet("{path}")'
 
     return decorator, imports, load_expr
 
 _BANDING_SINGLE = '''\
-@pipeline.node(banding="{banding}", column="{column}",
+@pipeline.banding(banding="{banding}", column="{column}",
                output_column="{output_column}"{rules_kw}{default_kw})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
@@ -203,21 +204,21 @@ def {func_name}({params}) -> pl.LazyFrame:
 '''
 
 _BANDING_MULTI = '''\
-@pipeline.node(factors={factors_repr})
+@pipeline.banding(factors={factors_repr})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _RATING_STEP = '''\
-@pipeline.node(tables={tables_repr}{extra_kwargs})
+@pipeline.rating_step(tables={tables_repr}{extra_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _SINK_PARQUET = '''\
-@pipeline.node(sink="{path}", format="parquet")
+@pipeline.data_sink(path="{path}", format="parquet")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute._polars_utils import safe_sink
@@ -226,7 +227,7 @@ def {func_name}({params}) -> pl.LazyFrame:
 '''
 
 _SINK_CSV = '''\
-@pipeline.node(sink="{path}", format="csv")
+@pipeline.data_sink(path="{path}", format="csv")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute._polars_utils import safe_sink
@@ -235,42 +236,42 @@ def {func_name}({params}) -> pl.LazyFrame:
 '''
 
 _SCENARIO_EXPANDER = '''\
-@pipeline.node(scenario_expander=True{extra_kwargs})
+@pipeline.scenario_expander({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _OPTIMISER = '''\
-@pipeline.node(optimiser=True{extra_kwargs})
+@pipeline.optimiser({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _OPTIMISER_APPLY = '''\
-@pipeline.node(optimiser_apply=True{extra_kwargs})
+@pipeline.optimiser_apply({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _MODELLING = '''\
-@pipeline.node(modelling=True{extra_kwargs})
+@pipeline.modelling({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
 '''
 
 _CONSTANT = '''\
-@pipeline.node(constant=True, values={values_repr})
+@pipeline.constant(values={values_repr})
 def {func_name}() -> pl.LazyFrame:
     """{description}"""
     return pl.LazyFrame({data_dict})
 '''
 
 _EXTERNAL = '''\
-@pipeline.node(external="{path}", file_type="{file_type}"{extra_dec})
+@pipeline.external_file(path="{path}", file_type="{file_type}"{extra_dec})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute.graph_utils import load_external_object
@@ -336,8 +337,9 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
         func_name = _sanitize_func_name(node.data.label)
         cfg_path = config_path_for_node(node_type, func_name).as_posix()
         try:
+            dec_name = NODE_TYPE_TO_DECORATOR.get(node_type, "transform")
             def_idx = code.index("\ndef ")
-            code = f'@pipeline.node(config="{cfg_path}")' + code[def_idx:]
+            code = f'@pipeline.{dec_name}(config="{cfg_path}")' + code[def_idx:]
         except ValueError:
             logger.warning("no_def_in_generated_code", node=node.data.label)
     return code
@@ -476,7 +478,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         reg_model = config.get("registered_model", "")
         ver = config.get("version", "latest")
         decorator_kwargs = (
-            f'model_score=True, source_type="registered", '
+            f'source_type="registered", '
             f'registered_model="{reg_model}", version="{ver}", '
             f'task="{task_val}", output_column="{output_column}"'
         )
@@ -487,7 +489,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         exp_name = config.get("experiment_name", "")
         exp_id = config.get("experiment_id", "")
         decorator_kwargs = (
-            f'model_score=True, source_type="run", '
+            f'source_type="run", '
             f'run_id="{rid}", artifact_path="{apath}", '
             f'task="{task_val}", output_column="{output_column}"'
         )
@@ -501,7 +503,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
     if user_code:
         indented = "\n".join(f"    {line}" for line in user_code.splitlines())
         return (
-            f'@pipeline.node({decorator_kwargs})\n'
+            f'@pipeline.model_score({decorator_kwargs})\n'
             f'def {func_name}({params}) -> pl.LazyFrame:\n'
             f'    """{description}"""\n'
             f'    from pathlib import Path\n'
@@ -622,13 +624,13 @@ def _make_passthrough_builder(
         params = _build_params(source_names)
         first = _first_source(source_names)
         extra_parts = _build_extra_kwargs(config, config_keys)
-        extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+        dec_kwargs = ", ".join(extra_parts)
         return template.format(
             func_name=func_name,
             description=description,
             params=params,
             first=first,
-            extra_kwargs=extra_kwargs,
+            dec_kwargs=dec_kwargs,
         )
 
     return builder
@@ -640,7 +642,7 @@ def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
     params = _build_params(source_names)
     first = _first_source(source_names)
     extra_parts = _build_extra_kwargs(config, SCENARIO_EXPANDER_CONFIG_KEYS)
-    extra_kwargs = (", " + ", ".join(extra_parts)) if extra_parts else ""
+    dec_kwargs = ", ".join(extra_parts)
     code = (config.get("code") or "").strip()
 
     if not code:
@@ -649,12 +651,12 @@ def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
             description=description,
             params=params,
             first=first,
-            extra_kwargs=extra_kwargs,
+            dec_kwargs=dec_kwargs,
         )
 
     user_body = _wrap_user_code(code, ["df"])
     return (
-        f"@pipeline.node(scenario_expander=True{extra_kwargs})\n"
+        f"@pipeline.scenario_expander({dec_kwargs})\n"
         f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"    df = {first}\n"
@@ -721,7 +723,7 @@ def _gen_output(node: GraphNode, source_names: list[str]) -> str:
     fields = config.get("fields", []) or []
     params = _build_params(source_names)
     first = _first_source(source_names)
-    dec_parts = ["output=True"]
+    dec_parts: list[str] = []
     if fields:
         dec_parts.append(f"fields={fields!r}")
         select_args = ", ".join(f'"{f}"' for f in fields)
@@ -730,7 +732,7 @@ def _gen_output(node: GraphNode, source_names: list[str]) -> str:
         body = f"    return {first}"
     dec = ", ".join(dec_parts)
     return (
-        f"@pipeline.node({dec})\n"
+        f"@pipeline.output({dec})\n"
         f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"{body}\n"
@@ -746,9 +748,9 @@ def _gen_transform(node: GraphNode, source_names: list[str]) -> str:
     sel = config.get("selected_columns", [])
 
     if sel:
-        decorator = f"@pipeline.node(selected_columns={sel!r})"
+        decorator = f"@pipeline.transform(selected_columns={sel!r})"
     else:
-        decorator = "@pipeline.node"
+        decorator = "@pipeline.transform"
 
     return (
         f"{decorator}\n"
@@ -820,7 +822,7 @@ def _instance_to_code(
         args = ", ".join(source_names) if source_names else "df"
 
     return (
-        f'@pipeline.node(instance_of="{original_func_name}")\n'
+        f'@pipeline.instance(of="{original_func_name}")\n'
         f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"    return {original_func_name}({args})\n"
@@ -953,11 +955,15 @@ def _generate_pipeline_lines(
         orig_id = instance_of_map[node.id]
         orig_func = id_to_func.get(orig_id, orig_id)
         orig_src = node_sources.get(orig_id, [])
-        lines.append(_instance_to_code(
+        inst_code = _instance_to_code(
             node, orig_func,
             source_names=srcs,
             orig_source_names=orig_src,
-        ))
+        )
+        # Inside submodel files the decorator prefix must be @submodel.*
+        if obj_name != "pipeline":
+            inst_code = inst_code.replace("@pipeline.", f"@{obj_name}.", 1)
+        lines.append(inst_code)
         lines.append("")
 
     # ── Submodel imports (pipeline files only) ────────────────────────
@@ -1010,11 +1016,11 @@ def graph_to_code(
 def _submodel_node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str:
     """Generate code for a single node inside a submodel file.
 
-    Identical to ``_node_to_code`` but uses ``@submodel.node`` instead of
-    ``@pipeline.node``.
+    Identical to ``_node_to_code`` but uses ``@submodel.<type>`` instead of
+    ``@pipeline.<type>``.
     """
     code = _node_to_code(node, source_names=source_names)
-    return code.replace("@pipeline.node", "@submodel.node", 1)
+    return code.replace("@pipeline.", "@submodel.", 1)
 
 
 def graph_to_code_multi(

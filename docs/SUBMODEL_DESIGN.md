@@ -60,7 +60,7 @@ import haute
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
-@pipeline.node(table="quotes.delta.policies", deploy_input=True, row_id_column="IDpol")
+@pipeline.data_source(table="quotes.delta.policies", deploy_input=True, row_id_column="IDpol")
 def policies() -> pl.LazyFrame:
     """data_source node"""
     from haute._databricks_io import read_cached_table
@@ -72,7 +72,7 @@ def policies() -> pl.LazyFrame:
 pipeline.submodel("modules/model_scoring.py")
 
 
-@pipeline.node
+@pipeline.transform
 def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFrame) -> pl.LazyFrame:
     """calculate_premium node"""
     df = (
@@ -83,7 +83,7 @@ def calculate_premium(severity_model: pl.LazyFrame, frequency_model: pl.LazyFram
     return df
 
 
-@pipeline.node(output=True)
+@pipeline.output()
 def output(calculate_premium: pl.LazyFrame) -> pl.LazyFrame:
     """Output node"""
     return calculate_premium
@@ -107,7 +107,7 @@ import haute
 submodel = haute.Submodel("model_scoring")
 
 
-@submodel.node(external="models/freq.cbm", file_type="catboost", model_class="regressor")
+@submodel.external_file(path="models/freq.cbm", file_type="catboost", model_class="regressor")
 def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """Frequency model scoring"""
     from haute.graph_utils import load_external_object
@@ -118,7 +118,7 @@ def frequency_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     return df
 
 
-@submodel.node(external="models/sev.cbm", file_type="catboost", model_class="regressor")
+@submodel.external_file(path="models/sev.cbm", file_type="catboost", model_class="regressor")
 def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
     """Severity model scoring"""
     from haute.graph_utils import load_external_object
@@ -134,7 +134,7 @@ def severity_model(policies: pl.LazyFrame) -> pl.LazyFrame:
 | Decision | Choice | Rationale |
 |---|---|---|
 | **Submodel variable** | `submodel = haute.Submodel(name)` | Mirrors `pipeline = haute.Pipeline(name)` — consistent API |
-| **Decorator** | `@submodel.node` | Mirrors `@pipeline.node` — same decorator API |
+| **Decorator** | `@submodel.<type>` | Mirrors `@pipeline.<type>` — same decorator API |
 | **Import mechanism** | `pipeline.submodel("modules/path.py")` | Explicit path, no Python import magic, works with file watcher |
 | **File location** | `modules/` directory | Convention, keeps root clean, file watcher already watches this |
 | **Edge wiring** | Cross-boundary edges stay in `main.py` | The parent file owns all inter-submodel and submodel-to-parent wiring |
@@ -286,9 +286,12 @@ class Submodel:
         self._node_map: dict[str, Node] = {}
         self._edges: list[tuple[str, str]] = []
 
-    def node(self, fn=None, **config):
-        """Same API as Pipeline.node."""
-        # Identical to Pipeline.node
+    def transform(self, fn=None):
+        """Register a transform node. Same API pattern as Pipeline."""
+        ...
+
+    def data_source(self, **config):
+        """Register a data source node."""
         ...
 
     def connect(self, source: str, target: str) -> Submodel:
@@ -309,7 +312,7 @@ class Pipeline:
 
 New functions:
 - `_extract_submodel_imports(tree)` — find `pipeline.submodel("path")` calls
-- `parse_submodel_file(filepath)` — like `parse_pipeline_file` but for `@submodel.node`
+- `parse_submodel_file(filepath)` — like `parse_pipeline_file` but for `@submodel.<type>` decorators
 - `_merge_submodel_nodes(parent_graph, submodel_graphs)` — flatten submodel nodes into parent
 
 The parser needs two modes:
@@ -327,7 +330,7 @@ def parse_pipeline_file(filepath, flatten=False):
 ```
 
 Detailed changes to `parse_pipeline_source()`:
-- After parsing `@pipeline.node` functions, scan for `pipeline.submodel(...)` calls
+- After parsing `@pipeline.<type>` functions, scan for `pipeline.submodel(...)` calls
 - For each submodel path, parse the submodel file
 - In hierarchical mode: add a `submodel` node to the graph + store child graphs in `submodels` dict
 - In flat mode: merge child nodes directly into the parent graph
@@ -354,16 +357,16 @@ def _extract_submodel_calls(tree: ast.Module) -> list[str]:
     return paths
 ```
 
-Submodel file parsing reuses the same `_is_pipeline_node_decorator` logic but matches `@submodel.node` instead of `@pipeline.node`:
+Submodel file parsing reuses the same `_is_pipeline_decorator` logic but matches `@submodel.<type>` instead of `@pipeline.<type>`:
 
 ```python
-def _is_submodel_node_decorator(decorator: ast.expr) -> bool:
-    """Check if a decorator is @submodel.node or @submodel.node(...)."""
+def _is_submodel_decorator(decorator: ast.expr) -> bool:
+    """Check if a decorator is @submodel.<type> or @submodel.<type>(...)."""
     if isinstance(decorator, ast.Attribute):
-        if isinstance(decorator.value, ast.Name) and decorator.attr == "node":
+        if isinstance(decorator.value, ast.Name):
             return decorator.value.id == "submodel"
     if isinstance(decorator, ast.Call):
-        return _is_submodel_node_decorator(decorator.func)
+        return _is_submodel_decorator(decorator.func)
     return False
 ```
 
@@ -390,11 +393,11 @@ Logic:
 1. Separate nodes into groups: root-level nodes vs submodel children
 2. For each submodel group:
    - Generate a `modules/<name>.py` file with `submodel = haute.Submodel(name)`
-   - Include `@submodel.node` decorated functions
+   - Include `@submodel.<type>` decorated functions
    - Include `submodel.connect()` calls for internal edges
 3. For the root file:
    - Generate `pipeline.submodel("modules/<name>.py")` lines
-   - Generate `@pipeline.node` decorated functions for root-level nodes
+   - Generate `@pipeline.<type>` decorated functions for root-level nodes
    - Generate `pipeline.connect()` calls for cross-boundary and root-level edges
 
 ### 5.4 `server.py` — New API Endpoints
@@ -741,7 +744,7 @@ A node inside the submodel has both internal edges (to other submodel nodes) and
 
 ### Phase 1: Core Backend (Parser + Codegen + Submodel Class)
 
-1. **`Submodel` class** in `pipeline.py` — mirror of `Pipeline` with `@submodel.node` decorator
+1. **`Submodel` class** in `pipeline.py` — mirror of `Pipeline` with `@submodel.<type>` decorators
 2. **`__init__.py`** — export `Submodel` class
 3. **Parser updates** — detect `pipeline.submodel()`, parse submodel files, merge nodes
 4. **Parser `flatten` parameter** — flat mode for executor, hierarchical for GUI

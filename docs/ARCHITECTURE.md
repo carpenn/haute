@@ -97,7 +97,7 @@ All 17 types are defined in `_types.py` as a `NodeType(StrEnum)` enum, with per-
 Node configuration is externalized to JSON sidecar files under `config/<type>/<name>.json`. The decorator references the config file:
 
 ```python
-@pipeline.node(config="config/banding/vehicle_age_band.json")
+@pipeline.banding(config="config/banding/vehicle_age_band.json")
 def vehicle_age_band(df):
     ...
 ```
@@ -134,7 +134,7 @@ A group of nodes can be extracted into a **submodel** — a separate `modules/<n
 import haute
 pipeline = haute.Pipeline("motor_pricing")
 
-@pipeline.node(path="data/claims.parquet")
+@pipeline.data_source(path="data/claims.parquet")
 def load_claims(): ...
 
 pipeline.submodel("modules/model_scoring.py")
@@ -146,10 +146,10 @@ pipeline.connect("load_claims", "feature_engineering")
 import haute
 submodel = haute.Submodel("model_scoring")
 
-@submodel.node
+@submodel.transform
 def feature_engineering(df): ...
 
-@submodel.node(model="models/freq.cbm")
+@submodel.model_score(model="models/freq.cbm")
 def score_frequency(df): ...
 
 submodel.connect("feature_engineering", "score_frequency")
@@ -758,7 +758,7 @@ class TestMotorPipeline(PipelineTestCase):
 Coarse pipeline stages by default, expandable to fine-grained operations. Users see a clean high-level graph and can drill into any node to see/edit individual operations.
 
 ### 8.2 Code generation strategy → Decorators + External Config
-Each decorated function (`@pipeline.node(config="config/banding/age.json")`) corresponds to a node in the GUI. The decorator references a JSON config sidecar file for node parameters (paths, model references, banding rules, rating tables, etc.), while the function body contains user code. Low floor, high ceiling.
+Each decorated function (`@pipeline.banding(config="config/banding/age.json")`) corresponds to a node in the GUI. The decorator references a JSON config sidecar file for node parameters (paths, model references, banding rules, rating tables, etc.), while the function body contains user code. Low floor, high ceiling.
 
 ```python
 import haute
@@ -766,17 +766,17 @@ import polars as pl
 
 pipeline = haute.Pipeline("motor_pricing")
 
-@pipeline.node(config="config/data_source/claims.json")
+@pipeline.data_source(config="config/data_source/claims.json")
 def load_claims():
     """Source node — reads claims data."""
     return pl.scan_parquet("data/claims.parquet")
 
-@pipeline.node
+@pipeline.transform
 def clean_vehicle(df: pl.LazyFrame) -> pl.LazyFrame:
     """Transform node — standardise vehicle codes."""
     return df.with_columns(...)
 
-@pipeline.node(config="config/model_scoring/freq.json")
+@pipeline.model_score(config="config/model_scoring/freq.json")
 def score_frequency(df: pl.LazyFrame) -> pl.LazyFrame:
     """Model scoring node — CatBoost frequency model."""
     ...

@@ -1,8 +1,8 @@
 """Regex-based fallback parser for pipeline files with syntax errors.
 
 When a .py file has syntax errors and ``ast.parse`` fails, this module
-extracts ``@pipeline.node`` functions, ``pipeline.connect()`` calls,
-and pipeline metadata using regular expressions.  The result is a
+extracts ``@pipeline.<type>`` decorated functions, ``pipeline.connect()``
+calls, and pipeline metadata using regular expressions.  The result is a
 best-effort PipelineGraph that the GUI can render alongside error markers.
 """
 
@@ -21,9 +21,9 @@ from haute._parser_helpers import (
     _build_rf_nodes,
     _extract_preamble,
     _get_docstring,
-    _infer_node_type,
 )
-from haute.graph_utils import PipelineGraph
+from haute._types import DECORATOR_TO_NODE_TYPE
+from haute.graph_utils import NodeType, PipelineGraph
 
 logger = get_logger(component="parser.regex")
 
@@ -32,7 +32,7 @@ logger = get_logger(component="parser.regex")
 # ---------------------------------------------------------------------------
 
 _RE_DECORATOR = re.compile(
-    r"^(@pipeline\.node(?:\([^)]*\))?)\s*\n"
+    r"^(@pipeline\.(\w+)(?:\([^)]*\))?)\s*\n"
     r"def\s+(\w+)\s*\(([^)]*)\)",
     re.MULTILINE,
 )
@@ -61,18 +61,24 @@ _RE_DECORATOR_BOOL_KWARG = re.compile(
 
 
 def _find_function_blocks(source: str) -> list[dict]:
-    """Find @pipeline.node function blocks using regex.
+    """Find @pipeline.<type> function blocks using regex.
 
-    Returns a list of dicts with keys: func_name, decorator_text, params,
-    body_text, start_line.
+    Returns a list of dicts with keys: func_name, decorator_text,
+    decorator_method, explicit_node_type, param_names, body_text,
+    start_line.
     """
     lines = source.splitlines()
     blocks: list[dict] = []
 
     for m in _RE_DECORATOR.finditer(source):
         decorator_text = m.group(1)
-        func_name = m.group(2)
-        params_text = m.group(3)
+        decorator_method = m.group(2)
+        func_name = m.group(3)
+        params_text = m.group(4)
+
+        # Skip decorators that aren't recognised type-specific methods
+        if decorator_method not in DECORATOR_TO_NODE_TYPE:
+            continue
 
         # Find the line number of the def
         def_pos = m.start()
@@ -110,6 +116,8 @@ def _find_function_blocks(source: str) -> list[dict]:
             {
                 "func_name": func_name,
                 "decorator_text": decorator_text,
+                "decorator_method": decorator_method,
+                "explicit_node_type": DECORATOR_TO_NODE_TYPE[decorator_method],
                 "param_names": param_names,
                 "body_text": "\n".join(body_lines),
                 "start_line": start_line,
@@ -121,7 +129,7 @@ def _find_function_blocks(source: str) -> list[dict]:
 
 def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, Any]:
     """Extract keyword arguments from a decorator using regex."""
-    # Strip the @pipeline.node( ... ) wrapper
+    # Strip the @pipeline.<method>( ... ) wrapper
     if "(" in decorator_text:
         inner = decorator_text.split("(", 1)[1].rstrip(")")
         result: dict[str, Any] = dict(_RE_DECORATOR_KWARG.findall(inner))
@@ -141,8 +149,8 @@ def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, Any]:
 def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> PipelineGraph:
     """Parse a pipeline file with syntax errors using regex fallback.
 
-    Extracts all @pipeline.node functions, marks broken ones with an error
-    in their config, and still returns the full graph.
+    Extracts all @pipeline.<type> decorated functions, marks broken ones
+    with an error in their config, and still returns the full graph.
     """
     # Resolve base_dir from source_file for config loading
     base_dir = Path(source_file).parent if source_file else Path.cwd()
@@ -160,8 +168,7 @@ def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> 
         func_name = block["func_name"]
         decorator_kwargs = _parse_decorator_kwargs_regex(block["decorator_text"])
         param_names = block["param_names"]
-        n_params = len(param_names)
-        node_type = _infer_node_type(decorator_kwargs, n_params)
+        node_type: NodeType = block["explicit_node_type"]
 
         # If the decorator references an external config file, try to
         # load it.  The config= path in the source may be mangled by
@@ -172,7 +179,10 @@ def fallback_parse(source: str, source_file: str, syntax_error: SyntaxError) -> 
         if config_kwarg and func_name:
             recovered = find_config_by_func_name(func_name, base_dir)
             if recovered is not None:
-                loaded_config, node_type = recovered
+                loaded_config, recovered_type = recovered
+                # Explicit decorator type takes priority over config-inferred type
+                if not block["explicit_node_type"]:
+                    node_type = recovered_type
 
         # Try to parse the function individually to get the docstring
         params_str = ", ".join(param_names)

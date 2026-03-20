@@ -15,35 +15,9 @@ from haute._parser_helpers import (
     _extract_model_score_user_code,
     _extract_preamble,
     _extract_user_code,
-    _infer_node_type,
     _strip_docstring,
 )
 from haute.parser import parse_pipeline_file, parse_pipeline_source
-
-
-# ---------------------------------------------------------------------------
-# _infer_node_type
-# ---------------------------------------------------------------------------
-
-class TestInferNodeType:
-    @pytest.mark.parametrize(
-        "kwargs, n_params, expected",
-        [
-            pytest.param({"external": "model.pkl"}, 1, "externalFile", id="external_file"),
-            pytest.param({"sink": "out.parquet"}, 1, "dataSink", id="data_sink"),
-            pytest.param({"output": True}, 1, "output", id="output"),
-            pytest.param({"model_score": True}, 1, "modelScore", id="model_score"),
-            pytest.param({"table": "t", "key": "k"}, 1, "ratingStep", id="rating_step"),
-            pytest.param({"path": "data.parquet"}, 0, "dataSource", id="source_by_path"),
-            pytest.param({}, 0, "dataSource", id="source_zero_params"),
-            pytest.param({}, 1, "transform", id="transform_default"),
-            pytest.param({"live_switch": True}, 2, "liveSwitch", id="live_switch"),
-            pytest.param({"api_input": True, "path": "d.json"}, 0, "apiInput", id="api_input"),
-            pytest.param({"external": "m.pkl", "path": "x"}, 1, "externalFile", id="external_over_path"),
-        ],
-    )
-    def test_infers_correct_type(self, kwargs, n_params, expected):
-        assert _infer_node_type(kwargs, n_params) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -417,20 +391,20 @@ import haute
 pipeline = haute.Pipeline("broken")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.DataFrame:
     """Good node."""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node
+@pipeline.transform
 def bad_node(df: pl.DataFrame) -> pl.DataFrame:
     """This has a syntax error."""
     return df.with_columns(
         # missing closing paren
 
 
-@pipeline.node
+@pipeline.transform
 def good_node(df: pl.DataFrame) -> pl.DataFrame:
     """This is fine."""
     return df
@@ -455,11 +429,11 @@ import haute
 pipeline = haute.Pipeline("edges")
 
 
-@pipeline.node
+@pipeline.data_source(path="data.parquet")
 def a() -> pl.DataFrame:
     return pl.DataFrame(
 
-@pipeline.node
+@pipeline.transform
 def b(a: pl.DataFrame) -> pl.DataFrame:
     return a
 
@@ -488,13 +462,13 @@ import haute
 pipeline = haute.Pipeline("roundtrip", description="Test pipeline")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.DataFrame:
     """Load data."""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node
+@pipeline.transform
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Clean data."""
     df = (
@@ -504,7 +478,7 @@ def transform(source: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-@pipeline.node(output=True, fields=["x", "y"])
+@pipeline.output(fields=["x", "y"])
 def output(transform: pl.DataFrame) -> pl.DataFrame:
     """Final output."""
     return transform.select("x", "y")
@@ -576,13 +550,13 @@ import haute
 pipeline = haute.Pipeline("sel_test")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.LazyFrame:
     """source node"""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node(selected_columns=['quote_id', 'premium', 'sale_flag'])
+@pipeline.transform(selected_columns=['quote_id', 'premium', 'sale_flag'])
 def features(source: pl.LazyFrame) -> pl.LazyFrame:
     """features node"""
     return source
@@ -626,13 +600,13 @@ import haute
 pipeline = haute.Pipeline("plain_test")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.LazyFrame:
     """source node"""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node
+@pipeline.transform
 def clean(source: pl.LazyFrame) -> pl.LazyFrame:
     """clean node"""
     return source

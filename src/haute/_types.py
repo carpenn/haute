@@ -49,6 +49,30 @@ class NodeType(StrEnum):
     SUBMODEL_PORT = "submodelPort"
 
 
+DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
+    "data_source": NodeType.DATA_SOURCE,
+    "api_input": NodeType.API_INPUT,
+    "transform": NodeType.TRANSFORM,
+    "model_score": NodeType.MODEL_SCORE,
+    "banding": NodeType.BANDING,
+    "rating_step": NodeType.RATING_STEP,
+    "output": NodeType.OUTPUT,
+    "data_sink": NodeType.DATA_SINK,
+    "external_file": NodeType.EXTERNAL_FILE,
+    "live_switch": NodeType.LIVE_SWITCH,
+    "modelling": NodeType.MODELLING,
+    "optimiser": NodeType.OPTIMISER,
+    "scenario_expander": NodeType.SCENARIO_EXPANDER,
+    "optimiser_apply": NodeType.OPTIMISER_APPLY,
+    "constant": NodeType.CONSTANT,
+    "instance": NodeType.TRANSFORM,  # instances default to transform; real type resolved at runtime
+}
+
+NODE_TYPE_TO_DECORATOR: dict[NodeType, str] = {
+    v: k for k, v in DECORATOR_TO_NODE_TYPE.items() if k != "instance"
+}
+
+
 # ---------------------------------------------------------------------------
 # Typed config shapes (documentation + IDE autocomplete, no runtime change)
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import pytest
 
 from haute.graph_utils import GraphNode, NodeData, PipelineGraph
 from haute.codegen import graph_to_code
-from haute._parser_helpers import _build_node_config, _infer_node_type
+from haute._parser_helpers import _build_node_config
 from tests.conftest import make_edge, make_graph
 
 
@@ -182,28 +182,6 @@ class TestModelScoreCodegen:
         assert "doubled" in code
         assert "return result" in code
         compile(code, "<test_user_code>", "exec")
-
-
-# ---------------------------------------------------------------------------
-# Parser helpers — _infer_node_type
-# ---------------------------------------------------------------------------
-
-
-class TestInferNodeType:
-    def test_model_score_flag(self):
-        """model_score=True decorator kwarg → MODEL_SCORE."""
-        nt = _infer_node_type({"model_score": True}, n_params=1)
-        assert nt == "modelScore"
-
-    def test_registered_model_kwarg(self):
-        """registered_model kwarg → MODEL_SCORE."""
-        nt = _infer_node_type({"registered_model": "my-model"}, n_params=1)
-        assert nt == "modelScore"
-
-    def test_source_type_and_run_id(self):
-        """source_type + run_id kwargs → MODEL_SCORE."""
-        nt = _infer_node_type({"source_type": "run", "run_id": "abc"}, n_params=1)
-        assert nt == "modelScore"
 
 
 # ---------------------------------------------------------------------------

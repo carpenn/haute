@@ -429,14 +429,14 @@ from helpers.features import (
 pipeline = haute.Pipeline("my_pipeline", description="")
 
 
-@pipeline.node(config="config/quote_input/quotes.json")
+@pipeline.api_input(config="config/quote_input/quotes.json")
 def quotes() -> pl.LazyFrame:
     """api_input node"""
     from haute._json_flatten import read_json_flat
     return read_json_flat("data/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
-@pipeline.node
+@pipeline.transform
 def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Feature engineering for insurance pricing"""
 

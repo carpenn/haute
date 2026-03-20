@@ -21,7 +21,7 @@ The JSON graph is currently the source of truth. The `.py` file is a secondary e
 |---|---|---|
 | `codegen.py` | ✅ Works | Generates `.py` from graph JSON (GUI → Code) |
 | `executor.py` | ✅ Works | Runs pipeline from graph JSON |
-| `pipeline.py` | ✅ Works | Separate execution path via `@pipeline.node` decorators |
+| `pipeline.py` | ✅ Works | Separate execution path via type-specific `@pipeline.<type>` decorators |
 | `parser.py` (`.py` → graph JSON) | ✅ Works | Parses `.py` back into graph JSON (ast + regex fallback) |
 | File watcher | ✅ Works | watchfiles-based live sync from file changes to GUI |
 | WebSocket | ✅ Works | `/ws/sync` push channel from backend to frontend |
@@ -84,10 +84,10 @@ The parser extracts **graph structure** from the `.py` file:
 
 | Python construct | Maps to |
 |---|---|
-| `@pipeline.node` decorated function | A node in the graph |
+| `@pipeline.<type>` decorated function | A node in the graph |
 | Function name | Node ID / label |
 | Function signature (`def transform(df)`) | Node inputs (0 params = source node) |
-| Decorator kwargs (`@pipeline.node(path="...")`) | Node config |
+| Decorator kwargs (`@pipeline.data_source(path="...")`) | Node config |
 | `pipeline.connect("a", "b")` calls | Edges |
 | Parameter names matching other node names | Implicit edges |
 
@@ -97,7 +97,7 @@ Everything else is **preserved but not interpreted**:
 
 - Code inside function bodies (just a text string in the GUI code editor)
 - Imports
-- Helper functions (not decorated with `@pipeline.node`)
+- Helper functions (not decorated with `@pipeline.<type>`)
 - Comments, blank lines, formatting
 - Module-level code that isn't `pipeline.connect()`
 
@@ -115,7 +115,7 @@ pipeline.connect("enrich", "output")
 
 **Implicit** (parameter names match node names):
 ```python
-@pipeline.node
+@pipeline.output()
 def output(transform: pl.DataFrame, enrich: pl.DataFrame) -> pl.DataFrame:
     # parameter names "transform" and "enrich" match node names → implicit edges
     return transform.join(enrich, on="id")
@@ -129,7 +129,7 @@ The parser is **permissive, not strict**:
 
 | Scenario | Behaviour |
 |---|---|
-| Valid Python, has `@pipeline.node` functions | Parse normally |
+| Valid Python, has `@pipeline.<type>` functions | Parse normally |
 | Valid Python, no decorated functions | Show "No pipeline nodes found" warning banner |
 | Syntax error in `.py` file | Show "Syntax error on line N" banner, keep last good graph |
 | Decorated function with unparseable signature | Show that node with a warning icon, skip edge inference |
@@ -169,7 +169,7 @@ This preserves:
 
 1. Parse the existing file with libcst
 2. Generate a new decorated function (using codegen templates)
-3. Append it after the last `@pipeline.node` function
+3. Append it after the last `@pipeline.<type>` function
 4. If edges were created, add corresponding `pipeline.connect()` calls
 
 ### Deleting a node via GUI
@@ -273,7 +273,7 @@ Both GUI and CLI use the same path:
 | Layer | When | What |
 |---|---|---|
 | **Syntax** | On file save / watcher trigger | `ast.parse()` - is it valid Python? |
-| **Structure** | After successful parse | Does it have `@pipeline.node` functions? Are edges valid? |
+| **Structure** | After successful parse | Does it have `@pipeline.<type>` functions? Are edges valid? |
 | **Schema** | After structure validation | Do output columns of node A match input expectations of node B? (Polars lazy schema) |
 | **Runtime** | On preview / run | Does the code actually execute without error? |
 

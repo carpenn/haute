@@ -14,7 +14,6 @@ Covers public functions not already exercised in test_parser_internals.py:
   - _resolve_node_config  (with external config files)
 
 Edge-case coverage for functions already partly tested in test_parser_internals.py:
-  - _infer_node_type  (additional combos)
   - _build_node_config  (rating_step edge cases, constant, scenario_expander, etc.)
 """
 
@@ -46,7 +45,6 @@ from haute._parser_helpers import (
     _extract_user_code,
     _get_decorator_kwargs,
     _get_docstring,
-    _infer_node_type,
     _is_pipeline_node_decorator,
     _is_submodel_node_decorator,
     _resolve_node_config,
@@ -154,37 +152,51 @@ class TestIsPipelineNodeDecorator:
         return tree.body[0].decorator_list[0]
 
     def test_bare_attribute(self):
-        assert _is_pipeline_node_decorator(self._dec("@pipeline.node\ndef f(): pass"))
+        assert _is_pipeline_node_decorator(self._dec("@pipeline.transform\ndef f(): pass"))
 
     def test_call(self):
-        assert _is_pipeline_node_decorator(self._dec("@pipeline.node()\ndef f(): pass"))
+        assert _is_pipeline_node_decorator(self._dec("@pipeline.transform()\ndef f(): pass"))
 
     def test_call_with_kwargs(self):
         assert _is_pipeline_node_decorator(
-            self._dec('@pipeline.node(path="x")\ndef f(): pass')
+            self._dec('@pipeline.data_source(path="x")\ndef f(): pass')
         )
+
+    def test_all_decorator_types(self):
+        """All type-specific decorators should be recognised."""
+        from haute._types import DECORATOR_TO_NODE_TYPE
+        for method in DECORATOR_TO_NODE_TYPE:
+            assert _is_pipeline_node_decorator(
+                self._dec(f"@pipeline.{method}\ndef f(): pass")
+            ), f"@pipeline.{method} was not recognised"
 
     def test_wrong_attr(self):
         assert not _is_pipeline_node_decorator(
             self._dec("@pipeline.connect\ndef f(): pass")
         )
 
-    def test_other_object_with_node_attr_does_not_match(self):
-        """The function checks both .attr == 'node' AND the receiver name == 'pipeline'."""
+    def test_old_node_not_matched(self):
+        """The old @pipeline.node style is no longer recognised."""
         assert not _is_pipeline_node_decorator(
-            self._dec("@other.node\ndef f(): pass")
+            self._dec("@pipeline.node\ndef f(): pass")
         )
 
-    def test_submodel_node_does_not_match_pipeline(self):
-        """@submodel.node should NOT match the pipeline checker."""
+    def test_other_object_does_not_match(self):
+        """The function checks both .attr in DECORATOR_TO_NODE_TYPE AND receiver == 'pipeline'."""
         assert not _is_pipeline_node_decorator(
-            self._dec("@submodel.node\ndef f(): pass")
+            self._dec("@other.transform\ndef f(): pass")
         )
 
-    def test_submodel_node_call_does_not_match_pipeline(self):
-        """@submodel.node(...) should NOT match the pipeline checker."""
+    def test_submodel_does_not_match_pipeline(self):
+        """@submodel.transform should NOT match the pipeline checker."""
         assert not _is_pipeline_node_decorator(
-            self._dec("@submodel.node(path='x')\ndef f(): pass")
+            self._dec("@submodel.transform\ndef f(): pass")
+        )
+
+    def test_submodel_call_does_not_match_pipeline(self):
+        """@submodel.data_source(...) should NOT match the pipeline checker."""
+        assert not _is_pipeline_node_decorator(
+            self._dec("@submodel.data_source(path='x')\ndef f(): pass")
         )
 
     def test_plain_name_decorator(self):
@@ -198,20 +210,25 @@ class TestIsSubmodelNodeDecorator:
         tree = ast.parse(source)
         return tree.body[0].decorator_list[0]
 
-    def test_bare_submodel_node(self):
-        assert _is_submodel_node_decorator(self._dec("@submodel.node\ndef f(): pass"))
+    def test_bare_submodel_transform(self):
+        assert _is_submodel_node_decorator(self._dec("@submodel.transform\ndef f(): pass"))
 
     def test_submodel_call(self):
-        assert _is_submodel_node_decorator(self._dec("@submodel.node()\ndef f(): pass"))
+        assert _is_submodel_node_decorator(self._dec("@submodel.transform()\ndef f(): pass"))
 
-    def test_pipeline_node_is_not_submodel(self):
-        assert not _is_submodel_node_decorator(
-            self._dec("@pipeline.node\ndef f(): pass")
+    def test_submodel_data_source(self):
+        assert _is_submodel_node_decorator(
+            self._dec("@submodel.data_source(path='x')\ndef f(): pass")
         )
 
-    def test_other_object_node_is_not_submodel(self):
+    def test_pipeline_transform_is_not_submodel(self):
         assert not _is_submodel_node_decorator(
-            self._dec("@other.node\ndef f(): pass")
+            self._dec("@pipeline.transform\ndef f(): pass")
+        )
+
+    def test_other_object_is_not_submodel(self):
+        assert not _is_submodel_node_decorator(
+            self._dec("@other.transform\ndef f(): pass")
         )
 
     def test_submodel_connect_is_not_node(self):
@@ -542,7 +559,7 @@ class TestExtractPreambleEdgeCases:
             "\n"
             "MY_CONST = 10\n"
             "\n"
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def f(): pass\n"
         )
         preamble = _extract_preamble(source)
@@ -625,54 +642,6 @@ class TestExtractPreservedBlocks:
         )
         blocks = _extract_preserved_blocks(source)
         assert blocks[0] == "X = 1"
-
-
-# ===========================================================================
-# _infer_node_type — additional combos
-# ===========================================================================
-
-
-class TestInferNodeTypeExtended:
-    def test_instance_of_returns_transform(self):
-        assert _infer_node_type({"instance_of": "some_node"}, 2) == NodeType.TRANSFORM
-
-    def test_constant(self):
-        assert _infer_node_type({"constant": True}, 0) == NodeType.CONSTANT
-
-    def test_modelling(self):
-        assert _infer_node_type({"modelling": True}, 1) == NodeType.MODELLING
-
-    def test_registered_model_returns_model_score(self):
-        assert _infer_node_type({"registered_model": "my_model"}, 1) == NodeType.MODEL_SCORE
-
-    def test_source_type_plus_run_id_returns_model_score(self):
-        assert _infer_node_type({"source_type": "run", "run_id": "abc"}, 1) == NodeType.MODEL_SCORE
-
-    def test_banding_by_banding_key(self):
-        assert _infer_node_type({"banding": "continuous"}, 1) == NodeType.BANDING
-
-    def test_banding_by_factors_key(self):
-        assert _infer_node_type({"factors": [{}]}, 1) == NodeType.BANDING
-
-    def test_tables_key_returns_rating_step(self):
-        assert _infer_node_type({"tables": [{}]}, 1) == NodeType.RATING_STEP
-
-    def test_scenario_expander(self):
-        assert _infer_node_type({"scenario_expander": True}, 1) == NodeType.SCENARIO_EXPANDER
-
-    def test_optimiser_apply(self):
-        assert _infer_node_type({"optimiser_apply": True}, 1) == NodeType.OPTIMISER_APPLY
-
-    def test_optimiser(self):
-        assert _infer_node_type({"optimiser": True}, 1) == NodeType.OPTIMISER
-
-    def test_priority_external_over_sink(self):
-        """External takes priority over sink in the check chain."""
-        assert _infer_node_type({"external": "x", "sink": "y"}, 1) == NodeType.EXTERNAL_FILE
-
-    def test_priority_sink_over_api_input(self):
-        """Sink takes priority over api_input."""
-        assert _infer_node_type({"sink": "x", "api_input": True}, 1) == NodeType.DATA_SINK
 
 
 # ===========================================================================
@@ -898,6 +867,7 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
                 {"path": "data.parquet"}, "", [], 0, None,
+                explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
         assert config["path"] == "data.parquet"
@@ -914,6 +884,7 @@ class TestResolveNodeConfig:
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
                 "", [], 0, tmp_path,
+                explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
         assert loaded["path"] == "data.csv"
@@ -937,12 +908,13 @@ class TestResolveNodeConfig:
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
                 body, [], 0, tmp_path,
+                explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
         assert "filter" in loaded.get("code", "")
 
     def test_data_source_no_sentinel_gives_empty_code(self, tmp_path):
-        """DataSource without sentinel has empty code (backward compat)."""
+        """DataSource without sentinel has empty code."""
         cfg = {"path": "data.parquet", "sourceType": "flat_file"}
         cfg_dir = tmp_path / "config" / "data_source"
         cfg_dir.mkdir(parents=True)
@@ -957,6 +929,7 @@ class TestResolveNodeConfig:
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
                 body, [], 0, tmp_path,
+                explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
         assert loaded.get("code", "") == ""
@@ -967,12 +940,12 @@ class TestResolveNodeConfig:
             node_type, config = _resolve_node_config(
                 {"config": "config/data_source/missing.json"},
                 "", [], 0, tmp_path,
+                explicit_node_type=NodeType.DATA_SOURCE,
             )
-        # Should have fallen back to inferring type from the path structure
         assert node_type == NodeType.DATA_SOURCE
 
-    def test_factors_path_infers_banding_type(self, tmp_path):
-        """Config path under config/banding/ infers BANDING node type."""
+    def test_banding_type_from_explicit_decorator(self, tmp_path):
+        """Explicit decorator type is used directly for config resolution."""
         cfg_dir = tmp_path / "config" / "banding"
         cfg_dir.mkdir(parents=True)
         cfg_file = cfg_dir / "my_transform.json"
@@ -987,8 +960,8 @@ class TestResolveNodeConfig:
             node_type, config = _resolve_node_config(
                 {"config": "config/banding/my_transform.json"},
                 body, ["source"], 1, tmp_path,
+                explicit_node_type=NodeType.BANDING,
             )
-        # Config path says "banding" => BANDING
         assert node_type == NodeType.BANDING
 
     def test_does_not_mutate_decorator_kwargs(self):
@@ -1040,6 +1013,7 @@ class TestResolveNodeConfig:
                 {"config": mangled_path},
                 "", ["df"], 1, tmp_path,
                 func_name="age_band",
+                explicit_node_type=NodeType.BANDING,
             )
         assert node_type == NodeType.BANDING
         assert loaded.get("factors") == cfg["factors"]
@@ -1239,12 +1213,12 @@ class TestExtractDecoratedNodes:
             "import haute\n"
             'pipeline = haute.Pipeline("test")\n'
             "\n"
-            "@pipeline.node(path='data.parquet')\n"
+            "@pipeline.data_source(path='data.parquet')\n"
             "def source():\n"
             '    """Load data."""\n'
             "    return pl.scan_parquet('data.parquet')\n"
             "\n"
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def transform(source):\n"
             "    return source\n"
         )
@@ -1264,7 +1238,7 @@ class TestExtractDecoratedNodes:
             "import haute\n"
             'submodel = haute.Submodel("freq")\n'
             "\n"
-            "@submodel.node\n"
+            "@submodel.transform\n"
             "def calc(data):\n"
             "    return data\n"
         )
@@ -1282,7 +1256,7 @@ class TestExtractDecoratedNodes:
             "def ignored():\n"
             "    pass\n"
             "\n"
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def matched():\n"
             "    return 1\n"
         )
@@ -1298,7 +1272,7 @@ class TestExtractDecoratedNodes:
         source = (
             "x = 1\n"
             "y = 2\n"
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def only_func():\n"
             "    return 1\n"
         )
@@ -1319,7 +1293,7 @@ class TestExtractDecoratedNodes:
 
     def test_extracts_param_names(self):
         source = (
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def transform(a, b, c):\n"
             "    return a\n"
         )
@@ -1332,7 +1306,7 @@ class TestExtractDecoratedNodes:
 
     def test_extracts_docstring(self):
         source = (
-            "@pipeline.node\n"
+            "@pipeline.transform\n"
             "def transform(a):\n"
             '    """My transform doc."""\n'
             "    return a\n"
@@ -1346,18 +1320,18 @@ class TestExtractDecoratedNodes:
 
     def test_pipeline_checker_does_not_match_submodel(self):
         source = (
-            "@submodel.node\n"
+            "@submodel.transform\n"
             "def calc(x):\n"
             "    return x\n"
         )
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
-            # submodel checker matches @submodel.node
+            # submodel checker matches @submodel.transform
             nodes = _extract_decorated_nodes(
                 tree, _is_submodel_node_decorator, bodies, None,
             )
             assert len(nodes) == 1
-            # pipeline checker must NOT match @submodel.node —
+            # pipeline checker must NOT match @submodel.transform —
             # it checks decorator.value.id == "pipeline"
             nodes2 = _extract_decorated_nodes(
                 tree, _is_pipeline_node_decorator, bodies, None,

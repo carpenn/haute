@@ -1,4 +1,4 @@
-"""Tests for haute.parser - .py pipeline file → React Flow graph JSON."""
+"""Tests for haute.parser - .py pipeline file -> React Flow graph JSON."""
 
 from __future__ import annotations
 
@@ -33,13 +33,13 @@ import haute
 pipeline = haute.Pipeline("test", description="A test pipeline")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def load_data() -> pl.DataFrame:
     """Load input data."""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node
+@pipeline.transform
 def transform(load_data: pl.DataFrame) -> pl.DataFrame:
     """Transform the data."""
     return load_data
@@ -78,12 +78,12 @@ import haute
 pipeline = haute.Pipeline("edges_test")
 
 
-@pipeline.node
+@pipeline.data_source(path="data.parquet")
 def a() -> pl.DataFrame:
     return pl.DataFrame()
 
 
-@pipeline.node
+@pipeline.transform
 def b(a: pl.DataFrame) -> pl.DataFrame:
     return a
 
@@ -103,12 +103,12 @@ import haute
 pipeline = haute.Pipeline("implicit")
 
 
-@pipeline.node
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.DataFrame:
     return pl.DataFrame()
 
 
-@pipeline.node
+@pipeline.transform
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     return source
 '''
@@ -125,7 +125,7 @@ import haute
 pipeline = haute.Pipeline("config_test")
 
 
-@pipeline.node(path="data/input.parquet")
+@pipeline.data_source(path="data/input.parquet")
 def load_data() -> pl.DataFrame:
     """Read the data."""
     return pl.scan_parquet("data/input.parquet")
@@ -143,7 +143,7 @@ import haute
 pipeline = haute.Pipeline("doc_test")
 
 
-@pipeline.node
+@pipeline.transform
 def my_node() -> pl.DataFrame:
     """This is the description."""
     return pl.DataFrame()
@@ -169,7 +169,7 @@ DATA_DIR = Path("data")
 pipeline = haute.Pipeline("preamble_test")
 
 
-@pipeline.node
+@pipeline.transform
 def src() -> pl.DataFrame:
     return pl.DataFrame()
 '''
@@ -180,7 +180,7 @@ def src() -> pl.DataFrame:
 
 
 class TestParsePipelineRoundtrip:
-    """Test that parse → codegen → parse produces consistent results."""
+    """Test that parse -> codegen -> parse produces consistent results."""
 
     def test_roundtrip_preserves_structure(self, tmp_path):
         from haute.codegen import graph_to_code
@@ -192,13 +192,13 @@ import haute
 pipeline = haute.Pipeline("roundtrip")
 
 
-@pipeline.node(path="data.parquet")
+@pipeline.data_source(path="data.parquet")
 def source() -> pl.DataFrame:
     """Load data."""
     return pl.scan_parquet("data.parquet")
 
 
-@pipeline.node
+@pipeline.transform
 def transform(source: pl.DataFrame) -> pl.DataFrame:
     """Transform."""
     return source
