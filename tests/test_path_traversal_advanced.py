@@ -314,10 +314,9 @@ class TestSymlinkTraversal:
             validate_safe_path(project, "escape/secret.txt")
         assert exc_info.value.status_code == 403
 
-    def test_load_node_config_follows_symlinks_unprotected(self, tmp_path: Path):
-        """load_node_config has no symlink protection -- it follows them.
-
-        Production failure: config/banding/link.json -> /etc/shadow
+    def test_load_node_config_blocks_symlinks_outside_project(self, tmp_path: Path):
+        """FIX: load_node_config now validates resolved paths, so symlinks
+        pointing outside the project root are correctly blocked.
         """
         from haute._config_io import load_node_config
 
@@ -331,11 +330,8 @@ class TestSymlinkTraversal:
         config_dir.mkdir(parents=True)
         (config_dir / "linked.json").symlink_to(real_config)
 
-        # load_node_config happily follows the symlink
-        result = load_node_config("config/banding/linked.json", base_dir=project)
-        assert result == {"secret": "data"}, (
-            "load_node_config follows symlinks outside the project root"
-        )
+        with pytest.raises(ValueError, match="outside project root"):
+            load_node_config("config/banding/linked.json", base_dir=project)
 
 
 # =========================================================================
