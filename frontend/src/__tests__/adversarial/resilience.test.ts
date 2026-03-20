@@ -152,7 +152,7 @@ describe("1. API returns unexpected shapes", () => {
         ...makePreviewData("n1", "Test"),
         unexpectedField: "should not crash",
         _internalDebug: { detail: 42 },
-      } as any
+      } as unknown as Parameters<typeof store.setPreview>[1]
       expect(() => store.setPreview("n1", previewWithExtras, 0)).not.toThrow()
       const cached = store.getPreview("n1")
       expect(cached!.data.nodeId).toBe("n1")
@@ -160,14 +160,14 @@ describe("1. API returns unexpected shapes", () => {
 
     it("normalizeEdges handles edges with extra properties", () => {
       const edgesWithExtras = [
-        { id: "e1", source: "a", target: "b", customProp: "hello", weight: 42 } as any,
+        { id: "e1", source: "a", target: "b", customProp: "hello", weight: 42 } as Edge & Record<string, unknown>,
       ]
       const normalized = normalizeEdges(edgesWithExtras)
       expect(normalized[0].id).toBe("e1")
       expect(normalized[0].type).toBe("default")
       expect(normalized[0].animated).toBe(false)
       // Extra props should be preserved through spread
-      expect((normalized[0] as any).customProp).toBe("hello")
+      expect((normalized[0] as Edge & Record<string, unknown>).customProp).toBe("hello")
     })
   })
 
@@ -372,12 +372,12 @@ describe("4. Rapid undo/redo", () => {
       ...actual,
       useNodesState: (initial: Node[]) => {
         const [nodes, setNodes] = React.useState(initial)
-        const onNodesChange = React.useCallback((changes: any[]) => {
+        const onNodesChange = React.useCallback((changes: { type: string; id?: string; item?: Node }[]) => {
           setNodes((prev: Node[]) => {
             let next = [...prev]
             for (const change of changes) {
               if (change.type === "add") {
-                next.push(change.item)
+                if (change.item) next.push(change.item)
               } else if (change.type === "remove") {
                 next = next.filter((n: Node) => n.id !== change.id)
               }
@@ -389,12 +389,12 @@ describe("4. Rapid undo/redo", () => {
       },
       useEdgesState: (initial: Edge[]) => {
         const [edges, setEdges] = React.useState(initial)
-        const onEdgesChange = React.useCallback((changes: any[]) => {
+        const onEdgesChange = React.useCallback((changes: { type: string; id?: string; item?: Edge }[]) => {
           setEdges((prev: Edge[]) => {
             let next = [...prev]
             for (const change of changes) {
               if (change.type === "add") {
-                next.push(change.item)
+                if (change.item) next.push(change.item)
               } else if (change.type === "remove") {
                 next = next.filter((e: Edge) => e.id !== change.id)
               }
@@ -522,7 +522,7 @@ describe("5. Node with missing data.config", () => {
   it("buildGraph handles node with undefined config", () => {
     const nodeNoConfig = makeSimpleNode("n1", "polars")
     // Explicitly remove config
-    delete (nodeNoConfig.data as any).config
+    delete (nodeNoConfig.data as Record<string, unknown>).config
 
     expect(() => buildGraph([nodeNoConfig], [])).not.toThrow()
     const result = buildGraph([nodeNoConfig], [])
@@ -530,7 +530,7 @@ describe("5. Node with missing data.config", () => {
   })
 
   it("buildGraph handles node with null config", () => {
-    const nodeNullConfig = makeSimpleNode("n1", "polars", { config: null as any })
+    const nodeNullConfig = makeSimpleNode("n1", "polars", { config: null as unknown as Record<string, unknown> })
 
     expect(() => buildGraph([nodeNullConfig], [])).not.toThrow()
   })
@@ -549,7 +549,7 @@ describe("5. Node with missing data.config", () => {
   })
 
   it("makeNode with config explicitly set to undefined", () => {
-    const node = makeNode("n1", "polars", { data: { config: undefined } as any })
+    const node = makeNode("n1", "polars", { data: { config: undefined } as unknown as Node["data"] })
     // The spread means config key exists but value is undefined
     expect(node.data.config).toBeUndefined()
     // Other defaults should still be present

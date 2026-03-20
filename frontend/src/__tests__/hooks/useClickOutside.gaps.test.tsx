@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
-import { useRef, useState, createElement } from "react"
+import { useRef, useState } from "react"
 import useClickOutside from "../../hooks/useClickOutside"
 
 afterEach(cleanup)
@@ -16,13 +16,15 @@ afterEach(cleanup)
 function TestComponent({ onClose, active }: { onClose: () => void; active: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   useClickOutside(ref, onClose, active)
-  return createElement("div", null,
-    createElement("div", { ref, "data-testid": "inside" },
-      createElement("span", { "data-testid": "nested-child" }, "Nested"),
-    ),
-    createElement("div", { "data-testid": "outside" },
-      createElement("span", { "data-testid": "deep-outside" }, "Deep"),
-    ),
+  return (
+    <div>
+      <div ref={ref} data-testid="inside">
+        <span data-testid="nested-child">Nested</span>
+      </div>
+      <div data-testid="outside">
+        <span data-testid="deep-outside">Deep</span>
+      </div>
+    </div>
   )
 }
 
@@ -31,13 +33,14 @@ function ToggleComponent({ onClose }: { onClose: () => void }) {
   const [active, setActive] = useState(true)
   const ref = useRef<HTMLDivElement>(null)
   useClickOutside(ref, onClose, active)
-  return createElement("div", null,
-    createElement("div", { ref, "data-testid": "inside" }, "Inside"),
-    createElement("div", { "data-testid": "outside" }, "Outside"),
-    createElement("button", {
-      "data-testid": "toggle-btn",
-      onClick: () => setActive(false),
-    }, "Deactivate"),
+  return (
+    <div>
+      <div ref={ref} data-testid="inside">Inside</div>
+      <div data-testid="outside">Outside</div>
+      <button data-testid="toggle-btn" onClick={() => setActive(false)}>
+        Deactivate
+      </button>
+    </div>
   )
 }
 
@@ -46,7 +49,7 @@ function NullRefComponent({ onClose, active }: { onClose: () => void; active: bo
   const ref = useRef<HTMLDivElement>(null)
   // Intentionally don't attach ref to any element
   useClickOutside(ref, onClose, active)
-  return createElement("div", { "data-testid": "somewhere" }, "Hello")
+  return <div data-testid="somewhere">Hello</div>
 }
 
 describe("useClickOutside — gap tests", () => {
@@ -60,7 +63,7 @@ describe("useClickOutside — gap tests", () => {
     // TypeError on null. The current code safely short-circuits: when
     // ref.current is null, the `&&` fails so onClose is NOT called.
     const onClose = vi.fn()
-    render(createElement(NullRefComponent, { onClose, active: true }))
+    render(<NullRefComponent onClose={onClose} active={true} />)
 
     fireEvent.mouseDown(screen.getByTestId("somewhere"))
 
@@ -80,7 +83,7 @@ describe("useClickOutside — gap tests", () => {
     // would still fire onClose — e.g. closing a dropdown that's already
     // closed, or triggering navigation.
     const onClose = vi.fn()
-    render(createElement(ToggleComponent, { onClose }))
+    render(<ToggleComponent onClose={onClose} />)
 
     // First click outside — should trigger onClose
     fireEvent.mouseDown(screen.getByTestId("outside"))
@@ -103,7 +106,7 @@ describe("useClickOutside — gap tests", () => {
     // (`e.target === ref.current`), clicks on nested children would be
     // treated as "outside", closing dropdowns when clicking their items.
     const onClose = vi.fn()
-    render(createElement(TestComponent, { onClose, active: true }))
+    render(<TestComponent onClose={onClose} active={true} />)
 
     fireEvent.mouseDown(screen.getByTestId("nested-child"))
 
@@ -119,7 +122,7 @@ describe("useClickOutside — gap tests", () => {
     // outside the ref container, the hook would fail to detect the
     // outside click and the dropdown would stay permanently open.
     const onClose = vi.fn()
-    render(createElement(TestComponent, { onClose, active: true }))
+    render(<TestComponent onClose={onClose} active={true} />)
 
     fireEvent.mouseDown(screen.getByTestId("deep-outside"))
 
@@ -142,14 +145,16 @@ describe("useClickOutside — gap tests", () => {
       const ref2 = useRef<HTMLDivElement>(null)
       useClickOutside(ref1, onClose1, true)
       useClickOutside(ref2, onClose2, true)
-      return createElement("div", null,
-        createElement("div", { ref: ref1, "data-testid": "box1" }, "Box1"),
-        createElement("div", { ref: ref2, "data-testid": "box2" }, "Box2"),
-        createElement("div", { "data-testid": "neither" }, "Neither"),
+      return (
+        <div>
+          <div ref={ref1} data-testid="box1">Box1</div>
+          <div ref={ref2} data-testid="box2">Box2</div>
+          <div data-testid="neither">Neither</div>
+        </div>
       )
     }
 
-    render(createElement(DualComponent))
+    render(<DualComponent />)
 
     // Click inside box1 — box1 should NOT close, box2 SHOULD (it's outside box2)
     fireEvent.mouseDown(screen.getByTestId("box1"))
