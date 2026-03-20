@@ -20,11 +20,10 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
     df = pl.scan_parquet("output/nb_batch.parquet")
-    # -- user code --
     df = (
-            df
-            .limit(1000000)
-        )
+                        df
+                        .limit(100000)
+                    )
     return df
 
 
@@ -208,11 +207,10 @@ def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """premium node"""
     df = join_premiums
-    # -- user code --
     df = (
-                                            df
-                                            .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
-                                        )
+                                                        df
+                                                        .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
+                                                    )
     return df
 
 

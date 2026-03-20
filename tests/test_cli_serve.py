@@ -87,4 +87,8 @@ class TestServe:
         if isinstance(cmd, str):
             assert "npm" in cmd, f"Expected 'npm' in command string: {cmd}"
         else:
-            assert cmd[0] == "npm", f"Expected 'npm' as first arg, got: {cmd}"
+            # On Windows, shutil.which("npm") returns the full path
+            # e.g. "C:\Program Files\nodejs\npm.cmd"
+            import os
+            npm_basename = os.path.basename(cmd[0]).lower()
+            assert npm_basename.startswith("npm"), f"Expected npm as first arg, got: {cmd}"

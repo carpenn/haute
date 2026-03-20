@@ -9,6 +9,7 @@ S3c: submodel.py dissolve_submodel — sm_file traversal via validate_safe_path
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -564,6 +565,10 @@ class TestValidateSafePath:
         with pytest.raises((HTTPException, ValueError)):
             validate_safe_path(tmp_path, "file\x00.txt")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Creating symlinks requires admin privileges on Windows",
+    )
     def test_symlink_escape_blocked(self, tmp_path):
         """A symlink pointing outside the base must be blocked.
 

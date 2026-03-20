@@ -1,4 +1,4 @@
-"""Thread-safe single-entry fingerprint cache.
+"""Thread-safe multi-entry fingerprint cache.
 
 Replaces the duplicate ``_TraceCache`` and ``_PreviewCache`` classes in
 ``trace.py`` and ``executor.py`` with a single generic implementation.
@@ -9,6 +9,10 @@ Both caches follow the same pattern:
 2. On hit, the cached data dicts are returned without re-execution.
 3. On miss, the caller executes and stores new data.
 4. ``invalidate()`` clears everything.
+
+Supports multiple entries (default 8) so that switching between
+scenarios or row-limits does not invalidate unrelated cached results.
+LRU eviction keeps the most recently accessed entries.
 
 Usage::
 
@@ -30,50 +34,71 @@ Usage::
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 from typing import Any
 
 
 class FingerprintCache:
-    """Thread-safe single-entry cache keyed by a fingerprint string.
+    """Thread-safe multi-entry LRU cache keyed by fingerprint strings.
 
     Parameters
     ----------
     slots:
-        Names of the data fields this cache stores.  Each slot is
-        initialised to an empty dict.  ``store()`` accepts keyword
-        arguments matching these names.
+        Names of the data fields this cache stores.  ``store()``
+        accepts keyword arguments matching these names.
+    max_entries:
+        Maximum number of fingerprint entries to keep.  When exceeded,
+        the least-recently-used entry is evicted.  Default ``8``
+        allows caching ~4 scenarios × 2 row-limits without thrashing.
     """
 
-    __slots__ = ("_slots", "fingerprint", "_data", "_lock")
+    __slots__ = ("_slots", "_entries", "_max_entries", "_lock")
 
-    def __init__(self, slots: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        slots: tuple[str, ...],
+        max_entries: int = 8,
+    ) -> None:
         if not slots:
             raise ValueError("At least one slot name is required")
         self._slots = slots
-        self.fingerprint: str | None = None
-        self._data: dict[str, Any] = {name: {} for name in slots}
+        self._max_entries = max(max_entries, 1)
+        self._entries: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
     # -- public API --------------------------------------------------------
 
+    @property
+    def fingerprint(self) -> str | None:
+        """Most-recently stored fingerprint (backward compat)."""
+        with self._lock:
+            if self._entries:
+                return next(reversed(self._entries))
+            return None
+
     def try_get(self, fingerprint: str) -> dict[str, Any] | None:
         """Return a *shallow copy* of all slot data if *fingerprint* matches.
 
-        Returns ``None`` on miss (fingerprint mismatch or empty cache).
-        The first slot is used as the "non-empty" check -- if it's falsy
-        (e.g. empty dict/list), the cache is treated as empty.
+        Returns ``None`` on miss.  On hit the entry is promoted to
+        most-recently-used.
         """
         with self._lock:
+            entry = self._entries.get(fingerprint)
+            if entry is None:
+                return None
             first_slot = self._slots[0]
-            if fingerprint == self.fingerprint and self._data[first_slot]:
-                return {name: self._data[name] for name in self._slots}
-            return None
+            if not entry.get(first_slot):
+                return None
+            # Promote to MRU
+            self._entries.move_to_end(fingerprint)
+            return {name: entry[name] for name in self._slots}
 
     def store(self, fingerprint: str, **slot_data: Any) -> None:
-        """Replace all cached data with new values.
+        """Store (or replace) an entry for *fingerprint*.
 
         Every key in *slot_data* must be a declared slot name.
         Any declared slot not provided is reset to an empty dict.
+        LRU eviction occurs when *max_entries* is exceeded.
         """
         unknown = set(slot_data) - set(self._slots)
         if unknown:
@@ -82,12 +107,15 @@ class FingerprintCache:
                 f"Declared slots: {sorted(self._slots)}"
             )
         with self._lock:
-            self.fingerprint = fingerprint
-            for name in self._slots:
-                self._data[name] = slot_data.get(name, {})
+            entry = {name: slot_data.get(name, {}) for name in self._slots}
+            self._entries[fingerprint] = entry
+            self._entries.move_to_end(fingerprint)
+            # Evict LRU entries if over capacity
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
 
     def update_slot(self, slot: str, value: Any) -> None:
-        """Replace a single slot's value while keeping the rest intact.
+        """Replace a single slot's value on the most-recent entry.
 
         Useful for the preview cache's "extend" path where only some
         slots are merged.
@@ -98,20 +126,14 @@ class FingerprintCache:
                 f"Declared slots: {sorted(self._slots)}"
             )
         with self._lock:
-            self._data[slot] = value
+            if self._entries:
+                last_key = next(reversed(self._entries))
+                self._entries[last_key][slot] = value
 
     def invalidate(self) -> None:
-        """Clear the fingerprint and all slot data."""
+        """Clear all entries."""
         with self._lock:
-            self.fingerprint = None
-            for name in self._slots:
-                val = self._data[name]
-                # If it has a .clear() method (dict, list), use it to
-                # release references eagerly.  Otherwise just replace.
-                if hasattr(val, "clear"):
-                    val.clear()
-                else:
-                    self._data[name] = {}
+            self._entries.clear()
 
     @property
     def lock(self) -> threading.Lock:
@@ -119,11 +141,11 @@ class FingerprintCache:
         return self._lock
 
     def __repr__(self) -> str:
-        sizes = {
-            name: len(v) if hasattr(v, "__len__") else "?"
-            for name, v in self._data.items()
-        }
+        with self._lock:
+            n = len(self._entries)
+            fps = list(self._entries.keys())
+        fp_summary = ", ".join(f[:8] for f in fps[-3:])
         return (
-            f"FingerprintCache(fingerprint={self.fingerprint!r}, "
-            f"slots={sizes})"
+            f"FingerprintCache(entries={n}/{self._max_entries}, "
+            f"recent=[{fp_summary}])"
         )

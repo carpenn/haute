@@ -20,6 +20,10 @@ def pipeline_dir(tmp_path: Path) -> Path:
     data_dir.mkdir()
     pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]}).write_parquet(data_dir / "input.parquet")
 
+    # Use as_posix() to avoid Windows backslash escape issues in the
+    # generated Python source (e.g. \U interpreted as unicode escape).
+    data_path = (data_dir / "input.parquet").as_posix()
+
     code = f'''\
 import polars as pl
 import haute
@@ -27,10 +31,10 @@ import haute
 pipeline = haute.Pipeline("test_pipeline", description="A test pipeline")
 
 
-@pipeline.node(path="{data_dir / 'input.parquet'}")
+@pipeline.node(path="{data_path}")
 def source() -> pl.DataFrame:
     """Read data."""
-    return pl.scan_parquet("{data_dir / 'input.parquet'}")
+    return pl.scan_parquet("{data_path}")
 
 
 @pipeline.node

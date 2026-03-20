@@ -7,14 +7,14 @@
   "loss_function": "RMSE",
   "variance_power": 1.95,
   "params": {
-    "iterations": 1000,
+    "iterations": 100,
     "learning_rate": 0.05,
     "depth": 6,
     "l2_leaf_reg": 3,
     "early_stopping_rounds": 50,
     "task_type": "GPU"
   },
-  "row_limit": 10000000,
+  "row_limit": 100000,
   "exclude": [
     "quote_id",
     "channel",

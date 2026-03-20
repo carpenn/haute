@@ -371,7 +371,6 @@ class TestGenScenarioExpander:
             label="FilteredExpand",
         )
         code = _node_to_code(node, source_names=["upstream"])
-        assert "# -- user code --" in code
         assert "df = upstream" in code
         assert '.filter(pl.col("sv") > 0.9)' in code
         assert "return df" in code
@@ -389,7 +388,6 @@ class TestGenScenarioExpander:
             label="AssignExpand",
         )
         code = _node_to_code(node, source_names=["data"])
-        assert "# -- user code --" in code
         assert "df = data" in code
         assert 'df = df.with_columns' in code
         _compile_node_code(code)
@@ -402,7 +400,6 @@ class TestGenScenarioExpander:
             label="PassExpand",
         )
         code = _node_to_code(node, source_names=["data"])
-        assert "# -- user code --" not in code
         assert "return data" in code
         _compile_node_code(code)
 

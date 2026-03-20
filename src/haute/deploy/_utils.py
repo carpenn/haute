@@ -41,7 +41,7 @@ def build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
     return {
         "haute_version": get_haute_version(),
         "pipeline_name": resolved.pruned_graph.pipeline_name or config.model_name,
-        "pipeline_file": str(config.pipeline_file),
+        "pipeline_file": config.pipeline_file.as_posix(),
         "target": config.target,
         "created_at": datetime.now(UTC).isoformat(),
         "created_by": get_user(),
@@ -50,7 +50,7 @@ def build_manifest(resolved: ResolvedDeploy) -> dict[str, Any]:
         "output_fields": config.output_fields,
         "input_schema": resolved.input_schema,
         "output_schema": resolved.output_schema,
-        "artifacts": {name: str(path) for name, path in resolved.artifacts.items()},
+        "artifacts": {name: path.as_posix() for name, path in resolved.artifacts.items()},
         "pruned_graph": resolved.pruned_graph.model_dump(),
         "nodes_deployed": len(resolved.pruned_graph.nodes),
         "nodes_skipped": len(resolved.removed_node_ids),

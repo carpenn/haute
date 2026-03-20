@@ -122,23 +122,23 @@ class TestModelScorerInit:
 
 
 class TestModelScorerScore:
-    @patch("haute._model_scorer.ModelScorer._score_eager")
+    @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_live_scenario_uses_eager(self, mock_load, mock_eager):
+    def test_live_scenario_uses_eager(self, mock_load, mock_score_eager):
         sm = _make_scoring_model()
         mock_load.return_value = sm
-        mock_eager.return_value = pl.DataFrame({"x": [1], "prediction": [0.5]}).lazy()
+        mock_score_eager.return_value = pl.DataFrame({"x": [1], "prediction": [0.5]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         result = scorer.score(lf)
 
-        mock_eager.assert_called_once()
+        mock_score_eager.assert_called_once()
         assert isinstance(result, pl.LazyFrame)
         collected = result.collect()
         assert "prediction" in collected.columns
 
-    @patch("haute._model_scorer.ModelScorer._score_batched")
+    @patch("haute._model_scorer._score_batched_standalone")
     @patch("haute._mlflow_io.load_mlflow_model")
     def test_non_live_scenario_uses_batched(self, mock_load, mock_batched):
         sm = _make_scoring_model()
@@ -152,62 +152,62 @@ class TestModelScorerScore:
         mock_batched.assert_called_once()
         assert isinstance(result, pl.LazyFrame)
 
-    @patch("haute._model_scorer.ModelScorer._score_eager")
+    @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_row_limit_forces_eager(self, mock_load, mock_eager):
+    def test_row_limit_forces_eager(self, mock_load, mock_score_eager):
         """Even non-live scenario uses eager when row_limit is set."""
         sm = _make_scoring_model()
         mock_load.return_value = sm
-        mock_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
+        mock_score_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch", row_limit=10)
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         result = scorer.score(lf)
 
-        mock_eager.assert_called_once()
+        mock_score_eager.assert_called_once()
         assert isinstance(result, pl.LazyFrame)
 
+    @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_feature_intersection(self, mock_load):
+    def test_feature_intersection(self, mock_load, mock_score_eager):
         """Only features present in both model and input are used."""
         sm = _make_scoring_model(feature_names=["a", "b", "missing_col"])
         mock_load.return_value = sm
+        mock_score_eager.return_value = pl.DataFrame({"a": [1], "prediction": [0.5]}).lazy()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
+        lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
+        scorer.score(lf)
 
-        with patch.object(scorer, "_score_eager") as mock_eager:
-            mock_eager.return_value = pl.DataFrame({"a": [1], "prediction": [0.5]}).lazy()
-            lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
-            scorer.score(lf)
+        # Features passed should be ["a", "b"] (intersection)
+        call_args = mock_score_eager.call_args
+        features = call_args[0][2]
+        assert "a" in features
+        assert "b" in features
+        assert "missing_col" not in features
 
-            # Features passed should be ["a", "b"] (intersection)
-            call_args = mock_eager.call_args
-            features = call_args[0][2]
-            assert "a" in features
-            assert "b" in features
-            assert "missing_col" not in features
-
+    @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_empty_input_doesnt_crash(self, mock_load):
+    def test_empty_input_doesnt_crash(self, mock_load, mock_score_eager):
         """score() with no dfs should use an empty LazyFrame."""
         sm = _make_scoring_model(feature_names=[])
         sm._model.predict.return_value = np.array([])
         mock_load.return_value = sm
+        mock_score_eager.return_value = pl.LazyFrame()
 
         scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
-
-        with patch.object(scorer, "_score_eager") as mock_eager:
-            mock_eager.return_value = pl.LazyFrame()
-            result = scorer.score()  # no dfs passed
-            mock_eager.assert_called_once()
-            assert isinstance(result, pl.LazyFrame)
+        result = scorer.score()  # no dfs passed
+        mock_score_eager.assert_called_once()
+        assert isinstance(result, pl.LazyFrame)
 
     @patch("haute.executor._exec_user_code")
+    @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_user_code_applied_after_scoring(self, mock_load, mock_exec):
+    def test_user_code_applied_after_scoring(self, mock_load, mock_score_eager, mock_exec):
         """Post-processing user code should be applied after scoring."""
         sm = _make_scoring_model()
         mock_load.return_value = sm
+        mock_score_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
         mock_exec.return_value = pl.DataFrame({"result": [1]}).lazy()
 
         scorer = ModelScorer(
@@ -215,9 +215,7 @@ class TestModelScorerScore:
             code="result = result * 2",
             source_names=["df"],
         )
-        with patch.object(scorer, "_score_eager") as mock_eager:
-            mock_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
-            scorer.score(pl.DataFrame({"a": [1], "b": [2]}).lazy())
+        scorer.score(pl.DataFrame({"a": [1], "b": [2]}).lazy())
 
         mock_exec.assert_called_once()
         # Verify model is in extra_ns

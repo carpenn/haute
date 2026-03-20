@@ -174,7 +174,7 @@ class TestLoadMlflowOptimiserArtifactRegistered:
 
         with (
             patch("mlflow.tracking.MlflowClient") as mock_client,
-            patch("haute._optimiser_io.resolve_version", return_value="2"),
+            patch("haute._mlflow_utils.resolve_version", return_value="2"),
         ):
             mv = MagicMock()
             mv.run_id = "resolved_run_id"

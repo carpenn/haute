@@ -418,6 +418,19 @@ def load_mlflow_model(
             f"Invalid task {task!r}. Expected one of: {', '.join(valid_tasks)}"
         )
 
+    # Fast-path cache check using the raw inputs — avoids calling
+    # resolve_mlflow_source() (which hits the MLflow tracking server)
+    # on every invocation when the model is already cached.
+    # For source_type="run" with a known artifact_path, the cache key
+    # components are fully determined without any network call.
+    if source_type == "run" and run_id and artifact_path:
+        fast_key = (source_type, run_id, artifact_path, task)
+        if fast_key in _model_cache:
+            logger.info("mlflow_model_cache_hit", key=str(fast_key))
+            cached = _model_cache.get(fast_key)
+            assert cached is not None
+            return cached
+
     resolved_run_id, resolved_version, mlflow_mod, client = resolve_mlflow_source(
         source_type=source_type,
         run_id=run_id,

@@ -71,6 +71,7 @@ class TestLoadRunBasedModel:
 
         with modules_patch, resolve_patch, \
              patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
+             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
              patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
             result = load_mlflow_model(
                 source_type="run",
@@ -123,7 +124,8 @@ class TestLoadRegisteredModel:
 
         with modules_patch, resolve_patch, \
              patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
-             patch("haute._mlflow_io.resolve_version", return_value="2"), \
+             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
+             patch("haute._mlflow_utils.resolve_version", return_value="2"), \
              patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
             result = load_mlflow_model(
                 source_type="registered",
@@ -236,6 +238,7 @@ class TestModelCache:
 
         with modules_patch, resolve_patch, \
              patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
+             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
              patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
             load_mlflow_model(
                 source_type="run",

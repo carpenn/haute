@@ -69,7 +69,19 @@ class PreambleError(HauteError):
         self.source_line = source_line
 
 
-def _compile_preamble(preamble: str) -> dict[str, Any]:
+# Cache compiled preamble results by content hash so unchanged preambles
+# (common during training / optimiser runs where the preamble doesn't
+# change between invocations) skip the expensive module eviction +
+# re-import cycle.  The cache is invalidated when the preamble text
+# changes (hash mismatch).
+_preamble_cache: dict[str, dict[str, Any]] = {}
+
+
+def _compile_preamble(
+    preamble: str,
+    *,
+    force_refresh: bool = True,
+) -> dict[str, Any]:
     """Compile user-defined preamble code into a namespace dict.
 
     The preamble (helper functions, constants, lambdas) is defined at the
@@ -80,12 +92,25 @@ def _compile_preamble(preamble: str) -> dict[str, Any]:
     Uses a single dict for globals/locals so preamble functions can call
     each other (they share the same ``__globals__``).
 
+    When *force_refresh* is ``False`` (default), a cached result from a
+    previous call with the same preamble text is returned immediately,
+    skipping utility-module eviction and ``exec()``.  The preview path
+    passes ``force_refresh=True`` so that edits to utility modules in the
+    GUI are always picked up.
+
     Raises ``PreambleError`` with a human-readable message and optional
     source line number when the preamble fails to execute (e.g. a utility
     module has a NameError).
     """
     if not preamble or not preamble.strip():
         return {}
+
+    import hashlib
+    cache_key = hashlib.md5(preamble.encode()).hexdigest()
+
+    if not force_refresh and cache_key in _preamble_cache:
+        return _preamble_cache[cache_key]
+
     # Preamble may contain imports (e.g. from utility.features import …)
     # which are legitimate, but still validate against other dangerous
     # patterns (dunder access, eval, exec, etc.).
@@ -145,7 +170,9 @@ def _compile_preamble(preamble: str) -> dict[str, Any]:
 
             raise PreambleError(msg, source_line=source_line) from exc
 
-    return {k: v for k, v in ns.items() if k not in base_keys}
+    result = {k: v for k, v in ns.items() if k not in base_keys}
+    _preamble_cache[cache_key] = result
+    return result
 
 
 def _exec_user_code(
@@ -593,19 +620,25 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
     pl.Config.set_streaming_chunk_size(50_000)
 
     try:
-        preamble_ns = _compile_preamble(graph.preamble or "")
-        lazy_outputs, _order, _parents, _names = _execute_lazy(
-            graph,
-            _build_node_fn,
-            target_node_id=sink_node_id,
-            preamble_ns=preamble_ns or None,
-            scenario=sink_scenario,
-            checkpoint_dir=checkpoint_path,
-        )
+        # Sink path: use cached preamble (no GUI edits expected during
+        # batch runs).  Saves 50-500 ms of utility module re-import.
+        preamble_ns = _compile_preamble(graph.preamble or "", force_refresh=False)
 
-        lf = lazy_outputs.get(sink_node_id)
-        if lf is None:
-            raise RuntimeError("Failed to compute sink input")
+        def _run_lazy() -> pl.LazyFrame:
+            lazy_outputs, _order, _parents, _names = _execute_lazy(
+                graph,
+                _build_node_fn,
+                target_node_id=sink_node_id,
+                preamble_ns=preamble_ns or None,
+                scenario=sink_scenario,
+                checkpoint_dir=checkpoint_path,
+            )
+            lf = lazy_outputs.get(sink_node_id)
+            if lf is None:
+                raise RuntimeError("Failed to compute sink input")
+            return lf
+
+        lf = _run_lazy()
 
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)

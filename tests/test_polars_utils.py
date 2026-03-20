@@ -188,14 +188,17 @@ class TestMallocTrimDispatch:
         mock_cdll.assert_called_once_with("libc.so.6")
         mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
 
-    def test_windows_calls_heapmin(self, monkeypatch):
+    def test_windows_calls_heap_compact(self, monkeypatch):
         from unittest.mock import MagicMock
 
-        mock_msvcrt = MagicMock()
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetProcessHeap.return_value = 12345
+        mock_windll = MagicMock(kernel32=mock_kernel32)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.cdll", MagicMock(msvcrt=mock_msvcrt))
+        monkeypatch.setattr("ctypes.windll", mock_windll)
         _malloc_trim()
-        mock_msvcrt._heapmin.assert_called_once()
+        mock_kernel32.GetProcessHeap.assert_called_once()
+        mock_kernel32.HeapCompact.assert_called_once_with(12345, 0)
 
     def test_macos_is_noop(self, monkeypatch):
         """macOS has no native heap compaction — verify no ctypes calls."""
@@ -219,13 +222,13 @@ class TestMallocTrimDispatch:
         _malloc_trim()  # should not raise
 
     def test_windows_graceful_on_attribute_error(self, monkeypatch):
-        """If msvcrt._heapmin is missing, _malloc_trim must not raise."""
+        """If kernel32.HeapCompact is missing, _malloc_trim must not raise."""
         from unittest.mock import MagicMock, PropertyMock
 
-        mock_cdll = MagicMock()
-        type(mock_cdll).msvcrt = PropertyMock(side_effect=AttributeError)
+        mock_windll = MagicMock()
+        type(mock_windll).kernel32 = PropertyMock(side_effect=AttributeError)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.cdll", mock_cdll)
+        monkeypatch.setattr("ctypes.windll", mock_windll)
         _malloc_trim()  # should not raise
 
 

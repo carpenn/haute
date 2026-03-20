@@ -179,7 +179,6 @@ class TestModelScoreCodegen:
         code = graph_to_code(graph)
 
         assert "score_from_config" in code
-        assert "# -- user code --" in code
         assert "doubled" in code
         assert "return result" in code
         compile(code, "<test_user_code>", "exec")

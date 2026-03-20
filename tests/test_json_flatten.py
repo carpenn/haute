@@ -582,7 +582,7 @@ class TestJsonCache:
         # (write to a path that is a directory, not a file)
         bad_cache = tmp_path / "dir_not_file.parquet"
         bad_cache.mkdir()
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises((IsADirectoryError, PermissionError, OSError)):
             _flatten_and_write([{"x": 1}], {"x": "int"}, bad_cache)
 
     def test_read_json_flat_caches_and_reuses(self, tmp_path, monkeypatch):
@@ -886,16 +886,19 @@ class TestReleaseMemory:
         mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
 
     def test_end_to_end_windows(self, monkeypatch):
-        """Full path: _release_memory → _malloc_trim → msvcrt._heapmin on Windows."""
+        """Full path: _release_memory → _malloc_trim → kernel32.HeapCompact on Windows."""
         from unittest.mock import MagicMock
 
         from haute import _json_flatten as mod
 
-        mock_msvcrt = MagicMock()
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetProcessHeap.return_value = 12345
+        mock_windll = MagicMock(kernel32=mock_kernel32)
         monkeypatch.setattr("sys.platform", "win32")
-        monkeypatch.setattr("ctypes.cdll", MagicMock(msvcrt=mock_msvcrt))
+        monkeypatch.setattr("ctypes.windll", mock_windll)
         mod._release_memory()
-        mock_msvcrt._heapmin.assert_called_once()
+        mock_kernel32.GetProcessHeap.assert_called_once()
+        mock_kernel32.HeapCompact.assert_called_once_with(12345, 0)
 
     def test_end_to_end_macos(self, monkeypatch):
         """On macOS, gc.collect runs but no ctypes heap compaction."""
@@ -1301,7 +1304,7 @@ class TestAdaptiveChunkSize:
 class TestIterLineChunks:
     def test_exact_chunks(self, tmp_path):
         p = tmp_path / "data.jsonl"
-        p.write_text("a\nb\nc\nd\n")
+        p.write_bytes(b"a\nb\nc\nd\n")
         chunks = [c for c in _iter_line_chunks(p, 2)]
         assert len(chunks) == 2
         assert chunks[0] == b"a\nb\n"
@@ -1309,19 +1312,19 @@ class TestIterLineChunks:
 
     def test_remainder_chunk(self, tmp_path):
         p = tmp_path / "data.jsonl"
-        p.write_text("a\nb\nc\n")
+        p.write_bytes(b"a\nb\nc\n")
         chunks = [c for c in _iter_line_chunks(p, 2)]
         assert len(chunks) == 2
         assert chunks[1] == b"c\n"
 
     def test_empty_file(self, tmp_path):
         p = tmp_path / "empty.jsonl"
-        p.write_text("")
+        p.write_bytes(b"")
         assert list(_iter_line_chunks(p, 10)) == []
 
     def test_single_line(self, tmp_path):
         p = tmp_path / "one.jsonl"
-        p.write_text("hello\n")
+        p.write_bytes(b"hello\n")
         chunks = list(_iter_line_chunks(p, 100))
         assert len(chunks) == 1
         assert chunks[0] == b"hello\n"

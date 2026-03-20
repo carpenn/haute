@@ -572,14 +572,14 @@ def _flatten_and_write_streaming(
         if writer is not None:
             writer.close()
             writer = None
-            tmp_path.rename(cache_path)
+            tmp_path.replace(cache_path)
         else:
             empty = pa.table(
                 {f.name: pa.array([], type=f.type) for f in arrow_schema},
                 schema=arrow_schema,
             )
             pq.write_table(empty, str(tmp_path), compression="zstd")
-            tmp_path.rename(cache_path)
+            tmp_path.replace(cache_path)
 
         logger.info(
             "json_cache_written",
@@ -754,7 +754,7 @@ def _jsonl_to_raw_parquet(
         import pyarrow as pa
 
         pq.write_table(pa.table({}), str(tmp), compression="zstd")
-        tmp.rename(dest)
+        tmp.replace(dest)
         return 0
 
     writer: pq.ParquetWriter | None = None
@@ -785,7 +785,7 @@ def _jsonl_to_raw_parquet(
             import pyarrow as pa
 
             pq.write_table(pa.table({}), str(tmp), compression="zstd")
-        tmp.rename(dest)
+        tmp.replace(dest)
         return total_rows
 
     except BaseException:
@@ -826,7 +826,7 @@ def _flatten_raw_parquet(
         cols = schema_columns(flatten_schema)
         empty = pl.DataFrame({c: pl.Series([], dtype=pl.Utf8) for c in cols})
         empty.write_parquet(str(tmp), compression="zstd")
-        tmp.rename(dest)
+        tmp.replace(dest)
         return 0
 
     writer: pq.ParquetWriter | None = None
@@ -888,7 +888,7 @@ def _flatten_raw_parquet(
 
         writer.close()
         writer = None
-        tmp.rename(dest)
+        tmp.replace(dest)
         return total_rows
 
     except BaseException:
@@ -933,7 +933,7 @@ def _polars_flatten_to_parquet(
     exprs = _build_flatten_exprs(flatten_schema)
     if not exprs:
         pl.DataFrame().write_parquet(tmp_path, compression="zstd")
-        tmp_path.rename(cache_path)
+        tmp_path.replace(cache_path)
         return 0
 
     if chunk_lines is None:
@@ -984,7 +984,7 @@ def _polars_flatten_to_parquet(
 
             _update_progress(progress_key, t0, total_rows)
 
-        tmp_path.rename(cache_path)
+        tmp_path.replace(cache_path)
 
         logger.info(
             "json_cache_written_polars",
@@ -1080,9 +1080,15 @@ _CACHE_DIR = ".haute_cache"
 
 
 def _json_cache_path(data_path: str | Path) -> Path:
-    """Compute the parquet cache path for a JSON data file."""
-    safe = str(data_path).replace("/", "_").replace("\\", "_").replace(".", "_")
-    return Path.cwd() / _CACHE_DIR / f"json_{safe}.parquet"
+    """Compute the parquet cache path for a JSON data file.
+
+    Uses a SHA-256 hash of the stringified path to keep filenames short
+    and avoid exceeding Windows MAX_PATH (260 chars).
+    """
+    import hashlib
+
+    path_hash = hashlib.sha256(str(data_path).encode()).hexdigest()[:16]
+    return Path.cwd() / _CACHE_DIR / f"json_{path_hash}.parquet"
 
 
 def _is_cache_valid(cache_path: Path, *source_paths: Path) -> bool:

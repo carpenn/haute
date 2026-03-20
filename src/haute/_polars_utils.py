@@ -37,7 +37,7 @@ def atomic_write(dest: Path) -> Generator[Path, None, None]:
     tmp = dest.with_suffix(".parquet.tmp")
     try:
         yield tmp
-        tmp.rename(dest)
+        tmp.replace(dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -75,13 +75,16 @@ def read_parquet_metadata(path: Path) -> dict[str, Any]:
 def _malloc_trim() -> None:
     """Ask the OS to return freed heap pages.
 
-    After ``del df; gc.collect()``, Python's allocator keeps the pages
-    mapped — RSS stays high even though the memory is logically free.
+    After ``del df``, Python's allocator keeps the pages mapped — RSS
+    stays high even though the memory is logically free.
 
     Platform strategies:
 
     - **Linux**: ``malloc_trim(0)`` via glibc forces arena release.
-    - **Windows**: ``_heapmin()`` via msvcrt compacts the CRT heap.
+    - **Windows**: ``HeapCompact`` on the process default heap.  This
+      compacts the heap where Rust/Polars allocations live (via
+      ``HeapAlloc``).  The previous ``_heapmin()`` call only affected
+      the CRT heap which Polars does not use.
     - **macOS**: no direct API — callers should ``gc.collect()`` beforehand.
     """
     import sys
@@ -97,10 +100,19 @@ def _malloc_trim() -> None:
     elif platform == "win32":
         try:
             import ctypes
+            import ctypes.wintypes
 
-            ctypes.cdll.msvcrt._heapmin()
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            # GetProcessHeap returns a HANDLE (void*) — must declare
+            # the return type explicitly or ctypes truncates it to
+            # c_int (32-bit) on 64-bit Python, causing access violations.
+            kernel32.GetProcessHeap.restype = ctypes.wintypes.HANDLE
+            kernel32.HeapCompact.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD]
+            kernel32.HeapCompact.restype = ctypes.c_size_t
+            heap = kernel32.GetProcessHeap()
+            kernel32.HeapCompact(heap, 0)
         except (OSError, AttributeError):
-            logger.debug("heapmin_unavailable", platform=platform)
+            logger.debug("heap_compact_unavailable", platform=platform)
     # macOS / other: no native heap compaction API available
 
 
@@ -109,6 +121,7 @@ def safe_sink(
     path: str | Path,
     *,
     fmt: str = "parquet",
+    fast_checkpoint: bool = False,
 ) -> None:
     """Sink a LazyFrame to file via streaming, with fallback.
 
@@ -119,13 +132,19 @@ def safe_sink(
     Only retries on Polars-specific errors (``ComputeError``,
     ``InvalidOperationError``, ``SchemaError``).  Real I/O errors
     (permissions, disk full) propagate immediately.
+
+    When *fast_checkpoint* is ``True``, uses ``lz4`` compression instead
+    of the default ``zstd``.  This is ~3× faster for write and ~2× faster
+    for read — ideal for temporary checkpoint files that are consumed
+    immediately and then deleted.
     """
     path = Path(path)
+    compression = "lz4" if fast_checkpoint else "zstd"
     try:
         if fmt == "csv":
             lf.sink_csv(path)
         else:
-            lf.sink_parquet(path)
+            lf.sink_parquet(path, compression=compression)
     except (
         pl.exceptions.ComputeError,
         pl.exceptions.InvalidOperationError,
@@ -136,5 +155,5 @@ def safe_sink(
         if fmt == "csv":
             df.write_csv(path)
         else:
-            df.write_parquet(path)
+            df.write_parquet(path, compression=compression)
         del df

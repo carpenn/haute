@@ -1,4 +1,4 @@
-"""Tests for FingerprintCache — generic single-entry fingerprint cache."""
+"""Tests for FingerprintCache — generic multi-entry fingerprint cache."""
 
 from __future__ import annotations
 
@@ -41,14 +41,28 @@ class TestBasicSetGet:
         assert data["outputs"] == {"a": 1}
         assert data["order"] == ["a"]
 
-    def test_store_replaces_previous(self) -> None:
+    def test_store_keeps_multiple_entries(self) -> None:
+        """Multi-entry cache retains both entries (unlike the old single-entry)."""
         cache = FingerprintCache(slots=("x",))
         cache.store("fp1", x={"old": True})
         cache.store("fp2", x={"new": True})
+        # Both entries are accessible
+        data1 = cache.try_get("fp1")
+        assert data1 is not None
+        assert data1["x"] == {"old": True}
+        data2 = cache.try_get("fp2")
+        assert data2 is not None
+        assert data2["x"] == {"new": True}
+
+    def test_lru_eviction(self) -> None:
+        """Oldest entry is evicted when max_entries is exceeded."""
+        cache = FingerprintCache(slots=("x",), max_entries=2)
+        cache.store("fp1", x={"first": True})
+        cache.store("fp2", x={"second": True})
+        cache.store("fp3", x={"third": True})  # evicts fp1
         assert cache.try_get("fp1") is None
-        data = cache.try_get("fp2")
-        assert data is not None
-        assert data["x"] == {"new": True}
+        assert cache.try_get("fp2") is not None
+        assert cache.try_get("fp3") is not None
 
     def test_omitted_slots_default_to_empty_dict(self) -> None:
         cache = FingerprintCache(slots=("a", "b", "c"))
@@ -211,7 +225,7 @@ class TestRepr:
         cache = FingerprintCache(slots=("a", "b"))
         r = repr(cache)
         assert "FingerprintCache" in r
-        assert "None" in r  # fingerprint is None
+        assert "entries=0" in r
 
     def test_repr_with_data(self) -> None:
         cache = FingerprintCache(slots=("items",))

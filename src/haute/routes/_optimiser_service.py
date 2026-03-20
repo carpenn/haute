@@ -434,21 +434,34 @@ class OptimiserSolveService:
         The caller owns *checkpoint_dir* lifecycle (creation + cleanup).
         """
         try:
+            import polars as pl
+
             from haute.executor import _build_node_fn, _compile_preamble, _resolve_batch_scenario
             from haute.graph_utils import _execute_lazy
 
             # Resolve scenario: optimiser runs on batch data, not live.
             scenario = _resolve_batch_scenario(body.graph) or "batch"
 
-            preamble_ns = _compile_preamble(body.graph.preamble or "") or None
+            preamble_ns = _compile_preamble(
+                body.graph.preamble or "", force_refresh=False,
+            ) or None
 
-            lazy_outputs, *_ = _execute_lazy(
-                body.graph, _build_node_fn,
-                target_node_id=body.node_id,
-                preamble_ns=preamble_ns,
-                scenario=scenario,
-                checkpoint_dir=checkpoint_dir,
-            )
+            # Reduce streaming chunk size for the optimiser path (same
+            # rationale as execute_sink — wide schemas with 100+ columns
+            # can cause OOM with the default auto-sized chunk).
+            _prev_chunk = pl.Config.state().get("POLARS_STREAMING_CHUNK_SIZE")
+            pl.Config.set_streaming_chunk_size(50_000)
+            try:
+                lazy_outputs, *_ = _execute_lazy(
+                    body.graph, _build_node_fn,
+                    target_node_id=body.node_id,
+                    preamble_ns=preamble_ns,
+                    scenario=scenario,
+                    checkpoint_dir=checkpoint_dir,
+                )
+            finally:
+                if _prev_chunk is not None:
+                    pl.Config.set_streaming_chunk_size(int(_prev_chunk))
             return lazy_outputs
         except HTTPException:
             raise

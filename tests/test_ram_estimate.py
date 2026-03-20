@@ -8,7 +8,7 @@ import polars as pl
 
 from haute._ram_estimate import (
     _csv_row_count,
-    _parquet_row_count,
+    _parquet_metadata,
     available_ram_bytes,
     available_vram_bytes,
     estimate_gpu_vram_bytes,
@@ -114,7 +114,7 @@ class TestAvailableRam:
 
         # Block /proc and sysconf so only the Windows path runs
         with patch("builtins.open", side_effect=OSError):
-            with patch("os.sysconf", side_effect=AttributeError):
+            with patch("os.sysconf", side_effect=AttributeError, create=True):
                 with patch.dict(
                     "sys.modules",
                     {"ctypes": mock_ctypes},
@@ -129,7 +129,7 @@ class TestAvailableRam:
         """When all platform methods fail, returns 4 GiB default."""
         monkeypatch.setattr("sys.platform", "freebsd13")
         with patch("builtins.open", side_effect=OSError):
-            with patch("os.sysconf", side_effect=AttributeError):
+            with patch("os.sysconf", side_effect=AttributeError, create=True):
                 ram = available_ram_bytes()
         assert ram == 4 * 1024**3
 
@@ -144,7 +144,9 @@ class TestRowCounts:
         path = tmp_path / "test.parquet"
         df = pl.DataFrame({"a": range(500), "b": range(500)})
         df.write_parquet(str(path))
-        assert _parquet_row_count(str(path)) == 500
+        rows, cols = _parquet_metadata(str(path))
+        assert rows == 500
+        assert cols == 2
 
     def test_csv_row_count(self, tmp_path) -> None:
         path = tmp_path / "test.csv"
@@ -365,8 +367,8 @@ class TestEstimateSafeTrainingRows:
         result = estimate_safe_training_rows(
             graph, target.id, _build_dummy_node_fn,
         )
-        # Dummy source produces 3 columns (a, b, c)
-        assert result.probe_columns == 3
+        # Column count is resolved from the parquet file metadata (2 cols)
+        assert result.probe_columns == 2
 
 
 # ---------------------------------------------------------------------------

@@ -290,7 +290,12 @@ def score_from_config(
 
 
 def _sink_to_temp(lf: pl.LazyFrame) -> str:
-    """Sink a LazyFrame to a temp parquet file via streaming."""
+    """Sink a LazyFrame to a temp parquet file via streaming.
+
+    Uses ``fast_checkpoint=True`` for lz4 compression — these temp
+    files are read back immediately for batch scoring and then deleted,
+    so speed matters more than compression ratio.
+    """
     import os
     import tempfile
 
@@ -300,7 +305,7 @@ def _sink_to_temp(lf: pl.LazyFrame) -> str:
         suffix=".parquet", prefix="haute_score_in_",
     )
     os.close(fd)
-    safe_sink(lf, path)
+    safe_sink(lf, path, fast_checkpoint=True)
     return path
 
 

@@ -749,6 +749,231 @@ class TestExecuteGraph:
 
 
 # ---------------------------------------------------------------------------
+# Data source user code preservation
+# ---------------------------------------------------------------------------
+
+
+class TestDataSourceUserCode:
+    """Verify user code on dataSource nodes survives the full lifecycle.
+
+    The .py file is the source of truth.  When the parser extracts user
+    code (e.g. ``df = df.limit(100)``), that code must:
+    - Appear in the parsed graph's node config
+    - Be executed by both the eager (preview) and lazy (sink) paths
+    - NOT be written to the JSON config sidecar (code lives in .py only)
+    - Survive a parse → codegen → re-parse round-trip
+    """
+
+    def test_data_source_code_applied_in_preview(self, tmp_path):
+        """User code on a dataSource node is executed during preview."""
+        p = tmp_path / "big.parquet"
+        pl.DataFrame({"x": range(1000)}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _n({
+                    "id": "src",
+                    "data": {
+                        "label": "src",
+                        "nodeType": "dataSource",
+                        "config": {
+                            "path": str(p),
+                            "code": "df = df.limit(10)",
+                        },
+                    },
+                }),
+            ],
+            "edges": [],
+        })
+        results = execute_graph(graph)
+        assert results["src"].status == "ok"
+        assert results["src"].row_count == 10
+
+    def test_data_source_code_applied_in_sink(self, tmp_path):
+        """User code on a dataSource node is executed during sink."""
+        src = tmp_path / "big.parquet"
+        out = tmp_path / "out.parquet"
+        pl.DataFrame({"x": range(1000)}).write_parquet(src)
+
+        graph = _g({
+            "nodes": [
+                _n({
+                    "id": "src",
+                    "data": {
+                        "label": "src",
+                        "nodeType": "dataSource",
+                        "config": {
+                            "path": str(src),
+                            "code": "df = df.limit(10)",
+                        },
+                    },
+                }),
+                _n({
+                    "id": "sink",
+                    "data": {
+                        "label": "sink",
+                        "nodeType": "dataSink",
+                        "config": {"path": str(out), "format": "parquet"},
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sink")],
+        })
+        resp = execute_sink(graph, "sink")
+        assert resp.status == "ok"
+        assert resp.row_count == 10
+
+    def test_data_source_without_code_returns_all_rows(self, tmp_path):
+        """Without user code the full dataset is returned."""
+        p = tmp_path / "full.parquet"
+        pl.DataFrame({"x": range(500)}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _n({
+                    "id": "src",
+                    "data": {
+                        "label": "src",
+                        "nodeType": "dataSource",
+                        "config": {"path": str(p)},
+                    },
+                }),
+            ],
+            "edges": [],
+        })
+        results = execute_graph(graph)
+        assert results["src"].row_count == 500
+
+    def test_config_json_excludes_code(self):
+        """The JSON config sidecar must not contain 'code' — it lives in .py."""
+        from haute._config_io import collect_node_configs
+
+        graph = _g({
+            "nodes": [
+                _n({
+                    "id": "src",
+                    "data": {
+                        "label": "my_source",
+                        "nodeType": "dataSource",
+                        "config": {
+                            "path": "data.parquet",
+                            "code": "df = df.limit(100)",
+                        },
+                    },
+                }),
+            ],
+            "edges": [],
+        })
+        configs = collect_node_configs(graph)
+        for _path, content in configs.items():
+            parsed = json.loads(content)
+            assert "code" not in parsed, (
+                f"Config JSON should not contain 'code' — it lives in the .py file"
+            )
+
+    def test_parser_extracts_data_source_code_no_sentinel(self, tmp_path):
+        """Parser extracts user code from a dataSource body WITHOUT a sentinel.
+
+        New codegen no longer writes the ``# -- user code --`` sentinel.
+        The parser identifies user code as everything after the
+        auto-generated ``df = pl.scan_parquet(...)`` boilerplate line.
+        """
+        py_file = tmp_path / "pipeline.py"
+        parquet_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(parquet_path)
+
+        py_file.write_text(
+            f'import polars as pl\n'
+            f'import haute\n'
+            f'pipeline = haute.Pipeline("test")\n\n'
+            f'@pipeline.node(config="config/data_source/my_src.json")\n'
+            f'def my_src() -> pl.LazyFrame:\n'
+            f'    """my_src node"""\n'
+            f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
+            f'    df = df.limit(2)\n'
+            f'    return df\n'
+        )
+        cfg_dir = tmp_path / "config" / "data_source"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "my_src.json").write_text(
+            json.dumps({"path": str(parquet_path)})
+        )
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(py_file)
+        assert len(graph.nodes) == 1
+        node = graph.nodes[0]
+        assert node.data.nodeType == "dataSource"
+        code = node.data.config.get("code", "")
+        assert "limit(2)" in code, (
+            f"Parser should extract .limit(2) from the function body, got: {code!r}"
+        )
+
+    def test_parser_extracts_data_source_code_legacy_sentinel(self, tmp_path):
+        """Parser still works with the legacy sentinel format."""
+        py_file = tmp_path / "pipeline.py"
+        parquet_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(parquet_path)
+
+        py_file.write_text(
+            f'import polars as pl\n'
+            f'import haute\n'
+            f'pipeline = haute.Pipeline("test")\n\n'
+            f'@pipeline.node(config="config/data_source/my_src.json")\n'
+            f'def my_src() -> pl.LazyFrame:\n'
+            f'    """my_src node"""\n'
+            f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
+            f'    # -- user code --\n'
+            f'    df = df.limit(2)\n'
+            f'    return df\n'
+        )
+        cfg_dir = tmp_path / "config" / "data_source"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "my_src.json").write_text(
+            json.dumps({"path": str(parquet_path)})
+        )
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(py_file)
+        code = graph.nodes[0].data.config.get("code", "")
+        assert "limit(2)" in code
+
+    def test_parsed_data_source_code_executes_correctly(self, tmp_path):
+        """Full round-trip: parse .py → execute_graph → user code applied."""
+        py_file = tmp_path / "pipeline.py"
+        parquet_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": range(100)}).write_parquet(parquet_path)
+
+        py_file.write_text(
+            f'import polars as pl\n'
+            f'import haute\n'
+            f'pipeline = haute.Pipeline("test")\n\n'
+            f'@pipeline.node(config="config/data_source/src.json")\n'
+            f'def src() -> pl.LazyFrame:\n'
+            f'    """src node"""\n'
+            f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
+            f'    df = df.limit(5)\n'
+            f'    return df\n'
+        )
+        cfg_dir = tmp_path / "config" / "data_source"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "src.json").write_text(
+            json.dumps({"path": str(parquet_path)})
+        )
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(py_file)
+        results = execute_graph(graph)
+        assert results["src"].status == "ok"
+        assert results["src"].row_count == 5, (
+            f"Expected 5 rows (limit applied), got {results['src'].row_count}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # execute_sink
 # ---------------------------------------------------------------------------
 

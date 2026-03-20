@@ -302,11 +302,14 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
 def _extract_sentinel_user_code(body_source: str, return_var: str = "result") -> str:
     """Extract user code between ``# -- user code --`` sentinel and trailing return.
 
-    Used by MODEL_SCORE (``return result``), DATA_SOURCE (``return df``),
-    and any other node type that uses the sentinel pattern.
+    **Legacy support** — older pipeline files use a sentinel comment to
+    delimit auto-generated boilerplate from user code.  New codegen no
+    longer writes the sentinel; the ``_extract_source_user_code`` and
+    ``_extract_model_score_user_code`` functions handle both old and new
+    formats.
 
-    If no sentinel is found the body is entirely auto-generated and we
-    return an empty string.
+    If no sentinel is found returns an empty string (caller should try
+    the non-sentinel extraction path).
     """
     sentinel = "# -- user code --"
     if sentinel not in body_source:
@@ -328,9 +331,115 @@ def _extract_sentinel_user_code(body_source: str, return_var: str = "result") ->
     return _dedent("\n".join(lines)).strip()
 
 
+def _extract_source_user_code(body_source: str) -> str:
+    """Extract user code from a DATA_SOURCE or SCENARIO_EXPANDER body.
+
+    The auto-generated boilerplate is a single assignment line at the
+    top (e.g. ``df = pl.scan_parquet("...")``).  Everything after that
+    assignment — minus the trailing ``return df`` — is user code.
+
+    Supports both the legacy sentinel format (``# -- user code --``)
+    and the new sentinel-free format where user code follows the
+    boilerplate directly.
+    """
+    # Legacy: try sentinel first
+    legacy = _extract_sentinel_user_code(body_source, "df")
+    if legacy:
+        return legacy
+
+    lines = body_source.strip().splitlines()
+    cleaned = _strip_docstring(lines)
+    if not cleaned:
+        return ""
+
+    # Skip the first statement — it's always the auto-generated load.
+    # Detect the end of the first statement (handles multi-line
+    # assignments like ``df = (\n    ...\n)``).
+    first_end = 0
+    depth = 0
+    for i, line in enumerate(cleaned):
+        depth += line.count("(") - line.count(")")
+        if depth <= 0 and i >= first_end:
+            first_end = i + 1
+            break
+
+    rest = cleaned[first_end:]
+    if not rest:
+        return ""
+
+    code = _dedent("\n".join(rest)).strip()
+
+    # Strip trailing return df
+    code_lines = code.splitlines()
+    while code_lines and code_lines[-1].strip() in ("return df", ""):
+        code_lines.pop()
+    if not code_lines:
+        return ""
+
+    code = "\n".join(code_lines).strip()
+
+    # Unwrap codegen chain style: df = (\n...\n)
+    if code.startswith("df = (") or code.startswith("df=("):
+        inner = code.split("(", 1)[1]
+        if inner.rstrip().endswith(")"):
+            inner = inner.rstrip()[:-1]
+        return _dedent(inner).strip()
+
+    return code
+
+
 def _extract_model_score_user_code(body_source: str) -> str:
-    """Extract user post-processing code from a MODEL_SCORE function body."""
-    return _extract_sentinel_user_code(body_source, "result")
+    """Extract user post-processing code from a MODEL_SCORE function body.
+
+    The auto-generated boilerplate is the ``from pathlib ...`` /
+    ``score_from_config(...)`` block.  Everything after the
+    ``result = score_from_config(...)`` line (minus ``return result``)
+    is user code.
+
+    Supports both the legacy sentinel format and the new sentinel-free
+    format.
+    """
+    # Legacy: try sentinel first
+    legacy = _extract_sentinel_user_code(body_source, "result")
+    if legacy:
+        return legacy
+
+    lines = body_source.strip().splitlines()
+    cleaned = _strip_docstring(lines)
+    if not cleaned:
+        return ""
+
+    # Find the score_from_config *call* (not the import) — everything
+    # after it is user code.  The call line contains "= score_from_config"
+    # or "return score_from_config".
+    score_idx = None
+    for i, line in enumerate(cleaned):
+        stripped = line.strip()
+        if "score_from_config(" in stripped and not stripped.startswith(("from ", "import ")):
+            # Handle multi-line calls: find the closing paren
+            depth = line.count("(") - line.count(")")
+            j = i
+            while depth > 0 and j + 1 < len(cleaned):
+                j += 1
+                depth += cleaned[j].count("(") - cleaned[j].count(")")
+            score_idx = j
+            break
+
+    if score_idx is None:
+        return ""
+
+    rest = cleaned[score_idx + 1:]
+    if not rest:
+        return ""
+
+    code = _dedent("\n".join(rest)).strip()
+    code_lines = code.splitlines()
+    while code_lines and code_lines[-1].strip() in ("return result", ""):
+        code_lines.pop()
+    if not code_lines:
+        return ""
+
+    return "\n".join(code_lines).strip()
 
 
 def _extract_external_user_code(body_source: str, param_names: list[str]) -> str:
@@ -577,7 +686,7 @@ def _build_node_config(
             config["combinedColumn"] = str(combined)
     elif node_type == NodeType.SCENARIO_EXPANDER:
         _copy_config_keys(config, decorator_kwargs, SCENARIO_EXPANDER_CONFIG_KEYS)
-        config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
+        config["code"] = _extract_source_user_code(body) if body else ""
     elif node_type == NodeType.OPTIMISER_APPLY:
         _copy_config_keys(config, decorator_kwargs, OPTIMISER_APPLY_CONFIG_KEYS)
     elif node_type == NodeType.OPTIMISER:
@@ -838,7 +947,7 @@ def _resolve_node_config(
         base = base_dir or Path.cwd()
         try:
             loaded = load_node_config(config_ref, base_dir=base)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
             logger.warning("config_path_fallback", original_path=config_ref, func_name=func_name)
             # On Windows the config path may be mangled by backslash
             # escape interpretation (e.g. \b→backspace, \r→CR).  Recover
@@ -858,9 +967,9 @@ def _resolve_node_config(
         elif node_type == NodeType.TRANSFORM:
             config["code"] = _extract_user_code(body, param_names) if body else ""
         elif node_type == NodeType.DATA_SOURCE:
-            config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
+            config["code"] = _extract_source_user_code(body) if body else ""
         elif node_type == NodeType.SCENARIO_EXPANDER:
-            config["code"] = _extract_sentinel_user_code(body, "df") if body else ""
+            config["code"] = _extract_source_user_code(body) if body else ""
     else:
         node_type = _infer_node_type(decorator_kwargs, n_params)
         config = _build_node_config(node_type, decorator_kwargs, body, param_names)

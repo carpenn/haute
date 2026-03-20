@@ -154,9 +154,6 @@ def {func_name}({params}) -> pl.LazyFrame:
     return score_from_config({first_param}, config="{config_path}", base_dir=base)
 '''
 
-_USER_CODE_SENTINEL = "# -- user code --"
-
-
 def _data_source_parts(config: dict) -> tuple[str, str, str]:
     """Return (decorator, imports, load_expr) for a DataSource node.
 
@@ -430,7 +427,6 @@ def _gen_data_source(node: GraphNode, source_names: list[str]) -> str:
         f'    """{description}"""\n'
         f"{imports}"
         f"    df = {load_expr}\n"
-        f"    {_USER_CODE_SENTINEL}\n"
         f"{user_body}\n"
     )
 
@@ -512,7 +508,6 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
             f'    from haute.graph_utils import score_from_config\n'
             f'    base = str(Path(__file__).parent)\n'
             f'    result = score_from_config({first_param}, config="{cfg_path}", base_dir=base)\n'
-            f'    {_USER_CODE_SENTINEL}\n'
             f'{indented}\n'
             f'    return result\n'
         )
@@ -663,7 +658,6 @@ def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
         f"def {func_name}({params}) -> pl.LazyFrame:\n"
         f'    """{description}"""\n'
         f"    df = {first}\n"
-        f"    {_USER_CODE_SENTINEL}\n"
         f"{user_body}\n"
     )
 

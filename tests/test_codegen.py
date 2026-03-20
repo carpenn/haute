@@ -93,25 +93,25 @@ class TestNodeToCode:
             pytest.param(
                 "Load Data",
                 {"path": "data/input.parquet", "code": ".filter(pl.col('x') > 0)"},
-                ["df = pl.scan_parquet", "# -- user code --", "filter", "return df"],
+                ["df = pl.scan_parquet", "filter", "return df"],
                 id="parquet_with_code",
             ),
             pytest.param(
                 "CSV Source",
                 {"path": "data/input.csv", "code": "df = df.select('a', 'b')"},
-                ["df = pl.scan_csv", "# -- user code --", "select", "return df"],
+                ["df = pl.scan_csv", "select", "return df"],
                 id="csv_with_code",
             ),
             pytest.param(
                 "DB Source",
                 {"sourceType": "databricks", "table": "cat.sch.tbl", "code": ".limit(100)"},
-                ["read_cached_table", "# -- user code --", "limit", "return df"],
+                ["read_cached_table", "limit", "return df"],
                 id="databricks_with_code",
             ),
         ],
     )
     def test_data_source_with_code(self, label, config, expected_strings):
-        """DataSource with user code emits sentinel pattern."""
+        """DataSource with user code emits boilerplate + user code."""
         node = _n({
             "id": "src",
             "data": {"label": label, "nodeType": "dataSource", "config": config},

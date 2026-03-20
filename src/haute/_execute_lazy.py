@@ -6,6 +6,7 @@ import gc
 import re
 import time
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -26,6 +27,69 @@ from haute._types import (
 )
 
 logger = get_logger(component="execute")
+
+
+# ---------------------------------------------------------------------------
+# Adaptive checkpoint strategy
+# ---------------------------------------------------------------------------
+
+# Number of checkpoints between gc.collect() + _malloc_trim() calls.
+# Polars objects use Rust Arc refcounting and are freed immediately on
+# ``del``; Python gc.collect() only helps with cyclic garbage (rare here).
+# Batching avoids the overhead of scanning all Python objects per checkpoint.
+_GC_BATCH_INTERVAL = 3
+
+
+class _CheckpointAction(StrEnum):
+    """What to do at a potential checkpoint boundary."""
+
+    SKIP = "skip"
+    """Keep the LazyFrame as-is — no materialization needed."""
+
+    COLLECT_LAZY = "collect_lazy"
+    """Materialize in RAM via ``collect().lazy()`` to break plan
+    duplication without disk I/O.  Only used when the estimated
+    intermediate fits comfortably in available memory."""
+
+    PARQUET = "parquet"
+    """Sink to a temp parquet file and replace with ``scan_parquet``.
+    The safest option — frees RAM and isolates the query plan."""
+
+
+def _checkpoint_decision(
+    nid: str,
+    is_source: bool,
+    n_parents: int,
+    n_children: int,
+    feeds_join: bool,
+    node_map: dict[str, GraphNode],
+    scenario: str,
+) -> _CheckpointAction:
+    """Decide whether and how to checkpoint a node's output.
+
+    Uses the same three structural triggers as before (joins, fan-outs,
+    join-feeders) but skips MODEL_SCORE nodes in batch mode because
+    the batched scorer already sinks to temp parquet and returns
+    ``scan_parquet(scored_path)`` — an implicit checkpoint.  Adding
+    another parquet round-trip on top is pure waste.
+    """
+    if is_source:
+        return _CheckpointAction.SKIP
+
+    needs_checkpoint = n_parents > 1 or n_children > 1 or feeds_join
+    if not needs_checkpoint:
+        return _CheckpointAction.SKIP
+
+    # MODEL_SCORE in batch mode already returns scan_parquet — skip.
+    node = node_map.get(nid)
+    if (
+        node is not None
+        and node.data.nodeType == NodeType.MODEL_SCORE
+        and scenario != "live"
+    ):
+        return _CheckpointAction.SKIP
+
+    return _CheckpointAction.PARQUET
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +275,11 @@ def _execute_lazy(
     # can be safely deleted (freeing Polars/Rust Arrow buffers).
     remaining: dict[str, int] = dict(children_count)
 
+    # Batch gc.collect() calls — Polars objects use Rust Arc refcounting
+    # and are freed immediately on ``del``.  gc.collect() only helps with
+    # cyclic Python garbage (rare here) and adds 50-200 ms per call.
+    checkpoints_since_gc = 0
+
     for nid in order:
         fn, is_source = funcs[nid]
         if is_source:
@@ -228,32 +297,37 @@ def _execute_lazy(
         # Apply selected_columns filter for downstream propagation
         lf = _apply_selected_columns(lf, node_map[nid].data.config)
 
-        # Checkpoint to break Polars plan duplication and chained-join
-        # memory accumulation (pola-rs/polars#24206).  Three triggers:
-        #   1. Multi-input nodes (joins) — each join materialises both
-        #      sides; checkpointing isolates each join step.
-        #   2. Fan-out nodes (>1 downstream consumer) — without a
-        #      checkpoint Polars re-executes the full upstream plan once
-        #      per consumer branch, duplicating I/O and memory.
-        #   3. Nodes that feed into a join — when a compute-heavy node
-        #      (e.g. model scoring) feeds a join, the join's sink would
-        #      re-execute the full upstream plan.  Checkpointing the
-        #      feeder ensures the join reads from parquet instead.
-        # Sink to a temp parquet file and replace with scan_parquet so
-        # Polars sees an independent query plan per segment.
+        # Adaptive checkpoint to break Polars plan duplication and
+        # chained-join memory accumulation (pola-rs/polars#24206).
+        #
+        # Three structural triggers (joins, fan-outs, join-feeders) are
+        # evaluated by _checkpoint_decision which chooses the cheapest
+        # safe strategy:
+        #   PARQUET      — disk round-trip, safest, frees RAM
+        #   COLLECT_LAZY — in-memory materialization, no I/O, breaks
+        #                  plan duplication but holds data in RAM
+        #   SKIP         — keep the LazyFrame as-is (source nodes,
+        #                  batch MODEL_SCORE which already checkpoints
+        #                  internally, or nodes that don't need it)
         n_parents = len(parents_of.get(nid, []))
         n_children = children_count.get(nid, 0)
         feeds_join = any(
             len(parents_of.get(cid, [])) > 1
             for cid in children_of.get(nid, [])
         )
-        if (
-            checkpoint_dir is not None
-            and not is_source
-            and (n_parents > 1 or n_children > 1 or feeds_join)
-        ):
+
+        action = _checkpoint_decision(
+            nid, is_source, n_parents, n_children, feeds_join,
+            node_map, scenario or "live",
+        )
+
+        if checkpoint_dir is not None and action == _CheckpointAction.PARQUET:
             tmp = checkpoint_dir / f"{nid}.parquet"
-            safe_sink(lf if isinstance(lf, pl.LazyFrame) else lf.lazy(), tmp)
+            safe_sink(
+                lf if isinstance(lf, pl.LazyFrame) else lf.lazy(),
+                tmp,
+                fast_checkpoint=True,
+            )
 
             # Drop the old LazyFrame (and any cached Arrow buffers it
             # holds) before replacing with a fresh scan reference.
@@ -267,11 +341,15 @@ def _execute_lazy(
                 _, pid_is_source = funcs.get(pid, (None, False))
                 if remaining[pid] <= 0 and pid in lazy_outputs and not pid_is_source:
                     del lazy_outputs[pid]
-            gc.collect()
-            _malloc_trim()
+
+            checkpoints_since_gc += 1
+            if checkpoints_since_gc >= _GC_BATCH_INTERVAL:
+                gc.collect()
+                _malloc_trim()
+                checkpoints_since_gc = 0
 
             lf = pl.scan_parquet(tmp)
-            logger.info("checkpoint_written", node_id=nid, path=str(tmp))
+            logger.info("checkpoint_parquet", node_id=nid, path=str(tmp))
 
         lazy_outputs[nid] = lf
 
