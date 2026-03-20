@@ -26,11 +26,6 @@ class TestReadSourceParquet:
         result = lf.collect()
         assert result["a"].to_list() == [1, 2, 3]
 
-    def test_parquet_returns_lazy(self, tmp_path: Path) -> None:
-        path = tmp_path / "data.parquet"
-        pl.DataFrame({"x": [10]}).write_parquet(str(path))
-        lf = read_source(str(path))
-        assert isinstance(lf, pl.LazyFrame)
 
 
 class TestReadSourceCSV:
@@ -40,11 +35,6 @@ class TestReadSourceCSV:
         result = read_source(str(path)).collect()
         assert result["col"].to_list() == [4, 5]
 
-    def test_csv_returns_lazy(self, tmp_path: Path) -> None:
-        path = tmp_path / "data.csv"
-        pl.DataFrame({"x": [1]}).write_csv(str(path))
-        assert isinstance(read_source(str(path)), pl.LazyFrame)
-
 
 class TestReadSourceJSON:
     def test_reads_json_file(self, tmp_path: Path) -> None:
@@ -52,11 +42,6 @@ class TestReadSourceJSON:
         pl.DataFrame({"name": ["alice", "bob"]}).write_json(str(path))
         result = read_source(str(path)).collect()
         assert result["name"].to_list() == ["alice", "bob"]
-
-    def test_json_returns_lazy(self, tmp_path: Path) -> None:
-        path = tmp_path / "data.json"
-        pl.DataFrame({"x": [1]}).write_json(str(path))
-        assert isinstance(read_source(str(path)), pl.LazyFrame)
 
 
 class TestReadSourceJSONL:

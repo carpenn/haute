@@ -6,9 +6,12 @@ function reset() {
     paletteOpen: true,
     shortcutsOpen: false,
     submodelDialog: null,
+    renameDialog: null,
     syncBanner: null,
     dirty: false,
     nodePanelWidth: 0,
+    hoveredNodeId: null,
+    nodeSearchOpen: false,
   })
 }
 
@@ -127,6 +130,106 @@ describe("useUIStore", () => {
     it("setNodePanelWidth updates the width", () => {
       useUIStore.getState().setNodePanelWidth(600)
       expect(useUIStore.getState().nodePanelWidth).toBe(600)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // hoveredNodeId — connected edges glow, unconnected nodes dim
+  // Catches: forgetting to clear hoveredNodeId on mouse-leave would leave
+  // the canvas permanently dimmed.
+  // -----------------------------------------------------------------------
+
+  describe("hoveredNodeId", () => {
+    it("defaults to null", () => {
+      expect(useUIStore.getState().hoveredNodeId).toBeNull()
+    })
+
+    it("setHoveredNodeId sets a node id", () => {
+      useUIStore.getState().setHoveredNodeId("node-42")
+      expect(useUIStore.getState().hoveredNodeId).toBe("node-42")
+    })
+
+    it("setHoveredNodeId(null) clears the hover", () => {
+      useUIStore.getState().setHoveredNodeId("node-42")
+      useUIStore.getState().setHoveredNodeId(null)
+      expect(useUIStore.getState().hoveredNodeId).toBeNull()
+    })
+
+    it("overwriting with a different node id replaces the previous one", () => {
+      useUIStore.getState().setHoveredNodeId("node-1")
+      useUIStore.getState().setHoveredNodeId("node-2")
+      expect(useUIStore.getState().hoveredNodeId).toBe("node-2")
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // nodeSearchOpen (Ctrl+K) — supports both boolean and function updater
+  // Catches: if the function updater path were removed, Ctrl+K toggle
+  // (setNodeSearchOpen(prev => !prev)) would silently fail.
+  // -----------------------------------------------------------------------
+
+  describe("nodeSearchOpen", () => {
+    it("defaults to false", () => {
+      expect(useUIStore.getState().nodeSearchOpen).toBe(false)
+    })
+
+    it("setNodeSearchOpen(true) opens node search", () => {
+      useUIStore.getState().setNodeSearchOpen(true)
+      expect(useUIStore.getState().nodeSearchOpen).toBe(true)
+    })
+
+    it("setNodeSearchOpen accepts a function updater (toggle pattern)", () => {
+      useUIStore.getState().setNodeSearchOpen(false)
+      useUIStore.getState().setNodeSearchOpen((prev) => !prev)
+      expect(useUIStore.getState().nodeSearchOpen).toBe(true)
+      useUIStore.getState().setNodeSearchOpen((prev) => !prev)
+      expect(useUIStore.getState().nodeSearchOpen).toBe(false)
+    })
+
+    it("function updater reads current state, not stale closure value", () => {
+      // Simulate rapid toggle: open then immediately toggle via updater
+      useUIStore.getState().setNodeSearchOpen(true)
+      useUIStore.getState().setNodeSearchOpen((prev) => {
+        // prev should be true because we just set it
+        expect(prev).toBe(true)
+        return false
+      })
+      expect(useUIStore.getState().nodeSearchOpen).toBe(false)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // renameDialog — stores nodeId + currentLabel for the rename modal
+  // Catches: if renameDialog shape changes (e.g. dropping currentLabel),
+  // the rename modal would render with undefined text.
+  // -----------------------------------------------------------------------
+
+  describe("renameDialog", () => {
+    it("defaults to null", () => {
+      expect(useUIStore.getState().renameDialog).toBeNull()
+    })
+
+    it("setRenameDialog opens with nodeId and currentLabel", () => {
+      useUIStore.getState().setRenameDialog({ nodeId: "n-7", currentLabel: "My Node" })
+      expect(useUIStore.getState().renameDialog).toEqual({
+        nodeId: "n-7",
+        currentLabel: "My Node",
+      })
+    })
+
+    it("setRenameDialog(null) clears the dialog", () => {
+      useUIStore.getState().setRenameDialog({ nodeId: "n-7", currentLabel: "My Node" })
+      useUIStore.getState().setRenameDialog(null)
+      expect(useUIStore.getState().renameDialog).toBeNull()
+    })
+
+    it("replacing one dialog with another updates atomically", () => {
+      useUIStore.getState().setRenameDialog({ nodeId: "n-1", currentLabel: "First" })
+      useUIStore.getState().setRenameDialog({ nodeId: "n-2", currentLabel: "Second" })
+      expect(useUIStore.getState().renameDialog).toEqual({
+        nodeId: "n-2",
+        currentLabel: "Second",
+      })
     })
   })
 })

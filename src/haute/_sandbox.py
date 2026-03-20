@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import builtins
 import pickle
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -83,11 +84,18 @@ _BLOCKED_BUILTINS = frozenset({
     "compile",
     "eval",
     "exec",
+    "getattr",
+    "setattr",
+    "delattr",
     "globals",
     "locals",
     "open",
     "input",
     "memoryview",
+    "vars",
+    "dir",
+    "type",
+    "hasattr",
 })
 
 _SAFE_BUILTINS: dict[str, Any] = {
@@ -147,6 +155,23 @@ _BLOCKED_ATTRS = frozenset({
     "__spec__",
 })
 
+# Non-dunder attribute names that enable frame/traceback inspection escapes.
+_BLOCKED_FRAME_ATTRS = frozenset({
+    "__traceback__",
+    "tb_frame",
+    "tb_next",
+    "f_globals",
+    "f_locals",
+    "f_builtins",
+    "f_code",
+    "gi_frame",
+    "gi_code",
+    "cr_frame",
+    "cr_code",
+    "ag_frame",
+    "ag_code",
+})
+
 # Built-in function names that can be used to bypass attribute restrictions.
 _BLOCKED_CALLS = frozenset({
     "getattr",
@@ -199,6 +224,12 @@ class _ASTValidator(ast.NodeVisitor):
                 raise UnsafeCodeError(
                     f"Access to '{node.attr}' is blocked in pipeline code"
                 )
+        # Block traceback frame access — prevents sandbox escape via
+        # exception handler: e.__traceback__.tb_frame.f_globals
+        if node.attr in _BLOCKED_FRAME_ATTRS:
+            raise UnsafeCodeError(
+                f"Access to '{node.attr}' is blocked in pipeline code"
+            )
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -206,6 +237,15 @@ class _ASTValidator(ast.NodeVisitor):
         if isinstance(node.func, ast.Name) and node.func.id in _BLOCKED_CALLS:
             raise UnsafeCodeError(
                 f"Call to '{node.func.id}()' is blocked in pipeline code"
+            )
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        # Block __builtins__["getattr"] style access — prevents retrieving
+        # blocked callables via dict subscription on the builtins namespace.
+        if isinstance(node.value, ast.Name) and node.value.id == "__builtins__":
+            raise UnsafeCodeError(
+                "Subscript access to '__builtins__' is blocked in pipeline code"
             )
         self.generic_visit(node)
 
@@ -385,6 +425,9 @@ def safe_unpickle(path: str | Path) -> Any:
         return _RestrictedUnpickler(f).load()
 
 
+_joblib_lock = threading.Lock()
+
+
 def safe_joblib_load(path: str | Path) -> Any:
     """Deserialize a joblib file using a restricted unpickler.
 
@@ -409,7 +452,9 @@ def safe_joblib_load(path: str | Path) -> Any:
     def _restricted_joblib_find_class(self: Any, module: str, name: str) -> Any:
         """find_class with allowlist, delegating to the original on match."""
         for prefix in _ALLOWED_PICKLE_PREFIXES:
-            if module.startswith(prefix[0]):
+            if len(prefix) == 1 and module.startswith(prefix[0]):
+                return original_find_class(self, module, name)
+            if len(prefix) == 2 and module == prefix[0] and name == prefix[1]:
                 return original_find_class(self, module, name)
         raise pickle.UnpicklingError(
             f"Blocked unpickling of {module}.{name} — "
@@ -418,10 +463,11 @@ def safe_joblib_load(path: str | Path) -> Any:
             f"src/haute/_sandbox.py"
         )
 
-    NumpyUnpickler.find_class = _restricted_joblib_find_class
-    try:
-        import joblib
+    with _joblib_lock:
+        NumpyUnpickler.find_class = _restricted_joblib_find_class
+        try:
+            import joblib
 
-        return joblib.load(validated)
-    finally:
-        NumpyUnpickler.find_class = original_find_class
+            return joblib.load(validated)
+        finally:
+            NumpyUnpickler.find_class = original_find_class

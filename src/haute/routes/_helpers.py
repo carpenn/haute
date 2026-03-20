@@ -250,7 +250,7 @@ def load_sidecar(py_path: Path) -> dict[str, Any]:
     if sidecar.exists():
         try:
             return dict(_json.loads(sidecar.read_text()))
-        except (_json.JSONDecodeError, OSError) as e:
+        except (_json.JSONDecodeError, OSError, TypeError, ValueError) as e:
             logger.warning("corrupt_sidecar", file=sidecar.name, error=str(e))
     return {}
 

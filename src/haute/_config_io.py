@@ -70,13 +70,28 @@ def config_path_for_node(
 
     Returns a relative path like ``config/banding/optimiser_banding.json``.
     If *base_dir* is provided, returns an absolute path.
+
+    Raises ``ValueError`` if *node_name* contains path separators or ``..``
+    that would escape the config directory.
     """
     folder = NODE_TYPE_TO_FOLDER.get(node_type)
     if folder is None:
         raise ValueError(f"No config folder for node type {node_type!r}")
+    # Sanitize node_name to prevent path traversal
+    if ".." in node_name or "/" in node_name or "\\" in node_name:
+        raise ValueError(
+            f"Invalid node name {node_name!r}: must not contain "
+            f"path separators or '..'"
+        )
     rel = Path("config") / folder / f"{node_name}.json"
     if base_dir:
-        return base_dir / rel
+        abs_path = (base_dir / rel).resolve()
+        config_root = (base_dir / "config").resolve()
+        if not abs_path.is_relative_to(config_root):
+            raise ValueError(
+                f"Config path for {node_name!r} escapes config directory"
+            )
+        return abs_path
     return rel
 
 
@@ -92,11 +107,21 @@ def load_node_config(
     """Load a node's config from its JSON file.
 
     *config_path* can be relative (resolved against *base_dir*) or absolute.
+
+    Raises ``ValueError`` if the resolved path escapes *base_dir*.
     """
     p = Path(config_path)
     if not p.is_absolute() and base_dir:
         p = base_dir / p
-    return dict(json.loads(p.read_text()))
+    resolved = p.resolve()
+    # Validate path stays within project directory
+    if base_dir:
+        root = base_dir.resolve()
+        if not resolved.is_relative_to(root):
+            raise ValueError(
+                f"Config path {config_path!r} resolves outside project root"
+            )
+    return dict(json.loads(resolved.read_text()))
 
 
 def save_node_config(
@@ -150,6 +175,10 @@ def find_config_by_func_name(
 
     Returns ``(config_dict, node_type)`` on success, or ``None``.
     """
+    # Reject func_name with path separators to prevent traversal
+    if ".." in func_name or "/" in func_name or "\\" in func_name:
+        logger.warning("config_recovery_rejected", func=func_name, reason="path traversal")
+        return None
     for folder, node_type in FOLDER_TO_NODE_TYPE.items():
         candidate = base_dir / "config" / folder / f"{func_name}.json"
         if candidate.is_file():

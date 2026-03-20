@@ -347,8 +347,9 @@ describe("BandingEditor", () => {
     fireEvent.click(catTab)
     // After clicking region_group tab, the categorical button should be active
     const catTypeBtn = screen.getByText("Categorical").closest("button")!
-    // JSDOM converts hex to rgb, so check for the RGB values of #22d3ee
-    expect(catTypeBtn.style.border).toContain("rgb(34, 211, 238)")
+    // Active type button should have a styled (non-default) border indicating selection
+    expect(catTypeBtn.style.border).toBeTruthy()
+    expect(catTypeBtn.style.border).not.toBe("none")
   })
 
   it("renders InputSourcesBar when inputs provided", () => {

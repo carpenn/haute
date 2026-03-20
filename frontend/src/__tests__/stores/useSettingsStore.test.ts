@@ -16,7 +16,7 @@ import { checkMlflow } from "../../api/client.ts"
 
 function resetStore() {
   useSettingsStore.setState({
-    rowLimit: 1000,
+    rowLimit: 100,  // store default is 100, not 1000
     collapsedSections: {},
     mlflow: { status: "pending", backend: "", host: "" },
     _mlflowFetching: false,
@@ -40,8 +40,10 @@ describe("useSettingsStore", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("setRowLimit", () => {
-    it("defaults to 1000", () => {
-      expect(useSettingsStore.getState().rowLimit).toBe(1000)
+    it("defaults to 100", () => {
+      // The store's actual default is 100 (not 1000). This test catches drift
+      // between the reset helper and the real store initialiser.
+      expect(useSettingsStore.getState().rowLimit).toBe(100)
     })
 
     it("updates row limit", () => {
@@ -262,6 +264,127 @@ describe("useSettingsStore", () => {
       const slug = useSettingsStore.getState().addScenario("New Scenario")
       const scenarios = useSettingsStore.getState().scenarios
       expect(scenarios).toContain(slug)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // removeScenario
+  // Catches: removing a scenario that is currently active would leave
+  // activeScenario pointing at a nonexistent scenario, breaking data
+  // source routing.
+  // ────────────────────────────────────────────────────────────────
+
+  describe("removeScenario", () => {
+    it("removes a non-live scenario from the list", () => {
+      useSettingsStore.getState().addScenario("test_sc")
+      expect(useSettingsStore.getState().scenarios).toContain("test_sc")
+
+      useSettingsStore.getState().removeScenario("test_sc")
+      expect(useSettingsStore.getState().scenarios).not.toContain("test_sc")
+    })
+
+    it("cannot remove the 'live' scenario (always present)", () => {
+      useSettingsStore.getState().removeScenario("live")
+      expect(useSettingsStore.getState().scenarios).toContain("live")
+    })
+
+    it("resets activeScenario to 'live' when removing the active scenario", () => {
+      useSettingsStore.getState().addScenario("staging")
+      useSettingsStore.getState().setActiveScenario("staging")
+      expect(useSettingsStore.getState().activeScenario).toBe("staging")
+
+      useSettingsStore.getState().removeScenario("staging")
+      expect(useSettingsStore.getState().activeScenario).toBe("live")
+    })
+
+    it("does not change activeScenario when removing a non-active scenario", () => {
+      useSettingsStore.getState().addScenario("sc_a")
+      useSettingsStore.getState().addScenario("sc_b")
+      useSettingsStore.getState().setActiveScenario("sc_a")
+
+      useSettingsStore.getState().removeScenario("sc_b")
+      expect(useSettingsStore.getState().activeScenario).toBe("sc_a")
+    })
+
+    it("removing a nonexistent scenario is a no-op", () => {
+      const before = useSettingsStore.getState().scenarios.slice()
+      useSettingsStore.getState().removeScenario("ghost")
+      expect(useSettingsStore.getState().scenarios).toEqual(before)
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // setScenarios / setActiveScenario — direct setters
+  // Catches: if setScenarios were accidentally removed or renamed,
+  // pipeline load (which bulk-sets scenarios from the backend) would
+  // break silently.
+  // ────────────────────────────────────────────────────────────────
+
+  describe("setScenarios / setActiveScenario", () => {
+    it("setScenarios replaces the entire scenario list", () => {
+      useSettingsStore.getState().setScenarios(["live", "staging", "prod"])
+      expect(useSettingsStore.getState().scenarios).toEqual(["live", "staging", "prod"])
+    })
+
+    it("setActiveScenario switches the active scenario", () => {
+      useSettingsStore.getState().setScenarios(["live", "staging"])
+      useSettingsStore.getState().setActiveScenario("staging")
+      expect(useSettingsStore.getState().activeScenario).toBe("staging")
+    })
+
+    it("setScenarios does not affect activeScenario", () => {
+      useSettingsStore.getState().setActiveScenario("live")
+      useSettingsStore.getState().setScenarios(["live", "new_sc"])
+      expect(useSettingsStore.getState().activeScenario).toBe("live")
+    })
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // MLflow 5-second timeout race
+  // Catches: if the 5s timeout is removed, a hung MLflow check would
+  // block the UI indefinitely with status "pending" / spinner.
+  // ────────────────────────────────────────────────────────────────
+
+  describe("MLflow 5s timeout", () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it("times out and sets error status when checkMlflow hangs for >5s", async () => {
+      const mockCheckMlflow = vi.mocked(checkMlflow)
+      // Return a promise that never resolves
+      mockCheckMlflow.mockReturnValue(new Promise(() => {}))
+
+      useSettingsStore.getState().fetchMlflow()
+
+      // Advance past the 5s timeout
+      vi.advanceTimersByTime(5_001)
+
+      // Allow microtasks (Promise.race rejection, .catch, .finally) to flush
+      await vi.waitFor(() => {
+        expect(useSettingsStore.getState().mlflow.status).toBe("error")
+      })
+      expect(useSettingsStore.getState()._mlflowFetching).toBe(false)
+    })
+
+    it("succeeds before the timeout if checkMlflow resolves quickly", async () => {
+      const mockCheckMlflow = vi.mocked(checkMlflow)
+      mockCheckMlflow.mockResolvedValue({ mlflow_installed: true, backend: "local" })
+
+      useSettingsStore.getState().fetchMlflow()
+
+      // Let the resolved promise flush
+      await vi.waitFor(() => {
+        expect(useSettingsStore.getState().mlflow.status).toBe("connected")
+      })
+
+      // The timeout should not overwrite the connected status even if it fires later
+      vi.advanceTimersByTime(6_000)
+      expect(useSettingsStore.getState().mlflow.status).toBe("connected")
     })
   })
 })

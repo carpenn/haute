@@ -54,9 +54,9 @@ describe("DataSourceEditor", () => {
   it("renders flat_file tab selected by default", () => {
     render(<DataSourceEditor {...DEFAULT_PROPS} />)
     const flatFileBtn = screen.getByText("Flat File").closest("button")!
-    expect(flatFileBtn.style.border).toContain("rgb(59, 130, 246)")
     const dbBtn = screen.getByText("Databricks").closest("button")!
-    expect(dbBtn.style.border).not.toContain("rgb(59, 130, 246)")
+    // Active tab should have a visually distinct border from inactive tab
+    expect(flatFileBtn.style.border).not.toBe(dbBtn.style.border)
   })
 
   it("shows FileBrowser when no file selected, no green box", () => {

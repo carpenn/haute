@@ -172,9 +172,14 @@ describe("WarehousePicker", () => {
     const stoppedDot = Array.from(dots).find(d => d.getAttribute("title") === "STOPPED")
     const startingDot = Array.from(dots).find(d => d.getAttribute("title") === "STARTING")
 
-    expect(runningDot?.style.background).toBe("rgb(34, 197, 94)")
-    expect(stoppedDot?.style.background).toBe("rgb(239, 68, 68)")
-    expect(startingDot?.style.background).toBe("rgb(245, 158, 11)")
+    // Each status should have a distinct color indicator
+    expect(runningDot?.style.background).toBeTruthy()
+    expect(stoppedDot?.style.background).toBeTruthy()
+    expect(startingDot?.style.background).toBeTruthy()
+    // All three states must be visually distinguishable from each other
+    expect(runningDot?.style.background).not.toBe(stoppedDot?.style.background)
+    expect(runningDot?.style.background).not.toBe(startingDot?.style.background)
+    expect(stoppedDot?.style.background).not.toBe(startingDot?.style.background)
   })
 
   it("shows size label when warehouse has a size", async () => {

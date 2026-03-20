@@ -721,6 +721,146 @@ describe("useNodeResultsStore", () => {
       expect(cached.result.history).toHaveLength(1)
     })
 
+    // ────────────────────────────────────────────────────────────
+    // getModellingPreview — error-status filtering
+    // Catches: if the error filter is removed, the panel would try
+    // to render charts from a failed training result with missing
+    // fields (feature_importance, metrics, etc.), causing a crash.
+    // ────────────────────────────────────────────────────────────
+
+    it("getModellingPreview returns null when train result has error status", () => {
+      const s = useNodeResultsStore.getState()
+      s.startTrainJob("t1", "tj-1", "Model Node", "cfg-h")
+      s.completeTrainJob("t1", makeTrainResult({ status: "error", error: "OOM" }))
+
+      const preview = useNodeResultsStore.getState().getModellingPreview("t1")
+      expect(preview).toBeNull()
+    })
+
+    it("getModellingPreview returns result when status is 'completed'", () => {
+      const s = useNodeResultsStore.getState()
+      s.startTrainJob("t1", "tj-1", "Model Node", "cfg-h")
+      s.completeTrainJob("t1", makeTrainResult({ status: "completed" }))
+
+      const preview = useNodeResultsStore.getState().getModellingPreview("t1")
+      expect(preview).not.toBeNull()
+      expect(preview!.result.status).toBe("completed")
+      expect(preview!.jobId).toBe("tj-1")
+      expect(preview!.configHash).toBe("cfg-h")
+    })
+
+    it("getModellingPreview returns null when no train result exists", () => {
+      expect(useNodeResultsStore.getState().getModellingPreview("ghost")).toBeNull()
+    })
+
+    it("getModellingPreview uses active job nodeLabel if still running", () => {
+      const s = useNodeResultsStore.getState()
+      // Start a job, complete it, then start another job for the same node
+      s.startTrainJob("t1", "tj-1", "First Label", "h1")
+      s.completeTrainJob("t1", makeTrainResult())
+      // Start a new job (different config) — old result still cached
+      s.startTrainJob("t1", "tj-2", "Updated Label", "h2")
+
+      const preview = useNodeResultsStore.getState().getModellingPreview("t1")
+      expect(preview).not.toBeNull()
+      // nodeLabel should come from the active job, not the cached result
+      expect(preview!.nodeLabel).toBe("Updated Label")
+    })
+
+    it("getModellingPreview falls back to 'Model' when no active job", () => {
+      const s = useNodeResultsStore.getState()
+      // Complete directly without a job (direct completion path)
+      s.completeTrainJob("t1", makeTrainResult())
+
+      const preview = useNodeResultsStore.getState().getModellingPreview("t1")
+      expect(preview).not.toBeNull()
+      expect(preview!.nodeLabel).toBe("Model")
+    })
+
+    // ────────────────────────────────────────────────────────────
+    // Scenario-keyed columns
+    // Catches: if the scenario key separator changes or scenario
+    // parameter is ignored, columns from different scenarios would
+    // overwrite each other, showing stale schema in the panel.
+    // ────────────────────────────────────────────────────────────
+
+    it("setColumns with scenario key isolates columns per scenario", () => {
+      const s = useNodeResultsStore.getState()
+      const liveColumns = [{ name: "premium", dtype: "float64" }]
+      const stagingColumns = [{ name: "premium", dtype: "float64" }, { name: "discount", dtype: "float64" }]
+
+      s.setColumns("src-1", liveColumns, 0, "live")
+      s.setColumns("src-1", stagingColumns, 0, "staging")
+
+      const liveResult = useNodeResultsStore.getState().getColumns("src-1", "live")
+      const stagingResult = useNodeResultsStore.getState().getColumns("src-1", "staging")
+
+      expect(liveResult!.columns).toEqual(liveColumns)
+      expect(stagingResult!.columns).toEqual(stagingColumns)
+      expect(liveResult!.columns).not.toEqual(stagingResult!.columns)
+    })
+
+    it("getColumns without scenario returns bare nodeId entry", () => {
+      const s = useNodeResultsStore.getState()
+      const cols = [{ name: "x", dtype: "int64" }]
+      s.setColumns("src-1", cols, 0)
+
+      // Bare key should work
+      expect(useNodeResultsStore.getState().getColumns("src-1")!.columns).toEqual(cols)
+      // Scenario-keyed lookup should not find it
+      expect(useNodeResultsStore.getState().getColumns("src-1", "live")).toBeNull()
+    })
+
+    it("scenario-keyed columns become stale after bumpGraphVersion", () => {
+      const s = useNodeResultsStore.getState()
+      s.setColumns("src-1", [{ name: "a", dtype: "float64" }], 0, "staging")
+      s.bumpGraphVersion()
+
+      const result = useNodeResultsStore.getState().getColumns("src-1", "staging")
+      expect(result).not.toBeNull()
+      expect(result!.fresh).toBe(false)
+    })
+
+    // ────────────────────────────────────────────────────────────
+    // Concurrent solve/train for same nodeId
+    // Catches: if a user kicks off an optimiser solve and a training
+    // run on the same node, one should not clobber the other.
+    // ────────────────────────────────────────────────────────────
+
+    it("concurrent solve and train jobs on the same nodeId are independent", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "sj-1", "Node 1", { c: { min: 0 } }, "sh1")
+      s.startTrainJob("n1", "tj-1", "Node 1", "th1")
+
+      // Both should exist
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeDefined()
+      expect(useNodeResultsStore.getState().trainJobs["n1"]).toBeDefined()
+
+      // Complete solve — train should still be running
+      s.completeSolveJob("n1", makeSolveResult())
+      expect(useNodeResultsStore.getState().solveResults["n1"]).toBeDefined()
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
+      expect(useNodeResultsStore.getState().trainJobs["n1"]).toBeDefined()
+
+      // Complete train — solve result should still be there
+      s.completeTrainJob("n1", makeTrainResult())
+      expect(useNodeResultsStore.getState().trainResults["n1"]).toBeDefined()
+      expect(useNodeResultsStore.getState().solveResults["n1"]).toBeDefined()
+    })
+
+    it("failing solve does not affect concurrent train job", () => {
+      const s = useNodeResultsStore.getState()
+      s.startSolveJob("n1", "sj-1", "Node 1", {}, "sh1")
+      s.startTrainJob("n1", "tj-1", "Node 1", "th1")
+
+      s.failSolveJob("n1", "Solver diverged")
+
+      // Solve job has error, but train job is untouched
+      expect(useNodeResultsStore.getState().solveJobs["n1"].error).toBe("Solver diverged")
+      expect(useNodeResultsStore.getState().trainJobs["n1"].error).toBeNull()
+      expect(useNodeResultsStore.getState().trainJobs["n1"].progress).toBeNull()
+    })
+
     it("getOptimiserPreview includes frontier and selectedPointIndex", () => {
       const s = useNodeResultsStore.getState()
       const constraints = { vol: { min: 0.9 } }

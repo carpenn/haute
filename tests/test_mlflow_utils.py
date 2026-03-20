@@ -18,13 +18,15 @@ class TestSearchVersions:
     def test_calls_client_with_quoted_name(self):
         client = MagicMock()
         client.search_model_versions.return_value = []
-        search_versions(client, "my_model")
+        result = search_versions(client, "my_model")
+        assert result == []
         client.search_model_versions.assert_called_once_with("name='my_model'")
 
     def test_escapes_single_quotes_in_model_name(self):
         client = MagicMock()
         client.search_model_versions.return_value = []
-        search_versions(client, "model's_name")
+        result = search_versions(client, "model's_name")
+        assert result == []
         call_arg = client.search_model_versions.call_args[0][0]
         assert "\\'" in call_arg
 
@@ -48,7 +50,8 @@ class TestResolveVersion:
 
     def test_explicit_version_does_not_call_search(self):
         client = MagicMock()
-        resolve_version(client, "model", "3")
+        result = resolve_version(client, "model", "3")
+        assert result == "3"
         client.search_model_versions.assert_not_called()
 
     def test_latest_resolves_to_highest(self):

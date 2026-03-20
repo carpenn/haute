@@ -168,8 +168,14 @@ class TestWarnUnrecognizedConfigKeys:
         """Even with weird input, the function must not raise."""
         # None node type
         assert warn_unrecognized_config_keys(None, {"x": 1}) == []  # type: ignore[arg-type]
-        # Non-dict config -- guard against AttributeError
+        # Non-dict config -- guard against TypeError on iteration
         # (the function signature says dict, but let's be defensive)
+        try:
+            result = warn_unrecognized_config_keys(NodeType.POLARS, 42)  # type: ignore[arg-type]
+        except TypeError:
+            pass  # acceptable — non-iterable input may raise
+        else:
+            assert isinstance(result, list)
 
 
 # ---------------------------------------------------------------------------

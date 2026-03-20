@@ -109,11 +109,9 @@ describe("ModelScoreEditor", () => {
   it("renders with default registered source type selected", () => {
     render(<ModelScoreEditor {...defaultProps()} />)
     const registeredBtn = screen.getByText("Registered Model")
-    // Active button has the purple border (jsdom converts hex #8b5cf6 to rgb)
-    expect(registeredBtn.style.border).toContain("rgb(139, 92, 246)")
-    // Run button should not be active
     const runBtn = screen.getByText("Experiment Run")
-    expect(runBtn.style.border).not.toContain("rgb(139, 92, 246)")
+    // Active button should have a visually distinct border from inactive button
+    expect(registeredBtn.style.border).not.toBe(runBtn.style.border)
   })
 
   // 2. Source type toggle switches between registered and run

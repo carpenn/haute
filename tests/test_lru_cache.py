@@ -240,6 +240,11 @@ class TestConcurrency:
 
         assert not errors
         assert len(cache) <= 50
+        # Data integrity: every retrievable value must be correct (key * 2)
+        for key in range(500):
+            val = cache.get(key)
+            if val is not None:
+                assert val == key * 2, f"key={key} expected {key*2}, got {val}"
 
     def test_concurrent_get_put(self) -> None:
         """Mixed get/put from multiple threads should not raise."""
@@ -250,7 +255,12 @@ class TestConcurrency:
             try:
                 for i in range(50):
                     cache.put(tid * 50 + i, i)
-                    cache.get(tid * 50 + i)
+                    val = cache.get(tid * 50 + i)
+                    # Value may be evicted by another thread, but if present it must be correct
+                    if val is not None and val != i:
+                        errors.append(
+                            Exception(f"tid={tid} key={tid*50+i}: expected {i}, got {val}")
+                        )
             except Exception as exc:
                 errors.append(exc)
 
@@ -261,6 +271,7 @@ class TestConcurrency:
             t.join()
 
         assert not errors
+        assert len(cache) <= 20, f"Cache size {len(cache)} exceeds max_size=20"
 
 
 # ---------------------------------------------------------------------------

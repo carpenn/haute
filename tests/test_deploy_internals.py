@@ -165,10 +165,13 @@ class TestHauteModelPredict:
         mock_result = pl.DataFrame({"premium": [100.0]})
 
         with patch("haute.deploy._scorer.score_graph", return_value=mock_result) as mock_score:
-            model.predict(MagicMock(), input_pd)
+            result = model.predict(MagicMock(), input_pd)
 
         call_kwargs = mock_score.call_args.kwargs
         assert call_kwargs["output_fields"] == ["premium"]
+        assert isinstance(result, pd.DataFrame)
+        assert list(result.columns) == ["premium"]
+        assert result["premium"].tolist() == [100.0]
 
     def test_predict_passes_artifact_paths(self):
         """predict() forwards artifact_paths to score_graph."""
@@ -187,10 +190,13 @@ class TestHauteModelPredict:
         mock_result = pl.DataFrame({"x": [1.0]})
 
         with patch("haute.deploy._scorer.score_graph", return_value=mock_result) as mock_score:
-            model.predict(MagicMock(), input_pd)
+            result = model.predict(MagicMock(), input_pd)
 
         call_kwargs = mock_score.call_args.kwargs
         assert call_kwargs["artifact_paths"] == {"model.pkl": "/served/model.pkl"}
+        assert isinstance(result, pd.DataFrame)
+        assert list(result.columns) == ["x"]
+        assert result["x"].tolist() == [1.0]
 
     @staticmethod
     def _build_fixture_model(output_fields: list[str] | None = None) -> "HauteModel":

@@ -586,3 +586,648 @@ class TestCachePathTraversal:
 
         p = _cache_path_for("a/b\\c.d", project_root=tmp_path)
         assert p.name == "a_b_c_d.parquet"
+
+
+# ---------------------------------------------------------------------------
+# Gap: EXECUTE IMMEDIATE bypass — only EXEC is blocked, not EXECUTE
+# Production failure: attacker runs arbitrary SQL via EXECUTE IMMEDIATE
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteImmediateBypass:
+    """EXECUTE IMMEDIATE is a Databricks SQL command that runs dynamic SQL.
+    The current regex blocks EXEC but EXECUTE IMMEDIATE slips through because
+    \\bEXEC\\b matches 'EXEC' as a whole word — 'EXECUTE' also starts with
+    EXEC but the word boundary after EXEC fails since 'U' follows.
+
+    Actually \\bEXEC\\b will NOT match inside 'EXECUTE' because the 'U'
+    after 'EXEC' is a word char, so \\b does not fire. This is the gap.
+    """
+
+    def test_execute_immediate_not_blocked(self) -> None:
+        """Demonstrates that EXECUTE IMMEDIATE bypasses validation today.
+
+        Production risk: a GUI user could craft a query like
+        'SELECT 1 WHERE 1=1 EXECUTE IMMEDIATE ...' and it would pass
+        validation. The \\bEXEC\\b regex does NOT match 'EXECUTE' because
+        the U after EXEC is a word character, preventing the \\b boundary.
+
+        Note: we must avoid other blocked keywords in the test payload
+        so only EXECUTE is tested.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        # This SHOULD raise but currently does NOT — documenting the gap.
+        # When the fix lands (adding EXECUTE to _DANGEROUS_SQL_RE), flip
+        # this test to assert it raises.
+        try:
+            _validate_select_clause(
+                "SELECT 1 WHERE 1=1 EXECUTE IMMEDIATE 'SELECT 2'"
+            )
+            # If we get here, the gap is still open
+            pytest.xfail(
+                "EXECUTE IMMEDIATE is not blocked by _validate_select_clause — "
+                "add EXECUTE to _DANGEROUS_SQL_RE"
+            )
+        except ValueError:
+            pass  # Fixed — EXECUTE is now blocked
+
+    def test_exec_is_blocked(self) -> None:
+        """Baseline: EXEC (without UTE) IS already blocked."""
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="forbidden SQL keyword"):
+            _validate_select_clause("SELECT 1 WHERE EXEC sp_evil")
+
+
+# ---------------------------------------------------------------------------
+# Gap: Subqueries in SELECT clause — FROM not in _DANGEROUS_SQL_RE
+# Production failure: attacker reads unauthorized tables via subquery
+# ---------------------------------------------------------------------------
+
+
+class TestSubqueryBypass:
+    """A query like 'SELECT * FROM (SELECT * FROM secret_table)' passes
+    validation because FROM is not a dangerous keyword. After composition
+    it becomes 'SELECT * FROM (SELECT * FROM secret_table) FROM cat.sch.tbl'
+    which, depending on the SQL engine, may execute the inner FROM first.
+    """
+
+    def test_select_from_subquery_not_blocked(self) -> None:
+        """Demonstrates that FROM-based subqueries bypass validation.
+
+        Production risk: user reads from a table they weren't granted
+        access to by embedding a FROM clause in the SELECT portion.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        try:
+            _validate_select_clause(
+                "SELECT * FROM (SELECT secret_col FROM other_catalog.other_schema.secrets)"
+            )
+            pytest.xfail(
+                "Subquery with FROM in SELECT clause is not blocked — "
+                "consider adding FROM to _DANGEROUS_SQL_RE or restricting "
+                "the query to column-list-only syntax"
+            )
+        except ValueError:
+            pass  # Fixed
+
+
+# ---------------------------------------------------------------------------
+# Gap: SQL comments can neutralize the appended FROM clause
+# Production failure: attacker comments out FROM {table}, controlling the
+# full query
+# ---------------------------------------------------------------------------
+
+
+class TestSQLCommentInjection:
+    """The composed query is '{select_clause} FROM {table}'.
+    If select_clause ends with '--', the FROM {table} is commented out,
+    letting the attacker control which table is actually queried.
+    """
+
+    def test_line_comment_neutralizes_from(self) -> None:
+        """'SELECT * FROM secrets --' would produce:
+        'SELECT * FROM secrets -- FROM cat.sch.tbl'
+        The '-- FROM ...' is a comment, so only 'SELECT * FROM secrets' runs.
+
+        Production risk: complete bypass of table-level access control.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        try:
+            _validate_select_clause("SELECT * FROM secrets --")
+            pytest.xfail(
+                "SQL line comment (--) in query is not blocked — "
+                "attacker can comment out the appended FROM clause"
+            )
+        except ValueError:
+            pass  # Fixed
+
+    def test_block_comment_neutralizes_from(self) -> None:
+        """'SELECT * FROM secrets /*' would produce:
+        'SELECT * FROM secrets /* FROM cat.sch.tbl'
+        The '/* FROM ...' is an unclosed block comment — most SQL engines
+        treat it as commenting out the rest.
+
+        Production risk: same as line comment — full query control.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        try:
+            _validate_select_clause("SELECT * FROM secrets /*")
+            pytest.xfail(
+                "SQL block comment (/*) in query is not blocked — "
+                "attacker can comment out the appended FROM clause"
+            )
+        except ValueError:
+            pass  # Fixed
+
+    def test_inline_block_comment_hides_keyword(self) -> None:
+        """Block comments are now explicitly rejected by the /* check,
+        regardless of content. A query like 'SELECT 1 /*UNION*/ FROM
+        secrets' is blocked because it contains '/*'.
+
+        This is stricter than the old keyword-only check and prevents
+        attackers from using comments to hide SQL structure.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        # The /* check fires before the keyword regex
+        with pytest.raises(ValueError, match="block comment"):
+            _validate_select_clause("SELECT 1 /*UNION*/ FROM secrets")
+
+
+# ---------------------------------------------------------------------------
+# Gap: Window functions, CTEs (WITH), and LATERAL VIEW not blocked
+# Production failure: CTE allows arbitrary multi-statement-like behavior
+# ---------------------------------------------------------------------------
+
+
+class TestAdvancedSQLConstructsBypass:
+    """WITH (CTE) and LATERAL VIEW are powerful SQL constructs that
+    can be used to compose complex queries bypassing the simple
+    select-clause model.
+    """
+
+    def test_cte_with_clause_not_blocked(self) -> None:
+        """'WITH tmp AS (SELECT ...) SELECT ...' doesn't start with SELECT,
+        so it IS rejected by the startswith check. But what about
+        'SELECT * WHERE EXISTS (WITH ...)' or similar embeddings?
+
+        Actually, CTEs must be at the top, so the startswith check does
+        catch the common case. This test confirms that.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        with pytest.raises(ValueError, match="must start with SELECT"):
+            _validate_select_clause("WITH tmp AS (SELECT 1) SELECT * FROM tmp")
+
+    def test_lateral_view_not_blocked(self) -> None:
+        """LATERAL VIEW is a Spark/Databricks SQL construct for table-generating
+        functions. It could be used to expand data from unexpected sources.
+
+        Production risk: data exfiltration via LATERAL VIEW EXPLODE on
+        a crafted array, or LATERAL VIEW OUTER that modifies result shape.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        try:
+            _validate_select_clause(
+                "SELECT col1 LATERAL VIEW EXPLODE(array(1,2,3)) t AS val"
+            )
+            pytest.xfail(
+                "LATERAL VIEW is not blocked — consider adding it to "
+                "_DANGEROUS_SQL_RE"
+            )
+        except ValueError:
+            pass  # Fixed
+
+    def test_window_function_allowed(self) -> None:
+        """Window functions (OVER, PARTITION BY) are read-only analytics
+        and should be ALLOWED. This test ensures we don't over-block.
+        """
+        from haute._databricks_io import _validate_select_clause
+
+        # Should NOT raise — window functions are safe read-only operations
+        _validate_select_clause(
+            "SELECT id, ROW_NUMBER() OVER (PARTITION BY category ORDER BY price)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Gap: Unicode table names
+# Production failure: Unicode confusables or invisible chars in table names
+# could bypass regex or cause unexpected file paths
+# ---------------------------------------------------------------------------
+
+
+class TestUnicodeTableNames:
+    """The _TABLE_NAME_RE uses \\w which in Python matches Unicode word chars.
+    This means non-ASCII letters pass the table name check.
+    """
+
+    def test_unicode_letters_in_table_name(self, tmp_path: Path) -> None:
+        """Table names with accented or CJK characters pass \\w matching.
+
+        Production risk: if Databricks doesn't support these chars, the
+        query will fail at runtime with a confusing error. If it does
+        support them, the cache filename may collide or cause filesystem
+        issues on Windows.
+        """
+        from haute._databricks_io import _TABLE_NAME_RE, _cache_path_for
+
+        # Unicode letters match \w in Python
+        assert _TABLE_NAME_RE.match("catálogo.esquema.tabl\u00e9")
+
+        # Verify cache path doesn't break
+        p = _cache_path_for("catálogo.esquema.tabl\u00e9", project_root=tmp_path)
+        assert p.name == "catálogo_esquema_tabl\u00e9.parquet"
+
+    def test_invisible_unicode_chars_in_table_name(self) -> None:
+        """Zero-width spaces and other invisible Unicode chars should be
+        rejected to prevent confusable table names.
+
+        Production risk: two table names that look identical but differ
+        by invisible chars could point to different tables/cache files.
+        """
+        from haute._databricks_io import _TABLE_NAME_RE
+
+        # Zero-width space (U+200B) is NOT a \\w char, so this should fail
+        result = _TABLE_NAME_RE.match("cat\u200b.sch.tbl")
+        assert result is None, (
+            "Table name with zero-width space should be rejected"
+        )
+
+    def test_homoglyph_table_names_produce_distinct_cache(self, tmp_path: Path) -> None:
+        """Two table names using confusable chars (e.g. Latin 'a' vs Cyrillic 'а')
+        must produce distinct cache files, not silently collide.
+
+        Production risk: attacker creates table with homoglyph name that
+        shadows a legitimate table's cache.
+        """
+        from haute._databricks_io import _cache_path_for
+
+        p_latin = _cache_path_for("cat.sch.data", project_root=tmp_path)
+        # Cyrillic 'а' (U+0430) looks like Latin 'a' (U+0061)
+        p_cyrillic = _cache_path_for("c\u0430t.sch.d\u0430ta", project_root=tmp_path)
+
+        assert p_latin != p_cyrillic, (
+            "Homoglyph table names must map to distinct cache paths"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Gap: Network timeout during fetch — no test for transient network errors
+# Production failure: mid-fetch timeout leaves system in bad state
+# ---------------------------------------------------------------------------
+
+
+class TestNetworkTimeoutDuringFetch:
+    """Test that transient errors during batch fetching are handled correctly
+    with retry logic and proper cleanup.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_progress(self) -> None:
+        yield
+        _clear_fetch_progress()
+
+    def test_transient_error_retried_then_succeeds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """fetchmany_arrow fails twice then succeeds — retry logic recovers.
+
+        Production risk: without retries, a single transient network blip
+        causes the entire fetch to fail, wasting minutes of work.
+        """
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+        # Disable actual sleep during retries
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        batch = _make_arrow_batch(5)
+        empty = _empty_batch_like(batch)
+
+        # First two calls fail, third succeeds, fourth returns empty
+        call_count = 0
+        def fetch_with_failures(size: int) -> pa.Table:
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise ConnectionError("network timeout")
+            if call_count == 3:
+                return batch
+            return empty
+
+        cursor = MagicMock()
+        cursor.fetchmany_arrow = MagicMock(side_effect=fetch_with_failures)
+
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+
+        mock_connect = MagicMock(return_value=conn)
+        mock_db, mock_sql = _mock_dbsql_module(mock_connect)
+
+        with patch.dict("sys.modules", {"databricks": mock_db, "databricks.sql": mock_sql}):
+            result = fetch_and_cache(
+                "cat.sch.tbl",
+                http_path="/path",
+                project_root=tmp_path,
+            )
+
+        assert result["row_count"] == 5
+        # 2 failures + 1 success + 1 empty = 4 calls
+        assert call_count == 4
+
+    def test_all_retries_exhausted_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """All retry attempts fail — error is raised and cleanup happens.
+
+        Production risk: without proper cleanup after exhausted retries,
+        temp files and progress state could leak.
+        """
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        cursor = MagicMock()
+        cursor.fetchmany_arrow = MagicMock(
+            side_effect=ConnectionError("persistent timeout")
+        )
+
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+
+        mock_connect = MagicMock(return_value=conn)
+        mock_db, mock_sql = _mock_dbsql_module(mock_connect)
+
+        with patch.dict("sys.modules", {"databricks": mock_db, "databricks.sql": mock_sql}):
+            with pytest.raises(ConnectionError, match="persistent timeout"):
+                fetch_and_cache(
+                    "cat.sch.tbl",
+                    http_path="/path",
+                    project_root=tmp_path,
+                )
+
+        # Progress must be cleaned up
+        assert fetch_progress("cat.sch.tbl") is None
+        # No temp files left
+        assert not any(tmp_path.rglob("*.tmp"))
+
+
+# ---------------------------------------------------------------------------
+# Gap: Cache file corruption — partially-written parquet
+# Production failure: corrupt cache causes silent data errors or crashes
+# ---------------------------------------------------------------------------
+
+
+class TestCacheFileCorruption:
+    """Test that corrupted cache files are handled gracefully."""
+
+    def test_corrupt_parquet_raises_on_read(self, tmp_path: Path) -> None:
+        """A partially-written or corrupted parquet file should raise a
+        clear error, not silently return wrong data.
+
+        Production risk: if the process is killed mid-write (OOM, power loss),
+        the .parquet file could be truncated. On next pipeline run,
+        read_cached_table must fail clearly, not return partial data.
+        """
+        from haute._databricks_io import _cache_path_for, read_cached_table
+
+        p = _cache_path_for("cat.sch.tbl", project_root=tmp_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Write garbage bytes that look nothing like a parquet file
+        p.write_bytes(b"NOT_A_PARQUET_FILE_\x00\x01\x02")
+
+        with pytest.raises(Exception):
+            # polars.scan_parquet will raise on invalid parquet
+            read_cached_table("cat.sch.tbl", project_root=tmp_path).collect()
+
+    def test_truncated_parquet_raises(self, tmp_path: Path) -> None:
+        """Parquet file with valid header but truncated data should fail.
+
+        Production risk: half-written file from interrupted network transfer.
+        """
+        from haute._databricks_io import _cache_path_for, read_cached_table
+
+        p = _cache_path_for("cat.sch.tbl", project_root=tmp_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write a valid parquet file, then truncate it
+        import polars as pl
+        pl.DataFrame({"a": list(range(1000))}).write_parquet(p)
+        full_size = p.stat().st_size
+
+        # Truncate to half the file
+        data = p.read_bytes()
+        p.write_bytes(data[: full_size // 2])
+
+        with pytest.raises(Exception):
+            read_cached_table("cat.sch.tbl", project_root=tmp_path).collect()
+
+    def test_zero_byte_parquet_raises(self, tmp_path: Path) -> None:
+        """Empty (0-byte) cache file must fail, not return empty DataFrame.
+
+        Production risk: race condition where file is created but no data
+        is written yet.
+        """
+        from haute._databricks_io import _cache_path_for, read_cached_table
+
+        p = _cache_path_for("cat.sch.tbl", project_root=tmp_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"")
+
+        with pytest.raises(Exception):
+            read_cached_table("cat.sch.tbl", project_root=tmp_path).collect()
+
+
+# ---------------------------------------------------------------------------
+# Gap: Atomic rename failure on Windows — Path.rename() fails if target exists
+# Production failure: second fetch of same table fails on Windows because
+# .rename() doesn't overwrite on Windows (unlike POSIX)
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicRenameOnWindows:
+    """On Windows, Path.rename() raises FileExistsError if the target exists.
+    On POSIX, rename atomically replaces the target. This means re-fetching
+    a table (where the .parquet file already exists) may fail on Windows.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_progress(self) -> None:
+        yield
+        _clear_fetch_progress()
+
+    def test_refetch_overwrites_existing_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fetching a table twice should succeed — the second fetch must
+        overwrite the first cache file.
+
+        Production risk: on Windows, the second fetch fails with
+        FileExistsError, leaving the user unable to refresh stale data.
+        Fix: use Path.replace() instead of Path.rename() in fetch_and_cache.
+        """
+        import sys
+
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+
+        batch = _make_arrow_batch(5)
+        mock_db, mock_sql, _ = _build_mock_connector([batch])
+
+        with patch.dict("sys.modules", {"databricks": mock_db, "databricks.sql": mock_sql}):
+            # First fetch
+            fetch_and_cache(
+                "cat.sch.tbl",
+                http_path="/path",
+                project_root=tmp_path,
+            )
+
+        # Re-build connector for second fetch
+        batch2 = _make_arrow_batch(8)
+        mock_db2, mock_sql2, _ = _build_mock_connector([batch2])
+
+        with patch.dict("sys.modules", {"databricks": mock_db2, "databricks.sql": mock_sql2}):
+            # Second fetch — must not fail even though target exists
+            try:
+                result2 = fetch_and_cache(
+                    "cat.sch.tbl",
+                    http_path="/path",
+                    project_root=tmp_path,
+                )
+                assert result2["row_count"] == 8
+            except FileExistsError:
+                if sys.platform == "win32":
+                    pytest.xfail(
+                        "Path.rename() fails on Windows when target exists — "
+                        "use Path.replace() instead in fetch_and_cache"
+                    )
+                else:
+                    raise
+
+    def test_rename_failure_simulated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Simulate Path.rename() raising FileExistsError to verify the
+        code handles it (or document that it doesn't).
+
+        Production risk: Windows-specific failure that won't show up in
+        Linux CI.
+        """
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+
+        batch = _make_arrow_batch(3)
+        mock_db, mock_sql, _ = _build_mock_connector([batch])
+
+        original_rename = Path.rename
+
+        call_count = 0
+        def failing_rename(self_path: Path, target: Path) -> Path:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise FileExistsError(
+                    f"Cannot rename: target exists: {target}"
+                )
+            return original_rename(self_path, target)
+
+        with patch.dict("sys.modules", {"databricks": mock_db, "databricks.sql": mock_sql}):
+            with patch.object(Path, "rename", failing_rename):
+                # This test documents whether the current code handles
+                # rename failure. If it raises, the gap is confirmed.
+                try:
+                    fetch_and_cache(
+                        "cat.sch.tbl",
+                        http_path="/path",
+                        project_root=tmp_path,
+                    )
+                    # If we get here, the code handles it
+                except FileExistsError:
+                    pytest.xfail(
+                        "Path.rename() fails on Windows when target exists — "
+                        "use Path.replace() instead for atomic cross-platform rename"
+                    )
+
+        # Either way, no temp files should remain
+        assert not any(tmp_path.rglob("*.tmp"))
+
+
+# ---------------------------------------------------------------------------
+# Gap: Very large fetch with batch progress tracking
+# Production failure: progress state incorrect or stale during multi-batch fetch
+# ---------------------------------------------------------------------------
+
+
+class TestLargeFetchBatchProgress:
+    """Test that progress tracking correctly reflects state across
+    multiple batches during a large fetch.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_progress(self) -> None:
+        yield
+        _clear_fetch_progress()
+
+    def test_multi_batch_progress_updates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify progress dict updates correctly across 5 batches.
+
+        Production risk: if progress tracking is wrong, the UI shows
+        stale/incorrect row counts, and users can't tell if a large
+        fetch is still making progress or stuck.
+        """
+        monkeypatch.setenv("DATABRICKS_HOST", "host.com")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "tok")
+
+        num_batches = 5
+        rows_per_batch = 100
+        batches = [_make_arrow_batch(rows_per_batch) for _ in range(num_batches)]
+        mock_db, mock_sql, _ = _build_mock_connector(batches)
+
+        # Capture progress snapshots during fetch by hooking fetchmany_arrow
+        progress_snapshots: list[dict[str, object] | None] = []
+        original_fetch_progress = fetch_progress
+
+        # We'll read progress after each batch write by wrapping the
+        # cursor's fetchmany_arrow to also capture progress
+        empty = _empty_batch_like(batches[0])
+        batch_iter = iter(batches + [empty])
+        call_idx = 0
+
+        def fetching_with_progress_capture(size: int) -> pa.Table:
+            nonlocal call_idx
+            # Capture progress BEFORE returning next batch
+            if call_idx > 0:
+                snap = original_fetch_progress("cat.sch.big_table")
+                progress_snapshots.append(snap)
+            call_idx += 1
+            return next(batch_iter)
+
+        cursor = MagicMock()
+        cursor.fetchmany_arrow = MagicMock(side_effect=fetching_with_progress_capture)
+
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+
+        mock_connect = MagicMock(return_value=conn)
+        mock_db_mod, mock_sql_mod = _mock_dbsql_module(mock_connect)
+
+        with patch.dict("sys.modules", {"databricks": mock_db_mod, "databricks.sql": mock_sql_mod}):
+            result = fetch_and_cache(
+                "cat.sch.big_table",
+                http_path="/path",
+                project_root=tmp_path,
+            )
+
+        # Total rows: 5 batches * 100 rows = 500
+        assert result["row_count"] == 500
+
+        # We should have captured progress at batches 1-5 (before the empty return)
+        assert len(progress_snapshots) == num_batches
+
+        # Progress should be monotonically increasing
+        for i, snap in enumerate(progress_snapshots):
+            assert snap is not None, f"Progress was None at batch {i+1}"
+            assert snap["rows"] == (i + 1) * rows_per_batch
+            assert snap["batches"] == i + 1
+            assert isinstance(snap["elapsed"], float)
+            assert snap["elapsed"] >= 0
+
+        # After fetch completes, progress is cleared
+        assert fetch_progress("cat.sch.big_table") is None

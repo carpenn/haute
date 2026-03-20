@@ -8,11 +8,17 @@ from pathlib import Path
 import pytest
 
 from haute.codegen import (
+    _build_extra_kwargs,
     _build_params,
     _generate_node_code,
+    _instance_to_code,
     _make_passthrough_builder,
     _node_to_code,
+    _sanitize_description,
+    _submodel_node_to_code,
+    _wrap_user_code,
     graph_to_code,
+    graph_to_code_multi,
 )
 from haute.parser import parse_pipeline_source
 from tests.conftest import compile_node_code as _compile_node_code, make_graph as _g, make_node as _n
@@ -1456,3 +1462,483 @@ class TestUnknownNodeTypeFallback:
         finally:
             if original_builder is not None:
                 _CODEGEN_BUILDERS["banding"] = original_builder
+
+
+# ---------------------------------------------------------------------------
+# Gap 1: Unknown node type fallback produces compilable transform code
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownNodeTypeFallbackCode:
+    """Catch: if fallback silently generates broken code for unknown types,
+    deployed pipelines with future node types would fail at import time."""
+
+    def test_fallback_generates_compilable_transform_with_code(self):
+        """Unknown type with user code still wraps it like a polars transform."""
+        from unittest.mock import patch
+        from haute.codegen import _CODEGEN_BUILDERS
+
+        node = _n({
+            "id": "u1",
+            "data": {
+                "label": "FutureNode",
+                "nodeType": "banding",
+                "config": {"code": ".filter(pl.col('x') > 0)"},
+            },
+        })
+        saved = _CODEGEN_BUILDERS.pop("banding", None)
+        try:
+            with patch("haute.codegen.logger"):
+                code = _generate_node_code(node, source_names=["upstream"])
+            assert "def FutureNode(upstream: pl.LazyFrame)" in code
+            assert "filter" in code
+            assert "return df" in code
+            _compile_node_code(code)
+        finally:
+            if saved is not None:
+                _CODEGEN_BUILDERS["banding"] = saved
+
+    def test_fallback_without_code_returns_first_source(self):
+        """Unknown type with no user code produces passthrough returning first source."""
+        from unittest.mock import patch
+        from haute.codegen import _CODEGEN_BUILDERS
+
+        node = _n({
+            "id": "u2",
+            "data": {
+                "label": "Empty",
+                "nodeType": "banding",
+                "config": {},
+            },
+        })
+        saved = _CODEGEN_BUILDERS.pop("banding", None)
+        try:
+            with patch("haute.codegen.logger"):
+                code = _generate_node_code(node, source_names=["src"])
+            assert "return src" in code
+            _compile_node_code(code)
+        finally:
+            if saved is not None:
+                _CODEGEN_BUILDERS["banding"] = saved
+
+
+# ---------------------------------------------------------------------------
+# Gap 2: _wrap_user_code misdetects comparison operators as assignments
+# ---------------------------------------------------------------------------
+
+
+class TestWrapUserCodeAssignmentDetection:
+    """Catch: code like ``x == 5`` is misdetected as an assignment because
+    ``"=" in first_line.split("(", 1)[0]`` matches the ``==`` operator.
+    This means the code is indented as-is instead of wrapped as a bare
+    expression, producing ``x == 5\\nreturn df`` instead of
+    ``df = (x == 5)\\nreturn df``."""
+
+    def test_equality_comparison_misdetected_as_assignment(self):
+        """Demonstrates the known bug: ``x == 5`` triggers the assignment branch."""
+        result = _wrap_user_code("x == 5", ["src"])
+        # BUG: the code treats ``==`` as containing ``=`` and enters the
+        # assignment branch, indenting as-is rather than wrapping as expression.
+        # The test documents this behaviour so a future fix doesn't regress.
+        assert "x == 5" in result
+        # In the assignment branch, code is indented and ``return df`` appended
+        assert "return df" in result
+
+    def test_not_equal_comparison_misdetected(self):
+        """``!=`` also contains ``=`` and triggers the assignment branch."""
+        result = _wrap_user_code("status != 'active'", ["src"])
+        assert "status != 'active'" in result
+        assert "return df" in result
+
+    def test_less_equal_comparison_misdetected(self):
+        """``<=`` also contains ``=`` and triggers the assignment branch."""
+        result = _wrap_user_code("value <= 100", ["src"])
+        assert "value <= 100" in result
+        assert "return df" in result
+
+    def test_genuine_assignment_still_detected(self):
+        """Real assignments like ``df = ...`` must still be detected correctly."""
+        result = _wrap_user_code("df = src.filter(pl.col('x') > 0)", ["src"])
+        assert "df = src.filter" in result
+        assert "return df" in result
+        # Should NOT be wrapped in df = (...)
+        assert "df = (\n" not in result
+
+    def test_bare_expression_without_equals(self):
+        """A bare expression without any = should be wrapped in df = (...)."""
+        result = _wrap_user_code("src.filter(pl.col('x') > 0)", ["src"])
+        assert "df = (" in result
+        assert "return df" in result
+
+
+# ---------------------------------------------------------------------------
+# Gap 3: _sanitize_description triple-quote edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeDescription:
+    """Catch: descriptions containing triple quotes, trailing backslashes,
+    or trailing double-quotes would break the generated docstring, producing
+    a SyntaxError at pipeline import time."""
+
+    def test_triple_quotes_replaced(self):
+        """Triple quotes inside description would close the docstring early."""
+        result = _sanitize_description('hello """world"""')
+        assert '"""' not in result
+        assert "'''" in result
+        # Must produce valid docstring
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_trailing_double_quote(self):
+        """A trailing " merges with closing triple-quote to form invalid syntax."""
+        result = _sanitize_description('ends with quote"')
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_trailing_multiple_double_quotes(self):
+        """Multiple trailing " chars each need escaping."""
+        result = _sanitize_description('danger""')
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_trailing_backslash(self):
+        """A trailing backslash would escape the closing quote."""
+        result = _sanitize_description("ends with backslash\\")
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_trailing_backslash_before_quotes(self):
+        r"""Odd backslashes before trailing quotes: ``foo\"`` would absorb escape."""
+        result = _sanitize_description('backslash then quote\\"')
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_only_triple_quotes(self):
+        """Description that is nothing but triple quotes."""
+        result = _sanitize_description('"""')
+        assert '"""' not in result
+        code = f'def f():\n    """{result}"""\n    pass'
+        compile(code, "<test>", "exec")
+
+    def test_empty_string(self):
+        result = _sanitize_description("")
+        assert result == ""
+
+    def test_normal_text_unchanged(self):
+        result = _sanitize_description("Simple description")
+        assert result == "Simple description"
+
+
+# ---------------------------------------------------------------------------
+# Gap 4: Instance code generation with missing instanceOf target
+# ---------------------------------------------------------------------------
+
+
+class TestInstanceMissingTarget:
+    """Catch: if the ``instanceOf`` target node is not in the graph, the
+    generated instance code would reference an undefined function, causing
+    a NameError at pipeline execution time."""
+
+    def test_instance_with_missing_original_still_compiles(self):
+        """Instance node whose instanceOf target is absent from graph."""
+        instance_node = _n({
+            "id": "inst1",
+            "data": {
+                "label": "ClonedStep",
+                "nodeType": "polars",
+                "config": {"instanceOf": "ghost_node_id"},
+            },
+        })
+        # _instance_to_code takes the original func name directly - if lookup
+        # falls back to the raw ID, the code should still compile syntactically.
+        code = _instance_to_code(
+            instance_node,
+            original_func_name="ghost_node_id",
+            source_names=["upstream"],
+        )
+        assert "def ClonedStep(" in code
+        assert 'of="ghost_node_id"' in code
+        assert "return ghost_node_id(" in code
+        _compile_node_code(code)
+
+    def test_instance_in_graph_with_missing_target_node(self):
+        """Full graph where instanceOf references a node ID not in the graph."""
+        graph = _g({
+            "nodes": [
+                {"id": "src", "data": {"label": "Source", "nodeType": "dataSource",
+                                        "config": {"path": "d.parquet"}}},
+                {"id": "inst", "data": {"label": "Clone", "nodeType": "polars",
+                                         "config": {"instanceOf": "deleted_node"}}},
+            ],
+            "edges": [{"id": "e1", "source": "src", "target": "inst"}],
+        })
+        # Should not crash; the instance references a missing node
+        code = graph_to_code(graph)
+        compile(code, "<test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Gap 5: _submodel_node_to_code replaces only first @pipeline. occurrence
+# ---------------------------------------------------------------------------
+
+
+class TestSubmodelPipelineReplacement:
+    """Catch: ``.replace("@pipeline.", "@submodel.", 1)`` only replaces the
+    first occurrence. If user code in a comment or string literal contains
+    ``@pipeline.``, it stays as ``@pipeline.`` which is misleading but not
+    a syntax error. The decorator prefix is correctly replaced."""
+
+    def test_decorator_replaced_but_comment_preserved(self):
+        """A node whose generated code contains @pipeline. in a comment."""
+        node = _n({
+            "id": "s1",
+            "data": {
+                "label": "Step",
+                "nodeType": "polars",
+                "config": {"code": "# see @pipeline.polars docs\ndf = src.drop_nulls()"},
+            },
+        })
+        code = _submodel_node_to_code(node, source_names=["src"])
+        # Decorator line must use @submodel.
+        assert "@submodel.polars" in code
+        # The comment still has @pipeline. because replace(..., 1) only hits first
+        assert "@pipeline.polars docs" in code
+
+    def test_decorator_is_always_first_replacement(self):
+        """Even with code that mentions @pipeline, the decorator is what gets replaced."""
+        node = _n({
+            "id": "s2",
+            "data": {
+                "label": "Clean",
+                "nodeType": "polars",
+                "config": {"code": ""},
+            },
+        })
+        code = _submodel_node_to_code(node, source_names=["src"])
+        lines = code.strip().split("\n")
+        assert lines[0].startswith("@submodel.polars")
+
+
+# ---------------------------------------------------------------------------
+# Gap 6: _build_extra_kwargs edge cases — falsy but valid values
+# ---------------------------------------------------------------------------
+
+
+class TestBuildExtraKwargsEdgeCases:
+    """Catch: ``_build_extra_kwargs`` skips None, "", and []. But 0, False,
+    and {} are falsy values that should NOT be skipped. If they were skipped,
+    config like ``tolerance=0`` or ``enabled=False`` would silently vanish
+    from generated decorators."""
+
+    def test_zero_is_included(self):
+        """0 is falsy but is a valid config value — must not be skipped."""
+        parts = _build_extra_kwargs({"tolerance": 0}, ("tolerance",))
+        assert parts == ["tolerance=0"]
+
+    def test_false_is_included(self):
+        """False is falsy but is a valid config value — must not be skipped."""
+        parts = _build_extra_kwargs({"enabled": False}, ("enabled",))
+        assert parts == ["enabled=False"]
+
+    def test_empty_dict_is_included(self):
+        """{} is falsy but is a valid config value — must not be skipped."""
+        parts = _build_extra_kwargs({"mapping": {}}, ("mapping",))
+        assert parts == ["mapping={}"]
+
+    def test_none_is_skipped(self):
+        parts = _build_extra_kwargs({"x": None}, ("x",))
+        assert parts == []
+
+    def test_empty_string_is_skipped(self):
+        parts = _build_extra_kwargs({"x": ""}, ("x",))
+        assert parts == []
+
+    def test_empty_list_is_skipped(self):
+        parts = _build_extra_kwargs({"x": []}, ("x",))
+        assert parts == []
+
+    def test_missing_key_is_skipped(self):
+        parts = _build_extra_kwargs({}, ("x",))
+        assert parts == []
+
+    def test_mixed_values(self):
+        """Only None, '', and [] are skipped — everything else passes through."""
+        config = {
+            "a": None,
+            "b": "",
+            "c": [],
+            "d": 0,
+            "e": False,
+            "f": "real",
+        }
+        parts = _build_extra_kwargs(config, ("a", "b", "c", "d", "e", "f"))
+        assert len(parts) == 3
+        assert "d=0" in parts
+        assert "e=False" in parts
+        assert "f='real'" in parts
+
+
+# ---------------------------------------------------------------------------
+# Gap 7: Connect deduplication in multi-submodel mode
+# ---------------------------------------------------------------------------
+
+
+class TestConnectDeduplication:
+    """Catch: in multi-submodel mode, cross-boundary edges can produce
+    duplicate connect() calls. ``dedup_connects=True`` must eliminate them.
+    Without dedup, the pipeline would wire the same pair twice, potentially
+    causing double-execution or confusing the executor."""
+
+    def test_duplicate_connects_deduplicated(self):
+        """Two edges between the same pair in submodel mode should produce one connect."""
+        graph = _g({
+            "nodes": [
+                {"id": "src", "data": {"label": "Source", "nodeType": "dataSource",
+                                        "config": {"path": "d.parquet"}}},
+                {"id": "child_a", "data": {"label": "ChildA", "nodeType": "polars",
+                                            "config": {}}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "src", "target": "submodel__sm1",
+                 "targetHandle": "in__child_a"},
+                {"id": "e2", "source": "src", "target": "submodel__sm1",
+                 "targetHandle": "in__child_a"},
+            ],
+            "submodels": {
+                "sm1": {
+                    "file": "modules/sm1.py",
+                    "childNodeIds": ["child_a"],
+                    "graph": {
+                        "nodes": [
+                            {"id": "child_a", "data": {"label": "ChildA",
+                             "nodeType": "polars", "config": {}}},
+                        ],
+                        "edges": [],
+                    },
+                },
+            },
+        })
+        files = graph_to_code_multi(graph, pipeline_name="main")
+        main_code = files["main.py"]
+        # Count connect calls for the same pair
+        connect_count = main_code.count('pipeline.connect("Source", "ChildA")')
+        assert connect_count == 1, (
+            f"Expected 1 connect call after dedup, got {connect_count}"
+        )
+        compile(main_code, "<test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Gap 8: Special characters in labels — quotes, newlines, unicode
+# ---------------------------------------------------------------------------
+
+
+class TestSpecialCharacterLabels:
+    """Catch: labels with quotes or unusual chars could produce invalid
+    Python identifiers or break string literals in decorators/connect calls."""
+
+    def test_label_with_single_quotes(self):
+        node = _n({
+            "id": "q",
+            "data": {"label": "it's a node", "nodeType": "polars", "config": {}},
+        })
+        code = _node_to_code(node)
+        _compile_node_code(code)
+        assert "def " in code
+
+    def test_label_with_double_quotes(self):
+        node = _n({
+            "id": "q",
+            "data": {"label": 'say "hello"', "nodeType": "polars", "config": {}},
+        })
+        code = _node_to_code(node)
+        _compile_node_code(code)
+
+    def test_label_with_newline(self):
+        """Newlines in labels would break function def syntax."""
+        node = _n({
+            "id": "nl",
+            "data": {"label": "line1\nline2", "nodeType": "polars", "config": {}},
+        })
+        code = _node_to_code(node)
+        _compile_node_code(code)
+
+    def test_label_with_unicode_emoji(self):
+        node = _n({
+            "id": "em",
+            "data": {"label": "price_update_\u2705", "nodeType": "polars", "config": {}},
+        })
+        code = _node_to_code(node)
+        _compile_node_code(code)
+
+    def test_label_all_special_chars(self):
+        """Label made entirely of special chars should still produce a valid identifier."""
+        node = _n({
+            "id": "sp",
+            "data": {"label": "!@#$%", "nodeType": "polars", "config": {}},
+        })
+        code = _node_to_code(node)
+        # Must have a def with some valid identifier
+        assert "def " in code
+        _compile_node_code(code)
+
+    def test_connect_with_sanitized_labels(self):
+        """Graph connect calls must use sanitized names matching function defs."""
+        graph = _g({
+            "nodes": [
+                {"id": "a", "data": {"label": "My Source (v2)", "nodeType": "dataSource",
+                                      "config": {"path": "d.parquet"}}},
+                {"id": "b", "data": {"label": "Clean & Filter!", "nodeType": "polars",
+                                      "config": {}}},
+            ],
+            "edges": [{"id": "e1", "source": "a", "target": "b"}],
+        })
+        code = graph_to_code(graph)
+        compile(code, "<test>", "exec")
+        # The connect call and the def must use the same sanitized name
+        assert "pipeline.connect(" in code
+
+
+# ---------------------------------------------------------------------------
+# Gap 9: Very long user code — performance / correctness test
+# ---------------------------------------------------------------------------
+
+
+class TestVeryLongUserCode:
+    """Catch: extremely large code blocks could trigger performance issues
+    in string operations (splitlines, join, indent) or exceed Python's
+    compile limits."""
+
+    def test_large_chain_code_block(self):
+        """1000-line method chain should still produce compilable code."""
+        lines = [".with_columns(pl.lit(1).alias('col_{i}'))".format(i=i)
+                 for i in range(1000)]
+        code_block = "\n".join(lines)
+        node = _n({
+            "id": "big",
+            "data": {
+                "label": "BigTransform",
+                "nodeType": "polars",
+                "config": {"code": code_block},
+            },
+        })
+        code = _node_to_code(node, source_names=["src"])
+        assert "def BigTransform(src: pl.LazyFrame)" in code
+        assert "return df" in code
+        _compile_node_code(code)
+
+    def test_large_assignment_code_block(self):
+        """500 lines of assignment-style code should compile."""
+        lines = [f"df = df.with_columns(pl.lit({i}).alias('c{i}'))"
+                 for i in range(500)]
+        code_block = "\n".join(lines)
+        result = _wrap_user_code(code_block, ["src"])
+        assert "return df" in result
+        # Verify it compiles in a function context
+        func_code = (
+            "import polars as pl\n"
+            "def test_func(src):\n"
+            f"{result}\n"
+        )
+        compile(func_code, "<test>", "exec")

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { makeNode, makeEdge, makeSimpleNode, makeSimpleEdge } from "../factories"
+import { makeNode, makeEdge, makeSimpleNode, makeSimpleEdge, makeGraph, makeConfig, makeTrainResult, makeTrainEstimate } from "../factories"
 
 describe("makeNode", () => {
   it("creates a node with defaults", () => {
@@ -91,5 +91,78 @@ describe("makeSimpleEdge", () => {
     expect(edge.id).toBe("e1")
     expect(edge.source).toBe("a")
     expect(edge.target).toBe("b")
+  })
+})
+
+describe("makeGraph", () => {
+  it("creates a linear graph with default 3 nodes", () => {
+    const { nodes, edges } = makeGraph()
+    expect(nodes).toHaveLength(3)
+    expect(edges).toHaveLength(2)
+    expect(edges[0].source).toBe("n0")
+    expect(edges[0].target).toBe("n1")
+    expect(edges[1].source).toBe("n1")
+    expect(edges[1].target).toBe("n2")
+  })
+
+  it("creates a graph with custom node count", () => {
+    const { nodes, edges } = makeGraph(5)
+    expect(nodes).toHaveLength(5)
+    expect(edges).toHaveLength(4)
+  })
+
+  it("creates a graph without edges when linear is false", () => {
+    const { nodes, edges } = makeGraph(3, false)
+    expect(nodes).toHaveLength(3)
+    expect(edges).toHaveLength(0)
+  })
+})
+
+describe("makeConfig", () => {
+  it("creates a config with sensible defaults", () => {
+    const config = makeConfig()
+    expect(config.target).toBe("loss_amount")
+    expect(config.task).toBe("regression")
+    expect(config.metrics).toEqual(["gini", "rmse"])
+    expect(config.split).toBeDefined()
+    expect(config.params).toBeDefined()
+  })
+
+  it("accepts overrides", () => {
+    const config = makeConfig({ target: "claim_count", task: "classification" })
+    expect(config.target).toBe("claim_count")
+    expect(config.task).toBe("classification")
+  })
+})
+
+describe("makeTrainResult", () => {
+  it("creates a result with sensible defaults", () => {
+    const result = makeTrainResult()
+    expect(result.status).toBe("complete")
+    expect(result.train_rows).toBe(8000)
+    expect(result.test_rows).toBe(2000)
+    expect(result.feature_importance).toHaveLength(3)
+    expect(result.metrics).toHaveProperty("gini")
+  })
+
+  it("accepts overrides", () => {
+    const result = makeTrainResult({ status: "error", error: "OOM" })
+    expect(result.status).toBe("error")
+    expect(result.error).toBe("OOM")
+  })
+})
+
+describe("makeTrainEstimate", () => {
+  it("creates an estimate with sensible defaults", () => {
+    const est = makeTrainEstimate()
+    expect(est.total_rows).toBe(10000)
+    expect(est.available_mb).toBe(16384)
+    expect(est.was_downsampled).toBe(false)
+  })
+
+  it("accepts overrides", () => {
+    const est = makeTrainEstimate({ was_downsampled: true, total_rows: 500000 })
+    expect(est.was_downsampled).toBe(true)
+    expect(est.total_rows).toBe(500000)
   })
 })

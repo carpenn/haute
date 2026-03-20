@@ -1012,7 +1012,6 @@ class TestClearBytecache:
         from haute.server import _clear_bytecache
 
         _clear_bytecache()  # should not raise
-        assert True
 
 
 class TestMiddleware500:

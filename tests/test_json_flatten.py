@@ -872,48 +872,7 @@ class TestReleaseMemory:
         mock_gc.assert_called_once()
         mock_trim.assert_called_once()
 
-    def test_end_to_end_linux(self, monkeypatch):
-        """Full path: _release_memory → _malloc_trim → ctypes.CDLL on Linux."""
-        from unittest.mock import MagicMock
-
-        from haute import _json_flatten as mod
-
-        mock_cdll = MagicMock()
-        monkeypatch.setattr("sys.platform", "linux")
-        monkeypatch.setattr("ctypes.CDLL", mock_cdll)
-        mod._release_memory()
-        mock_cdll.assert_called_once_with("libc.so.6")
-        mock_cdll.return_value.malloc_trim.assert_called_once_with(0)
-
-    def test_end_to_end_windows(self, monkeypatch):
-        """Full path: _release_memory → _malloc_trim → kernel32.HeapCompact on Windows."""
-        from unittest.mock import MagicMock
-
-        from haute import _json_flatten as mod
-
-        mock_kernel32 = MagicMock()
-        mock_kernel32.GetProcessHeap.return_value = 12345
-        mock_windll = MagicMock(kernel32=mock_kernel32)
-        monkeypatch.setattr("sys.platform", "win32")
-        import ctypes
-        if not hasattr(ctypes, "windll"):
-            monkeypatch.setattr(ctypes, "windll", mock_windll, raising=False)
-        else:
-            monkeypatch.setattr("ctypes.windll", mock_windll)
-        mod._release_memory()
-        mock_kernel32.GetProcessHeap.assert_called_once()
-        mock_kernel32.HeapCompact.assert_called_once_with(12345, 0)
-
-    def test_end_to_end_macos(self, monkeypatch):
-        """On macOS, gc.collect runs but no ctypes heap compaction."""
-        from unittest.mock import patch
-
-        from haute import _json_flatten as mod
-
-        monkeypatch.setattr("sys.platform", "darwin")
-        with patch("gc.collect") as mock_gc:
-            mod._release_memory()
-            mock_gc.assert_called_once()
+    # Platform-specific _malloc_trim dispatch is tested in test_polars_utils.py
 
 
 # ---------------------------------------------------------------------------

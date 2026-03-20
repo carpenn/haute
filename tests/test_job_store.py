@@ -631,3 +631,656 @@ class TestClearResultData:
         # New dict should not
         assert "solver" not in new_dict
         assert old_dict is not new_dict
+
+
+# ---------------------------------------------------------------------------
+# GAP 1: update_job (non-atomic) race condition — reader sees partial state
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateJobRaceCondition:
+    """Demonstrate that update_job can expose partially-updated dicts.
+
+    Production failure: The train service uses ``update_job`` for progress
+    callbacks from background threads (``_progress``, ``_on_iteration``).
+    Meanwhile the main thread polls ``get_job`` to serve status responses.
+    Because ``dict.update()`` mutates in-place and is NOT atomic for
+    multi-key updates, a reader can observe a dict where some keys are
+    from the old state and others from the new state.
+
+    ``atomic_update`` avoids this by swapping in a new dict; ``update_job``
+    does not.
+    """
+
+    def test_update_job_can_expose_inconsistent_multi_key_state(self) -> None:
+        """Stress test: writer calls update_job with coupled fields,
+        reader checks whether the fields are always consistent.
+
+        With update_job (non-atomic), there is a window where status and
+        progress disagree.  With atomic_update, they never disagree.
+
+        This test documents the hazard — it may not fail deterministically
+        on every run (due to GIL timing), but the assertion captures the
+        structural difference between the two APIs.
+        """
+        store = JobStore()
+        job_id = store.create_job({"status": "running", "progress": 0.0, "step": 0})
+
+        inconsistencies: list[dict] = []
+        stop = threading.Event()
+
+        def reader() -> None:
+            """Poll the job and look for step/progress mismatches."""
+            while not stop.is_set():
+                job = store.get_job(job_id)
+                if job is None:
+                    continue
+                step = job.get("step", 0)
+                progress = job.get("progress", 0.0)
+                # Convention: progress == step / 100.  If they disagree
+                # by more than one step, the reader saw a partial update.
+                expected_progress = step / 100.0
+                if abs(progress - expected_progress) > 0.015:
+                    inconsistencies.append({"step": step, "progress": progress})
+
+        def writer_non_atomic() -> None:
+            """Update coupled fields with the non-atomic update_job."""
+            for i in range(1, 101):
+                store.update_job(job_id, step=i, progress=i / 100.0)
+
+        reader_t = threading.Thread(target=reader, daemon=True)
+        writer_t = threading.Thread(target=writer_non_atomic)
+        reader_t.start()
+        writer_t.start()
+        writer_t.join(timeout=5)
+        stop.set()
+        reader_t.join(timeout=2)
+
+        # Record whether inconsistencies were seen — either way, the test
+        # passes.  The purpose is to document the hazard.  The real
+        # assertion is structural: atomic_update NEVER shows them.
+        # (Inconsistencies may or may not appear depending on GIL timing.)
+
+        # Now verify that atomic_update never shows inconsistencies.
+        store2 = JobStore()
+        job_id2 = store2.create_job({"status": "running", "progress": 0.0, "step": 0})
+        atomic_inconsistencies: list[dict] = []
+        stop2 = threading.Event()
+
+        def reader2() -> None:
+            while not stop2.is_set():
+                job = store2.get_job(job_id2)
+                if job is None:
+                    continue
+                step = job.get("step", 0)
+                progress = job.get("progress", 0.0)
+                expected = step / 100.0
+                if abs(progress - expected) > 0.015:
+                    atomic_inconsistencies.append({"step": step, "progress": progress})
+
+        def writer_atomic() -> None:
+            for i in range(1, 101):
+                store2.atomic_update(job_id2, {"step": i, "progress": i / 100.0})
+
+        reader_t2 = threading.Thread(target=reader2, daemon=True)
+        writer_t2 = threading.Thread(target=writer_atomic)
+        reader_t2.start()
+        writer_t2.start()
+        writer_t2.join(timeout=5)
+        stop2.set()
+        reader_t2.join(timeout=2)
+
+        # atomic_update must never show partial state
+        assert not atomic_inconsistencies, (
+            "atomic_update exposed partial state — this should be impossible"
+        )
+
+
+# ---------------------------------------------------------------------------
+# GAP 2: 24+ hour job evicted mid-execution
+# ---------------------------------------------------------------------------
+
+
+class TestLongRunningJobEviction:
+    """Demonstrate that _evict_stale can remove a still-running job.
+
+    Production failure: A training job running for >24 hours gets evicted
+    when another ``create_job`` or ``get_job`` call triggers
+    ``_evict_stale``.  The background thread's next ``update_job`` call
+    then raises ``KeyError`` because the job dict is gone.
+    """
+
+    def test_running_job_evicted_after_ttl_causes_keyerror(self) -> None:
+        """A running job older than TTL is evicted; update_job then fails."""
+        store = JobStore(ttl_seconds=10)
+
+        # Simulate a job created 25 hours ago (still "running")
+        job_id = store.create_job({
+            "status": "running",
+            "progress": 0.5,
+            "created_at": time.time() - 25 * 3600,
+        })
+
+        # Before eviction, the job exists
+        assert store.jobs.get(job_id) is not None
+
+        # Trigger eviction by creating another job (or calling get_job)
+        store.create_job({"status": "new"})
+
+        # The long-running job has been evicted
+        assert store.get_job(job_id) is None
+
+        # The background thread would try to update progress — KeyError
+        with pytest.raises(KeyError):
+            store.update_job(job_id, progress=0.6, message="Still training...")
+
+    def test_running_job_evicted_during_background_thread(self) -> None:
+        """Simulate the full race: background thread writes, main thread
+        triggers eviction, background thread's next write fails.
+
+        Catches: silent job loss — the user sees the job vanish while
+        training is still in progress.
+        """
+        store = JobStore(ttl_seconds=2)
+
+        job_id = store.create_job({
+            "status": "running",
+            "progress": 0.0,
+            "created_at": time.time() - 5,  # already stale
+        })
+
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def background_worker() -> None:
+            barrier.wait()
+            try:
+                # Simulate a progress update from the training thread
+                store.update_job(job_id, progress=0.75, message="Training epoch 3")
+            except KeyError as exc:
+                errors.append(exc)
+
+        def main_thread_poller() -> None:
+            barrier.wait()
+            # This triggers eviction
+            store.get_job("some_other_id")
+
+        bg = threading.Thread(target=background_worker)
+        main = threading.Thread(target=main_thread_poller)
+        bg.start()
+        main.start()
+        main.join(timeout=5)
+        bg.join(timeout=5)
+
+        # The job should have been evicted
+        assert store.get_job(job_id) is None
+        # The background thread may or may not have hit the KeyError
+        # depending on scheduling.  But we've demonstrated the scenario
+        # is possible.  Verify the structural issue:
+        with pytest.raises(KeyError):
+            store.update_job(job_id, progress=0.8)
+
+    def test_atomic_update_also_fails_on_evicted_job(self) -> None:
+        """atomic_update has the same eviction vulnerability."""
+        store = JobStore(ttl_seconds=1)
+        job_id = store.create_job({
+            "status": "running",
+            "created_at": time.time() - 100,
+        })
+        # Trigger eviction
+        store.create_job({"status": "trigger"})
+        with pytest.raises(KeyError):
+            store.atomic_update(job_id, {"progress": 0.9})
+
+
+# ---------------------------------------------------------------------------
+# GAP 3: No concurrent optimiser guard
+# ---------------------------------------------------------------------------
+
+
+class TestOptimiserNoConcurrencyGuard:
+    """Demonstrate that OptimiserSolveService lacks a _start_lock.
+
+    Production failure: Two users (or a double-click) fire off two
+    optimiser solve jobs simultaneously.  Unlike TrainService which has
+    ``_start_lock`` + ``_check_no_concurrent_jobs()``, the optimiser
+    service has no such guard.  Multiple jobs run in parallel, competing
+    for CPU/memory.
+
+    We test at the JobStore level since we can't easily instantiate the
+    full service, but the test documents the architectural gap.
+    """
+
+    def test_train_service_has_start_lock(self) -> None:
+        """Verify TrainService has the _start_lock attribute."""
+        from haute.routes._train_service import TrainService
+        store = JobStore()
+        svc = TrainService(store)
+        assert hasattr(svc, "_start_lock")
+        assert isinstance(svc._start_lock, type(threading.Lock()))
+
+    def test_optimiser_service_lacks_start_lock(self) -> None:
+        """Verify OptimiserSolveService does NOT have a _start_lock.
+
+        This documents the gap: nothing prevents concurrent solves.
+        """
+        from haute.routes._optimiser_service import OptimiserSolveService
+        store = JobStore()
+        svc = OptimiserSolveService(store)
+        assert not hasattr(svc, "_start_lock"), (
+            "OptimiserSolveService now has _start_lock — update this test"
+        )
+
+    def test_multiple_running_jobs_allowed_in_store(self) -> None:
+        """Without a lock, multiple 'running' jobs coexist in the store.
+
+        TrainService explicitly checks for running jobs under a lock.
+        The optimiser service does not, so multiple running jobs are
+        possible.  This test demonstrates the difference.
+        """
+        store = JobStore()
+
+        # Simulate two concurrent optimiser job starts (no lock, no check)
+        id1 = store.create_job({"status": "running", "type": "optimiser"})
+        id2 = store.create_job({"status": "running", "type": "optimiser"})
+
+        running = [
+            jid for jid, j in store.jobs.items()
+            if j.get("status") == "running"
+        ]
+        # Both are running — no guard rejected the second one
+        assert len(running) == 2
+        assert id1 in running
+        assert id2 in running
+
+    def test_concurrent_optimiser_starts_race(self) -> None:
+        """Simulate the double-click race: N threads all create 'running'
+        jobs simultaneously.  All succeed (no lock blocks them).
+        """
+        store = JobStore()
+        n_threads = 5
+        barrier = threading.Barrier(n_threads)
+        ids: list[str] = []
+        lock = threading.Lock()
+
+        def start_optimiser(idx: int) -> None:
+            barrier.wait()
+            jid = store.create_job({
+                "status": "running",
+                "type": "optimiser",
+                "idx": idx,
+            })
+            with lock:
+                ids.append(jid)
+
+        threads = [threading.Thread(target=start_optimiser, args=(i,)) for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(ids) == n_threads
+        running = [jid for jid, j in store.jobs.items() if j.get("status") == "running"]
+        assert len(running) == n_threads, (
+            f"Expected {n_threads} concurrent running jobs, got {len(running)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# GAP 4: clear_result_data is dead code (never called from routes)
+# ---------------------------------------------------------------------------
+
+
+class TestClearResultDataDeadCode:
+    """Verify clear_result_data is defined but never invoked from routes.
+
+    Production failure: Memory leak — after an optimiser solve completes
+    and results are consumed, the heavy solver/solve_result/quote_grid
+    objects stay in memory until TTL eviction (up to 24h).  The
+    ``clear_result_data`` method was designed to fix this, but nobody
+    calls it.
+
+    These tests exercise the method end-to-end on realistic job shapes
+    to ensure it works correctly if/when it is wired in.
+    """
+
+    def test_clear_result_data_not_called_anywhere_in_routes(self) -> None:
+        """Structural test: grep the source tree for clear_result_data calls.
+
+        If this test starts failing, it means someone wired the method
+        into a route — great!  Update the test accordingly.
+        """
+        import importlib
+        import inspect
+
+        from haute.routes import _job_store
+
+        # Get the source of the module that defines clear_result_data
+        src = inspect.getsource(_job_store)
+        # The definition appears once; there should be no call sites in
+        # other modules.  We check by importing all route modules and
+        # scanning for the method name.
+        route_modules = []
+        try:
+            from haute.routes import _train_service
+            route_modules.append(_train_service)
+        except ImportError:
+            pass
+        try:
+            from haute.routes import _optimiser_service
+            route_modules.append(_optimiser_service)
+        except ImportError:
+            pass
+
+        for mod in route_modules:
+            mod_src = inspect.getsource(mod)
+            assert "clear_result_data" not in mod_src, (
+                f"clear_result_data is called in {mod.__name__} — no longer dead code!"
+            )
+
+    def test_end_to_end_optimiser_job_shape(self) -> None:
+        """Exercise clear_result_data on a dict shaped like a real
+        optimiser completed job — the use case it was designed for.
+        """
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "progress": 1.0,
+            "message": "Completed",
+            "config": {"objective": "income", "constraints": {"loss_ratio": 1.0}},
+            "solver": object(),         # heavy: OnlineOptimiser instance
+            "solve_result": object(),   # heavy: solve result with full DataFrame
+            "quote_grid": object(),     # heavy: QuoteGrid
+            "result": {
+                "mode": "online",
+                "total_objective": 1.05,
+                "converged": True,
+                "frontier": None,
+            },
+            "frontier_data": None,
+            "elapsed_seconds": 42.0,
+        })
+
+        # Before clear: heavy objects present
+        job = store.get_job(job_id)
+        assert "solver" in job
+        assert "solve_result" in job
+        assert "quote_grid" in job
+
+        store.clear_result_data(job_id)
+
+        # After clear: heavy objects gone, metadata intact
+        job = store.get_job(job_id)
+        assert "solver" not in job
+        assert "solve_result" not in job
+        assert "quote_grid" not in job
+        assert job["status"] == "completed"
+        assert job["result"]["converged"] is True
+        assert job["config"]["objective"] == "income"
+        assert job["elapsed_seconds"] == 42.0
+
+    def test_clear_after_clear_is_safe(self) -> None:
+        """Double-clear should not raise or corrupt."""
+        store = JobStore()
+        job_id = store.create_job({
+            "status": "completed",
+            "solver": "big",
+            "solve_result": "big",
+            "quote_grid": "big",
+            "result": {"ok": True},
+        })
+        store.clear_result_data(job_id)
+        store.clear_result_data(job_id)
+        job = store.get_job(job_id)
+        assert job["status"] == "completed"
+        assert "solver" not in job
+
+
+# ---------------------------------------------------------------------------
+# GAP 5: Eviction during iteration — dict size changes
+# ---------------------------------------------------------------------------
+
+
+class TestEvictionDuringIteration:
+    """Demonstrate that _evict_stale can race with concurrent dict mutation.
+
+    Production failure: ``_evict_stale`` iterates ``self._jobs.items()``
+    to find stale keys, then deletes them.  If another thread inserts or
+    deletes a key between the iteration and the deletion, CPython may
+    raise ``RuntimeError: dictionary changed size during iteration``
+    (in older versions) or silently skip entries.
+
+    In CPython 3.12+ dict iteration is more resilient, but the race is
+    still architecturally unsound.
+    """
+
+    def test_eviction_concurrent_with_creates(self) -> None:
+        """Hammer create_job (which calls _evict_stale) from many threads
+        while the store has a mix of stale and fresh jobs.
+
+        Catches: RuntimeError from dict mutation during iteration,
+        or silent data loss where a fresh job disappears.
+        """
+        store = JobStore(ttl_seconds=1)
+
+        # Pre-populate with 50 stale jobs to maximize eviction work
+        for i in range(50):
+            store.create_job({
+                "status": "stale",
+                "idx": i,
+                "created_at": time.time() - 100 - i,
+            })
+
+        n_threads = 20
+        barrier = threading.Barrier(n_threads)
+        new_ids: list[str] = []
+        errors: list[Exception] = []
+        lock = threading.Lock()
+
+        def create_and_evict(idx: int) -> None:
+            barrier.wait()
+            try:
+                jid = store.create_job({"status": "fresh", "idx": idx})
+                with lock:
+                    new_ids.append(jid)
+            except Exception as exc:
+                with lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=create_and_evict, args=(i,)) for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Concurrent eviction raised: {errors}"
+        assert len(new_ids) == n_threads
+        # All fresh jobs must survive
+        for jid in new_ids:
+            job = store.get_job(jid)
+            assert job is not None, f"Fresh job {jid} was lost during eviction race"
+            assert job["status"] == "fresh"
+
+    def test_eviction_concurrent_with_updates(self) -> None:
+        """Writers call update_job while readers call get_job (triggering
+        eviction) — no crash, no data loss for non-stale jobs.
+        """
+        store = JobStore(ttl_seconds=2)
+
+        # Create some stale jobs to be evicted
+        for _ in range(20):
+            store.create_job({"status": "old", "created_at": time.time() - 50})
+
+        # Create fresh jobs that should survive
+        fresh_ids = [
+            store.create_job({"status": "running", "counter": 0})
+            for _ in range(5)
+        ]
+
+        n_rounds = 50
+        errors: list[Exception] = []
+
+        def updater() -> None:
+            for i in range(n_rounds):
+                for jid in fresh_ids:
+                    try:
+                        store.update_job(jid, counter=i)
+                    except Exception as exc:
+                        errors.append(exc)
+
+        def reader() -> None:
+            for _ in range(n_rounds):
+                for jid in fresh_ids:
+                    try:
+                        store.get_job(jid)  # triggers _evict_stale
+                    except Exception as exc:
+                        errors.append(exc)
+
+        t_update = threading.Thread(target=updater)
+        t_read = threading.Thread(target=reader)
+        t_update.start()
+        t_read.start()
+        t_update.join(timeout=10)
+        t_read.join(timeout=10)
+
+        assert not errors, f"Concurrent eviction + update raised: {errors}"
+        for jid in fresh_ids:
+            job = store.get_job(jid)
+            assert job is not None
+
+    def test_eviction_while_iterating_jobs_property(self) -> None:
+        """External code iterates store.jobs (e.g. _check_no_concurrent_jobs)
+        while another thread triggers eviction via create_job.
+        """
+        store = JobStore(ttl_seconds=1)
+
+        # Populate with stale jobs
+        for _ in range(30):
+            store.create_job({"status": "stale", "created_at": time.time() - 50})
+        # And a fresh one
+        fresh_id = store.create_job({"status": "running"})
+
+        errors: list[Exception] = []
+
+        def iterator() -> None:
+            """Mimic _check_no_concurrent_jobs — iterate .jobs.items()."""
+            for _ in range(100):
+                try:
+                    running = [
+                        jid for jid, j in store.jobs.items()
+                        if j.get("status") == "running"
+                    ]
+                except Exception as exc:
+                    errors.append(exc)
+
+        def evictor() -> None:
+            """Create new jobs, each triggering _evict_stale."""
+            for _ in range(100):
+                try:
+                    store.create_job({
+                        "status": "stale",
+                        "created_at": time.time() - 50,
+                    })
+                except Exception as exc:
+                    errors.append(exc)
+
+        t1 = threading.Thread(target=iterator)
+        t2 = threading.Thread(target=evictor)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        assert not errors, f"Concurrent iteration + eviction raised: {errors}"
+        # Fresh job must survive
+        assert store.jobs.get(fresh_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# GAP 6: require_completed_job treats "running" and "error" identically
+# ---------------------------------------------------------------------------
+
+
+class TestRequireCompletedJobErrorVsRunning:
+    """Document that require_completed_job returns HTTP 400 for both
+    "running" and "error" status, with no way to distinguish them.
+
+    Production failure: A client polling for job completion gets 400
+    for an errored job and assumes "still running, try again later"
+    because the status code is the same.  The error message includes
+    the status string, but the HTTP status code (400) is identical.
+    A proper API would return 409 for "running" (conflict/retry) and
+    400 or 422 for "error" (terminal failure).
+    """
+
+    def test_running_and_error_both_return_400(self) -> None:
+        """Both non-completed statuses produce the same HTTP status code."""
+        from fastapi import HTTPException
+
+        store = JobStore()
+        running_id = store.create_job({"status": "running"})
+        error_id = store.create_job({"status": "error", "message": "OOM"})
+
+        with pytest.raises(HTTPException) as running_exc:
+            store.require_completed_job(running_id)
+        with pytest.raises(HTTPException) as error_exc:
+            store.require_completed_job(error_id)
+
+        # Same status code — client cannot distinguish via HTTP alone
+        assert running_exc.value.status_code == error_exc.value.status_code == 400
+
+    def test_error_detail_includes_status_string(self) -> None:
+        """The detail message does include the status, so a client parsing
+        the message body CAN distinguish — but this is fragile.
+        """
+        from fastapi import HTTPException
+
+        store = JobStore()
+        running_id = store.create_job({"status": "running"})
+        error_id = store.create_job({"status": "error", "message": "OOM"})
+
+        with pytest.raises(HTTPException) as running_exc:
+            store.require_completed_job(running_id)
+        with pytest.raises(HTTPException) as error_exc:
+            store.require_completed_job(error_id)
+
+        assert "running" in running_exc.value.detail
+        assert "error" in error_exc.value.detail
+        # Both say "not completed" — same template
+        assert "not completed" in running_exc.value.detail
+        assert "not completed" in error_exc.value.detail
+
+    def test_running_is_retriable_error_is_terminal(self) -> None:
+        """Document the semantic difference: 'running' means try later,
+        'error' means the job failed permanently.  The API conflates them.
+
+        A well-designed API might return:
+        - 202 Accepted / 409 Conflict for "running" (retriable)
+        - 400 / 422 for "error" (terminal)
+        """
+        from fastapi import HTTPException
+
+        store = JobStore()
+
+        # Running job — semantically retriable
+        running_id = store.create_job({"status": "running", "progress": 0.5})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(running_id)
+        assert exc_info.value.status_code == 400  # should arguably be 409
+
+        # Errored job — semantically terminal
+        error_id = store.create_job({"status": "error", "message": "CUDA OOM"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(error_id)
+        assert exc_info.value.status_code == 400  # same code, different semantics
+
+    def test_detail_format_is_consistent(self) -> None:
+        """Verify the exact detail format for regression testing."""
+        from fastapi import HTTPException
+
+        store = JobStore()
+        job_id = store.create_job({"status": "error"})
+        with pytest.raises(HTTPException) as exc_info:
+            store.require_completed_job(job_id)
+        detail = exc_info.value.detail
+        assert detail == f"Job '{job_id}' is not completed (status: error)"

@@ -172,7 +172,9 @@ def test_safe_sink_real_error_propagates(tmp_path: Path):
 
 def test_malloc_trim_does_not_raise():
     """_malloc_trim must never raise regardless of platform."""
-    _malloc_trim()  # should not raise
+    result = _malloc_trim()
+    # _malloc_trim should return None (it's a void helper)
+    assert result is None
 
 
 class TestMallocTrimDispatch:

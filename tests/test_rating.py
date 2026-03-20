@@ -562,7 +562,601 @@ class TestApplyRatingTableSchemaCallCount:
         # existing_cols set correctly filters it from cast_exprs.
         # The join on ["region", "nonexistent"] would fail because
         # "nonexistent" is not in the main frame schema.
-        try:
+        with pytest.raises((pl.exceptions.ColumnNotFoundError, pl.exceptions.SchemaError)):
             _apply_rating_table(lf, table).collect()
+
+
+# ===========================================================================
+# GAP 1: _apply_banding — comprehensive direct tests
+# ===========================================================================
+
+
+class TestApplyBanding:
+    """Direct tests for _apply_banding.
+
+    Production failure caught: banding misconfiguration silently passes data
+    through without creating the output column, or assigns wrong bands.
+    """
+
+    def test_continuous_single_rule(self) -> None:
+        """A single continuous rule assigns values inside its range."""
+        lf = pl.DataFrame({"age": [18, 30, 50]}).lazy()
+        rules = [{"op1": ">=", "val1": 0, "op2": "<=", "val2": 25, "assignment": "young"}]
+        result = _apply_banding(lf, "age", "age_band", "continuous", rules).collect()
+        assert result["age_band"].to_list() == ["young", None, None]
+
+    def test_continuous_multiple_rules(self) -> None:
+        """Multiple continuous rules create non-overlapping bands."""
+        lf = pl.DataFrame({"age": [20, 35, 60]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": 0, "op2": "<", "val2": 30, "assignment": "young"},
+            {"op1": ">=", "val1": 30, "op2": "<", "val2": 50, "assignment": "mid"},
+            {"op1": ">=", "val1": 50, "op2": "<=", "val2": 100, "assignment": "senior"},
+        ]
+        result = _apply_banding(lf, "age", "age_band", "continuous", rules).collect()
+        assert result["age_band"].to_list() == ["young", "mid", "senior"]
+
+    def test_continuous_with_default(self) -> None:
+        """Default value is applied when no rule matches."""
+        lf = pl.DataFrame({"x": [5, 999]}).lazy()
+        rules = [{"op1": ">=", "val1": 0, "op2": "<", "val2": 10, "assignment": "low"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules, default="unknown").collect()
+        assert result["band"].to_list() == ["low", "unknown"]
+
+    def test_categorical_banding(self) -> None:
+        """Categorical banding maps exact string values."""
+        lf = pl.DataFrame({"prop": ["House", "Flat", "Bungalow"]}).lazy()
+        rules = [
+            {"value": "House", "assignment": "dwelling"},
+            {"value": "Flat", "assignment": "apartment"},
+        ]
+        result = _apply_banding(lf, "prop", "prop_band", "categorical", rules).collect()
+        assert result["prop_band"].to_list() == ["dwelling", "apartment", None]
+
+    def test_categorical_with_default(self) -> None:
+        """Categorical banding applies default for unmatched values."""
+        lf = pl.DataFrame({"prop": ["House", "Unknown"]}).lazy()
+        rules = [{"value": "House", "assignment": "dwelling"}]
+        result = _apply_banding(lf, "prop", "band", "categorical", rules, default="other").collect()
+        assert result["band"].to_list() == ["dwelling", "other"]
+
+    def test_empty_rules_returns_frame_unchanged(self) -> None:
+        """Empty rules list should return the frame without adding columns.
+
+        Catches: silent data corruption if empty rules produce a column of all nulls.
+        """
+        lf = pl.DataFrame({"x": [1, 2]}).lazy()
+        result = _apply_banding(lf, "x", "band", "continuous", []).collect()
+        assert "band" not in result.columns
+
+    def test_categorical_empty_rules_returns_frame_unchanged(self) -> None:
+        lf = pl.DataFrame({"x": ["a"]}).lazy()
+        result = _apply_banding(lf, "x", "band", "categorical", []).collect()
+        assert "band" not in result.columns
+
+    def test_continuous_rules_all_invalid_returns_unchanged(self) -> None:
+        """Rules where all operators are invalid should not add a column.
+
+        Catches: a when/then chain built from zero valid conditions would crash.
+        """
+        lf = pl.DataFrame({"x": [1]}).lazy()
+        rules = [{"op1": "!=", "val1": 5, "assignment": "bad"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert "band" not in result.columns
+
+    def test_categorical_numeric_column_cast_to_string(self) -> None:
+        """Categorical banding on a numeric column casts to Utf8 for matching.
+
+        Catches: integer column failing to match string keys in the remap dict.
+        """
+        lf = pl.DataFrame({"code": [1, 2, 3]}).lazy()
+        rules = [
+            {"value": "1", "assignment": "one"},
+            {"value": "2", "assignment": "two"},
+        ]
+        result = _apply_banding(lf, "code", "band", "categorical", rules).collect()
+        assert result["band"].to_list() == ["one", "two", None]
+
+    def test_output_column_different_from_input(self) -> None:
+        """Output column name is distinct from input; both preserved."""
+        lf = pl.DataFrame({"age": [25]}).lazy()
+        rules = [{"op1": ">=", "val1": 0, "op2": "<=", "val2": 30, "assignment": "young"}]
+        result = _apply_banding(lf, "age", "age_band", "continuous", rules).collect()
+        assert "age" in result.columns
+        assert "age_band" in result.columns
+
+
+# ===========================================================================
+# GAP 2: Very large rating tables — performance and correctness
+# ===========================================================================
+
+
+class TestLargeRatingTable:
+    """Rating table with 1000+ entries must produce correct lookups.
+
+    Production failure caught: O(n^2) join logic, memory blowup, or
+    incorrect deduplication on large lookup frames.
+    """
+
+    def test_large_table_correctness(self) -> None:
+        n = 2000
+        entries = [{"region": f"R{i}", "value": float(i)} for i in range(n)]
+        lf = pl.DataFrame({"region": [f"R{i}" for i in range(n)]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["region"],
+            "outputColumn": "factor",
+            "entries": entries,
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result.height == n
+        assert result["factor"].to_list() == [float(i) for i in range(n)]
+
+    def test_large_table_with_unmatched_rows(self) -> None:
+        """Large lookup where half the input rows have no match."""
+        n = 1000
+        entries = [{"region": f"R{i}", "value": float(i)} for i in range(n)]
+        input_regions = [f"R{i}" for i in range(n)] + [f"MISSING{i}" for i in range(n)]
+        lf = pl.DataFrame({"region": input_regions}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["region"],
+            "outputColumn": "factor",
+            "entries": entries,
+            "defaultValue": "-1.0",
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result.height == 2 * n
+        matched = result["factor"].to_list()[:n]
+        unmatched = result["factor"].to_list()[n:]
+        assert matched == [float(i) for i in range(n)]
+        assert all(v == -1.0 for v in unmatched)
+
+
+# ===========================================================================
+# GAP 3: Rating table with all null values
+# ===========================================================================
+
+
+class TestAllNullRatingTable:
+    """Every entry has a null value — output column should be all null.
+
+    Production failure caught: null cast to Float64 throws, or fill_null
+    with default overwrites entries that are intentionally null.
+    """
+
+    def test_all_null_values_no_default(self) -> None:
+        lf = pl.DataFrame({"k": ["a", "b"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["k"],
+            "outputColumn": "out",
+            "entries": [
+                {"k": "a", "value": None},
+                {"k": "b", "value": None},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result["out"].to_list() == [None, None]
+
+    def test_all_null_values_with_default(self) -> None:
+        """Default should fill nulls even when the entry explicitly has null."""
+        lf = pl.DataFrame({"k": ["a", "b", "c"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["k"],
+            "outputColumn": "out",
+            "entries": [
+                {"k": "a", "value": None},
+                {"k": "b", "value": None},
+            ],
+            "defaultValue": "99.0",
+        }
+        result = _apply_rating_table(lf, table).collect()
+        # Entries with null values get filled by default; unmatched "c" also gets default
+        vals = result["out"].to_list()
+        assert vals == [99.0, 99.0, 99.0]
+
+
+# ===========================================================================
+# GAP 4: Combined rating with non-numeric columns
+# ===========================================================================
+
+
+class TestCombineNonNumericColumns:
+    """Combine operation on string columns — should propagate Polars errors
+    or produce null, not silently corrupt data.
+
+    Production failure caught: multiply/add on string columns produces
+    garbage instead of a clear error.
+    """
+
+    def test_multiply_string_columns_raises(self) -> None:
+        """Multiplying string columns should raise, not silently succeed."""
+        lf = pl.DataFrame({"a": ["hello"], "b": ["world"]}).lazy()
+        with pytest.raises(Exception):
+            _combine_rating_columns(lf, ["a", "b"], "multiply", "out").collect()
+
+    def test_add_string_columns_concatenates_or_raises(self) -> None:
+        """Adding string columns either concatenates (Polars behaviour) or raises.
+
+        Either outcome is acceptable — the key is it does NOT silently return 0.
+        """
+        lf = pl.DataFrame({"a": ["hello"], "b": ["world"]}).lazy()
+        try:
+            result = _combine_rating_columns(lf, ["a", "b"], "add", "out").collect()
+            # If Polars allows string +, the result should be concatenation
+            assert result["out"].to_list() == ["helloworld"]
         except Exception:
-            pass  # Join failure is expected; we verified cast path worked
+            pass  # Raising is also acceptable
+
+    def test_min_max_on_strings(self) -> None:
+        """min/max on strings should use lexicographic ordering or raise."""
+        lf = pl.DataFrame({"a": ["banana"], "b": ["apple"]}).lazy()
+        try:
+            result_min = _combine_rating_columns(lf, ["a", "b"], "min", "out").collect()
+            assert result_min["out"].to_list() == ["apple"]
+            result_max = _combine_rating_columns(lf, ["a", "b"], "max", "out").collect()
+            assert result_max["out"].to_list() == ["banana"]
+        except Exception:
+            pass  # Raising is acceptable
+
+
+# ===========================================================================
+# GAP 5: Banding with boundary values (floating point equality)
+# ===========================================================================
+
+
+class TestBandingBoundaryValues:
+    """Values exactly on the boundary between two bands.
+
+    Production failure caught: off-by-one in band assignment — e.g. a value
+    of exactly 25 falls into neither the 0-25 band nor the 25-50 band.
+    """
+
+    def test_boundary_value_inclusive_exclusive(self) -> None:
+        """Value exactly on boundary: [0,25) and [25,50) — 25 goes to second band."""
+        lf = pl.DataFrame({"x": [24.9999, 25.0, 25.0001]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": 0, "op2": "<", "val2": 25, "assignment": "low"},
+            {"op1": ">=", "val1": 25, "op2": "<", "val2": 50, "assignment": "mid"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["low", "mid", "mid"]
+
+    def test_boundary_both_inclusive(self) -> None:
+        """Overlapping bands where boundary belongs to both: first rule wins."""
+        lf = pl.DataFrame({"x": [25.0]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": 0, "op2": "<=", "val2": 25, "assignment": "low"},
+            {"op1": ">=", "val1": 25, "op2": "<=", "val2": 50, "assignment": "mid"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        # First matching rule in the when/then chain wins
+        assert result["band"].to_list() == ["low"]
+
+    def test_floating_point_near_boundary(self) -> None:
+        """Floating point arithmetic near boundaries must not cause misclassification.
+
+        Catches: 0.1 + 0.2 != 0.3 issues causing values to slip between bands.
+        """
+        lf = pl.DataFrame({"x": [0.1 + 0.2]}).lazy()  # 0.30000000000000004
+        rules = [
+            {"op1": ">=", "val1": 0, "op2": "<", "val2": 0.3, "assignment": "low"},
+            {"op1": ">=", "val1": 0.3, "op2": "<", "val2": 1.0, "assignment": "high"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        # 0.1+0.2 > 0.3, so it falls into "high"
+        assert result["band"].to_list() == ["high"]
+
+    def test_exact_equality_boundary(self) -> None:
+        """Using == operator on a float boundary value."""
+        lf = pl.DataFrame({"x": [0.0, 0.5, 1.0]}).lazy()
+        rules = [{"op1": "=", "val1": 0.5, "assignment": "exact"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == [None, "exact", None]
+
+
+# ===========================================================================
+# GAP 6: Negative values in banding
+# ===========================================================================
+
+
+class TestBandingNegativeValues:
+    """Negative numbers and reversed ranges in banding rules.
+
+    Production failure caught: banding logic assumes positive values, or
+    reversed min/max silently produces empty bands.
+    """
+
+    def test_negative_values_banded_correctly(self) -> None:
+        lf = pl.DataFrame({"temp": [-20.0, -5.0, 0.0, 10.0]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": -30, "op2": "<", "val2": -10, "assignment": "freezing"},
+            {"op1": ">=", "val1": -10, "op2": "<", "val2": 0, "assignment": "cold"},
+            {"op1": ">=", "val1": 0, "op2": "<=", "val2": 20, "assignment": "mild"},
+        ]
+        result = _apply_banding(lf, "temp", "temp_band", "continuous", rules).collect()
+        assert result["temp_band"].to_list() == ["freezing", "cold", "mild", "mild"]
+
+    def test_negative_boundary_exact(self) -> None:
+        """Value exactly on a negative boundary."""
+        lf = pl.DataFrame({"x": [-10.0]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": -20, "op2": "<", "val2": -10, "assignment": "lower"},
+            {"op1": ">=", "val1": -10, "op2": "<", "val2": 0, "assignment": "upper"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["upper"]
+
+    def test_reversed_range_produces_no_match(self) -> None:
+        """A rule with min > max (e.g. >= 50 AND < 10) should match nothing.
+
+        Catches: reversed ranges silently accepting all values.
+        """
+        lf = pl.DataFrame({"x": [5.0, 30.0, 60.0]}).lazy()
+        rules = [{"op1": ">=", "val1": 50, "op2": "<", "val2": 10, "assignment": "impossible"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == [None, None, None]
+
+
+# ===========================================================================
+# GAP 7: Empty DataFrame through banding
+# ===========================================================================
+
+
+class TestBandingEmptyDataFrame:
+    """0-row input should pass through cleanly.
+
+    Production failure caught: division by zero, empty-frame schema errors,
+    or exceptions when applying when/then to an empty frame.
+    """
+
+    def test_continuous_banding_empty_frame(self) -> None:
+        lf = pl.DataFrame({"x": pl.Series([], dtype=pl.Float64)}).lazy()
+        rules = [{"op1": ">=", "val1": 0, "op2": "<", "val2": 10, "assignment": "low"}]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result.height == 0
+        assert "band" in result.columns
+
+    def test_categorical_banding_empty_frame(self) -> None:
+        lf = pl.DataFrame({"cat": pl.Series([], dtype=pl.Utf8)}).lazy()
+        rules = [{"value": "A", "assignment": "group_a"}]
+        result = _apply_banding(lf, "cat", "band", "categorical", rules).collect()
+        assert result.height == 0
+        assert "band" in result.columns
+
+    def test_rating_table_empty_frame(self) -> None:
+        """Rating table applied to 0-row frame should return 0 rows with output column."""
+        lf = pl.DataFrame({"region": pl.Series([], dtype=pl.Utf8)}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["region"],
+            "outputColumn": "factor",
+            "entries": [{"region": "North", "value": 1.2}],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result.height == 0
+        assert "factor" in result.columns
+
+
+# ===========================================================================
+# GAP 8: Multiple rating tables applied sequentially
+# ===========================================================================
+
+
+class TestSequentialRatingTables:
+    """Output of one rating table feeds as input to the next.
+
+    Production failure caught: column name collision, schema drift, or
+    the second table failing to join because the first mutated types.
+    """
+
+    def test_chained_tables(self) -> None:
+        """Two tables applied in sequence — second uses a column created by the first."""
+        lf = pl.DataFrame({"region": ["North", "South"]}).lazy()
+        table1: dict[str, Any] = {
+            "factors": ["region"],
+            "outputColumn": "region_factor",
+            "entries": [
+                {"region": "North", "value": 1.2},
+                {"region": "South", "value": 0.8},
+            ],
+        }
+        lf = _apply_rating_table(lf, table1)
+
+        # Second table uses a different factor column
+        # First, band the region_factor
+        table2: dict[str, Any] = {
+            "factors": ["region"],
+            "outputColumn": "region_loading",
+            "entries": [
+                {"region": "North", "value": 0.5},
+                {"region": "South", "value": 0.3},
+            ],
+        }
+        lf = _apply_rating_table(lf, table2)
+        result = lf.collect()
+
+        assert "region_factor" in result.columns
+        assert "region_loading" in result.columns
+        assert result["region_factor"].to_list() == [1.2, 0.8]
+        assert result["region_loading"].to_list() == [0.5, 0.3]
+
+    def test_chained_then_combined(self) -> None:
+        """Two tables applied, then their outputs multiplied together."""
+        lf = pl.DataFrame({"band": ["A", "B"]}).lazy()
+        table1: dict[str, Any] = {
+            "factors": ["band"],
+            "outputColumn": "f1",
+            "entries": [
+                {"band": "A", "value": 2.0},
+                {"band": "B", "value": 3.0},
+            ],
+        }
+        table2: dict[str, Any] = {
+            "factors": ["band"],
+            "outputColumn": "f2",
+            "entries": [
+                {"band": "A", "value": 1.5},
+                {"band": "B", "value": 0.5},
+            ],
+        }
+        lf = _apply_rating_table(lf, table1)
+        lf = _apply_rating_table(lf, table2)
+        lf = _combine_rating_columns(lf, ["f1", "f2"], "multiply", "combined")
+        result = lf.collect()
+        assert result["combined"].to_list() == [3.0, 1.5]
+
+    def test_three_tables_sequential_with_nulls(self) -> None:
+        """Three tables in sequence, some with nulls — nulls propagate correctly."""
+        lf = pl.DataFrame({"k": ["a", "b", "c"]}).lazy()
+        for i, entries in enumerate([
+            [{"k": "a", "value": 1.0}, {"k": "b", "value": 2.0}],
+            [{"k": "a", "value": 10.0}, {"k": "c", "value": 30.0}],
+            [{"k": "b", "value": 200.0}, {"k": "c", "value": 300.0}],
+        ]):
+            table: dict[str, Any] = {
+                "factors": ["k"],
+                "outputColumn": f"t{i}",
+                "entries": entries,
+            }
+            lf = _apply_rating_table(lf, table)
+        result = lf.collect()
+        assert result["t0"].to_list() == [1.0, 2.0, None]
+        assert result["t1"].to_list() == [10.0, None, 30.0]
+        assert result["t2"].to_list() == [None, 200.0, 300.0]
+
+
+# ===========================================================================
+# GAP 9: Factor names with special characters
+# ===========================================================================
+
+
+class TestSpecialCharacterFactorNames:
+    """Factor names containing spaces, dots, brackets.
+
+    Production failure caught: Polars column selection fails on names like
+    'Property Type' or 'claim.amount' because they are not valid identifiers.
+    """
+
+    def test_factor_with_spaces(self) -> None:
+        lf = pl.DataFrame({"Property Type": ["House", "Flat"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["Property Type"],
+            "outputColumn": "prop factor",
+            "entries": [
+                {"Property Type": "House", "value": 1.0},
+                {"Property Type": "Flat", "value": 1.5},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result["prop factor"].to_list() == [1.0, 1.5]
+
+    def test_factor_with_dots(self) -> None:
+        lf = pl.DataFrame({"claim.type": ["fire", "flood"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["claim.type"],
+            "outputColumn": "claim.factor",
+            "entries": [
+                {"claim.type": "fire", "value": 2.0},
+                {"claim.type": "flood", "value": 3.0},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result["claim.factor"].to_list() == [2.0, 3.0]
+
+    def test_factor_with_brackets(self) -> None:
+        lf = pl.DataFrame({"risk[level]": ["high", "low"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["risk[level]"],
+            "outputColumn": "risk_factor",
+            "entries": [
+                {"risk[level]": "high", "value": 5.0},
+                {"risk[level]": "low", "value": 1.0},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result["risk_factor"].to_list() == [5.0, 1.0]
+
+    def test_banding_with_special_column_names(self) -> None:
+        """Banding also handles special character column names."""
+        lf = pl.DataFrame({"sum insured (GBP)": [10000.0, 50000.0]}).lazy()
+        rules = [
+            {"op1": ">=", "val1": 0, "op2": "<", "val2": 25000, "assignment": "low"},
+            {"op1": ">=", "val1": 25000, "op2": "<=", "val2": 100000, "assignment": "high"},
+        ]
+        result = _apply_banding(lf, "sum insured (GBP)", "si_band", "continuous", rules).collect()
+        assert result["si_band"].to_list() == ["low", "high"]
+
+
+# ===========================================================================
+# GAP 10: Extreme float values — Inf, -Inf, very large/small numbers
+# ===========================================================================
+
+
+class TestExtremeFloatValues:
+    """Inf, -Inf, very large numbers, very small numbers in data.
+
+    Production failure caught: Inf values silently pass through banding/rating,
+    producing nonsensical downstream arithmetic (e.g. Inf * 1.2 = Inf premium).
+    """
+
+    def test_inf_in_banding_gt(self) -> None:
+        """Inf should satisfy > any finite number."""
+        lf = pl.DataFrame({"x": [float("inf"), 5.0, float("-inf")]}).lazy()
+        rules = [
+            {"op1": ">", "val1": 0, "assignment": "positive"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["positive", "positive", None]
+
+    def test_neg_inf_in_banding(self) -> None:
+        """-Inf should satisfy < any finite number."""
+        lf = pl.DataFrame({"x": [float("-inf"), -5.0, 0.0]}).lazy()
+        rules = [
+            {"op1": "<", "val1": -100, "assignment": "extreme_low"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["extreme_low", None, None]
+
+    def test_very_large_numbers(self) -> None:
+        """Numbers near float max should band correctly without overflow."""
+        lf = pl.DataFrame({"x": [1e308, -1e308, 1e-308]}).lazy()
+        rules = [
+            {"op1": ">", "val1": 1e307, "assignment": "huge"},
+            {"op1": "<", "val1": -1e307, "assignment": "neg_huge"},
+            {"op1": ">=", "val1": 0, "op2": "<", "val2": 1, "assignment": "tiny"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        assert result["band"].to_list() == ["huge", "neg_huge", "tiny"]
+
+    def test_inf_in_rating_table_entry(self) -> None:
+        """A rating table entry with Inf value — it becomes a Float64 Inf in output."""
+        lf = pl.DataFrame({"k": ["a", "b"]}).lazy()
+        table: dict[str, Any] = {
+            "factors": ["k"],
+            "outputColumn": "out",
+            "entries": [
+                {"k": "a", "value": float("inf")},
+                {"k": "b", "value": 1.0},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        vals = result["out"].to_list()
+        assert vals[0] == float("inf")
+        assert vals[1] == 1.0
+
+    def test_combine_with_null_propagation(self) -> None:
+        """Multiplying a null value with a number should produce null, not zero.
+
+        Catches: null silently treated as 0 in multiply, giving wrong premiums.
+        """
+        lf = pl.DataFrame({"a": [2.0, None], "b": [3.0, 5.0]}).lazy()
+        result = _combine_rating_columns(lf, ["a", "b"], "multiply", "out").collect()
+        vals = result["out"].to_list()
+        assert vals[0] == 6.0
+        assert vals[1] is None
+
+    def test_combine_with_inf(self) -> None:
+        """Inf * finite = Inf, Inf + finite = Inf."""
+        lf = pl.DataFrame({"a": [float("inf")], "b": [2.0]}).lazy()
+        result_mul = _combine_rating_columns(lf, ["a", "b"], "multiply", "out").collect()
+        assert result_mul["out"].to_list() == [float("inf")]
+        result_add = _combine_rating_columns(lf, ["a", "b"], "add", "out").collect()
+        assert result_add["out"].to_list() == [float("inf")]

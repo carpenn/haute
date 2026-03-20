@@ -32,7 +32,7 @@ _TABLE_NAME_RE = re.compile(
 
 # Dangerous SQL keywords that must never appear in user-supplied SELECT clauses.
 _DANGEROUS_SQL_RE = re.compile(
-    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|EXEC|CREATE|GRANT|REVOKE|UNION)\b",
+    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|EXEC|EXECUTE|CREATE|GRANT|REVOKE|UNION|LATERAL)\b",
     re.IGNORECASE,
 )
 
@@ -74,6 +74,15 @@ def _validate_select_clause(query: str) -> None:
     if ";" in stripped:
         raise ValueError(
             "Query must not contain semicolons."
+        )
+    # Block SQL comments that could neutralize the appended FROM clause.
+    if "--" in stripped:
+        raise ValueError(
+            "Query must not contain SQL line comments (--)."
+        )
+    if "/*" in stripped:
+        raise ValueError(
+            "Query must not contain SQL block comments (/*)."
         )
     match = _DANGEROUS_SQL_RE.search(stripped)
     if match:
@@ -309,7 +318,7 @@ def fetch_and_cache(
         if writer is not None:
             writer.close()
             writer = None
-        tmp_path.rename(out_path)
+        tmp_path.replace(out_path)
     except BaseException:
         if writer is not None:
             writer.close()

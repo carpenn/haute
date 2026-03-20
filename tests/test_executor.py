@@ -1950,3 +1950,703 @@ class TestResolveBatchScenario:
         })
         with pytest.raises(ValueError, match="Conflicting batch scenarios"):
             _resolve_batch_scenario(graph)
+
+
+# ===========================================================================
+# GAP ANALYSIS TESTS
+# ===========================================================================
+#
+# Each test below targets a specific gap in the existing test suite.
+# The docstring of each test explains what real production failure it catches.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# GAP 1: FingerprintCache partial-hit path
+# Production failure: User clicks node A, cache populates.  Then clicks
+# node B (deeper in the graph).  The cache has the same fingerprint but
+# node B isn't in the cached outputs.  The executor must re-execute for
+# the new target, merge results, and store the merged cache — not silently
+# return incomplete results.
+# ---------------------------------------------------------------------------
+
+class TestPreviewCachePartialHit:
+    """Verify the cache-extend (partial-hit) path in execute_graph."""
+
+    def test_partial_hit_extends_cache(self, tmp_path):
+        """When a cached graph fingerprint exists but the target node is
+        not yet materialized, execute_graph should re-execute for the new
+        target and merge the results.
+
+        Real failure: clicking a deeper node after an initial preview
+        returns 'No output' because the cache returned a hit without
+        the requested node.
+        """
+        from haute.executor import _preview_cache
+
+        _preview_cache.invalidate()
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("mid", ".with_columns(y=pl.col('x') + 1)"),
+                _transform_node("leaf", ".with_columns(z=pl.col('y') * 10)"),
+            ],
+            "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
+        })
+
+        # First call: only up to "mid"
+        results1 = execute_graph(graph, target_node_id="mid")
+        assert results1["mid"].status == "ok"
+        assert "leaf" not in results1
+
+        # Second call: same graph, but now requesting "leaf" — partial hit
+        results2 = execute_graph(graph, target_node_id="leaf")
+        assert "leaf" in results2
+        assert results2["leaf"].status == "ok"
+        assert results2["leaf"].row_count == 3
+        # The merged cache should also still contain "mid" and "src"
+        assert "mid" in results2
+        assert results2["mid"].status == "ok"
+
+        _preview_cache.invalidate()
+
+    def test_full_cache_hit_returns_instantly(self, tmp_path):
+        """When the target node is already in the cached outputs, no
+        re-execution should happen.
+
+        Real failure: every click re-executes the full pipeline even when
+        the result is already cached.
+        """
+        from unittest.mock import patch
+        from haute.executor import _preview_cache
+
+        _preview_cache.invalidate()
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        })
+
+        # Populate cache
+        execute_graph(graph, target_node_id="src")
+
+        # Second call — should hit cache, no _eager_execute call
+        with patch("haute.executor._eager_execute") as mock_exec:
+            results = execute_graph(graph, target_node_id="src")
+            mock_exec.assert_not_called()
+        assert results["src"].status == "ok"
+
+        _preview_cache.invalidate()
+
+
+# ---------------------------------------------------------------------------
+# GAP 2: Preview cache invalidation
+# Production failure: User edits a node's code, but the preview still
+# shows stale results because _preview_cache.invalidate() was not called
+# or didn't actually clear the cache.
+# ---------------------------------------------------------------------------
+
+class TestPreviewCacheInvalidation:
+    """Verify _preview_cache.invalidate() actually clears cached results."""
+
+    def test_invalidate_forces_re_execution(self, tmp_path):
+        """After invalidation, the same graph fingerprint triggers a
+        full re-execution instead of returning stale cached results.
+
+        Real failure: user edits utility code (same graph structure),
+        invalidation fires, but stale results are still served.
+        """
+        from haute.executor import _preview_cache
+
+        _preview_cache.invalidate()
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1, 2]}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        })
+
+        results1 = execute_graph(graph)
+        assert results1["src"].status == "ok"
+
+        # Invalidate the cache
+        _preview_cache.invalidate()
+
+        # After invalidation, try_get should return None for any fingerprint
+        from haute.graph_utils import graph_fingerprint
+        fp = graph_fingerprint(graph, "None:live")
+        assert _preview_cache.try_get(fp) is None
+
+        # Re-execute should still work
+        results2 = execute_graph(graph)
+        assert results2["src"].status == "ok"
+        assert results2["src"].row_count == 2
+
+        _preview_cache.invalidate()
+
+
+# ---------------------------------------------------------------------------
+# GAP 3: Preamble lock under concurrent access
+# Production failure: Two concurrent requests (e.g. preview + estimate)
+# both call _compile_preamble.  One evicts "utility" from sys.modules
+# while the other is mid-import, causing KeyError inside
+# importlib._bootstrap._load_unlocked.
+# ---------------------------------------------------------------------------
+
+class TestPreambleLockConcurrency:
+    """Verify _preamble_lock prevents race conditions during preamble compilation."""
+
+    def test_concurrent_preamble_compilation_no_crash(self, tmp_path, monkeypatch):
+        """Two threads compiling the same preamble concurrently should not
+        crash with KeyError from sys.modules eviction race.
+
+        Real failure: intermittent KeyError in importlib._bootstrap when
+        two requests hit _compile_preamble simultaneously.
+        """
+        import threading
+
+        monkeypatch.chdir(tmp_path)
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text("VALUE = 42\n")
+
+        errors: list[Exception] = []
+        results: list[dict] = []
+
+        def compile_worker():
+            try:
+                ns = _compile_preamble("from utility.helpers import *\n")
+                results.append(ns)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=compile_worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Concurrent preamble compilation crashed: {errors}"
+        assert len(results) == 5
+        for ns in results:
+            assert ns["VALUE"] == 42
+
+    def test_sys_path_insert_is_idempotent(self, tmp_path, monkeypatch):
+        """Multiple _compile_preamble calls should not keep appending the
+        same cwd to sys.path.
+
+        Real failure: sys.path grows unboundedly on every preview click,
+        slowing down all subsequent imports.
+        """
+        import sys
+        monkeypatch.chdir(tmp_path)
+
+        cwd = str(tmp_path)
+        # Remove cwd from sys.path first to get a clean state
+        while cwd in sys.path:
+            sys.path.remove(cwd)
+
+        _compile_preamble("X = 1\n")
+        count_after_first = sys.path.count(cwd)
+
+        _compile_preamble("Y = 2\n")
+        count_after_second = sys.path.count(cwd)
+
+        # Should not have added cwd again (it was already there from first call)
+        assert count_after_second == count_after_first, (
+            f"sys.path.insert duplicated cwd: {count_after_first} -> {count_after_second}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# GAP 5: max_preview_rows truncation
+# Production failure: A pipeline with 50K rows sends a 50K-row JSON
+# preview payload over the WebSocket, causing the browser to freeze
+# and the server to OOM on JSON serialization.
+# ---------------------------------------------------------------------------
+
+class TestMaxPreviewRowsTruncation:
+    """Verify max_preview_rows limits the preview payload size."""
+
+    def test_preview_truncated_to_max_rows(self, tmp_path):
+        """execute_graph should cap the preview list at max_preview_rows
+        even when the full DataFrame has more rows.
+
+        Real failure: browser tab crashes when receiving a 100K-row
+        JSON preview payload.
+        """
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        p = tmp_path / "big.parquet"
+        pl.DataFrame({"x": list(range(500))}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        })
+
+        results = execute_graph(graph, max_preview_rows=10)
+        assert results["src"].status == "ok"
+        # row_count should reflect the full data
+        assert results["src"].row_count == 500
+        # preview should be truncated
+        assert len(results["src"].preview) == 10
+
+        _preview_cache.invalidate()
+
+    def test_max_preview_rows_smaller_than_data(self, tmp_path):
+        """When max_preview_rows < actual rows, preview is capped but
+        row_count stays accurate.
+
+        Real failure: row_count and len(preview) are conflated — the UI
+        shows 'showing 50 of 50' instead of 'showing 50 of 10000'.
+        """
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        p = tmp_path / "data.parquet"
+        pl.DataFrame({"x": list(range(200))}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+            ],
+            "edges": [_edge("src", "t")],
+        })
+
+        results = execute_graph(graph, max_preview_rows=5)
+        assert results["t"].row_count == 200
+        assert len(results["t"].preview) == 5
+        # Verify the preview rows have the correct columns
+        assert "x" in results["t"].preview[0]
+        assert "y" in results["t"].preview[0]
+
+        _preview_cache.invalidate()
+
+    def test_max_preview_rows_default_caps_at_10k(self, tmp_path):
+        """Default max_preview_rows=10_000 should cap large DataFrames.
+
+        Real failure: the default value is ignored or not applied.
+        """
+        from haute.executor import _MAX_PREVIEW_ROWS, _preview_cache
+        _preview_cache.invalidate()
+
+        p = tmp_path / "huge.parquet"
+        n_rows = _MAX_PREVIEW_ROWS + 100
+        pl.DataFrame({"x": list(range(n_rows))}).write_parquet(p)
+
+        graph = _g({
+            "nodes": [_source_node("src", str(p))],
+            "edges": [],
+        })
+
+        results = execute_graph(graph)  # uses default max_preview_rows
+        assert results["src"].row_count == n_rows
+        assert len(results["src"].preview) == _MAX_PREVIEW_ROWS
+
+        _preview_cache.invalidate()
+
+
+# ---------------------------------------------------------------------------
+# GAP 6: Empty DataFrame (0 rows) through full pipeline
+# Production failure: A source with 0 rows (e.g. filtered to nothing)
+# crashes downstream joins or transforms that assume at least 1 row.
+# ---------------------------------------------------------------------------
+
+class TestEmptyDataFrameFullPipeline:
+    """Verify 0-row DataFrames propagate through transforms and joins."""
+
+    def test_empty_source_through_transform_chain(self, tmp_path):
+        """0-row source → transform → transform should produce 0-row
+        results with correct schema at each step.
+
+        Real failure: transforms crash with 'empty sequence' or
+        'invalid schema' when receiving 0-row input.
+        """
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        p = tmp_path / "empty.parquet"
+        pl.DataFrame({
+            "x": pl.Series([], dtype=pl.Int64),
+            "y": pl.Series([], dtype=pl.Float64),
+        }).write_parquet(p)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t1", ".with_columns(z=pl.col('x') + 1)"),
+                _transform_node("t2", ".with_columns(w=pl.col('z') * pl.col('y'))"),
+            ],
+            "edges": [_edge("src", "t1"), _edge("t1", "t2")],
+        })
+
+        results = execute_graph(graph)
+        for nid in ("src", "t1", "t2"):
+            assert results[nid].status == "ok", f"Node {nid} failed: {results[nid].error}"
+            assert results[nid].row_count == 0
+
+        # Schema should be correct even with 0 rows
+        t2_cols = {c.name for c in results["t2"].columns}
+        assert {"x", "y", "z", "w"} <= t2_cols
+
+        _preview_cache.invalidate()
+
+    def test_empty_source_through_join(self, tmp_path):
+        """0-row left source joined with non-empty right should produce
+        0-row output (left join semantics).
+
+        Real failure: join logic crashes or produces NaN-filled rows
+        when one side is empty.
+        """
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        p_empty = tmp_path / "empty.parquet"
+        p_full = tmp_path / "full.parquet"
+        pl.DataFrame({
+            "key": pl.Series([], dtype=pl.Int64),
+            "a": pl.Series([], dtype=pl.Int64),
+        }).write_parquet(p_empty)
+        pl.DataFrame({"key": [1, 2], "b": [10, 20]}).write_parquet(p_full)
+
+        graph = _g({
+            "nodes": [
+                _source_node("empty_src", str(p_empty)),
+                _source_node("full_src", str(p_full)),
+                _n({
+                    "id": "join",
+                    "data": {
+                        "label": "join",
+                        "nodeType": "polars",
+                        "config": {
+                            "code": "empty_src.join(full_src, on='key', how='left')",
+                        },
+                    },
+                }),
+            ],
+            "edges": [
+                _edge("empty_src", "join"),
+                _edge("full_src", "join"),
+            ],
+        })
+
+        results = execute_graph(graph)
+        assert results["join"].status == "ok"
+        assert results["join"].row_count == 0
+        join_cols = {c.name for c in results["join"].columns}
+        assert {"key", "a", "b"} <= join_cols
+
+        _preview_cache.invalidate()
+
+    def test_empty_source_sink_writes_empty_file(self, tmp_path):
+        """execute_sink with 0-row input should write a valid empty
+        parquet file (schema only, no rows).
+
+        Real failure: sink crashes on empty input or writes a corrupt
+        file that can't be read back.
+        """
+        p_src = tmp_path / "empty.parquet"
+        p_out = tmp_path / "out.parquet"
+        pl.DataFrame({
+            "x": pl.Series([], dtype=pl.Int64),
+        }).write_parquet(p_src)
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p_src)),
+                _n({
+                    "id": "sink",
+                    "data": {
+                        "label": "sink",
+                        "nodeType": "dataSink",
+                        "config": {"path": str(p_out), "format": "parquet"},
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sink")],
+        })
+
+        result = execute_sink(graph, sink_node_id="sink")
+        assert result.status == "ok"
+        assert result.row_count == 0
+        # The file should be readable with correct schema
+        df = pl.read_parquet(p_out)
+        assert len(df) == 0
+        assert "x" in df.columns
+
+
+# ---------------------------------------------------------------------------
+# GAP 7: Conflicting batch scenarios
+# Production failure: Two live_switch nodes define different batch
+# scenario names (e.g. "nb_batch" and "monthly_batch").  execute_sink
+# silently picks one, routing half the pipeline to the wrong data source.
+# ---------------------------------------------------------------------------
+
+class TestConflictingBatchScenarios:
+    """Verify _resolve_batch_scenario raises on conflicting non-live names."""
+
+    def test_same_non_live_across_switches_ok(self):
+        """Multiple live_switch nodes with the SAME non-live scenario
+        should return that scenario (no conflict).
+
+        Real failure: false positive conflict detection when multiple
+        switches agree on the same batch scenario name.
+        """
+        graph = _g({
+            "nodes": [
+                _source_node("src1", "d1.parquet"),
+                _source_node("src2", "d2.parquet"),
+                _n({
+                    "id": "sw1",
+                    "data": {
+                        "label": "sw1",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"a": "live", "b": "nb_batch"},
+                        },
+                    },
+                }),
+                _n({
+                    "id": "sw2",
+                    "data": {
+                        "label": "sw2",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"c": "live", "d": "nb_batch"},
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src1", "sw1"), _edge("src2", "sw2")],
+        })
+        assert _resolve_batch_scenario(graph) == "nb_batch"
+
+    def test_conflicting_scenarios_error_message_informative(self):
+        """The error message should name both conflicting scenario values.
+
+        Real failure: generic error message makes it impossible for the
+        user to identify which live_switch nodes are misconfigured.
+        """
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _n({
+                    "id": "sw1",
+                    "data": {
+                        "label": "sw1",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"a": "live", "b": "alpha_batch"},
+                        },
+                    },
+                }),
+                _n({
+                    "id": "sw2",
+                    "data": {
+                        "label": "sw2",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {"c": "live", "d": "beta_batch"},
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
+        })
+        with pytest.raises(ValueError, match="Conflicting batch scenarios") as exc_info:
+            _resolve_batch_scenario(graph)
+        msg = str(exc_info.value)
+        assert "alpha_batch" in msg
+        assert "beta_batch" in msg
+
+    def test_single_switch_multiple_non_live_same_value_ok(self):
+        """A single live_switch with multiple inputs mapping to the same
+        non-live scenario should not raise.
+
+        Real failure: the duplicate-detection logic incorrectly flags
+        the same value appearing twice within a single ISM.
+        """
+        graph = _g({
+            "nodes": [
+                _source_node("src", "data.parquet"),
+                _n({
+                    "id": "sw",
+                    "data": {
+                        "label": "sw",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {
+                                "a": "live",
+                                "b": "nb_batch",
+                                "c": "nb_batch",
+                            },
+                        },
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sw")],
+        })
+        assert _resolve_batch_scenario(graph) == "nb_batch"
+
+
+# ---------------------------------------------------------------------------
+# GAP 8: Preamble failure isolation
+# Production failure: A broken preamble (e.g. bad utility import) causes
+# ALL nodes to fail, including data sources that don't use preamble
+# bindings.  The user can't even see their data to debug the issue.
+# ---------------------------------------------------------------------------
+
+class TestPreambleFailureIsolation:
+    """Verify preamble errors inject only into POLARS and LIVE_SWITCH nodes."""
+
+    def test_broken_preamble_data_source_succeeds(self, tmp_path, monkeypatch):
+        """Data source nodes should execute normally even when the preamble
+        is broken.
+
+        Real failure: user breaks utility code, entire pipeline shows
+        errors including data sources, blocking all debugging.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "broken.py").write_text("raise RuntimeError('compile fail')\n")
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
+
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _transform_node("t1", ".with_columns(y=pl.col('x') + 1)"),
+                _transform_node("t2", ".filter(pl.col('x') > 0)"),
+            ],
+            "edges": [_edge("src", "t1"), _edge("t1", "t2")],
+            "preamble": "from utility.broken import *\n",
+        })
+
+        results = execute_graph(graph)
+        # Data source should succeed
+        assert results["src"].status == "ok"
+        assert results["src"].row_count == 3
+        # Transform nodes should fail with the preamble error
+        assert results["t1"].status == "error"
+        assert results["t2"].status == "error"
+
+        _preview_cache.invalidate()
+
+    def test_broken_preamble_live_switch_gets_error(self, tmp_path, monkeypatch):
+        """liveSwitch nodes should also receive the preamble error.
+
+        Real failure: liveSwitch nodes silently pass through with no
+        error, hiding the preamble failure from the user.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "broken.py").write_text("undefined_name\n")
+
+        p1 = tmp_path / "live.parquet"
+        p2 = tmp_path / "batch.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p1)
+        pl.DataFrame({"x": [2]}).write_parquet(p2)
+
+        from haute.executor import _preview_cache
+        _preview_cache.invalidate()
+
+        graph = _g({
+            "nodes": [
+                _source_node("live_src", str(p1)),
+                _source_node("batch_src", str(p2)),
+                _n({
+                    "id": "sw",
+                    "data": {
+                        "label": "sw",
+                        "nodeType": "liveSwitch",
+                        "config": {
+                            "input_scenario_map": {
+                                "live_src": "live",
+                                "batch_src": "nb_batch",
+                            },
+                        },
+                    },
+                }),
+            ],
+            "edges": [
+                _edge("live_src", "sw"),
+                _edge("batch_src", "sw"),
+            ],
+            "preamble": "from utility.broken import *\n",
+        })
+
+        results = execute_graph(graph, scenario="live")
+        # Data sources should succeed
+        assert results["live_src"].status == "ok"
+        # liveSwitch should get the preamble error
+        assert results["sw"].status == "error"
+        assert "undefined_name" in results["sw"].error
+
+        _preview_cache.invalidate()
+
+    def test_broken_preamble_does_not_error_model_score_or_sink(self, tmp_path, monkeypatch):
+        """Non-preamble node types (dataSink, etc.) should not receive
+        the preamble error.
+
+        Real failure: sink nodes display 'preamble error' when they
+        have nothing to do with preamble code, confusing the user.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "broken.py").write_text("bad_name\n")
+
+        p = tmp_path / "d.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(p)
+
+        from haute.executor import _preview_cache, _eager_execute
+        _preview_cache.invalidate()
+
+        graph = _g({
+            "nodes": [
+                _source_node("src", str(p)),
+                _n({
+                    "id": "sink",
+                    "data": {
+                        "label": "sink",
+                        "nodeType": "dataSink",
+                        "config": {"path": str(tmp_path / "out.parquet"), "format": "parquet"},
+                    },
+                }),
+            ],
+            "edges": [_edge("src", "sink")],
+            "preamble": "from utility.broken import *\n",
+        })
+
+        # Use _eager_execute directly to check error injection logic
+        outputs, order, errors, *_ = _eager_execute(graph, None, None, scenario="live")
+        # dataSink is NOT in the preamble_types set, so it should not
+        # have the preamble error injected
+        assert "sink" not in errors or "bad_name" not in errors.get("sink", "")
+
+        _preview_cache.invalidate()

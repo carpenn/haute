@@ -136,3 +136,38 @@ class TestDeployDispatchUnknown:
 
         with pytest.raises(ValueError, match="Unknown deploy target"):
             deploy(config)
+
+
+class TestDeployDispatchReturnValue:
+    """Verify deploy() returns the result from the backend, not a wrapper."""
+
+    def test_return_value_has_expected_attributes(self) -> None:
+        from haute.deploy import deploy
+
+        config = _make_config("databricks")
+        fake_result = _make_deploy_result()
+        fake_resolved = MagicMock()
+
+        with (
+            patch("haute.deploy.resolve_config", return_value=fake_resolved),
+            patch("haute.deploy.deploy_to_mlflow", return_value=fake_result),
+        ):
+            result = deploy(config)
+
+        assert result.model_name == "test-model"
+        assert result.model_version == 1
+        assert result.model_uri == "models:/test-model/1"
+        assert result.manifest_path == Path("/tmp/deploy_manifest.json")
+
+    def test_resolve_config_failure_propagates(self) -> None:
+        """If resolve_config raises, deploy() must not swallow it."""
+        from haute.deploy import deploy
+
+        config = _make_config("databricks")
+
+        with patch(
+            "haute.deploy.resolve_config",
+            side_effect=ValueError("No source nodes found"),
+        ):
+            with pytest.raises(ValueError, match="No source nodes"):
+                deploy(config)

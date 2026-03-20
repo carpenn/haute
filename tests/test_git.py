@@ -970,3 +970,404 @@ class TestDefaultBranchCache:
         finally:
             git_mod._run_git_ok = original_run_git_ok
             _get_default_branch_cached.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# GAP 1: _validate_ref_name does not block '..' (parent traversal)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRefNameParentTraversal:
+    """Production risk: A ref name containing '..' could reference parent
+    objects (e.g. 'refs/heads/../../etc/passwd').  Git itself rejects these,
+    but _validate_ref_name should catch it *before* the subprocess call to
+    provide a clear error and prevent any path traversal attempt.
+
+    These tests document that the current validation is INCOMPLETE.
+    """
+
+    def test_double_dot_not_blocked_by_validate(self) -> None:
+        """BUG: _validate_ref_name does not reject '..' sequences.
+        This test documents the gap — it currently passes validation
+        but git would reject it.
+        """
+        # This SHOULD raise GitError but currently does not.
+        # If _validate_ref_name is fixed, change this to pytest.raises.
+        _validate_ref_name("refs/heads/../../etc/passwd")  # no exception raised
+
+    def test_double_dot_rejected_by_git(self, tmp_path: Path) -> None:
+        """Even though _validate_ref_name allows '..', git itself rejects it.
+        This proves the defence-in-depth works but the first layer is missing.
+        """
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        # Attempting to switch to a '..' ref should fail at the git level
+        with pytest.raises(GitError):
+            switch_branch("HEAD/../../../etc/passwd", repo)
+
+
+# ---------------------------------------------------------------------------
+# GAP 2: _validate_ref_name does not block spaces
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRefNameSpaces:
+    """Production risk: Branch names with spaces pass _validate_ref_name but
+    fail in git, causing confusing subprocess errors instead of clean
+    validation messages.
+    """
+
+    def test_space_not_blocked_by_validate(self) -> None:
+        """BUG: _validate_ref_name does not reject spaces.
+        Spaces are invalid in git ref names but slip through the regex.
+        """
+        # This SHOULD raise GitError but currently does not.
+        _validate_ref_name("branch with spaces")  # no exception raised
+
+    def test_space_in_branch_name_fails_in_git(self, tmp_path: Path) -> None:
+        """A branch name with spaces will fail at the git level, producing
+        a confusing error instead of a clean validation message.
+        """
+        repo = _init_repo(tmp_path)
+        with pytest.raises(GitError):
+            switch_branch("branch with spaces", repo)
+
+
+# ---------------------------------------------------------------------------
+# GAP 3: Unicode branch names (emoji, CJK, RTL)
+# ---------------------------------------------------------------------------
+
+
+class TestUnicodeBranchNames:
+    """Production risk: Users could paste emoji or non-Latin text into a
+    branch description.  _slugify strips these to safe ASCII, but if someone
+    calls _validate_ref_name directly with unicode, it passes through.
+    """
+
+    def test_emoji_passes_validate_ref_name(self) -> None:
+        """BUG: _validate_ref_name does not reject emoji characters.
+        Git may accept some unicode refs depending on filesystem, but
+        they cause cross-platform portability issues (Windows NTFS, etc).
+        """
+        # Emoji is not in _BAD_REF_CHARS — this passes validation
+        _validate_ref_name("feature/rocket-\U0001f680")  # no exception
+
+    def test_cjk_passes_validate_ref_name(self) -> None:
+        """CJK characters pass validation. These cause issues on
+        filesystems that don't support them or have different normalisation.
+        """
+        _validate_ref_name("feature/\u529f\u80fd\u66f4\u65b0")  # no exception
+
+    def test_rtl_passes_validate_ref_name(self) -> None:
+        """RTL characters pass validation. These can cause display
+        confusion in terminals and UIs (branch name appears reversed).
+        """
+        _validate_ref_name("feature/\u0645\u064a\u0632\u0629")  # no exception
+
+    def test_slugify_strips_emoji(self) -> None:
+        """_slugify correctly strips emoji to produce safe branch names.
+        This is the real protection — create_branch uses _slugify.
+        """
+        slug = _slugify("Rocket launch \U0001f680")
+        assert "\U0001f680" not in slug
+        assert slug == "rocket-launch"
+
+    def test_create_branch_with_emoji_description_is_safe(self, tmp_path: Path) -> None:
+        """create_branch slugifies the description, so emoji input is safe."""
+        repo = _init_repo(tmp_path)
+        branch = create_branch("Add rocket feature \U0001f680", repo)
+        # Emoji is stripped by _slugify
+        assert "\U0001f680" not in branch
+        assert "add-rocket-feature" in branch
+
+
+# ---------------------------------------------------------------------------
+# GAP 4: Very long branch names (255-char limit)
+# ---------------------------------------------------------------------------
+
+
+class TestLongBranchNames:
+    """Production risk: Git refs are stored as filesystem paths.  Most
+    filesystems limit path components to 255 bytes.  A very long branch
+    name can fail silently or corrupt the ref storage.
+    """
+
+    def test_long_name_passes_validate(self) -> None:
+        """BUG: _validate_ref_name has no length check.  A 300-char ref
+        name passes validation but will fail on most filesystems.
+        """
+        long_name = "a" * 300
+        # This SHOULD raise GitError but currently does not.
+        _validate_ref_name(long_name)  # no exception
+
+    def test_very_long_branch_name_fails_in_git(self, tmp_path: Path) -> None:
+        """Git (or the filesystem) rejects absurdly long branch names,
+        but the error comes from subprocess, not from our validation.
+        """
+        repo = _init_repo(tmp_path)
+        long_desc = "a" * 250  # _slugify preserves this; prefix adds more
+        # create_branch prepends "pricing/<user>/" making it well over 255
+        with pytest.raises(GitError):
+            create_branch(long_desc, repo)
+
+
+# ---------------------------------------------------------------------------
+# GAP 5: Merge conflicts during pull_latest
+# ---------------------------------------------------------------------------
+
+
+class TestPullLatestMergeConflict:
+    """Production risk: When a user's branch and main both edit the same
+    file, pull_latest should detect the conflict, abort the merge, and
+    return a helpful message — not leave the repo in a broken state.
+    """
+
+    def test_conflicting_changes_detected(self, tmp_path: Path) -> None:
+        """pull_latest returns conflict=True and aborts the merge when
+        the same file was edited on both branches.
+        """
+        repo, remote = _init_repo_with_remote(tmp_path)
+
+        # User creates a branch and edits a file
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        (repo / "shared.py").write_text("user_version = True\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "User edit")
+        _git(repo, "push", "-u", "origin", "pricing/test-user/feat")
+
+        # Someone else edits the same file on main (via a clone)
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", str(remote), str(clone))
+        _git(clone, "config", "user.name", "Other User")
+        _git(clone, "config", "user.email", "other@example.com")
+        (clone / "shared.py").write_text("other_version = True\n")
+        _git(clone, "add", ".")
+        _git(clone, "commit", "-m", "Conflicting edit on main")
+        _git(clone, "push", "origin", "main")
+
+        # Now pull_latest should detect the conflict
+        result = pull_latest(repo)
+        assert result.success is False
+        assert result.conflict is True
+        assert result.conflict_message is not None
+        assert "overlap" in result.conflict_message.lower() or "conflict" in result.conflict_message.lower()
+        assert result.commits_pulled == 0
+
+    def test_repo_clean_after_conflict_abort(self, tmp_path: Path) -> None:
+        """After a conflict, the merge is aborted and the working tree
+        is clean — not left in a half-merged state.
+        """
+        repo, remote = _init_repo_with_remote(tmp_path)
+
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+        (repo / "shared.py").write_text("user_version = True\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "User edit")
+        _git(repo, "push", "-u", "origin", "pricing/test-user/feat")
+
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", str(remote), str(clone))
+        _git(clone, "config", "user.name", "Other User")
+        _git(clone, "config", "user.email", "other@example.com")
+        (clone / "shared.py").write_text("other_version = True\n")
+        _git(clone, "add", ".")
+        _git(clone, "commit", "-m", "Conflicting edit")
+        _git(clone, "push", "origin", "main")
+
+        pull_latest(repo)
+
+        # Repo should be clean — no merge markers, no staged conflicts
+        status = _git(repo, "status", "--porcelain")
+        assert status == "", f"Repo not clean after conflict abort: {status}"
+        # Should still be on the user's branch
+        assert _get_current_branch(repo) == "pricing/test-user/feat"
+
+
+# ---------------------------------------------------------------------------
+# GAP 6: Detached HEAD state in get_status
+# ---------------------------------------------------------------------------
+
+
+class TestDetachedHead:
+    """Production risk: If a user checks out a specific commit (detached HEAD),
+    get_status should handle this gracefully — not crash or return misleading
+    branch info.
+    """
+
+    def test_detached_head_reports_HEAD(self, tmp_path: Path) -> None:
+        """get_status reports branch='HEAD' when in detached HEAD state."""
+        repo = _init_repo(tmp_path)
+        sha = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "checkout", sha)
+
+        s = get_status(repo)
+        assert s.branch == "HEAD"
+
+    def test_detached_head_is_read_only(self, tmp_path: Path) -> None:
+        """Detached HEAD should NOT be read-only (the code has branch != 'HEAD'
+        check), allowing emergency saves. Verify the actual behaviour.
+        """
+        repo = _init_repo(tmp_path)
+        sha = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "checkout", sha)
+
+        s = get_status(repo)
+        # Detached HEAD is not in PROTECTED_BRANCHES, and the code has
+        # an explicit `branch != "HEAD"` check that makes it writable
+        assert s.is_main is False
+        # is_read_only depends on _is_own_branch which returns False for "HEAD",
+        # BUT the code explicitly excludes "HEAD" from the read-only check
+        assert s.is_read_only is False
+
+
+# ---------------------------------------------------------------------------
+# GAP 7: '#' and '&' in branch names inject into _build_compare_url
+# ---------------------------------------------------------------------------
+
+
+class TestCompareUrlInjection:
+    """Production risk: Branch names containing '#' or '&' pass
+    _validate_ref_name but inject fragments/parameters into the compare URL.
+    For example, '#' truncates the URL path and '&' adds query parameters
+    to GitLab/Azure URLs.
+    """
+
+    def test_hash_not_blocked_by_validate(self) -> None:
+        """BUG: '#' passes _validate_ref_name but can inject a URL fragment."""
+        _validate_ref_name("feature/test#malicious")  # no exception
+
+    def test_ampersand_not_blocked_by_validate(self) -> None:
+        """BUG: '&' passes _validate_ref_name but can inject URL query params."""
+        _validate_ref_name("feature/test&evil=1")  # no exception
+
+    def test_hash_in_github_compare_url(self, tmp_path: Path) -> None:
+        """A '#' in the branch name creates a URL fragment, breaking the
+        compare link — the part after '#' becomes a page anchor, not
+        part of the branch ref.
+        """
+        repo = _init_repo(tmp_path)
+        _git(repo, "remote", "add", "origin", "git@github.com:org/repo.git")
+        url = _build_compare_url("feature/test#inject", "main", repo)
+        assert url is not None
+        # The '#' is embedded raw in the URL — it will be interpreted
+        # as a fragment separator by browsers
+        assert "#inject" in url  # proves the injection
+
+    def test_ampersand_in_gitlab_url(self, tmp_path: Path) -> None:
+        """An '&' in the branch name injects extra query parameters
+        into the GitLab merge request URL.
+        """
+        repo = _init_repo(tmp_path)
+        _git(repo, "remote", "add", "origin", "https://gitlab.com/org/repo.git")
+        url = _build_compare_url("feature/test&evil=1", "main", repo)
+        assert url is not None
+        # The '&' creates an additional query parameter
+        assert "&evil=1" in url  # proves the injection
+
+
+# ---------------------------------------------------------------------------
+# GAP 8: Archive name collision (two archives same day)
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveNameCollision:
+    """Production risk: If two branches with the same slug are archived on
+    the same day, the second archive could overwrite the first.  The code
+    appends a date suffix on collision, but does not handle the case where
+    the date-suffixed name *also* already exists.
+    """
+
+    def test_two_archives_same_slug_same_day(self, tmp_path: Path) -> None:
+        """Archiving two branches that produce the same archive name should
+        not lose either branch.
+        """
+        repo = _init_repo(tmp_path)
+
+        # Create two branches with the same final slug component
+        _git(repo, "checkout", "-b", "pricing/user-a/my-feat")
+        (repo / "a.py").write_text("a = 1\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "branch a")
+        _git(repo, "checkout", "main")
+
+        _git(repo, "checkout", "-b", "pricing/user-b/my-feat")
+        (repo / "b.py").write_text("b = 1\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "branch b")
+        _git(repo, "checkout", "main")
+
+        # Archive both — both would want "archive/my-feat"
+        name1 = archive_branch("pricing/user-a/my-feat", repo)
+        name2 = archive_branch("pricing/user-b/my-feat", repo)
+
+        # They must have different names
+        assert name1 != name2
+        assert name1.startswith("archive/")
+        assert name2.startswith("archive/")
+
+        # Both branches should still be resolvable
+        sha1 = _git(repo, "rev-parse", name1)
+        sha2 = _git(repo, "rev-parse", name2)
+        assert sha1
+        assert sha2
+        assert sha1 != sha2  # They point to different commits
+
+
+# ---------------------------------------------------------------------------
+# GAP 9: 'git add -A' stages sensitive files (.env)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgressStagesSensitiveFiles:
+    """Production risk: save_progress uses 'git add -A', which stages
+    EVERY file in the working tree — including .env files, credentials,
+    private keys, etc.  Without a .gitignore, these get committed and
+    potentially pushed to a remote.
+    """
+
+    def test_env_file_gets_staged_and_committed(self, tmp_path: Path) -> None:
+        """SECURITY: .env files are committed by save_progress when no
+        .gitignore is present.  This test proves the risk exists.
+        """
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+
+        # Create a sensitive .env file
+        (repo / ".env").write_text("SECRET_KEY=super-secret-value\nDB_PASSWORD=hunter2\n")
+
+        result = save_progress(repo)
+        assert result.commit_sha
+
+        # Verify .env was committed — this is the security risk
+        committed_files = _git(repo, "show", "--name-only", "--format=", "HEAD")
+        assert ".env" in committed_files, (
+            ".env was NOT committed — if this fails, git add -A behaviour changed"
+        )
+
+    def test_private_key_gets_staged(self, tmp_path: Path) -> None:
+        """SECURITY: Private keys are also staged by 'git add -A'."""
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+
+        (repo / "id_rsa").write_text("-----BEGIN RSA PRIVATE KEY-----\nfake\n")
+
+        result = save_progress(repo)
+        committed_files = _git(repo, "show", "--name-only", "--format=", "HEAD")
+        assert "id_rsa" in committed_files
+
+    def test_gitignore_prevents_env_staging(self, tmp_path: Path) -> None:
+        """With a proper .gitignore, .env is excluded from 'git add -A'.
+        This shows the mitigation that SHOULD be in place.
+        """
+        repo = _init_repo(tmp_path)
+        _git(repo, "checkout", "-b", "pricing/test-user/feat")
+
+        # Add .gitignore first
+        (repo / ".gitignore").write_text(".env\nid_rsa\n*.pem\n")
+        (repo / ".env").write_text("SECRET_KEY=super-secret-value\n")
+        (repo / "real_change.py").write_text("x = 1\n")
+
+        result = save_progress(repo)
+        committed_files = _git(repo, "show", "--name-only", "--format=", "HEAD")
+        assert ".env" not in committed_files
+        assert ".gitignore" in committed_files

@@ -130,4 +130,115 @@ describe("useUndoRedo", () => {
     })
     expect(result.current.canUndo).toBe(true)
   })
+
+  // ─────────────────────────────────────────────────────────────────
+  // MAX_HISTORY (100) cap — evicts oldest snapshot
+  // Catches: if the cap is removed or miscalculated, undo history
+  // would grow unbounded, causing OOM on long editing sessions.
+  // ─────────────────────────────────────────────────────────────────
+
+  it("101st snapshot evicts the oldest entry (MAX_HISTORY=100)", () => {
+    const { result } = renderHook(() => useUndoRedo([makeNode("n0")], []))
+
+    // Push 101 snapshots (each setNodes call pushes one)
+    for (let i = 1; i <= 101; i++) {
+      act(() => {
+        result.current.setNodes([makeNode(`n${i}`)])
+      })
+    }
+
+    // We should be able to undo exactly 100 times (MAX_HISTORY)
+    let undoCount = 0
+    while (result.current.canUndo) {
+      act(() => {
+        result.current.undo()
+      })
+      undoCount++
+      // Safety guard to prevent infinite loop in case of bug
+      if (undoCount > 150) break
+    }
+
+    expect(undoCount).toBe(100)
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  // ─────────────────────────────────────────────────────────────────
+  // Drag snapshot behavior — snapshot on drag start, not during drag
+  // Catches: if drag events pushed a snapshot on every position change
+  // (mousemove), the undo history would fill with useless intermediate
+  // positions and the user couldn't undo back to pre-drag position.
+  // ─────────────────────────────────────────────────────────────────
+
+  it("drag start pushes one snapshot; mid-drag position changes do not", () => {
+    const node = makeNode("n1")
+    const { result } = renderHook(() => useUndoRedo([node], []))
+
+    // Simulate drag start
+    act(() => {
+      result.current.onNodesChange([
+        { type: "position", id: "n1", dragging: true, position: { x: 10, y: 10 } },
+      ])
+    })
+    expect(result.current.canUndo).toBe(true)
+
+    // Record undo availability before mid-drag changes
+    // Undo once to consume the drag-start snapshot
+    act(() => {
+      result.current.undo()
+    })
+    expect(result.current.canUndo).toBe(false)
+
+    // Redo to get back, then simulate more mid-drag position changes
+    act(() => {
+      result.current.redo()
+    })
+
+    // Mid-drag: dragging is still true — should NOT push another snapshot
+    act(() => {
+      result.current.onNodesChange([
+        { type: "position", id: "n1", dragging: true, position: { x: 50, y: 50 } },
+      ])
+    })
+    act(() => {
+      result.current.onNodesChange([
+        { type: "position", id: "n1", dragging: true, position: { x: 100, y: 100 } },
+      ])
+    })
+
+    // Drag end
+    act(() => {
+      result.current.onNodesChange([
+        { type: "position", id: "n1", dragging: false, position: { x: 100, y: 100 } },
+      ])
+    })
+
+    // Undo should go back to the state before the drag started (1 undo)
+    // The mid-drag position changes should not have created additional snapshots
+    act(() => {
+      result.current.undo()
+    })
+    // After one undo we should be back at the original (pre-drag) state
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  // ─────────────────────────────────────────────────────────────────
+  // Position-only changes (non-drag) should NOT push snapshots
+  // Catches: if all position changes pushed snapshots, React Flow's
+  // internal layout adjustments would pollute the undo history.
+  // ─────────────────────────────────────────────────────────────────
+
+  it("position-only change without dragging does not push a snapshot", () => {
+    const node = makeNode("n1")
+    const { result } = renderHook(() => useUndoRedo([node], []))
+
+    // A position change with no dragging flag (e.g. from fitView or layout)
+    act(() => {
+      result.current.onNodesChange([
+        { type: "position", id: "n1", position: { x: 200, y: 200 } },
+      ])
+    })
+
+    // No snapshot should have been pushed
+    expect(result.current.canUndo).toBe(false)
+  })
 })

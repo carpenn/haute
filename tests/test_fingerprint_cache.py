@@ -127,6 +127,11 @@ class TestInvalidation:
         cache = FingerprintCache(slots=("x",))
         cache.invalidate()  # should not raise
         assert cache.fingerprint is None
+        # Subsequent operations must still work correctly after invalidating an empty cache
+        cache.store("fp_after", x={"restored": True})
+        data = cache.try_get("fp_after")
+        assert data is not None
+        assert data["x"] == {"restored": True}
 
     def test_invalidate_clears_non_dict_slots(self) -> None:
         """Slots holding lists or sets should also be cleared."""

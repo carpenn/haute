@@ -27,9 +27,9 @@ class TestCheckDockerAvailable:
 
         with patch("haute.deploy._container.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            # Should not raise
-            _check_docker_available()
+            result = _check_docker_available()
 
+        assert result is None  # returns nothing on success
         mock_run.assert_called_once_with(
             ["docker", "info"],
             check=True,
@@ -57,9 +57,9 @@ class TestDockerBuild:
         with patch("haute.deploy._container.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-            # Should not raise
-            _docker_build(tmp_path, "test-image:latest")
+            result = _docker_build(tmp_path, "test-image:latest")
 
+        assert result is None  # returns nothing on success
         mock_run.assert_called_once_with(
             ["docker", "build", "-t", "test-image:latest", "."],
             cwd=tmp_path,
@@ -68,7 +68,7 @@ class TestDockerBuild:
         )
 
     def test_raises_runtime_error_on_failure(self, tmp_path: Path) -> None:
-        """RuntimeError when docker build returns non-zero."""
+        """RuntimeError when docker build returns non-zero, including stderr."""
         from haute.deploy._container import _docker_build
 
         with patch("haute.deploy._container.subprocess.run") as mock_run:
@@ -77,8 +77,9 @@ class TestDockerBuild:
                 stderr="ERROR: Dockerfile parse error",
             )
 
-            with pytest.raises(RuntimeError, match="Docker build failed"):
+            with pytest.raises(RuntimeError, match="Docker build failed") as exc_info:
                 _docker_build(tmp_path, "test-image:latest")
+            assert "Dockerfile parse error" in str(exc_info.value)
 
 
 class TestGitShaShort:
@@ -114,9 +115,11 @@ class TestUpdateService:
         """Any platform target should raise NotImplementedError (not yet built)."""
         from haute.deploy._container import _update_service
 
-        with pytest.raises(NotImplementedError, match="not yet implemented"):
+        with pytest.raises(NotImplementedError, match="not yet implemented") as exc_info:
             _update_service(
                 target="azure-container-apps",
                 image_tag="myregistry/model:abc1234",
                 resolved=MagicMock(),
             )
+        assert "azure-container-apps" in str(exc_info.value)
+        assert "myregistry/model:abc1234" in str(exc_info.value)

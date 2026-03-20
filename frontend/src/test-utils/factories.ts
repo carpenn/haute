@@ -110,3 +110,108 @@ export function makeSimpleEdge(
 ): SimpleEdge {
   return { id, source, target }
 }
+
+// ---------------------------------------------------------------------------
+// makeGraph — A simple graph (nodes + edges) for panel/editor tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a minimal graph with nodes and edges.
+ *
+ * @param nodeCount – Number of nodes to create (default 3).
+ * @param linear    – If true, chain nodes with edges (n0→n1→n2...).
+ */
+export function makeGraph(
+  nodeCount = 3,
+  linear = true,
+): { nodes: Node[]; edges: Edge[] } {
+  const nodes = Array.from({ length: nodeCount }, (_, i) =>
+    makeNode(`n${i}`, "polars"),
+  )
+  const edges: Edge[] = []
+  if (linear) {
+    for (let i = 0; i < nodeCount - 1; i++) {
+      edges.push(makeEdge(`n${i}`, `n${i + 1}`))
+    }
+  }
+  return { nodes, edges }
+}
+
+// ---------------------------------------------------------------------------
+// makeConfig — Modelling config with sensible defaults
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a modelling config record with sensible defaults.
+ *
+ * @param overrides – Any config keys to override.
+ */
+export function makeConfig(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    target: "loss_amount",
+    weight: "",
+    task: "regression",
+    metrics: ["gini", "rmse"],
+    exclude: [],
+    split: { strategy: "random", validation_size: 0.2, holdout_size: 0, seed: 42 },
+    params: { iterations: 1000, learning_rate: 0.05, depth: 6 },
+    ...overrides,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// makeTrainResult — Training result fixture
+// ---------------------------------------------------------------------------
+
+import type { TrainResult } from "../stores/useNodeResultsStore"
+
+/**
+ * Create a `TrainResult` with sensible defaults.
+ *
+ * @param overrides – Partial overrides for any TrainResult field.
+ */
+export function makeTrainResult(
+  overrides: Partial<TrainResult> = {},
+): TrainResult {
+  return {
+    status: "complete",
+    metrics: { gini: 0.45, rmse: 0.12 },
+    feature_importance: [
+      { feature: "age", importance: 25.3 },
+      { feature: "income", importance: 18.7 },
+      { feature: "region", importance: 12.1 },
+    ],
+    model_path: "/tmp/model.cbm",
+    train_rows: 8000,
+    test_rows: 2000,
+    ...overrides,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// makeTrainEstimate — RAM estimate fixture
+// ---------------------------------------------------------------------------
+
+import type { TrainEstimate } from "../api/types"
+
+/**
+ * Create a `TrainEstimate` with sensible defaults.
+ *
+ * @param overrides – Partial overrides for any TrainEstimate field.
+ */
+export function makeTrainEstimate(
+  overrides: Partial<TrainEstimate> = {},
+): TrainEstimate {
+  return {
+    total_rows: 10000,
+    safe_row_limit: null,
+    estimated_mb: 256,
+    training_mb: 512,
+    available_mb: 16384,
+    bytes_per_row: 2048,
+    was_downsampled: false,
+    ...overrides,
+  }
+}

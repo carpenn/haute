@@ -20,6 +20,12 @@ class TestGetRssMb:
     def test_returns_float(self):
         result = _get_rss_mb()
         assert isinstance(result, float)
+        assert result >= 0.0, "RSS should never be negative"
+        # A running Python process uses at least a few MB of RSS
+        # (on platforms where /proc or equivalent is available).
+        # On unsupported platforms the function returns 0.0, which is still >= 0.
+        if result > 0.0:
+            assert result < 100_000, "RSS above 100 GB is implausible for a test process"
 
     @pytest.mark.skipif(sys.platform != "linux", reason="Linux only")
     def test_positive_on_linux(self):

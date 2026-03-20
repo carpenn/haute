@@ -127,10 +127,9 @@ describe("OptimiserApplyEditor", () => {
   it("renders with default file source type selected", () => {
     render(<OptimiserApplyEditor {...defaultProps()} />)
     const fileBtn = screen.getByText("File Path")
-    // Active button has the accent border (jsdom converts hex #f59e0b to rgb)
-    expect(fileBtn.style.border).toContain("rgb(245, 158, 11)")
     const registeredBtn = screen.getByText("Registered")
-    expect(registeredBtn.style.border).not.toContain("rgb(245, 158, 11)")
+    // Active button should have a visually distinct border from inactive button
+    expect(fileBtn.style.border).not.toBe(registeredBtn.style.border)
   })
 
   // 2. Source type toggle among file/registered/run

@@ -405,3 +405,395 @@ class TestParserRobustness:
         for edge in graph.edges:
             assert edge.source in node_ids, f"Edge source {edge.source!r} not in nodes"
             assert edge.target in node_ids, f"Edge target {edge.target!r} not in nodes"
+
+
+# ---------------------------------------------------------------------------
+# 1. Parser roundtrip: graph → codegen → parse → equivalent graph
+# ---------------------------------------------------------------------------
+
+
+class TestParserRoundtripProperty:
+    """Generate random valid graphs, round-trip through codegen+parse."""
+
+    @given(graph=_pipeline_graph_strategy())
+    @settings(max_examples=50, deadline=5000)
+    def test_roundtrip_node_and_edge_topology(self, graph: PipelineGraph):
+        """Full structural equivalence after codegen → parse roundtrip."""
+        parsed = _roundtrip(graph)
+        # Same node labels
+        orig_labels = sorted(n.data.label for n in graph.nodes)
+        parsed_labels = sorted(n.data.label for n in parsed.nodes)
+        assert orig_labels == parsed_labels
+        # Same edge topology (by label)
+        id_to_label = {n.id: n.data.label for n in graph.nodes}
+        orig_edges = {(id_to_label[e.source], id_to_label[e.target]) for e in graph.edges}
+        pid_to_label = {n.id: n.data.label for n in parsed.nodes}
+        parsed_edges = {(pid_to_label[e.source], pid_to_label[e.target]) for e in parsed.edges}
+        assert orig_edges == parsed_edges
+
+
+# ---------------------------------------------------------------------------
+# 2. Sanitize name idempotence (expanded)
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeIdempotence:
+    @given(name=st.text(min_size=0, max_size=80))
+    @settings(max_examples=300)
+    def test_idempotence_for_arbitrary_unicode(self, name: str):
+        """sanitize(sanitize(x)) == sanitize(x) for any unicode string."""
+        once = _sanitize_func_name(name)
+        twice = _sanitize_func_name(once)
+        assert once == twice, f"Not idempotent: {name!r} → {once!r} → {twice!r}"
+
+
+# ---------------------------------------------------------------------------
+# 3. Banding monotonicity
+# ---------------------------------------------------------------------------
+
+
+class TestBandingMonotonicity:
+    @given(
+        n=st.integers(min_value=2, max_value=50),
+    )
+    @settings(max_examples=100)
+    def test_monotonic_input_ordered_bands_monotonic_output(self, n: int):
+        """With ordered non-overlapping bands, monotonic input → monotonic output."""
+        import polars as pl
+
+        values = list(range(n))  # strictly monotonic increasing
+        lf = pl.DataFrame({"x": [float(v) for v in values]}).lazy()
+        # Non-overlapping ordered bands: (-inf, 10], (10, 20], (20, inf)
+        rules = [
+            {"op1": "<=", "val1": 10, "assignment": "A"},
+            {"op1": ">", "val1": 10, "op2": "<=", "val2": 20, "assignment": "B"},
+            {"op1": ">", "val1": 20, "assignment": "C"},
+        ]
+        result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
+        bands = result["band"].to_list()
+        # Filter out nulls, then check band labels never go backward
+        band_order = {"A": 0, "B": 1, "C": 2}
+        non_null = [band_order[b] for b in bands if b is not None]
+        for i in range(1, len(non_null)):
+            assert non_null[i] >= non_null[i - 1], (
+                f"Band output not monotonic at index {i}: {bands}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 4. Rating table join preserves row count
+# ---------------------------------------------------------------------------
+
+
+class TestRatingTableRowCount:
+    @given(
+        n_rows=st.integers(min_value=1, max_value=50),
+        categories=st.lists(
+            st.sampled_from(["cat_a", "cat_b", "cat_c", "cat_d"]),
+            min_size=1,
+            max_size=50,
+        ),
+    )
+    @settings(max_examples=100)
+    def test_left_join_never_increases_row_count(self, n_rows, categories):
+        """Left-joining a deduplicated rating table should not fan out rows."""
+        from haute._rating import _apply_rating_table
+
+        # Build a main frame with factor column
+        cats = [categories[i % len(categories)] for i in range(n_rows)]
+        lf = pl.DataFrame({"factor1": cats, "base": [1.0] * n_rows}).lazy()
+
+        # Build a rating table with unique entries per factor
+        entries = [
+            {"factor1": "cat_a", "value": 1.1},
+            {"factor1": "cat_b", "value": 1.2},
+            {"factor1": "cat_c", "value": 0.9},
+            {"factor1": "cat_d", "value": 1.0},
+        ]
+        table = {
+            "factors": ["factor1"],
+            "outputColumn": "rating",
+            "entries": entries,
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert len(result) == n_rows, (
+            f"Row count changed: {n_rows} → {len(result)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. Config roundtrip: save_node_config → load_node_config
+# ---------------------------------------------------------------------------
+
+
+class TestConfigRoundtrip:
+    @given(
+        config=st.fixed_dictionaries({
+            "key_str": st.text(
+                alphabet=string.ascii_letters + string.digits + " _-",
+                min_size=0, max_size=20,
+            ),
+            "key_int": st.integers(min_value=-1000, max_value=1000),
+            "key_float": st.floats(allow_nan=False, allow_infinity=False),
+            "key_bool": st.booleans(),
+            "key_list": st.lists(st.integers(), max_size=5),
+        }),
+    )
+    @settings(max_examples=80)
+    def test_config_roundtrip_preserves_data(self, config, tmp_path_factory):
+        """load(save(config)) == config for valid config dicts."""
+        from haute._config_io import load_node_config, save_node_config
+        from haute.graph_utils import NodeType
+
+        base_dir = tmp_path_factory.mktemp("cfg")
+        rel = save_node_config(
+            NodeType.BANDING, "test_node", config, base_dir,
+        )
+        loaded = load_node_config(rel, base_dir=base_dir)
+        # JSON roundtrip: int keys stay int, float may lose precision
+        for k, v in config.items():
+            assert k in loaded, f"Key {k!r} missing after roundtrip"
+            if isinstance(v, float):
+                assert abs(loaded[k] - v) < 1e-10, f"Float drift for {k}"
+            else:
+                assert loaded[k] == v, f"Value mismatch for {k}: {v!r} vs {loaded[k]!r}"
+
+
+# ---------------------------------------------------------------------------
+# 6. Fingerprint determinism
+# ---------------------------------------------------------------------------
+
+
+class TestFingerprintDeterminism:
+    @given(graph=_pipeline_graph_strategy())
+    @settings(max_examples=50, deadline=5000)
+    def test_same_graph_same_fingerprint(self, graph: PipelineGraph):
+        """Same graph always produces the same fingerprint."""
+        from haute.graph_utils import graph_fingerprint
+
+        fp1 = graph_fingerprint(graph)
+        # Clear any cached fingerprint to force recomputation
+        try:
+            object.__delattr__(graph, "_haute_base_fingerprint")
+        except (AttributeError, TypeError):
+            pass
+        fp2 = graph_fingerprint(graph)
+        assert fp1 == fp2
+
+    @given(data=st.data())
+    @settings(max_examples=50, deadline=5000)
+    def test_different_graphs_different_fingerprints(self, data):
+        """Graphs with different structure produce different fingerprints."""
+        from haute.graph_utils import graph_fingerprint
+
+        # Build two graphs that differ by number of transforms
+        g1 = data.draw(_pipeline_graph_strategy())
+        g2 = data.draw(_pipeline_graph_strategy())
+        # Only assert when structural content actually differs
+        labels1 = sorted(n.data.label for n in g1.nodes)
+        labels2 = sorted(n.data.label for n in g2.nodes)
+        assume(labels1 != labels2)
+        fp1 = graph_fingerprint(g1)
+        fp2 = graph_fingerprint(g2)
+        assert fp1 != fp2, "Structurally different graphs should have different fingerprints"
+
+
+# ---------------------------------------------------------------------------
+# 7. Topological sort validity (extended)
+# ---------------------------------------------------------------------------
+
+
+class TestTopoSortValidity:
+    @given(data=dag_strategy())
+    @settings(max_examples=200)
+    def test_every_node_appears_after_all_its_dependencies(self, data):
+        """For any DAG, every node appears after ALL of its dependencies."""
+        ids, edges = data
+        result = topo_sort_ids(ids, edges)
+        pos = {nid: i for i, nid in enumerate(result)}
+        # Build full parent map
+        parents: dict[str, set[str]] = {nid: set() for nid in ids}
+        for e in edges:
+            parents[e.target].add(e.source)
+        for nid in result:
+            for parent in parents[nid]:
+                assert pos[parent] < pos[nid], (
+                    f"Dependency {parent} should appear before {nid}"
+                )
+
+    @given(data=dag_strategy())
+    @settings(max_examples=100)
+    def test_deterministic(self, data):
+        """Same DAG always produces the same topo sort."""
+        ids, edges = data
+        r1 = topo_sort_ids(ids, edges)
+        r2 = topo_sort_ids(ids, edges)
+        assert r1 == r2
+
+
+# ---------------------------------------------------------------------------
+# 8. Code validation consistency (cache correctness)
+# ---------------------------------------------------------------------------
+
+
+class TestCodeValidationConsistency:
+    @given(
+        code=st.sampled_from([
+            "x = 1 + 2",
+            "result = [i for i in range(10)]",
+            "df = df.filter(pl.col('a') > 0)",
+            ".filter(pl.col('x') > 0)",
+            "y = {'a': 1, 'b': 2}",
+        ]),
+    )
+    @settings(max_examples=30)
+    def test_validate_same_result_multiple_calls(self, code: str):
+        """validate_user_code gives the same result regardless of call count."""
+        from haute._sandbox import UnsafeCodeError, validate_user_code
+
+        results = []
+        for _ in range(3):
+            try:
+                validate_user_code(code)
+                results.append("ok")
+            except UnsafeCodeError as exc:
+                results.append(f"err:{exc}")
+        assert results[0] == results[1] == results[2], (
+            f"Inconsistent validation results: {results}"
+        )
+
+    @given(
+        code=st.sampled_from([
+            "getattr(obj, 'x')",
+            "import os",
+            "class Foo: pass",
+            "obj.__class__",
+            "eval('1+1')",
+        ]),
+    )
+    @settings(max_examples=30)
+    def test_unsafe_code_always_rejected(self, code: str):
+        """Unsafe code is always rejected, even on repeated calls."""
+        from haute._sandbox import UnsafeCodeError, validate_user_code
+
+        for _ in range(3):
+            with pytest.raises(UnsafeCodeError):
+                validate_user_code(code)
+
+
+# ---------------------------------------------------------------------------
+# 9. Path validation
+# ---------------------------------------------------------------------------
+
+
+class TestPathValidation:
+    @given(
+        segments=st.lists(
+            st.sampled_from(["a", "b", "c", "..", "sub", "dir"]),
+            min_size=1,
+            max_size=6,
+        ),
+    )
+    @settings(max_examples=100)
+    def test_dotdot_escaping_root_is_rejected(self, segments, tmp_path_factory):
+        """validate_project_path should reject paths that escape the root."""
+        from haute._sandbox import set_project_root, validate_project_path
+
+        root = tmp_path_factory.mktemp("root")
+        set_project_root(root)
+        path = root.joinpath(*segments)
+        resolved = path.resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            with pytest.raises(ValueError, match="outside"):
+                validate_project_path(path)
+        else:
+            # Should not raise
+            result = validate_project_path(path)
+            assert result.is_relative_to(root.resolve())
+
+    @given(
+        n_dotdots=st.integers(min_value=1, max_value=10),
+    )
+    @settings(max_examples=50)
+    def test_pure_dotdot_always_rejected(self, n_dotdots, tmp_path_factory):
+        """A path of N '..' segments from a nested root should be rejected."""
+        from haute._sandbox import set_project_root, validate_project_path
+
+        root = tmp_path_factory.mktemp("deep")
+        # Create a subdirectory as the root so '..' can escape
+        nested = root / "a" / "b" / "c"
+        nested.mkdir(parents=True, exist_ok=True)
+        set_project_root(nested)
+        escaping = nested / Path(*([".." ] * (n_dotdots + 3)))  # enough to escape
+        resolved = escaping.resolve()
+        if not resolved.is_relative_to(nested.resolve()):
+            with pytest.raises(ValueError, match="outside"):
+                validate_project_path(escaping)
+
+
+# ---------------------------------------------------------------------------
+# 10. LRU cache invariant
+# ---------------------------------------------------------------------------
+
+
+class TestLRUCacheInvariant:
+    @given(
+        max_size=st.integers(min_value=1, max_value=50),
+        n_puts=st.integers(min_value=0, max_value=100),
+    )
+    @settings(max_examples=200)
+    def test_size_bounded_by_min_n_maxsize(self, max_size: int, n_puts: int):
+        """After N puts with max_size M, cache size == min(N_unique, M)."""
+        from haute._lru_cache import LRUCache
+
+        cache: LRUCache[int, str] = LRUCache(max_size=max_size)
+        # Use distinct keys so each put adds a new entry
+        for i in range(n_puts):
+            cache.put(i, f"val_{i}")
+        assert len(cache) == min(n_puts, max_size)
+
+    @given(
+        max_size=st.integers(min_value=1, max_value=20),
+        keys=st.lists(st.integers(min_value=0, max_value=30), min_size=0, max_size=60),
+    )
+    @settings(max_examples=200)
+    def test_size_never_exceeds_max(self, max_size: int, keys: list[int]):
+        """Cache size should never exceed max_size regardless of access pattern."""
+        from haute._lru_cache import LRUCache
+
+        cache: LRUCache[int, int] = LRUCache(max_size=max_size)
+        for k in keys:
+            cache.put(k, k * 10)
+            assert len(cache) <= max_size
+
+    @given(
+        max_size=st.integers(min_value=1, max_value=10),
+        ops=st.lists(
+            st.tuples(
+                st.sampled_from(["put", "get"]),
+                st.integers(min_value=0, max_value=15),
+            ),
+            min_size=0,
+            max_size=50,
+        ),
+    )
+    @settings(max_examples=200)
+    def test_get_after_put_returns_value(self, max_size: int, ops):
+        """A get immediately after a put (with no eviction) returns the value."""
+        from haute._lru_cache import LRUCache
+
+        cache: LRUCache[int, int] = LRUCache(max_size=max_size)
+        stored: dict[int, int] = {}
+        for op, key in ops:
+            if op == "put":
+                cache.put(key, key * 7)
+                stored[key] = key * 7
+                # Evict from our tracking if we exceed max_size
+                if len(stored) > max_size:
+                    # We don't know exactly which key was evicted, just check size
+                    pass
+            else:
+                val = cache.get(key)
+                if val is not None:
+                    assert val == key * 7
+        assert len(cache) <= max_size

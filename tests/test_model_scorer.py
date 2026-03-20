@@ -19,6 +19,8 @@ import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import numpy as np
 import polars as pl
 
@@ -416,7 +418,7 @@ class TestScoreFromConfig:
         }))
 
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
-        result = score_from_config(lf, config=str(config_path))
+        result = score_from_config(lf, config=str(config_path), base_dir=str(tmp_path))
         collected = result.collect()
 
         assert "pred" in collected.columns
@@ -482,8 +484,8 @@ class TestScoreFromConfig:
         assert "pred" in collected.columns
 
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_base_dir_ignored_for_absolute_config(self, mock_load, tmp_path):
-        """base_dir is ignored when config is an absolute path."""
+    def test_base_dir_validates_absolute_config(self, mock_load, tmp_path):
+        """Absolute config path outside base_dir is now rejected."""
         sm = _make_scoring_model(predictions=np.array([0.5]))
         mock_load.return_value = sm
 
@@ -498,12 +500,11 @@ class TestScoreFromConfig:
         }))
 
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
-        # Pass absolute path + a bogus base_dir — should still work
-        result = score_from_config(
-            lf, config=str(config_abs), base_dir="/nonexistent",
-        )
-        collected = result.collect()
-        assert "pred" in collected.columns
+        # Absolute path with a base_dir that doesn't contain it — now rejected
+        with pytest.raises(ValueError, match="outside project root"):
+            score_from_config(
+                lf, config=str(config_abs), base_dir="/nonexistent",
+            )
 
     def test_base_dir_with_missing_config_raises(self, tmp_path):
         """FileNotFoundError when base_dir + config doesn't exist."""

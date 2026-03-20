@@ -6,14 +6,22 @@ verify all stages interoperate correctly.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import textwrap
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from haute.codegen import graph_to_code
-from haute.executor import execute_graph
+from haute._config_io import collect_node_configs
+from haute._types import GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
+from haute.codegen import graph_to_code, graph_to_code_multi
+from haute.executor import _compile_preamble, execute_graph
+from haute.graph_utils import _prune_live_switch_edges, flatten_graph
 from haute.parser import parse_pipeline_file, parse_pipeline_source
+from haute.routes._submodel_ops import create_submodel_graph
 from haute.trace import execute_trace
 
 FIXTURE_DIR = Path("tests/fixtures")
@@ -176,3 +184,761 @@ class TestEndToEnd:
         assert "VehPower" in reparsed_columns
         assert "Area" in reparsed_columns
         assert "Exposure" in reparsed_columns
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Helper: build a PipelineGraph programmatically
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _posix_path(p) -> str:
+    """Convert a path to a forward-slash string (avoids Windows backslash
+    escape issues in codegen round-trips)."""
+    return str(p).replace("\\", "/")
+
+
+def _make_node(nid: str, label: str, node_type: NodeType, config: dict | None = None) -> GraphNode:
+    return GraphNode(
+        id=nid,
+        data=NodeData(
+            label=label,
+            nodeType=node_type,
+            config=config or {},
+        ),
+    )
+
+
+def _make_edge(src: str, tgt: str) -> GraphEdge:
+    return GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. Full pipeline lifecycle: create → add nodes → connect → preview →
+#    trace → save → reload → verify identical
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFullPipelineLifecycle:
+    """Create a pipeline entirely from graph objects, execute it, trace it,
+    save to code, reload, and verify everything matches.
+    """
+
+    @pytest.fixture()
+    def pipeline_graph(self, tmp_path):
+        """Build a small but realistic pipeline graph with data files."""
+        # Write test data
+        data_path = tmp_path / "data.parquet"
+        df = pl.DataFrame({
+            "id": [1, 2, 3, 4, 5],
+            "value": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "region": ["A", "B", "A", "B", "A"],
+        })
+        df.write_parquet(data_path)
+
+        nodes = [
+            _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
+            _make_node(
+                "transform", "transform", NodeType.POLARS,
+                {"code": ".with_columns(doubled=pl.col('value') * 2)"},
+            ),
+            _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
+        ]
+        edges = [
+            _make_edge("src", "transform"),
+            _make_edge("transform", "out"),
+        ]
+        return PipelineGraph(
+            nodes=nodes,
+            edges=edges,
+            pipeline_name="lifecycle_test",
+        )
+
+    def test_create_execute_trace_save_reload(self, tmp_path, pipeline_graph, _widen_sandbox_root):
+        # Step 1: Execute
+        results = execute_graph(pipeline_graph)
+        assert results["out"].status == "ok"
+        assert results["out"].row_count == 5
+        out_cols = {c.name for c in results["out"].columns}
+        assert "doubled" in out_cols
+
+        # Step 2: Trace
+        trace = execute_trace(pipeline_graph, row_index=0, target_node_id="out")
+        assert len(trace.steps) == 3
+        assert trace.steps[-1].node_id == "out"
+        assert "doubled" in trace.steps[-1].output_values
+
+        # Step 3: Save (codegen + config files)
+        code = graph_to_code(pipeline_graph, pipeline_name="lifecycle_test")
+        for rel_path, content in collect_node_configs(pipeline_graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        py_file = tmp_path / "lifecycle_test.py"
+        py_file.write_text(code)
+
+        # Step 4: Reload and verify structure
+        reloaded = parse_pipeline_source(code, _base_dir=tmp_path)
+        assert len(reloaded.nodes) == len(pipeline_graph.nodes)
+        assert len(reloaded.edges) == len(pipeline_graph.edges)
+        orig_types = sorted(n.data.nodeType for n in pipeline_graph.nodes)
+        new_types = sorted(n.data.nodeType for n in reloaded.nodes)
+        assert orig_types == new_types
+
+        # Step 5: Re-execute reloaded graph and verify identical output
+        results2 = execute_graph(reloaded)
+        assert results2["out"].status == "ok"
+        assert results2["out"].row_count == results["out"].row_count
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Save-parse roundtrip with ALL node types
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAllNodeTypesRoundtrip:
+    """Create a graph covering every node type, save → parse → verify."""
+
+    def test_roundtrip_all_node_types(self, tmp_path, _widen_sandbox_root):
+        """Create a graph with every supported node type, codegen → parse → verify.
+
+        SUBMODEL is a meta-node (grouping container), not emitted by codegen as
+        a standalone node — it is excluded from the roundtrip assertion.
+        """
+        # Write test data files for nodes that need them
+        data_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2], "region": ["A", "B"]}).write_parquet(data_path)
+        json_path = tmp_path / "api_input.json"
+        json_path.write_text(json.dumps([{"x": 1, "region": "A"}]))
+        lookup_path = tmp_path / "lookup.json"
+        lookup_path.write_text(json.dumps({"A": 1.0, "B": 2.0}))
+        sink_path = tmp_path / "output.parquet"
+
+        # Build the node list covering all non-meta node types.
+        # Every node is connected in a linear chain so codegen handles
+        # source_names correctly and the parser can reconstruct edges.
+        nodes = [
+            _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
+            _make_node("api", "api", NodeType.API_INPUT, {"path": _posix_path(json_path)}),
+            _make_node("const", "const", NodeType.CONSTANT, {
+                "values": [{"name": "base_rate", "value": "100"}],
+            }),
+            _make_node("switch", "switch", NodeType.LIVE_SWITCH, {
+                "input_scenario_map": {"ds": "test_batch", "api": "live"},
+            }),
+            _make_node("transform", "transform", NodeType.POLARS, {"code": ""}),
+            _make_node("band", "band", NodeType.BANDING, {
+                "factors": [{
+                    "banding": "continuous",
+                    "column": "x",
+                    "outputColumn": "x_band",
+                    "rules": [{"from": 0, "to": 1, "label": "low"}, {"from": 1, "to": 100, "label": "high"}],
+                }],
+            }),
+            _make_node("rating", "rating", NodeType.RATING_STEP, {
+                "tables": [{
+                    "name": "region_table",
+                    "factors": ["region"],
+                    "outputColumn": "region_factor",
+                    "entries": [
+                        {"region": "A", "region_factor": 1.0},
+                        {"region": "B", "region_factor": 1.5},
+                    ],
+                }],
+            }),
+            _make_node("mscore", "mscore", NodeType.MODEL_SCORE, {
+                "sourceType": "run",
+                "run_id": "abc123",
+                "artifact_path": "model.cbm",
+                "task": "regression",
+                "output_column": "prediction",
+            }),
+            _make_node("expander", "expander", NodeType.SCENARIO_EXPANDER, {
+                "quote_id": "x",
+                "column_name": "scenario_val",
+                "min_value": 0.8,
+                "max_value": 1.2,
+                "steps": 3,
+                "step_column": "scenario_idx",
+            }),
+            _make_node("opt", "opt", NodeType.OPTIMISER, {
+                "mode": "online",
+                "quote_id": "x",
+                "objective": "premium",
+            }),
+            _make_node("opt_apply", "opt_apply", NodeType.OPTIMISER_APPLY, {
+                "artifact_path": "optimiser.json",
+            }),
+            _make_node("ext", "ext", NodeType.EXTERNAL_FILE, {
+                "path": _posix_path(lookup_path),
+                "fileType": "json",
+                "code": "",
+            }),
+            _make_node("sink", "sink", NodeType.DATA_SINK, {
+                "path": _posix_path(sink_path),
+                "format": "parquet",
+            }),
+            _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
+        ]
+
+        # Chain them linearly so every node has a source_name
+        edges = [
+            _make_edge("ds", "switch"),
+            _make_edge("api", "switch"),
+            _make_edge("switch", "transform"),
+            _make_edge("transform", "band"),
+            _make_edge("band", "rating"),
+            _make_edge("rating", "mscore"),
+            _make_edge("mscore", "expander"),
+            _make_edge("expander", "opt"),
+            _make_edge("opt", "opt_apply"),
+            _make_edge("opt_apply", "ext"),
+            _make_edge("ext", "sink"),
+            _make_edge("ext", "out"),
+            _make_edge("const", "transform"),
+        ]
+
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="all_types")
+
+        # Generate code
+        code = graph_to_code(graph, pipeline_name="all_types")
+
+        # Write config files for re-parsing
+        for rel_path, content in collect_node_configs(graph).items():
+            cfg_file = tmp_path / rel_path
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(content)
+
+        # Verify code compiles
+        compile(code, "<all_types>", "exec")
+
+        # Parse back
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+
+        # Compare node types (sorted)
+        orig_types = sorted(n.data.nodeType for n in graph.nodes)
+        new_types = sorted(n.data.nodeType for n in reparsed.nodes)
+        assert orig_types == new_types
+
+        # Edge count should match
+        assert len(reparsed.edges) == len(graph.edges)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Submodel lifecycle: create → verify file → dissolve → verify restored
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSubmodelLifecycle:
+    """Create a graph, extract submodel, verify, dissolve back, verify."""
+
+    def test_extract_and_dissolve_submodel(self, tmp_path, _widen_sandbox_root):
+        data_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]}).write_parquet(data_path)
+
+        nodes = [
+            _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
+            _make_node("t1", "step_one", NodeType.POLARS, {
+                "code": ".with_columns(a=pl.col('x') + 1)",
+            }),
+            _make_node("t2", "step_two", NodeType.POLARS, {
+                "code": ".with_columns(b=pl.col('a') + 10)",
+            }),
+            _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
+        ]
+        edges = [
+            _make_edge("src", "t1"),
+            _make_edge("t1", "t2"),
+            _make_edge("t2", "out"),
+        ]
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="submodel_test")
+        orig_node_ids = {n.id for n in graph.nodes}
+        orig_edge_pairs = {(e.source, e.target) for e in graph.edges}
+
+        # Step 1: Execute original
+        results = execute_graph(graph)
+        assert results["out"].status == "ok"
+        orig_row_count = results["out"].row_count
+
+        # Step 2: Extract submodel (t1 + t2)
+        result = create_submodel_graph(graph, ["t1", "t2"], "inner_group")
+        new_graph = result.graph
+
+        # Verify submodel placeholder is present
+        sm_node_ids = [n.id for n in new_graph.nodes if n.data.nodeType == NodeType.SUBMODEL]
+        assert len(sm_node_ids) == 1
+        assert "submodel__inner_group" in sm_node_ids
+
+        # Verify submodel metadata
+        assert "inner_group" in (new_graph.submodels or {})
+        sm_meta = new_graph.submodels["inner_group"]
+        assert set(sm_meta["childNodeIds"]) == {"t1", "t2"}
+
+        # Step 3: Generate code for submodel file
+        files = graph_to_code_multi(
+            new_graph,
+            pipeline_name="submodel_test",
+            source_file="main.py",
+        )
+        # Should have main file + submodel file
+        assert len(files) == 2
+        assert any("modules/" in k for k in files)
+
+        # Step 4: Dissolve submodel back
+        flat = flatten_graph(new_graph)
+
+        # Verify dissolution restores original structure
+        flat_node_ids = {n.id for n in flat.nodes}
+        assert flat_node_ids == orig_node_ids
+
+        flat_edge_pairs = {(e.source, e.target) for e in flat.edges}
+        assert flat_edge_pairs == orig_edge_pairs
+
+        # Step 5: Execute the dissolved graph — should produce same results
+        results2 = execute_graph(flat)
+        assert results2["out"].status == "ok"
+        assert results2["out"].row_count == orig_row_count
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Config roundtrip: set configs → save → reload → verify configs preserved
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestConfigRoundtrip:
+    """Set node configs, save, reload, verify configs are preserved."""
+
+    def test_data_source_config_roundtrip(self, tmp_path, _widen_sandbox_root):
+        data_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1]}).write_parquet(data_path)
+
+        node = _make_node("ds", "ds", NodeType.DATA_SOURCE, {
+            "path": _posix_path(data_path),
+            "sourceType": "flat_file",
+        })
+        graph = PipelineGraph(
+            nodes=[node],
+            edges=[],
+            pipeline_name="cfg_test",
+        )
+        code = graph_to_code(graph, pipeline_name="cfg_test")
+        for rel, content in collect_node_configs(graph).items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+        assert len(reparsed.nodes) == 1
+        assert reparsed.nodes[0].data.config.get("path") == _posix_path(data_path)
+
+    def test_banding_config_roundtrip(self, tmp_path, _widen_sandbox_root):
+        banding_config = {
+            "factors": [{
+                "banding": "discrete",
+                "column": "region",
+                "outputColumn": "region_band",
+                "rules": [
+                    {"value": "urban", "label": "city"},
+                    {"value": "rural", "label": "country"},
+                ],
+                "default": "other",
+            }],
+        }
+        nodes = [
+            _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": "data.parquet"}),
+            _make_node("band", "band", NodeType.BANDING, banding_config),
+        ]
+        edges = [_make_edge("ds", "band")]
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="band_cfg")
+
+        code = graph_to_code(graph, pipeline_name="band_cfg")
+        for rel, content in collect_node_configs(graph).items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+        band_node = [n for n in reparsed.nodes if n.data.nodeType == NodeType.BANDING]
+        assert len(band_node) == 1
+        factors = band_node[0].data.config.get("factors", [])
+        assert len(factors) == 1
+        assert factors[0]["column"] == "region"
+        assert factors[0]["outputColumn"] == "region_band"
+
+    def test_rating_step_config_roundtrip(self, tmp_path, _widen_sandbox_root):
+        rating_config = {
+            "tables": [{
+                "name": "age_table",
+                "factors": ["age_band"],
+                "outputColumn": "age_factor",
+                "entries": [
+                    {"age_band": "young", "age_factor": 1.5},
+                    {"age_band": "middle", "age_factor": 1.0},
+                    {"age_band": "senior", "age_factor": 1.2},
+                ],
+                "defaultValue": "1.0",
+            }],
+            "operation": "multiply",
+            "combinedColumn": "total_factor",
+        }
+        nodes = [
+            _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": "data.parquet"}),
+            _make_node("rt", "rt", NodeType.RATING_STEP, rating_config),
+        ]
+        edges = [_make_edge("ds", "rt")]
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="rt_cfg")
+
+        code = graph_to_code(graph, pipeline_name="rt_cfg")
+        for rel, content in collect_node_configs(graph).items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+        rt_node = [n for n in reparsed.nodes if n.data.nodeType == NodeType.RATING_STEP]
+        assert len(rt_node) == 1
+        tables = rt_node[0].data.config.get("tables", [])
+        assert len(tables) == 1
+        assert tables[0]["name"] == "age_table"
+        entries = tables[0].get("entries", [])
+        assert len(entries) == 3
+
+    def test_model_score_config_roundtrip(self, tmp_path, _widen_sandbox_root):
+        ms_config = {
+            "sourceType": "run",
+            "run_id": "run_abc123",
+            "artifact_path": "model.cbm",
+            "task": "regression",
+            "output_column": "pred",
+        }
+        nodes = [
+            _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": "data.parquet"}),
+            _make_node("ms", "ms", NodeType.MODEL_SCORE, ms_config),
+        ]
+        edges = [_make_edge("ds", "ms")]
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="ms_cfg")
+
+        code = graph_to_code(graph, pipeline_name="ms_cfg")
+        for rel, content in collect_node_configs(graph).items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+        ms_node = [n for n in reparsed.nodes if n.data.nodeType == NodeType.MODEL_SCORE]
+        assert len(ms_node) == 1
+        cfg = ms_node[0].data.config
+        assert cfg.get("task") == "regression"
+        assert cfg.get("output_column") == "pred"
+
+    def test_optimiser_config_roundtrip(self, tmp_path, _widen_sandbox_root):
+        opt_config = {
+            "mode": "online",
+            "quote_id": "policy_id",
+            "objective": "premium",
+            "constraints": {"volume": {"min": 0.9}},
+            "max_iter": 50,
+        }
+        nodes = [
+            _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": "data.parquet"}),
+            _make_node("opt", "opt", NodeType.OPTIMISER, opt_config),
+        ]
+        edges = [_make_edge("ds", "opt")]
+        graph = PipelineGraph(nodes=nodes, edges=edges, pipeline_name="opt_cfg")
+
+        code = graph_to_code(graph, pipeline_name="opt_cfg")
+        for rel, content in collect_node_configs(graph).items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(content)
+
+        reparsed = parse_pipeline_source(code, _base_dir=tmp_path)
+        opt_node = [n for n in reparsed.nodes if n.data.nodeType == NodeType.OPTIMISER]
+        assert len(opt_node) == 1
+        cfg = opt_node[0].data.config
+        assert cfg.get("mode") == "online"
+        assert cfg.get("quote_id") == "policy_id"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Git workflow: create branch → make changes → save → commit → revert
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGitWorkflow:
+    """Test git operations in an isolated repo."""
+
+    @pytest.fixture()
+    def git_repo(self, tmp_path):
+        """Create a fresh git repo with an initial commit."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def _git(*args):
+            return subprocess.run(
+                ["git"] + list(args),
+                capture_output=True, text=True, cwd=repo, check=True,
+            ).stdout.strip()
+
+        _git("init")
+        _git("config", "user.email", "test@test.com")
+        _git("config", "user.name", "Test User")
+
+        # Create initial pipeline file
+        pipeline_file = repo / "main.py"
+        pipeline_file.write_text(textwrap.dedent("""\
+            import polars as pl
+            import haute
+
+            pipeline = haute.Pipeline("main")
+
+            @pipeline.data_source(path="data.parquet")
+            def source() -> pl.LazyFrame:
+                return pl.scan_parquet("data.parquet")
+        """))
+
+        _git("add", "-A")
+        _git("commit", "-m", "Initial commit")
+
+        return repo, _git
+
+    def test_branch_create_commit_revert(self, git_repo):
+        from haute._git import (
+            create_branch,
+            get_history,
+            get_status,
+            revert_to,
+            save_progress,
+        )
+
+        repo, _git = git_repo
+
+        # Step 1: Create branch
+        branch = create_branch("test feature", cwd=repo)
+        assert "pricing/" in branch
+        assert "test-feature" in branch
+
+        status = get_status(cwd=repo)
+        assert status.branch == branch
+        assert not status.is_main
+
+        # Step 2: Make changes
+        pipeline_file = repo / "main.py"
+        pipeline_file.write_text(textwrap.dedent("""\
+            import polars as pl
+            import haute
+
+            pipeline = haute.Pipeline("main")
+
+            @pipeline.data_source(path="data.parquet")
+            def source() -> pl.LazyFrame:
+                return pl.scan_parquet("data.parquet")
+
+            @pipeline.polars
+            def transform(source: pl.LazyFrame) -> pl.LazyFrame:
+                return source
+        """))
+
+        status = get_status(cwd=repo)
+        assert len(status.changed_files) > 0
+
+        # Step 3: Save (commit)
+        result = save_progress(cwd=repo)
+        assert result.commit_sha
+        assert result.message
+
+        # Step 4: Verify history
+        history = get_history(cwd=repo)
+        assert len(history) >= 1
+
+        # Step 5: Revert to original state
+        initial_sha = _git("rev-list", "--max-parents=0", "HEAD")
+        revert_result = revert_to(initial_sha, cwd=repo)
+        assert revert_result.backup_tag
+        assert revert_result.reverted_to
+
+        # Verify file was restored
+        content = pipeline_file.read_text()
+        assert "transform" not in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. Utility module lifecycle: create → use in preamble → preview →
+#    update → preview again → delete
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestUtilityModuleLifecycle:
+    """Test creating, using, updating, and deleting utility modules."""
+
+    def test_utility_lifecycle(self, tmp_path, monkeypatch, _widen_sandbox_root):
+        import sys
+
+        # Set up the project root in tmp_path so utility imports resolve
+        monkeypatch.chdir(tmp_path)
+        if str(tmp_path) not in sys.path:
+            sys.path.insert(0, str(tmp_path))
+
+        # Step 1: Create utility module
+        util_dir = tmp_path / "utility"
+        util_dir.mkdir()
+        (util_dir / "__init__.py").write_text("")
+        (util_dir / "helpers.py").write_text(textwrap.dedent("""\
+            MAGIC_CONSTANT = 42
+
+            def double_it(x):
+                return x * 2
+        """))
+
+        # Step 2: Write test data
+        data_path = tmp_path / "data.parquet"
+        pl.DataFrame({"x": [1, 2, 3]}).write_parquet(data_path)
+
+        # Step 3: Create pipeline with preamble that uses the utility
+        preamble = "from utility.helpers import MAGIC_CONSTANT, double_it"
+        nodes = [
+            _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
+            _make_node("t", "transform", NodeType.POLARS, {
+                "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
+            }),
+        ]
+        edges = [_make_edge("src", "t")]
+        graph = PipelineGraph(
+            nodes=nodes, edges=edges,
+            pipeline_name="util_test",
+            preamble=preamble,
+        )
+
+        # Step 4: Preview (execute) — verify utility works
+        results = execute_graph(graph)
+        assert results["t"].status == "ok"
+        # double_it(42) = 84
+        preview = results["t"].preview
+        assert all(row["result"] == 84 for row in preview)
+
+        # Step 5: Update the utility module
+        (util_dir / "helpers.py").write_text(textwrap.dedent("""\
+            MAGIC_CONSTANT = 100
+
+            def double_it(x):
+                return x * 3  # changed to triple!
+        """))
+
+        # Evict utility from sys.modules so the new version is picked up
+        for mod_name in [k for k in sys.modules if k.startswith("utility")]:
+            del sys.modules[mod_name]
+
+        # Step 6: Preview again — verify updated utility is used.
+        # Change node code slightly to invalidate the fingerprint cache
+        # (preamble is not part of the fingerprint).
+        nodes2 = [
+            _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
+            _make_node("t2", "transform", NodeType.POLARS, {
+                "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
+            }),
+        ]
+        graph2 = PipelineGraph(
+            nodes=nodes2,
+            edges=[_make_edge("src", "t2")],
+            pipeline_name="util_test_v2",
+            preamble=preamble,
+        )
+        results2 = execute_graph(graph2)
+        assert results2["t2"].status == "ok"
+        # double_it(100) = 300 now (triple)
+        preview2 = results2["t2"].preview
+        assert all(row["result"] == 300 for row in preview2)
+
+        # Step 7: Delete utility
+        (util_dir / "helpers.py").unlink()
+        assert not (util_dir / "helpers.py").exists()
+
+        # Clean up sys.path
+        if str(tmp_path) in sys.path:
+            sys.path.remove(str(tmp_path))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. Multi-scenario execution: live_switch with batch/live scenarios
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestMultiScenarioExecution:
+    """Verify live_switch edge pruning for different scenarios."""
+
+    @pytest.fixture()
+    def scenario_graph(self, tmp_path):
+        """Build a graph with two source paths routing through a live_switch."""
+        live_path = tmp_path / "live.parquet"
+        batch_path = tmp_path / "batch.parquet"
+        pl.DataFrame({"id": [1], "source": ["live"], "val": [100.0]}).write_parquet(live_path)
+        pl.DataFrame({"id": [1, 2, 3], "source": ["batch"] * 3, "val": [10.0, 20.0, 30.0]}).write_parquet(batch_path)
+
+        nodes = [
+            _make_node("live_src", "live_src", NodeType.DATA_SOURCE, {"path": _posix_path(live_path)}),
+            _make_node("batch_src", "batch_src", NodeType.DATA_SOURCE, {"path": _posix_path(batch_path)}),
+            _make_node("switch", "switch", NodeType.LIVE_SWITCH, {
+                "input_scenario_map": {"live_src": "live", "batch_src": "test_batch"},
+            }),
+            _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
+        ]
+        edges = [
+            _make_edge("live_src", "switch"),
+            _make_edge("batch_src", "switch"),
+            _make_edge("switch", "out"),
+        ]
+        return PipelineGraph(
+            nodes=nodes,
+            edges=edges,
+            pipeline_name="scenario_test",
+            scenarios=["live", "test_batch"],
+        )
+
+    def test_live_scenario_prunes_batch_edge(self, scenario_graph, _widen_sandbox_root):
+        """In 'live' scenario, the batch_src edge should be pruned."""
+        node_map = scenario_graph.node_map
+        pruned = _prune_live_switch_edges(scenario_graph.edges, node_map, "live")
+
+        # The batch_src -> switch edge should be removed
+        pruned_pairs = {(e.source, e.target) for e in pruned}
+        assert ("live_src", "switch") in pruned_pairs
+        assert ("batch_src", "switch") not in pruned_pairs
+        assert ("switch", "out") in pruned_pairs
+
+    def test_batch_scenario_prunes_live_edge(self, scenario_graph, _widen_sandbox_root):
+        """In 'test_batch' scenario, the live_src edge should be pruned."""
+        node_map = scenario_graph.node_map
+        pruned = _prune_live_switch_edges(scenario_graph.edges, node_map, "test_batch")
+
+        pruned_pairs = {(e.source, e.target) for e in pruned}
+        assert ("batch_src", "switch") in pruned_pairs
+        assert ("live_src", "switch") not in pruned_pairs
+
+    def test_execute_live_scenario_uses_live_data(self, scenario_graph, _widen_sandbox_root):
+        """Executing in 'live' scenario should use live data (1 row)."""
+        results = execute_graph(scenario_graph, scenario="live")
+        assert results["out"].status == "ok"
+        assert results["out"].row_count == 1
+        assert results["out"].preview[0]["source"] == "live"
+
+    def test_execute_batch_scenario_uses_batch_data(self, scenario_graph, _widen_sandbox_root):
+        """Executing in 'test_batch' scenario should use batch data (3 rows)."""
+        results = execute_graph(scenario_graph, scenario="test_batch")
+        assert results["out"].status == "ok"
+        assert results["out"].row_count == 3
+        assert all(row["source"] == "batch" for row in results["out"].preview)
+
+    def test_trace_respects_scenario(self, scenario_graph, _widen_sandbox_root):
+        """Trace should only include nodes from the active scenario path."""
+        # Live trace: should include live_src but not batch_src
+        trace_live = execute_trace(
+            scenario_graph, row_index=0,
+            target_node_id="out", scenario="live",
+        )
+        live_step_ids = {s.node_id for s in trace_live.steps}
+        assert "live_src" in live_step_ids
+        assert "batch_src" not in live_step_ids
+
+        # Batch trace: should include batch_src but not live_src
+        trace_batch = execute_trace(
+            scenario_graph, row_index=0,
+            target_node_id="out", scenario="test_batch",
+        )
+        batch_step_ids = {s.node_id for s in trace_batch.steps}
+        assert "batch_src" in batch_step_ids
+        assert "live_src" not in batch_step_ids

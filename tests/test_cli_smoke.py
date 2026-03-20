@@ -57,6 +57,16 @@ def _ready_endpoint_mock() -> MagicMock:
 
 
 class TestSmokeDatabricks:
+    """Databricks smoke tests.
+
+    Mocking strategy:
+    - ``WorkspaceClient`` — always mocked (external SDK, needs credentials)
+    - ``time.sleep`` — always mocked (avoid real delays in tests)
+    - ``_load_env`` — NOT mocked: no ``.env`` file in tmp_path, so it's a no-op
+    - ``load_test_quote_file`` — NOT mocked: reads real test-quote JSON
+      files created by ``_setup_smoke_project``
+    """
+
     def test_databricks_success(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -70,9 +80,6 @@ class TestSmokeDatabricks:
         mock_ws.serving_endpoints.query.return_value = mock_response
 
         with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws), \
-             patch("haute.deploy._config._load_env"), \
-             patch("haute.deploy._validators.load_test_quote_file",
-                   return_value=[{"VehPower": 5}]), \
              patch("time.sleep"):
             result = runner.invoke(cli, ["smoke"])
 
@@ -100,9 +107,6 @@ class TestSmokeDatabricks:
         mock_ws.serving_endpoints.query.return_value = mock_response
 
         with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws), \
-             patch("haute.deploy._config._load_env"), \
-             patch("haute.deploy._validators.load_test_quote_file",
-                   return_value=[{"VehPower": 5}]), \
              patch("time.sleep"):
             result = runner.invoke(cli, ["smoke"])
 
@@ -121,9 +125,6 @@ class TestSmokeDatabricks:
         mock_ws.serving_endpoints.query.side_effect = RuntimeError("500 Internal Server Error")
 
         with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws), \
-             patch("haute.deploy._config._load_env"), \
-             patch("haute.deploy._validators.load_test_quote_file",
-                   return_value=[{"VehPower": 5}]), \
              patch("time.sleep"):
             result = runner.invoke(cli, ["smoke"])
 
@@ -133,7 +134,7 @@ class TestSmokeDatabricks:
     def test_databricks_null_predictions(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Endpoint returns no predictions → failure."""
+        """Endpoint returns no predictions -> failure."""
         _setup_smoke_project(tmp_path, monkeypatch)
 
         mock_ws = MagicMock()
@@ -144,9 +145,6 @@ class TestSmokeDatabricks:
         mock_ws.serving_endpoints.query.return_value = mock_response
 
         with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws), \
-             patch("haute.deploy._config._load_env"), \
-             patch("haute.deploy._validators.load_test_quote_file",
-                   return_value=[{"VehPower": 5}]), \
              patch("time.sleep"):
             result = runner.invoke(cli, ["smoke"])
 
@@ -165,9 +163,6 @@ class TestSmokeDatabricks:
         mock_ws.serving_endpoints.query.return_value = mock_response
 
         with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws), \
-             patch("haute.deploy._config._load_env"), \
-             patch("haute.deploy._validators.load_test_quote_file",
-                   return_value=[{"VehPower": 5}]), \
              patch("time.sleep"):
             result = runner.invoke(cli, ["smoke", "--endpoint-suffix", "-canary"])
 

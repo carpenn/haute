@@ -269,7 +269,14 @@ def score_from_config(
     config_path = Path(config)
     if base_dir is not None and not config_path.is_absolute():
         config_path = Path(base_dir) / config_path
-    cfg = json.loads(config_path.read_text())
+    # Validate path stays within project directory
+    resolved = config_path.resolve()
+    root = (Path(base_dir) if base_dir else Path.cwd()).resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(
+            f"Config path {config!r} resolves outside project root"
+        )
+    cfg = json.loads(resolved.read_text())
     scorer = ModelScorer(
         source_type=cfg.get("sourceType", "run"),
         run_id=cfg.get("run_id", ""),

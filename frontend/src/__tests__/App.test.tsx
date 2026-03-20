@@ -279,7 +279,7 @@ describe("App", () => {
   it("shows loading state when loading is true", () => {
     mockLoading = true
     render(<App />)
-    expect(screen.getByText("Loading pipeline...")).toBeTruthy()
+    expect(screen.getByText("Loading pipeline...")).toBeInTheDocument()
   })
 
   it("does not show Toolbar in loading state", () => {
@@ -290,46 +290,46 @@ describe("App", () => {
 
   it("shows Toolbar when not loading", () => {
     render(<App />)
-    expect(screen.getByTestId("toolbar")).toBeTruthy()
+    expect(screen.getByTestId("toolbar")).toBeInTheDocument()
   })
 
   it("shows ReactFlow canvas when not loading", () => {
     render(<App />)
-    expect(screen.getByTestId("react-flow")).toBeTruthy()
+    expect(screen.getByTestId("react-flow")).toBeInTheDocument()
   })
 
   it("shows BreadcrumbBar", () => {
     render(<App />)
-    expect(screen.getByTestId("breadcrumb-bar")).toBeTruthy()
+    expect(screen.getByTestId("breadcrumb-bar")).toBeInTheDocument()
   })
 
   it("shows DataPreview by default (no trace or optimiser preview)", () => {
     render(<App />)
-    expect(screen.getByTestId("data-preview")).toBeTruthy()
+    expect(screen.getByTestId("data-preview")).toBeInTheDocument()
   })
 
   it("shows NodePanel when no trace result", () => {
     render(<App />)
-    expect(screen.getByTestId("node-panel")).toBeTruthy()
+    expect(screen.getByTestId("node-panel")).toBeInTheDocument()
   })
 
   it("shows Toast container", () => {
     render(<App />)
-    expect(screen.getByTestId("toast")).toBeTruthy()
+    expect(screen.getByTestId("toast")).toBeInTheDocument()
   })
 
   // ── Node palette ────────────────────────────────────────────────
 
   it("shows NodePalette when paletteOpen is true", () => {
     render(<App />)
-    expect(screen.getByTestId("node-palette")).toBeTruthy()
+    expect(screen.getByTestId("node-palette")).toBeInTheDocument()
   })
 
   it("shows palette toggle button when paletteOpen is false", () => {
     useUIStore.setState({ paletteOpen: false })
     render(<App />)
     expect(screen.queryByTestId("node-palette")).toBeNull()
-    expect(screen.getByRole("button", { name: "Show node palette" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Show node palette" })).toBeInTheDocument()
   })
 
   it("clicking palette toggle opens palette", () => {
@@ -349,7 +349,7 @@ describe("App", () => {
   it("clicking utility button opens UtilityPanel", () => {
     render(<App />)
     fireEvent.click(screen.getByTestId("utility-btn"))
-    expect(screen.getByTestId("utility-panel")).toBeTruthy()
+    expect(screen.getByTestId("utility-panel")).toBeInTheDocument()
   })
 
   it("ImportsPanel not shown by default", () => {
@@ -360,7 +360,7 @@ describe("App", () => {
   it("clicking imports button opens ImportsPanel", () => {
     render(<App />)
     fireEvent.click(screen.getByTestId("imports-btn"))
-    expect(screen.getByTestId("imports-panel")).toBeTruthy()
+    expect(screen.getByTestId("imports-panel")).toBeInTheDocument()
   })
 
   it("GitPanel not shown by default", () => {
@@ -371,13 +371,13 @@ describe("App", () => {
   it("clicking git button opens GitPanel", () => {
     render(<App />)
     fireEvent.click(screen.getByTestId("git-btn"))
-    expect(screen.getByTestId("git-panel")).toBeTruthy()
+    expect(screen.getByTestId("git-panel")).toBeInTheDocument()
   })
 
   it("GitPanel takes priority over UtilityPanel", () => {
     useUIStore.setState({ gitOpen: true, utilityOpen: true })
     render(<App />)
-    expect(screen.getByTestId("git-panel")).toBeTruthy()
+    expect(screen.getByTestId("git-panel")).toBeInTheDocument()
     expect(screen.queryByTestId("utility-panel")).toBeNull()
   })
 
@@ -389,7 +389,7 @@ describe("App", () => {
   it("KeyboardShortcuts shown when shortcutsOpen is true", () => {
     useUIStore.setState({ shortcutsOpen: true })
     render(<App />)
-    expect(screen.getByTestId("shortcuts")).toBeTruthy()
+    expect(screen.getByTestId("shortcuts")).toBeInTheDocument()
   })
 
   // ── Sync banner ─────────────────────────────────────────────────
@@ -402,7 +402,7 @@ describe("App", () => {
   it("sync banner shown when syncBanner has text", () => {
     useUIStore.setState({ syncBanner: "File changed on disk" })
     render(<App />)
-    expect(screen.getByText("File changed on disk")).toBeTruthy()
+    expect(screen.getByText("File changed on disk")).toBeInTheDocument()
   })
 
   it("dismiss button clears sync banner", () => {
@@ -425,6 +425,6 @@ describe("App", () => {
   it("SubmodelDialog shown when submodelDialog is set in store", () => {
     useUIStore.setState({ submodelDialog: { nodeIds: ["n1", "n2"] } })
     render(<App />)
-    expect(screen.getByTestId("submodel-dialog")).toBeTruthy()
+    expect(screen.getByTestId("submodel-dialog")).toBeInTheDocument()
   })
 })
