@@ -10,6 +10,7 @@ from haute.graph_utils import (
     _execute_lazy,
     _object_cache,
     _prepare_graph,
+    _resolve_sink_path,
     _sanitize_func_name,
     ancestors,
     load_external_object,
@@ -65,6 +66,30 @@ class TestSanitizeFuncName:
         for label in labels:
             name = _sanitize_func_name(label)
             assert name.isidentifier(), f"{label!r} -> {name!r} is not a valid identifier"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_sink_path
+# ---------------------------------------------------------------------------
+
+class TestResolveSinkPath:
+    def test_bare_name_gets_outputs_dir_and_extension(self):
+        assert _resolve_sink_path("modelling-data", "parquet") == "outputs/modelling-data.parquet"
+
+    def test_bare_name_csv(self):
+        assert _resolve_sink_path("results", "csv") == "outputs/results.csv"
+
+    def test_already_has_directory_no_prepend(self):
+        assert _resolve_sink_path("my-dir/data", "parquet") == "my-dir/data.parquet"
+
+    def test_already_has_extension_no_append(self):
+        assert _resolve_sink_path("modelling-data.parquet", "parquet") == "outputs/modelling-data.parquet"
+
+    def test_full_path_unchanged(self):
+        assert _resolve_sink_path("my-dir/data.parquet", "parquet") == "my-dir/data.parquet"
+
+    def test_wrong_extension_gets_appended(self):
+        assert _resolve_sink_path("data.csv", "parquet") == "outputs/data.csv.parquet"
 
 
 # ---------------------------------------------------------------------------

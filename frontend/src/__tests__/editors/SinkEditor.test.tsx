@@ -60,7 +60,7 @@ describe("SinkEditor", () => {
   it("path input calls onUpdate when changed", () => {
     const onUpdate = vi.fn()
     render(<SinkEditor {...DEFAULT_PROPS} onUpdate={onUpdate} />)
-    const input = screen.getByPlaceholderText("output/results.parquet")
+    const input = screen.getByRole("textbox")
     fireEvent.change(input, { target: { value: "new_path.parquet" } })
     expect(onUpdate).toHaveBeenCalledWith("path", "new_path.parquet")
   })
@@ -136,15 +136,10 @@ describe("SinkEditor", () => {
     expect(resultDiv.style.background).toContain("239, 68, 68")
   })
 
-  it("placeholder changes based on format selection", () => {
-    // Default: parquet
-    const { unmount } = render(<SinkEditor {...DEFAULT_PROPS} config={{}} />)
-    expect(screen.getByPlaceholderText("output/results.parquet")).toBeTruthy()
-    unmount()
-
-    // CSV format
-    render(<SinkEditor {...DEFAULT_PROPS} config={{ format: "csv" }} />)
-    expect(screen.getByPlaceholderText("output/results.csv")).toBeTruthy()
+  it("path input has no placeholder text", () => {
+    render(<SinkEditor {...DEFAULT_PROPS} config={{}} />)
+    const input = screen.getByRole("textbox")
+    expect(input.getAttribute("placeholder")).toBe("")
   })
 
   it("populates path input from config", () => {

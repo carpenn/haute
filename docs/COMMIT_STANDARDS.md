@@ -426,7 +426,7 @@ The script runs these checks in order and stops on first failure:
 | `tsc -b --noEmit` (frontend) | TypeScript type errors | 5s |
 | `eslint .` (frontend) | JS/TS lint errors (no-explicit-any, unused vars, React hooks rules) | 3s |
 | `pytest tests/` | Python test failures, coverage < 85% | 4 min |
-| `vitest run` (frontend) | Frontend test failures | 20s |
+| `npm test` (frontend) | Frontend test failures | 20s |
 
 Use `--quick` during active development (catches ~80% of CI failures in 15 seconds). Run the full version before opening a PR.
 
@@ -455,14 +455,14 @@ uv run ruff check src/ && uv run mypy src/haute/ && uv run pytest tests/ -q
 
 If you only touched frontend TypeScript:
 ```bash
-cd frontend && npx tsc -b --noEmit && npx eslint . && npx vitest run
+cd frontend && npx tsc -b --noEmit && npx eslint . && npm test
 ```
 
 If you added a new test file:
 ```bash
 # Verify it compiles, passes lint, and actually runs
 uv run pytest tests/test_your_new_file.py -v   # backend
-cd frontend && npx vitest run src/__tests__/your_new_file.test.ts  # frontend
+cd frontend && npm test -- src/__tests__/your_new_file.test.ts  # frontend
 ```
 
 ### Common CI failures and how to catch them locally
