@@ -48,6 +48,7 @@ from haute._types import NodeData as NodeData
 from haute._types import NodeType as NodeType
 from haute._types import PipelineGraph as PipelineGraph
 from haute._types import _Frame as _Frame
+from haute._types import _resolve_sink_path as _resolve_sink_path
 from haute._types import _sanitize_func_name as _sanitize_func_name
 from haute._types import build_instance_mapping as build_instance_mapping
 from haute._types import resolve_orig_source_names as resolve_orig_source_names

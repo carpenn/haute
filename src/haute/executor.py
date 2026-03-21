@@ -44,6 +44,7 @@ from haute.graph_utils import (
     _execute_eager_core,
     _execute_lazy,
     _Frame,
+    _resolve_sink_path,
     build_instance_mapping,
     graph_fingerprint,
 )
@@ -607,6 +608,8 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") 
 
     if not path:
         raise ValueError("Sink node has no output path configured")
+
+    path = _resolve_sink_path(path, fmt)
 
     # Sinks are never used in live serving — model scoring must use the
     # disk-batched path (any scenario != "live").  But the scenario name

@@ -73,7 +73,7 @@ export default function SinkEditor({
         <EditorLabel className="mb-1.5 block">Output Path</EditorLabel>
         <input
           type="text"
-          placeholder={format === "csv" ? "output/results.csv" : "output/results.parquet"}
+          placeholder=""
           defaultValue={configField(config, "path", "")}
           onChange={(e) => onUpdate("path", e.target.value)}
           className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"

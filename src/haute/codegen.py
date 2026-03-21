@@ -18,6 +18,7 @@ from haute.graph_utils import (
     GraphNode,
     NodeType,
     PipelineGraph,
+    _resolve_sink_path,
     _sanitize_func_name,
     build_instance_mapping,
     topo_sort_ids,
@@ -705,6 +706,7 @@ def _gen_data_sink(node: GraphNode, source_names: list[str]) -> str:
     func_name, description, config = _common_node_fields(node)
     path = config.get("path", "output.parquet")
     fmt = config.get("format", "parquet")
+    path = _resolve_sink_path(path, fmt)
     params = _build_params(source_names)
     first = _first_source(source_names)
     template = _SINK_CSV if fmt == "csv" else _SINK_PARQUET

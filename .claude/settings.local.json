@@ -241,7 +241,9 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_sink.py tests/test_builders.py -x -q)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_sink.py -x -q)",
       "Bash(while read:*)",
-      "Bash(do uv:*)"
+      "Bash(do uv:*)",
+      "Bash(xargs grep:*)",
+      "Bash(node_modules/.bin/tsc -b --noEmit)"
     ]
   }
 }

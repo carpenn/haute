@@ -262,7 +262,7 @@ class TestNodeToCode:
             }
         )
         code = _node_to_code(node, source_names=["transform"])
-        assert 'safe_sink(transform, "out.parquet")' in code
+        assert 'safe_sink(transform, "outputs/out.parquet")' in code
         assert "def Write(transform: pl.LazyFrame)" in code
         _compile_node_code(code)
 
@@ -278,7 +278,7 @@ class TestNodeToCode:
             }
         )
         code = _node_to_code(node)
-        assert 'safe_sink(df, "out.csv", fmt="csv")' in code
+        assert 'safe_sink(df, "outputs/out.csv", fmt="csv")' in code
         _compile_node_code(code)
 
     def test_model_score(self):

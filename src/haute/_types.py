@@ -562,6 +562,20 @@ class PipelineGraph(BaseModel):
         return build_parents_of(self.edges)
 
 
+def _resolve_sink_path(path: str, fmt: str) -> str:
+    """Normalise a sink output path.
+
+    Prepends ``outputs/`` when the path has no directory component and
+    appends the format extension (``.parquet`` or ``.csv``) when missing.
+    """
+    ext = ".csv" if fmt == "csv" else ".parquet"
+    if "/" not in path and "\\" not in path:
+        path = f"outputs/{path}"
+    if not path.endswith(ext):
+        path = f"{path}{ext}"
+    return path
+
+
 def _sanitize_func_name(label: str) -> str:
     """Convert a human label to a valid Python function name (preserves casing).
 
