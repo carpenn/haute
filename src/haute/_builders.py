@@ -16,6 +16,7 @@ from typing import Any
 
 import polars as pl
 
+from haute._io import load_external_object, read_source
 from haute._logging import get_logger
 from haute._rating import (
     _apply_banding,
@@ -23,13 +24,11 @@ from haute._rating import (
     _combine_rating_columns,
     _normalise_banding_factors,
 )
-from haute.graph_utils import (
+from haute._types import (
     GraphNode,
     NodeType,
     _Frame,
     _sanitize_func_name,
-    load_external_object,
-    read_source,
 )
 
 logger = get_logger(component="executor")
@@ -105,15 +104,51 @@ NodeBuilder = Callable[[NodeBuildContext], tuple[str, Callable, bool]]
 
 _NODE_BUILDERS: dict[NodeType, NodeBuilder] = {}
 
+# Column contract type: (produced_columns, referenced_columns).
+# ``produced``: columns the node creates (not in input).  None = opaque.
+# ``referenced``: input columns the node reads for computation.  None = opaque.
+ColumnContract = tuple[set[str] | None, set[str] | None]
+ColumnContractFn = Callable[[dict[str, Any]], ColumnContract]
 
-def _register(node_type: NodeType) -> Callable[[NodeBuilder], NodeBuilder]:
-    """Decorator to register a node builder for a given NodeType."""
+_COLUMN_CONTRACTS: dict[NodeType, ColumnContractFn] = {}
+
+
+def _register(
+    node_type: NodeType,
+    *,
+    columns: ColumnContractFn | None = None,
+) -> Callable[[NodeBuilder], NodeBuilder]:
+    """Decorator to register a node builder for a given NodeType.
+
+    The optional *columns* callback declares the node's column contract —
+    which columns it creates and which input columns it reads — given its
+    config dict.  This is used by the checkpoint projection pass to avoid
+    writing unneeded columns to intermediate parquet files.
+    """
 
     def decorator(fn: NodeBuilder) -> NodeBuilder:
         _NODE_BUILDERS[node_type] = fn
+        if columns is not None:
+            _COLUMN_CONTRACTS[node_type] = columns
         return fn
 
     return decorator
+
+
+def get_column_contract(
+    node_type: NodeType,
+    config: dict[str, Any],
+) -> ColumnContract:
+    """Return the column contract for a node type, or ``(None, None)`` if opaque."""
+    fn = _COLUMN_CONTRACTS.get(node_type)
+    if fn is None:
+        return (None, None)
+    return fn(config)
+
+
+def _passthrough_columns(_config: dict[str, Any]) -> ColumnContract:
+    """Column contract for passthrough nodes: creates nothing, reads nothing."""
+    return (set(), set())
 
 
 def _passthrough_fn(*dfs: _Frame) -> _Frame:
@@ -191,7 +226,7 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, source_with_code, True
 
 
-@_register(NodeType.CONSTANT)
+@_register(NodeType.CONSTANT, columns=_passthrough_columns)
 def _build_constant(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     raw_values = config.get("values", []) or []
@@ -214,7 +249,7 @@ def _build_constant(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, constant_fn, True
 
 
-@_register(NodeType.LIVE_SWITCH)
+@_register(NodeType.LIVE_SWITCH, columns=_passthrough_columns)
 def _build_live_switch(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
@@ -241,7 +276,7 @@ def _build_live_switch(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, switch_fn, False
 
 
-@_register(NodeType.DATA_SINK)
+@_register(NodeType.DATA_SINK, columns=_passthrough_columns)
 def _build_data_sink(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     # During normal run/preview, dataSink is a pass-through.
     # Actual writing happens via execute_sink() on explicit user action.
@@ -281,7 +316,7 @@ def _build_external_file(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
         return ctx.func_name, _passthrough_fn, False
 
 
-@_register(NodeType.OUTPUT)
+@_register(NodeType.OUTPUT, columns=_passthrough_columns)
 def _build_output(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     fields = config.get("fields", []) or []
@@ -295,7 +330,14 @@ def _build_output(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, output_fn, False
 
 
-@_register(NodeType.BANDING)
+def _banding_columns(config: dict[str, Any]) -> ColumnContract:
+    factors = config.get("factors") or []
+    produced = {f["outputColumn"] for f in factors if f.get("outputColumn")}
+    referenced = {f["column"] for f in factors if f.get("column")}
+    return produced, referenced
+
+
+@_register(NodeType.BANDING, columns=_banding_columns)
 def _build_banding(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     factors = _normalise_banding_factors(config)
@@ -321,7 +363,22 @@ def _build_banding(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, banding_fn, False
 
 
-@_register(NodeType.RATING_STEP)
+def _rating_step_columns(config: dict[str, Any]) -> ColumnContract:
+    tables = config.get("tables") or []
+    produced: set[str] = set()
+    referenced: set[str] = set()
+    for t in tables:
+        out = t.get("outputColumn", "")
+        if out:
+            produced.add(out)
+        referenced.update(t.get("factors") or [])
+    combined = config.get("combinedColumn", "")
+    if combined:
+        produced.add(combined)
+    return produced, referenced
+
+
+@_register(NodeType.RATING_STEP, columns=_rating_step_columns)
 def _build_rating_step(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     tables: list[dict[str, Any]] = config.get("tables", []) or []
@@ -355,7 +412,21 @@ def _build_rating_step(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, rating_fn, False
 
 
-@_register(NodeType.SCENARIO_EXPANDER)
+def _scenario_expander_columns(config: dict[str, Any]) -> ColumnContract:
+    # Post-expansion user code can reference arbitrary columns — opaque.
+    if (config.get("code") or "").strip():
+        return (None, None)
+    produced: set[str] = set()
+    cn = (config.get("column_name") or "").strip()
+    if cn:
+        produced.add(cn)
+    sc = config.get("step_column", "scenario_index")
+    if sc:
+        produced.add(sc)
+    return produced, set()
+
+
+@_register(NodeType.SCENARIO_EXPANDER, columns=_scenario_expander_columns)
 def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     _col_name = (config.get("column_name") or "").strip()
@@ -401,7 +472,7 @@ def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool
     return ctx.func_name, scenario_expand_with_code, False
 
 
-@_register(NodeType.OPTIMISER)
+@_register(NodeType.OPTIMISER, columns=_passthrough_columns)
 def _build_optimiser(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     # Pass-through in preview mode. Solving happens via /api/optimiser/solve.
     # When data_input is configured, select that specific input so the
@@ -424,7 +495,16 @@ def _build_optimiser(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, _passthrough_fn, False
 
 
-@_register(NodeType.OPTIMISER_APPLY)
+def _optimiser_apply_columns(config: dict[str, Any]) -> ColumnContract:
+    # Produced: version column is always added.
+    vcol = config.get("version_column", "__optimiser_version__")
+    produced = {vcol} if vcol else set()
+    # Referenced: column dependencies come from a runtime artifact
+    # (quote_id, scenario_index, objective, constraints) — opaque.
+    return produced, None
+
+
+@_register(NodeType.OPTIMISER_APPLY, columns=_optimiser_apply_columns)
 def _build_optimiser_apply(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     _artifact_path = config.get("artifact_path", "")
@@ -471,13 +551,44 @@ def _build_optimiser_apply(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, optimiser_apply_fn, False
 
 
-@_register(NodeType.MODELLING)
+@_register(NodeType.MODELLING, columns=_passthrough_columns)
 def _build_modelling(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     # Pass-through in preview mode. Training happens via /api/modelling/train.
     return ctx.func_name, _passthrough_fn, False
 
 
-@_register(NodeType.MODEL_SCORE)
+def _model_score_columns(config: dict[str, Any]) -> ColumnContract:
+    out = config.get("output_column", "prediction")
+    produced = {out} if out else {"prediction"}
+
+    # Post-processing code can reference arbitrary columns — opaque.
+    if (config.get("code") or "").strip():
+        return produced, None
+
+    # Feature columns are only known after loading the model.
+    # Try to load (cached) to extract them.
+    source_type = config.get("sourceType", "")
+    if not source_type:
+        return produced, None
+    try:
+        from haute._mlflow_io import load_mlflow_model
+
+        scoring_model = load_mlflow_model(
+            source_type=source_type,
+            run_id=config.get("run_id", ""),
+            artifact_path=config.get("artifact_path", ""),
+            registered_model=config.get("registered_model", ""),
+            version=config.get("version", "latest"),
+            task=config.get("task", "regression"),
+        )
+        if scoring_model.feature_names:
+            return produced, set(scoring_model.feature_names)
+    except Exception:
+        pass
+    return produced, None
+
+
+@_register(NodeType.MODEL_SCORE, columns=_model_score_columns)
 def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     # Default to "" (not "run") — empty sourceType means the node is
@@ -546,12 +657,12 @@ def _build_transform(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
 # SUBMODEL and SUBMODEL_PORT are pass-through types with no special logic.
 # Register them explicitly so _build_node_fn doesn't raise on unknown types.
-@_register(NodeType.SUBMODEL)
+@_register(NodeType.SUBMODEL, columns=_passthrough_columns)
 def _build_submodel(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, _passthrough_fn, False
 
 
-@_register(NodeType.SUBMODEL_PORT)
+@_register(NodeType.SUBMODEL_PORT, columns=_passthrough_columns)
 def _build_submodel_port(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, _passthrough_fn, False
 

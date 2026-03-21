@@ -13,7 +13,7 @@ from typing import Any
 
 import polars as pl
 
-from haute.graph_utils import _Frame
+from haute._types import _Frame
 
 # ---------------------------------------------------------------------------
 # Banding
@@ -153,10 +153,7 @@ def _apply_rating_table(
     existing_cols = set(
         lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns
     )
-    cast_exprs = [
-        pl.col(f).cast(pl.Utf8).alias(f) for f in factors
-        if f in existing_cols
-    ]
+    cast_exprs = [pl.col(f).cast(pl.Utf8).alias(f) for f in factors if f in existing_cols]
     if cast_exprs:
         lf = lf.with_columns(cast_exprs)
 

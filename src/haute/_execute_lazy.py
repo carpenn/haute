@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 import polars as pl
 
+from haute._builders import get_column_contract
 from haute._logging import get_logger
 from haute._polars_utils import _malloc_trim, safe_sink
 from haute._topo import ancestors, topo_sort_ids
@@ -27,6 +28,74 @@ from haute._types import (
 )
 
 logger = get_logger(component="execute")
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint projection — backward column analysis
+# ---------------------------------------------------------------------------
+
+
+def _compute_needed_columns(
+    order: list[str],
+    children_of: dict[str, list[str]],
+    node_map: dict[str, GraphNode],
+) -> dict[str, set[str] | None]:
+    """Backward pass: compute minimal columns needed from each node's output.
+
+    Walks the graph in reverse topological order.  For each node *n*,
+    ``needed[n]`` is the set of columns from *n*'s output that any
+    downstream consumer actually uses.  ``None`` means "all columns"
+    (cannot be determined — an opaque node is downstream).
+
+    Column contracts (which columns each node creates and reads) are
+    provided by the builder registry via ``get_column_contract``.  This
+    keeps the column knowledge colocated with the builder that defines
+    the node's runtime behaviour.
+    """
+    needed: dict[str, set[str] | None] = {}
+
+    for nid in reversed(order):
+        node = node_map[nid]
+        children = children_of.get(nid, [])
+
+        if not children:
+            # Terminal node — determine what it needs from its input.
+            if node.data.nodeType == NodeType.OUTPUT:
+                fields = node.data.config.get("fields") or []
+                needed[nid] = set(fields) if fields else None
+            else:
+                needed[nid] = None
+            continue
+
+        # Union of what all children need from this node's output.
+        needed_by_children: set[str] | None = set()
+        for cid in children:
+            child_node = node_map[cid]
+            child_needed = needed.get(cid)
+
+            if child_needed is None:
+                # Child needs all columns → we need all columns.
+                needed_by_children = None
+                break
+
+            produced, referenced = get_column_contract(
+                child_node.data.nodeType,
+                child_node.data.config,
+            )
+
+            if produced is None or referenced is None:
+                # Opaque child — can't determine what it needs.
+                needed_by_children = None
+                break
+
+            # Child needs from this node: columns needed downstream
+            # (minus what child creates) plus columns child reads.
+            from_parent = (child_needed - produced) | referenced
+            needed_by_children |= from_parent  # type: ignore[operator]
+
+        needed[nid] = needed_by_children
+
+    return needed
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +340,15 @@ def _execute_lazy(
                 children_count[pid] += 1
                 children_of[pid].append(nid)
 
+    # Backward column analysis: compute the minimal set of columns
+    # needed at each node's output so checkpoints can project away
+    # unneeded columns before writing to parquet.  Only computed when
+    # checkpointing is active — the analysis may trigger model loading
+    # (cached) and is wasted work for non-checkpoint paths.
+    needed_cols: dict[str, set[str] | None] = (
+        _compute_needed_columns(order, children_of, node_map) if checkpoint_dir is not None else {}
+    )
+
     # Separate mutable counter for tracking remaining downstream consumers.
     # Decremented at checkpoint time so we know when a parent's LazyFrame
     # can be safely deleted (freeing Polars/Rust Arrow buffers).
@@ -326,11 +404,26 @@ def _execute_lazy(
 
         if checkpoint_dir is not None and action == _CheckpointAction.PARQUET:
             tmp = checkpoint_dir / f"{nid}.parquet"
-            safe_sink(
-                lf if isinstance(lf, pl.LazyFrame) else lf.lazy(),
-                tmp,
-                fast_checkpoint=True,
-            )
+
+            # Project to only the columns needed downstream before
+            # writing the checkpoint.  This avoids writing (and later
+            # re-reading) columns that no downstream node will use —
+            # e.g. 100 source columns when the model only needs 8.
+            sink_lf = lf if isinstance(lf, pl.LazyFrame) else lf.lazy()
+            projection = needed_cols.get(nid)
+            if projection is not None:
+                schema_cols = sink_lf.collect_schema().names()
+                valid = [c for c in schema_cols if c in projection]
+                if valid and len(valid) < len(schema_cols):
+                    logger.info(
+                        "checkpoint_projection",
+                        node_id=nid,
+                        total_cols=len(schema_cols),
+                        projected_cols=len(valid),
+                    )
+                    sink_lf = sink_lf.select(valid)
+
+            safe_sink(sink_lf, tmp, fast_checkpoint=True)
 
             # Drop the old LazyFrame (and any cached Arrow buffers it
             # holds) before replacing with a fresh scan reference.
