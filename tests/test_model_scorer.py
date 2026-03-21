@@ -91,7 +91,7 @@ class TestModelScorerInit:
         assert scorer.output_col == "prediction"
         assert scorer.code == ""
         assert scorer.source_names == []
-        assert scorer.scenario == "live"
+        assert scorer.source == "live"
         assert scorer.row_limit is None
 
     def test_custom_values(self):
@@ -103,7 +103,7 @@ class TestModelScorerInit:
             output_col="pred",
             code="x = 1",
             source_names=["df1", "df2"],
-            scenario="test_batch",
+            source="test_batch",
             row_limit=100,
         )
         assert scorer.source_type == "registered"
@@ -131,7 +131,7 @@ class TestModelScorerScore:
         mock_load.return_value = sm
         mock_score_eager.return_value = pl.DataFrame({"x": [1], "prediction": [0.5]}).lazy()
 
-        scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
+        scorer = ModelScorer(source_type="run", run_id="abc", source="live")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         result = scorer.score(lf)
 
@@ -147,7 +147,7 @@ class TestModelScorerScore:
         mock_load.return_value = sm
         mock_batched.return_value = pl.DataFrame({"x": [1]}).lazy()
 
-        scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch")
+        scorer = ModelScorer(source_type="run", run_id="abc", source="batch")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         result = scorer.score(lf)
 
@@ -162,7 +162,7 @@ class TestModelScorerScore:
         mock_load.return_value = sm
         mock_score_eager.return_value = pl.DataFrame({"x": [1]}).lazy()
 
-        scorer = ModelScorer(source_type="run", run_id="abc", scenario="batch", row_limit=10)
+        scorer = ModelScorer(source_type="run", run_id="abc", source="batch", row_limit=10)
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         result = scorer.score(lf)
 
@@ -177,7 +177,7 @@ class TestModelScorerScore:
         mock_load.return_value = sm
         mock_score_eager.return_value = pl.DataFrame({"a": [1], "prediction": [0.5]}).lazy()
 
-        scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
+        scorer = ModelScorer(source_type="run", run_id="abc", source="live")
         lf = pl.DataFrame({"a": [1], "b": [2]}).lazy()
         scorer.score(lf)
 
@@ -197,7 +197,7 @@ class TestModelScorerScore:
         mock_load.return_value = sm
         mock_score_eager.return_value = pl.LazyFrame()
 
-        scorer = ModelScorer(source_type="run", run_id="abc", scenario="live")
+        scorer = ModelScorer(source_type="run", run_id="abc", source="live")
         result = scorer.score()  # no dfs passed
         mock_score_eager.assert_called_once()
         assert isinstance(result, pl.LazyFrame)
@@ -213,7 +213,9 @@ class TestModelScorerScore:
         mock_exec.return_value = pl.DataFrame({"result": [1]}).lazy()
 
         scorer = ModelScorer(
-            source_type="run", run_id="abc", scenario="live",
+            source_type="run",
+            run_id="abc",
+            source="live",
             code="result = result * 2",
             source_names=["df"],
         )
@@ -279,7 +281,11 @@ class TestBatchScoreToParquet:
         )
 
         out_path = _batch_score_to_parquet(
-            sm, input_path, ["a", "b"], "pred", "regression",
+            sm,
+            input_path,
+            ["a", "b"],
+            "pred",
+            "regression",
         )
 
         try:
@@ -302,7 +308,11 @@ class TestBatchScoreToParquet:
         )
 
         out_path = _batch_score_to_parquet(
-            sm, input_path, ["a", "b"], "pred", "classification",
+            sm,
+            input_path,
+            ["a", "b"],
+            "pred",
+            "classification",
         )
 
         try:
@@ -326,7 +336,11 @@ class TestBatchScoreToParquet:
         # No predict_proba
 
         out_path = _batch_score_to_parquet(
-            sm, input_path, ["a", "b"], "pred", "classification",
+            sm,
+            input_path,
+            ["a", "b"],
+            "pred",
+            "classification",
         )
 
         try:
@@ -409,13 +423,17 @@ class TestScoreFromConfig:
 
         config_path = tmp_path / "config" / "model_scoring" / "test.json"
         config_path.parent.mkdir(parents=True)
-        config_path.write_text(json.dumps({
-            "sourceType": "run",
-            "run_id": "abc123",
-            "artifact_path": "model.cbm",
-            "task": "regression",
-            "output_column": "pred",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "sourceType": "run",
+                    "run_id": "abc123",
+                    "artifact_path": "model.cbm",
+                    "task": "regression",
+                    "output_column": "pred",
+                }
+            )
+        )
 
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
         result = score_from_config(lf, config=str(config_path), base_dir=str(tmp_path))
@@ -445,13 +463,17 @@ class TestScoreFromConfig:
         config_rel = "config/model_scoring/test.json"
         config_abs = tmp_path / config_rel
         config_abs.parent.mkdir(parents=True)
-        config_abs.write_text(json.dumps({
-            "sourceType": "run",
-            "run_id": "r1",
-            "artifact_path": "model.cbm",
-            "task": "regression",
-            "output_column": "pred",
-        }))
+        config_abs.write_text(
+            json.dumps(
+                {
+                    "sourceType": "run",
+                    "run_id": "r1",
+                    "artifact_path": "model.cbm",
+                    "task": "regression",
+                    "output_column": "pred",
+                }
+            )
+        )
 
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
         # Call with base_dir pointing to tmp_path — even if CWD is different
@@ -469,13 +491,17 @@ class TestScoreFromConfig:
         config_rel = "config/model_scoring/test.json"
         config_abs = tmp_path / config_rel
         config_abs.parent.mkdir(parents=True)
-        config_abs.write_text(json.dumps({
-            "sourceType": "run",
-            "run_id": "r2",
-            "artifact_path": "model",
-            "task": "regression",
-            "output_column": "pred",
-        }))
+        config_abs.write_text(
+            json.dumps(
+                {
+                    "sourceType": "run",
+                    "run_id": "r2",
+                    "artifact_path": "model",
+                    "task": "regression",
+                    "output_column": "pred",
+                }
+            )
+        )
 
         monkeypatch.chdir(tmp_path)
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
@@ -491,19 +517,25 @@ class TestScoreFromConfig:
 
         config_abs = tmp_path / "config" / "model_scoring" / "test.json"
         config_abs.parent.mkdir(parents=True)
-        config_abs.write_text(json.dumps({
-            "sourceType": "run",
-            "run_id": "r3",
-            "artifact_path": "model",
-            "task": "regression",
-            "output_column": "pred",
-        }))
+        config_abs.write_text(
+            json.dumps(
+                {
+                    "sourceType": "run",
+                    "run_id": "r3",
+                    "artifact_path": "model",
+                    "task": "regression",
+                    "output_column": "pred",
+                }
+            )
+        )
 
         lf = pl.DataFrame({"a": [1.0], "b": [2.0]}).lazy()
         # Absolute path with a base_dir that doesn't contain it — now rejected
         with pytest.raises(ValueError, match="outside project root"):
             score_from_config(
-                lf, config=str(config_abs), base_dir="/nonexistent",
+                lf,
+                config=str(config_abs),
+                base_dir="/nonexistent",
             )
 
     def test_base_dir_with_missing_config_raises(self, tmp_path):
@@ -513,5 +545,7 @@ class TestScoreFromConfig:
         lf = pl.DataFrame({"a": [1.0]}).lazy()
         with pt.raises(FileNotFoundError):
             score_from_config(
-                lf, config="config/missing.json", base_dir=str(tmp_path),
+                lf,
+                config="config/missing.json",
+                base_dir=str(tmp_path),
             )

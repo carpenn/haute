@@ -20,7 +20,8 @@ logger = get_logger(component="model_scorer")
 # so that score_from_config (codegen path) can pick the right strategy.
 # "live" = eager in-memory scoring, anything else = disk-batched.
 _scenario_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "haute_scenario", default="batch",
+    "haute_scenario",
+    default="batch",
 )
 
 _SCORE_BATCH_SIZE = 500_000
@@ -35,7 +36,7 @@ def _run_score_pipeline(
     code: str = "",
     source_names: list[str] | None = None,
     extra_dfs: tuple[_Frame, ...] = (),
-    scenario: str = "live",
+    source: str = "live",
     row_limit: int | None = None,
 ) -> _Frame:
     """Core scoring logic shared by ``ModelScorer.score()`` and deploy scorer.
@@ -54,17 +55,17 @@ def _run_score_pipeline(
         Scoring configuration (same semantics as ``ModelScorer`` attributes).
     extra_dfs
         Additional upstream LazyFrames passed through to user code.
-    scenario
+    source
         ``"live"`` → eager path; anything else → batched path.
     row_limit
-        When set, forces the eager path regardless of scenario.
+        When set, forces the eager path regardless of source.
     """
     from haute._mlflow_io import _score_eager as score_eager_
 
     available_cols = set(lf.collect_schema().names())
     features = [f for f in scoring_model.feature_names if f in available_cols]
 
-    if scenario == "live" or row_limit:
+    if source == "live" or row_limit:
         result_lf = score_eager_(scoring_model, lf, features, output_col, task)
     else:
         result_lf = _score_batched_standalone(scoring_model, lf, features, output_col, task)
@@ -74,7 +75,9 @@ def _run_score_pipeline(
 
         all_dfs = (result_lf,) + extra_dfs
         result_lf = _exec_user_code(
-            code, source_names or [], all_dfs,
+            code,
+            source_names or [],
+            all_dfs,
             extra_ns={"model": scoring_model},
         )
     return result_lf
@@ -93,7 +96,11 @@ def _score_batched_standalone(
 
     input_path = _sink_to_temp(lf)
     scored_path = _batch_score_to_parquet(
-        scoring_model, input_path, features, output_col, task,
+        scoring_model,
+        input_path,
+        features,
+        output_col,
+        task,
     )
 
     def _cleanup(p: str = scored_path) -> None:
@@ -134,11 +141,11 @@ class ModelScorer:
         Optional user post-processing code applied after scoring.
     source_names : list[str]
         Sanitised upstream node names (variable names for user code).
-    scenario : str
-        Active execution scenario — ``"live"`` uses eager scoring, anything
+    source : str
+        Active execution source — ``"live"`` uses eager scoring, anything
         else uses the batched parquet path.
     row_limit : int | None
-        When set (preview/trace), forces the eager path regardless of scenario.
+        When set (preview/trace), forces the eager path regardless of source.
     """
 
     def __init__(
@@ -153,7 +160,7 @@ class ModelScorer:
         output_col: str = "prediction",
         code: str = "",
         source_names: list[str] | None = None,
-        scenario: str = "live",
+        source: str = "live",
         row_limit: int | None = None,
     ) -> None:
         self.source_type = source_type
@@ -165,7 +172,7 @@ class ModelScorer:
         self.output_col = output_col
         self.code = code
         self.source_names = list(source_names) if source_names else []
-        self.scenario = scenario
+        self.source = source
         self.row_limit = row_limit
 
     # ------------------------------------------------------------------
@@ -197,7 +204,7 @@ class ModelScorer:
             output_col=self.output_col,
             code=self.code,
             source_names=self.source_names,
-            scenario=self.scenario,
+            source=self.source,
             row_limit=self.row_limit,
         )
 
@@ -206,7 +213,10 @@ class ModelScorer:
     # ------------------------------------------------------------------
 
     def _score_eager(
-        self, scoring_model: Any, lf: pl.LazyFrame, features: list[str],
+        self,
+        scoring_model: Any,
+        lf: pl.LazyFrame,
+        features: list[str],
     ) -> pl.LazyFrame:
         """Collect and score in-memory -- delegates to shared helper."""
         from haute._mlflow_io import _score_eager as score_eager_
@@ -214,7 +224,10 @@ class ModelScorer:
         return score_eager_(scoring_model, lf, features, self.output_col, self.task)
 
     def _score_batched(
-        self, scoring_model: Any, lf: pl.LazyFrame, features: list[str],
+        self,
+        scoring_model: Any,
+        lf: pl.LazyFrame,
+        features: list[str],
     ) -> pl.LazyFrame:
         """Sink -> batch score -> lazy scan -- low-memory path."""
         import atexit
@@ -222,9 +235,13 @@ class ModelScorer:
 
         input_path = _sink_to_temp(lf)
         scored_path = _batch_score_to_parquet(
-            scoring_model, input_path, features,
-            self.output_col, self.task,
+            scoring_model,
+            input_path,
+            features,
+            self.output_col,
+            self.task,
         )
+
         def _cleanup(p: str = scored_path) -> None:
             if os.path.exists(p):
                 os.unlink(p)
@@ -273,9 +290,7 @@ def score_from_config(
     resolved = config_path.resolve()
     root = (Path(base_dir) if base_dir else Path.cwd()).resolve()
     if not resolved.is_relative_to(root):
-        raise ValueError(
-            f"Config path {config!r} resolves outside project root"
-        )
+        raise ValueError(f"Config path {config!r} resolves outside project root")
     cfg = json.loads(resolved.read_text())
     scorer = ModelScorer(
         source_type=cfg.get("sourceType", "run"),
@@ -285,7 +300,7 @@ def score_from_config(
         version=cfg.get("version", "latest"),
         task=cfg.get("task", "regression"),
         output_col=cfg.get("output_column", "prediction"),
-        scenario=_scenario_ctx.get(),
+        source=_scenario_ctx.get(),
     )
     return scorer.score(*dfs)
 
@@ -309,7 +324,8 @@ def _sink_to_temp(lf: pl.LazyFrame) -> str:
     from haute._polars_utils import safe_sink
 
     fd, path = tempfile.mkstemp(
-        suffix=".parquet", prefix="haute_score_in_",
+        suffix=".parquet",
+        prefix="haute_score_in_",
     )
     os.close(fd)
     safe_sink(lf, path, fast_checkpoint=True)
@@ -332,7 +348,8 @@ def _batch_score_to_parquet(
     from haute._mlflow_io import _append_classification_proba, _prepare_predict_frame
 
     fd, out_path = tempfile.mkstemp(
-        suffix=".parquet", prefix="haute_score_out_",
+        suffix=".parquet",
+        prefix="haute_score_out_",
     )
     os.close(fd)
 
@@ -350,7 +367,8 @@ def _batch_score_to_parquet(
             else:
                 chunk = chunk_raw
             x_data = _prepare_predict_frame(
-                chunk, features,
+                chunk,
+                features,
                 cat_feature_names=scoring_model.cat_feature_names,
                 flavor=scoring_model.flavor,
             )
@@ -360,12 +378,16 @@ def _batch_score_to_parquet(
             )
             if want_proba:
                 chunk = _append_classification_proba(
-                    chunk, scoring_model, x_data, output_col,
+                    chunk,
+                    scoring_model,
+                    x_data,
+                    output_col,
                 )
             table = chunk.to_arrow()
             if writer is None:
                 writer = pq.ParquetWriter(
-                    out_path, table.schema,
+                    out_path,
+                    table.schema,
                 )
             writer.write_table(table)
             del chunk, x_data, table

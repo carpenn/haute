@@ -35,8 +35,8 @@ describe("useDataInputColumns", () => {
       graphVersion: 0,
     })
     useSettingsStore.setState({
-      activeScenario: "live",
-      scenarios: ["live"],
+      activeSource: "live",
+      sources: ["live"],
     })
     mockPreview.mockReset()
   })
@@ -62,7 +62,7 @@ describe("useDataInputColumns", () => {
   })
 
   it("uses cached columns immediately when available", () => {
-    // Cache key is now "nodeId:scenario"
+    // Cache key is now "nodeId:source"
     useNodeResultsStore.setState({
       columnCache: {
         "ds1:live": { columns: sampleColumns, graphVersion: 0 },
@@ -111,22 +111,22 @@ describe("useDataInputColumns", () => {
     expect(result.current).toEqual([])
   })
 
-  // ── Scenario propagation (the original bug) ───────────────────────
+  // ── Source propagation (the original bug) ───────────────────────
 
-  it("passes active scenario from settings store to previewNode", async () => {
-    useSettingsStore.setState({ activeScenario: "nb_batch" })
+  it("passes active source from settings store to previewNode", async () => {
+    useSettingsStore.setState({ activeSource: "nb_batch" })
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
 
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(mockPreview).toHaveBeenCalled())
 
     const callArgs = mockPreview.mock.calls[0]
-    // previewNode(graph, nodeId, rowLimit, scenario, options)
+    // previewNode(graph, nodeId, rowLimit, source, options)
     expect(callArgs[3]).toBe("nb_batch")
   })
 
-  it("passes 'live' scenario when that is the active scenario", async () => {
-    useSettingsStore.setState({ activeScenario: "live" })
+  it("passes 'live' source when that is the active source", async () => {
+    useSettingsStore.setState({ activeSource: "live" })
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
 
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
@@ -136,29 +136,29 @@ describe("useDataInputColumns", () => {
     expect(callArgs[3]).toBe("live")
   })
 
-  it("uses the scenario that was active at mount time", async () => {
-    // Scenario is nb_batch before the hook mounts
-    useSettingsStore.setState({ activeScenario: "nb_batch" })
+  it("uses the source that was active at mount time", async () => {
+    // Source is nb_batch before the hook mounts
+    useSettingsStore.setState({ activeSource: "nb_batch" })
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
 
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(mockPreview).toHaveBeenCalledTimes(1))
 
-    // Verify the call used the active scenario at mount time
+    // Verify the call used the active source at mount time
     expect(mockPreview.mock.calls[0][3]).toBe("nb_batch")
   })
 
-  it("refetches with new scenario when cache is invalidated", async () => {
-    useSettingsStore.setState({ activeScenario: "live" })
+  it("refetches with new source when cache is invalidated", async () => {
+    useSettingsStore.setState({ activeSource: "live" })
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
 
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(mockPreview).toHaveBeenCalledTimes(1))
     expect(mockPreview.mock.calls[0][3]).toBe("live")
 
-    // Change scenario AND bump graphVersion (simulating a graph change)
+    // Change source AND bump graphVersion (simulating a graph change)
     act(() => {
-      useSettingsStore.setState({ activeScenario: "nb_batch" })
+      useSettingsStore.setState({ activeSource: "nb_batch" })
       useNodeResultsStore.setState({ graphVersion: 10 })
     })
 
@@ -253,14 +253,14 @@ describe("useDataInputColumns", () => {
 
   // ── Cache interaction ─────────────────────────────────────────────
 
-  it("writes fetched columns to the cache store with scenario key", async () => {
+  it("writes fetched columns to the cache store with source key", async () => {
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: sampleColumns })
 
     renderHook(() => useDataInputColumns("ds1", nodes, edges))
     await waitFor(() => expect(mockPreview).toHaveBeenCalled())
 
     const cache = useNodeResultsStore.getState().columnCache
-    // Cache key includes scenario: "ds1:live"
+    // Cache key includes source: "ds1:live"
     expect(cache["ds1:live"]).toBeDefined()
     expect(cache["ds1:live"].columns).toEqual(sampleColumns)
   })
@@ -284,7 +284,7 @@ describe("useDataInputColumns", () => {
     await waitFor(() => expect(mockPreview).toHaveBeenCalled())
 
     const callArgs = mockPreview.mock.calls[0]
-    // previewNode(graph, nodeId, rowLimit, scenario, options)
+    // previewNode(graph, nodeId, rowLimit, source, options)
     expect(callArgs[2]).toBe(1)
   })
 
@@ -312,9 +312,9 @@ describe("useDataInputColumns", () => {
     expect(result.current).toEqual([])
   })
 
-  // ── Scenario-aware cache (Issue 6) ─────────────────────────────────
+  // ── Source-aware cache (Issue 6) ─────────────────────────────────
 
-  it("uses separate cache entries per scenario", () => {
+  it("uses separate cache entries per source", () => {
     useNodeResultsStore.setState({
       columnCache: {
         "ds1:live": { columns: [{ name: "live_col", dtype: "f64" }], graphVersion: 0 },
@@ -323,20 +323,20 @@ describe("useDataInputColumns", () => {
       graphVersion: 0,
     })
 
-    // Live scenario → live columns
-    useSettingsStore.setState({ activeScenario: "live" })
+    // Live source → live columns
+    useSettingsStore.setState({ activeSource: "live" })
     const { result: liveResult } = renderHook(() => useDataInputColumns("ds1", nodes, edges))
     expect(liveResult.current[0].name).toBe("live_col")
 
     cleanup()
 
-    // Batch scenario → batch columns
-    useSettingsStore.setState({ activeScenario: "nb_batch" })
+    // Batch source → batch columns
+    useSettingsStore.setState({ activeSource: "nb_batch" })
     const { result: batchResult } = renderHook(() => useDataInputColumns("ds1", nodes, edges))
     expect(batchResult.current[0].name).toBe("batch_col")
   })
 
-  it("refetches when scenario changes even if graphVersion is same", async () => {
+  it("refetches when source changes even if graphVersion is same", async () => {
     // Cache exists for "live" but not for "nb_batch"
     useNodeResultsStore.setState({
       columnCache: {
@@ -344,17 +344,17 @@ describe("useDataInputColumns", () => {
       },
       graphVersion: 0,
     })
-    useSettingsStore.setState({ activeScenario: "live" })
+    useSettingsStore.setState({ activeSource: "live" })
 
     const batchCols = [{ name: "batch_only", dtype: "str" }]
     mockPreview.mockResolvedValue({ node_id: "ds1", status: "ok", columns: batchCols })
 
     const { result, rerender } = renderHook(
-      ({ scenario }: { scenario: string }) => {
-        useSettingsStore.setState({ activeScenario: scenario })
+      ({ source }: { source: string }) => {
+        useSettingsStore.setState({ activeSource: source })
         return useDataInputColumns("ds1", nodes, edges)
       },
-      { initialProps: { scenario: "live" } },
+      { initialProps: { source: "live" } },
     )
 
     // Live cache hit — no API call
@@ -362,7 +362,7 @@ describe("useDataInputColumns", () => {
     expect(result.current[0].name).toBe("age")
 
     // Switch to nb_batch — no cache entry, should fetch
-    rerender({ scenario: "nb_batch" })
+    rerender({ source: "nb_batch" })
     await waitFor(() => expect(mockPreview).toHaveBeenCalledTimes(1))
     expect(result.current[0].name).toBe("batch_only")
   })

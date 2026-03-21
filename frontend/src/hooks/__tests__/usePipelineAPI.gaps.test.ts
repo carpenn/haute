@@ -78,7 +78,7 @@ describe("usePipelineAPI — gap tests", () => {
   beforeEach(() => {
     vi.useRealTimers()
     useToastStore.setState({ toasts: [], _toastCounter: 0 })
-    useSettingsStore.setState({ rowLimit: 1000, activeScenario: "live", scenarios: ["live"] })
+    useSettingsStore.setState({ rowLimit: 1000, activeSource: "live", sources: ["live"] })
     useUIStore.setState({ dirty: false })
     useNodeResultsStore.setState({ previews: {}, graphVersion: 0, columnCache: {} })
     mockLoad.mockReset()
@@ -342,7 +342,7 @@ describe("usePipelineAPI — gap tests", () => {
       mockLoad.mockResolvedValue({ nodes: [], edges: [] })
 
       const abortSignals: AbortSignal[] = []
-      mockPreview.mockImplementation((_g: unknown, _id: unknown, _limit: unknown, _scenario: unknown, opts?: { signal?: AbortSignal }) => {
+      mockPreview.mockImplementation((_g: unknown, _id: unknown, _limit: unknown, _source: unknown, opts?: { signal?: AbortSignal }) => {
         if (opts?.signal) abortSignals.push(opts.signal)
         return new Promise(() => {}) // never resolves
       })

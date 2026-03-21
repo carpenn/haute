@@ -78,7 +78,7 @@ export default function usePipelineAPI({
   nodeIdCounter: nodeIdCounterRef,
 }: PipelineAPIParams): PipelineAPIReturn {
   const rowLimit = useSettingsStore((s) => s.rowLimit)
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  const activeSource = useSettingsStore((s) => s.activeSource)
   const setDirty = useUIStore((s) => s.setDirty)
   const addToast = useToastStore((s) => s.addToast)
   const [loading, setLoading] = useState(true)
@@ -91,8 +91,8 @@ export default function usePipelineAPI({
   // trigger re-creation of callbacks. Read at call-time instead.
   const rowLimitRef = useRef(rowLimit)
   useEffect(() => { rowLimitRef.current = rowLimit }, [rowLimit])
-  const activeScenarioRef = useRef(activeScenario)
-  useEffect(() => { activeScenarioRef.current = activeScenario }, [activeScenario])
+  const activeSourceRef = useRef(activeSource)
+  useEffect(() => { activeSourceRef.current = activeSource }, [activeSource])
 
   // ─── Downstream column propagation ──────────────────────────────
   // After a node's preview returns changed columns, cascade to downstream
@@ -117,7 +117,7 @@ export default function usePipelineAPI({
       const dsNode = nodes.find((n) => n.id === dsId)
       const oldColumns = (dsNode?.data as Record<string, unknown>)?._columns as ColumnDef[] | undefined
 
-      previewNode(graph, dsId, rowLimitRef.current, activeScenarioRef.current)
+      previewNode(graph, dsId, rowLimitRef.current, activeSourceRef.current)
         .then((result) => {
           if (result.columns) {
             const newColumns = result.columns as ColumnDef[]
@@ -153,12 +153,12 @@ export default function usePipelineAPI({
         if (data.pipeline_name) pipelineNameRef.current = data.pipeline_name
         if (data.source_file) sourceFileRef.current = data.source_file
         if (data.submodels) submodelsRef.current = data.submodels
-        // Populate scenario state from backend sidecar
-        if (data.scenarios && Array.isArray(data.scenarios)) {
-          useSettingsStore.getState().setScenarios(data.scenarios)
+        // Populate source state from backend sidecar
+        if (data.sources && Array.isArray(data.sources)) {
+          useSettingsStore.getState().setSources(data.sources)
         }
-        if (data.active_scenario) {
-          useSettingsStore.getState().setActiveScenario(data.active_scenario)
+        if (data.active_source) {
+          useSettingsStore.getState().setActiveSource(data.active_source)
         }
         nodeIdCounterRef.current = computeNextNodeId(pipelineNodes)
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
@@ -192,7 +192,7 @@ export default function usePipelineAPI({
 
     const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
 
-    previewNode(graph, node.id, rowLimitRef.current, activeScenarioRef.current, { signal: controller.signal })
+    previewNode(graph, node.id, rowLimitRef.current, activeSourceRef.current, { signal: controller.signal })
       .then((result) => {
         const preview = resultToPreview(node.id, label, result)
         setPreviewData(preview)
@@ -258,7 +258,7 @@ export default function usePipelineAPI({
     // Preview stale upstream nodes in parallel, then the target node
     Promise.all(
       staleUpstream.map((upstream) =>
-        previewNode(graph, upstream.id, rowLimitRef.current, activeScenarioRef.current)
+        previewNode(graph, upstream.id, rowLimitRef.current, activeSourceRef.current)
           .then((result) => {
             if (result.columns) {
               setNodes((nds) => nds.map((n) =>
@@ -282,15 +282,15 @@ export default function usePipelineAPI({
     if (refWarnings.length > 0) {
       addToast("warning", formatConfigRefWarnings(refWarnings))
     }
-    const { scenarios: sc, activeScenario: as_ } = useSettingsStore.getState()
+    const { sources: sc, activeSource: as_ } = useSettingsStore.getState()
     savePipeline({
       name: pipelineNameRef.current,
       description: "",
       graph: { nodes: n, edges: e, submodels: submodelsRef.current },
       preamble: preambleRef.current,
       source_file: sourceFileRef.current,
-      scenarios: sc,
-      active_scenario: as_,
+      sources: sc,
+      active_source: as_,
     })
       .then((data) => {
         lastSavedRef.current = JSON.stringify({ nodes: n, edges: e, preamble: preambleRef.current })

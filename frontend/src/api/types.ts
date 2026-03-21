@@ -14,8 +14,8 @@ export interface PipelineGraph {
   source_file?: string
   submodels?: Record<string, unknown>
   warning?: string
-  scenarios?: string[]
-  active_scenario?: string
+  sources?: string[]
+  active_source?: string
 }
 
 export interface SchemaWarning {

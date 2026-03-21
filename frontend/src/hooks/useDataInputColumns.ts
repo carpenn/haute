@@ -9,10 +9,10 @@ import type { SimpleNode, SimpleEdge } from "../panels/editors/_shared"
 /**
  * Fetches and caches columns from a data input node.
  * Shows cached columns immediately (no loading flash), re-fetches if stale.
- * Reads the active scenario from useSettingsStore so source-switch nodes
+ * Reads the active source from useSettingsStore so source-switch nodes
  * resolve through the same path as the normal preview.
  * Uses AbortController to cancel stale requests on rapid input switching.
- * Cache is keyed by (nodeId, scenario) so switching scenarios doesn't serve
+ * Cache is keyed by (nodeId, source) so switching sources doesn't serve
  * stale columns from a different data path.
  */
 export function useDataInputColumns(
@@ -23,10 +23,10 @@ export function useDataInputColumns(
   preamble?: string,
 ): { name: string; dtype: string }[] {
   const setColumnsCache = useNodeResultsStore((s) => s.setColumns)
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  const activeSource = useSettingsStore((s) => s.activeSource)
 
-  // Scenario-aware cache key: "nodeId:scenario"
-  const cacheKey = dataInput ? `${dataInput}:${activeScenario}` : ""
+  // Source-aware cache key: "nodeId:source"
+  const cacheKey = dataInput ? `${dataInput}:${activeSource}` : ""
 
   // Split into two leaf selectors so Zustand's Object.is check works
   // (avoids creating a new object on every store update)
@@ -60,13 +60,13 @@ export function useDataInputColumns(
     const controller = new AbortController()
     // Fetch fresh columns (cached value shown meanwhile)
     const graph = buildGraph(allNodes, edges, submodels, preamble)
-    previewNode(graph, dataInput, 1, activeScenario, { signal: controller.signal })
+    previewNode(graph, dataInput, 1, activeSource, { signal: controller.signal })
       .then((result) => {
         if (result.columns) {
           setDataInputColumns(result.columns)
           // getState() in .then() callback: reads graphVersion at completion time,
           // not at effect setup time, so the cached version stays accurate.
-          setColumnsCache(dataInput, result.columns, useNodeResultsStore.getState().graphVersion, activeScenario)
+          setColumnsCache(dataInput, result.columns, useNodeResultsStore.getState().graphVersion, activeSource)
         }
       })
       .catch((e) => {
@@ -76,7 +76,7 @@ export function useDataInputColumns(
         if (!cachedColumns) setDataInputColumns([])
       })
     return () => controller.abort()
-  }, [dataInput, allNodes, edges, submodels, preamble, activeScenario, setColumnsCache, cachedColumns, isCacheFresh, addToast])
+  }, [dataInput, allNodes, edges, submodels, preamble, activeSource, setColumnsCache, cachedColumns, isCacheFresh, addToast])
 
   return dataInputColumns
 }

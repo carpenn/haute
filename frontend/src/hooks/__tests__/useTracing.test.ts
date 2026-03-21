@@ -40,7 +40,7 @@ function makeParams(overrides: Partial<Parameters<typeof useTracing>[0]> = {}) {
 describe("useTracing", () => {
   beforeEach(() => {
     useToastStore.setState({ toasts: [], _toastCounter: 0 })
-    useSettingsStore.setState({ rowLimit: 1000, activeScenario: "live" })
+    useSettingsStore.setState({ rowLimit: 1000, activeSource: "live" })
     mockTraceCell.mockReset()
   })
 

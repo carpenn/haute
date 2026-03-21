@@ -615,10 +615,10 @@ describe("6. Empty graph", () => {
     expect(state.dirty).toBe(false)
   })
 
-  it("SettingsStore handles empty scenario list gracefully", () => {
+  it("SettingsStore handles empty source list gracefully", () => {
     const store = useSettingsStore.getState()
-    store.setScenarios([])
-    expect(useSettingsStore.getState().scenarios).toEqual([])
+    store.setSources([])
+    expect(useSettingsStore.getState().sources).toEqual([])
   })
 
   it("UIStore setHoveredNodeId with null does not crash", () => {

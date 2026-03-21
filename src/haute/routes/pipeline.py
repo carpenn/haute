@@ -155,7 +155,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
                 target_node_id=body.target_node_id,
                 column=body.column,
                 row_limit=body.row_limit,
-                scenario=body.scenario,
+                source=body.source,
             ),
             timeout=_TRACE_TIMEOUT,
         )
@@ -200,7 +200,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
                 graph,
                 target_node_id=body.node_id,
                 row_limit=body.row_limit,
-                scenario=body.scenario,
+                source=body.source,
             ),
             timeout=_PREVIEW_TIMEOUT,
         )
@@ -214,14 +214,18 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         node_map = graph.node_map
 
         # Only include timings/memory for ancestors of the target node
-        # (+ itself), pruned by the active scenario so the unused
+        # (+ itself), pruned by the active source so the unused
         # live_switch branch is excluded.
         if body.node_id:
             pruned = _prune_live_switch_edges(
-                graph.edges, node_map, body.scenario,
+                graph.edges,
+                node_map,
+                body.source,
             )
             relevant = ancestors(
-                body.node_id, pruned, set(node_map.keys()),
+                body.node_id,
+                pruned,
+                set(node_map.keys()),
             )
         else:
             relevant = set(results.keys())
@@ -246,9 +250,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
             if nid in node_map and nid in relevant
         ]
 
-        node_statuses = {
-            nid: r.status for nid, r in results.items() if nid in relevant
-        }
+        node_statuses = {nid: r.status for nid, r in results.items() if nid in relevant}
 
         return PreviewNodeResponse(
             node_id=body.node_id,
@@ -295,7 +297,10 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(
-                execute_sink, graph, sink_node_id=body.node_id, scenario=body.scenario,
+                execute_sink,
+                graph,
+                sink_node_id=body.node_id,
+                source=body.source,
             ),
             timeout=_SINK_TIMEOUT,
         )

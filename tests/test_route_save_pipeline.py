@@ -156,8 +156,8 @@ class TestSaveSimpleGraph:
             description="Test pipeline",
             graph=graph,
             source_file="my_pipeline.py",
-            scenarios=["live"],
-            active_scenario="live",
+            sources=["live"],
+            active_source="live",
         )
 
         with patch.object(svc, "_infer_flatten_schemas"):
@@ -274,7 +274,10 @@ class TestWriteCodeMultiFile:
         }
 
         body = SavePipelineRequest(
-            name="main", description="", graph=graph, source_file="main.py",
+            name="main",
+            description="",
+            graph=graph,
+            source_file="main.py",
         )
 
         with patch("haute.codegen.graph_to_code_multi", return_value=fake_files):
@@ -424,12 +427,15 @@ class TestSaveEndpointIntegration:
             ],
             "edges": [{"id": "e1", "source": "src", "target": "t1"}],
         }
-        resp = client.post("/api/pipeline/save", json={
-            "name": "saved_test",
-            "description": "Integration test",
-            "graph": graph,
-            "source_file": "saved_test.py",
-        })
+        resp = client.post(
+            "/api/pipeline/save",
+            json={
+                "name": "saved_test",
+                "description": "Integration test",
+                "graph": graph,
+                "source_file": "saved_test.py",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "saved"
@@ -462,12 +468,15 @@ class TestSaveEndpointIntegration:
             ],
             "edges": [],
         }
-        resp = client.post("/api/pipeline/save", json={
-            "name": "bad_pipe",
-            "description": "",
-            "graph": graph,
-            "source_file": "bad_pipe.py",
-        })
+        resp = client.post(
+            "/api/pipeline/save",
+            json={
+                "name": "bad_pipe",
+                "description": "",
+                "graph": graph,
+                "source_file": "bad_pipe.py",
+            },
+        )
         assert resp.status_code == 400
         assert "API Input" in resp.json()["detail"]
 
@@ -488,11 +497,14 @@ class TestSaveEndpointIntegration:
             ],
             "edges": [],
         }
-        resp = client.post("/api/pipeline/save", json={
-            "name": "pipe",
-            "description": "",
-            "graph": graph,
-            "source_file": "",
-        })
+        resp = client.post(
+            "/api/pipeline/save",
+            json={
+                "name": "pipe",
+                "description": "",
+                "graph": graph,
+                "source_file": "",
+            },
+        )
         assert resp.status_code == 400
         assert "source_file" in resp.json()["detail"]

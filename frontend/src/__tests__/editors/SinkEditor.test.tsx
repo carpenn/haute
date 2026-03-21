@@ -18,7 +18,7 @@ vi.mock("../../api/client", () => ({
 // Mock settings store
 vi.mock("../../stores/useSettingsStore", () => ({
   default: {
-    getState: () => ({ activeScenario: "live" }),
+    getState: () => ({ activeSource: "live" }),
   },
 }))
 
@@ -170,10 +170,10 @@ describe("SinkEditor", () => {
     })
 
     expect(mockExecuteSink).toHaveBeenCalledTimes(1)
-    // First arg: graph object, second: nodeId, third: activeScenario
-    const [graph, nodeId, scenario] = mockExecuteSink.mock.calls[0]
+    // First arg: graph object, second: nodeId, third: activeSource
+    const [graph, nodeId, source] = mockExecuteSink.mock.calls[0]
     expect(nodeId).toBe("sink_1")
-    expect(scenario).toBe("live")
+    expect(source).toBe("live")
     expect(graph).toHaveProperty("nodes")
     expect(graph).toHaveProperty("edges")
   })

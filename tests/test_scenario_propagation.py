@@ -79,8 +79,8 @@ def _modelling_node(nid: str = "model", label: str | None = None) -> GraphNode:
 def _scenario_tracking_build_fn(captured: dict):
     """Build function that records what scenario each node receives."""
 
-    def build_fn(node, *, scenario="live", source_names=None, **kwargs):
-        captured[node.id] = scenario
+    def build_fn(node, *, source="live", source_names=None, **kwargs):
+        captured[node.id] = source
         nt = node.data.nodeType
         if nt == NodeType.DATA_SOURCE:
             return node.id, lambda: pl.DataFrame({"x": [1, 2, 3]}).lazy(), True
@@ -93,8 +93,8 @@ def _branching_build_fn(captured: dict):
     """Build function for a pipeline with live/batch branches that produce
     different data, so we can verify which branch was taken."""
 
-    def build_fn(node, *, scenario="live", source_names=None, **kwargs):
-        captured[node.id] = scenario
+    def build_fn(node, *, source="live", source_names=None, **kwargs):
+        captured[node.id] = source
         nid = node.id
         nt = node.data.nodeType
 
@@ -125,7 +125,7 @@ class TestScenarioForwardingToBuilders:
             nodes=[_source_node("s"), _transform_node("t")],
             edges=[_e("s", "t")],
         )
-        _execute_lazy(g, _scenario_tracking_build_fn(captured), scenario="nb_batch")
+        _execute_lazy(g, _scenario_tracking_build_fn(captured), source="nb_batch")
         assert captured["s"] == "nb_batch"
         assert captured["t"] == "nb_batch"
 
@@ -135,7 +135,7 @@ class TestScenarioForwardingToBuilders:
             nodes=[_source_node("s"), _transform_node("t")],
             edges=[_e("s", "t")],
         )
-        _execute_eager_core(g, _scenario_tracking_build_fn(captured), scenario="nb_batch")
+        _execute_eager_core(g, _scenario_tracking_build_fn(captured), source="nb_batch")
         assert captured["s"] == "nb_batch"
         assert captured["t"] == "nb_batch"
 
@@ -143,10 +143,13 @@ class TestScenarioForwardingToBuilders:
         captured: dict[str, str] = {}
         node_map = {"s": _source_node("s"), "t": _transform_node("t")}
         _build_funcs(
-            ["s", "t"], node_map, {"s": [], "t": ["s"]},
-            {"s": "s", "t": "t"}, {"t": ["s"]},
+            ["s", "t"],
+            node_map,
+            {"s": [], "t": ["s"]},
+            {"s": "s", "t": "t"},
+            {"t": ["s"]},
             _scenario_tracking_build_fn(captured),
-            scenario="custom_scenario",
+            source="custom_scenario",
         )
         assert captured["s"] == "custom_scenario"
         assert captured["t"] == "custom_scenario"
@@ -175,10 +178,13 @@ class TestSourceSwitchScenarioRouting:
             nodes=[
                 _source_node("live_source"),
                 _source_node("batch_source"),
-                _live_switch_node("sw", {
-                    "live_source": "live",
-                    "batch_source": "nb_batch",
-                }),
+                _live_switch_node(
+                    "sw",
+                    {
+                        "live_source": "live",
+                        "batch_source": "nb_batch",
+                    },
+                ),
                 _transform_node("downstream"),
             ],
             edges=[
@@ -216,7 +222,7 @@ class TestSourceSwitchScenarioRouting:
     def test_prepare_graph_uses_scenario_for_pruning(self):
         """_prepare_graph should prune edges based on the passed scenario."""
         g = self._make_switch_graph()
-        _, order, parents, _ = _prepare_graph(g, scenario="nb_batch")
+        _, order, parents, _ = _prepare_graph(g, source="nb_batch")
         # The batch path should be in the ancestry
         sw_parents = parents.get("sw", [])
         parent_ids = set(sw_parents)
@@ -229,8 +235,9 @@ class TestSourceSwitchScenarioRouting:
         captured: dict[str, str] = {}
         g = self._make_switch_graph()
         result = _execute_eager_core(
-            g, _branching_build_fn(captured),
-            scenario="nb_batch",
+            g,
+            _branching_build_fn(captured),
+            source="nb_batch",
             target_node_id="downstream",
         )
         # With nb_batch, the downstream should get batch data
@@ -261,10 +268,13 @@ class TestStaleIsmKeys:
         because it looks up ISM key "feature_processing" against input_names
         which now contains "data_prep". This causes a silent fallback.
         """
-        sw = _live_switch_node("sw", {
-            "feature_processing": "live",
-            "batch_quotes": "nb_batch",
-        })
+        sw = _live_switch_node(
+            "sw",
+            {
+                "feature_processing": "live",
+                "batch_quotes": "nb_batch",
+            },
+        )
         renamed_node = _source_node("live_src", label="data_prep")
         batch_node = _source_node("batch_src", label="batch_quotes")
 
@@ -294,10 +304,13 @@ class TestStaleIsmKeys:
 
     def test_consistent_labels_match_correctly(self):
         """When labels match ISM keys, pruning works correctly."""
-        sw = _live_switch_node("sw", {
-            "feature_processing": "live",
-            "batch_quotes": "nb_batch",
-        })
+        sw = _live_switch_node(
+            "sw",
+            {
+                "feature_processing": "live",
+                "batch_quotes": "nb_batch",
+            },
+        )
         live_node = _source_node("live_src", label="feature_processing")
         batch_node = _source_node("batch_src", label="batch_quotes")
 
@@ -442,15 +455,15 @@ class TestRamEstimateScenario:
     forwards it to _execute_eager_core. These tests verify the fix.
     """
 
-    def test_estimate_accepts_scenario_parameter(self):
-        """estimate_safe_training_rows should accept a scenario kwarg."""
+    def test_estimate_accepts_source_parameter(self):
+        """estimate_safe_training_rows should accept a source kwarg."""
         import inspect
 
         from haute._ram_estimate import estimate_safe_training_rows
 
         sig = inspect.signature(estimate_safe_training_rows)
         param_names = list(sig.parameters.keys())
-        assert "scenario" in param_names
+        assert "source" in param_names
 
     def test_execute_eager_core_defaults_to_live_scenario(self):
         """When no scenario is passed, _execute_eager_core defaults to 'live'.
@@ -472,8 +485,9 @@ class TestRamEstimateScenario:
             edges=[_e("s", "model")],
         )
         _execute_eager_core(
-            g, _scenario_tracking_build_fn(captured),
-            scenario="nb_batch",
+            g,
+            _scenario_tracking_build_fn(captured),
+            source="nb_batch",
         )
         assert captured["s"] == "nb_batch"
 
@@ -488,11 +502,14 @@ class TestMultipleNonLiveScenarios:
 
     def test_three_scenario_switch_prunes_correctly(self):
         """A switch with 3 inputs and 3 scenarios prunes correctly."""
-        sw = _live_switch_node("sw", {
-            "src_live": "live",
-            "src_batch": "batch",
-            "src_test": "test",
-        })
+        sw = _live_switch_node(
+            "sw",
+            {
+                "src_live": "live",
+                "src_batch": "batch",
+                "src_test": "test",
+            },
+        )
         g = PipelineGraph(
             nodes=[
                 _source_node("src_live", label="src_live"),

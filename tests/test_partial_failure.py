@@ -321,9 +321,7 @@ class TestTempFileCleanupOnCrash:
 
         assert not ckpt_dir.exists(), "Checkpoint dir leaked after crash"
 
-    def test_background_thread_cleans_parquet_on_training_failure(
-        self, tmp_path: Path
-    ) -> None:
+    def test_background_thread_cleans_parquet_on_training_failure(self, tmp_path: Path) -> None:
         """Background training thread cleans up temp parquet even when training fails.
 
         Catches: temp file leak in _train_background's finally block when
@@ -628,15 +626,19 @@ class TestCorruptSidecar:
         py_path = tmp_path / "pipeline.py"
         py_path.write_text("# placeholder")
         sidecar = py_path.with_suffix(".haute.json")
-        sidecar.write_text(json.dumps({
-            "positions": {"node_1": {"x": 0, "y": 0}},
-            "future_field": "some_value",
-            "scenarios": ["live", "test"],
-        }))
+        sidecar.write_text(
+            json.dumps(
+                {
+                    "positions": {"node_1": {"x": 0, "y": 0}},
+                    "future_field": "some_value",
+                    "sources": ["live", "test"],
+                }
+            )
+        )
 
         result = load_sidecar(py_path)
         assert result["positions"]["node_1"] == {"x": 0, "y": 0}
-        assert result["scenarios"] == ["live", "test"]
+        assert result["sources"] == ["live", "test"]
 
 
 # ===================================================================
@@ -803,9 +805,7 @@ class TestOutOfMemoryDuringCollect:
 class TestSavePipelinePartialFailureIntegration:
     """End-to-end tests where real files are written then a step fails."""
 
-    def test_code_written_but_sidecar_fails_leaves_code_intact(
-        self, tmp_path: Path
-    ) -> None:
+    def test_code_written_but_sidecar_fails_leaves_code_intact(self, tmp_path: Path) -> None:
         """If sidecar write fails, the .py file should still be valid.
 
         Catches: cleanup logic that deletes the .py file when the sidecar
@@ -839,9 +839,7 @@ class TestSavePipelinePartialFailureIntegration:
         assert py_path.exists(), "Code file should survive sidecar failure"
         assert py_path.read_text() == "# generated code"
 
-    def test_config_write_failure_does_not_delete_code(
-        self, tmp_path: Path
-    ) -> None:
+    def test_config_write_failure_does_not_delete_code(self, tmp_path: Path) -> None:
         """Config write failure after code write preserves the code file.
 
         Catches: overly aggressive rollback that removes the .py file

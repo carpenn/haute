@@ -60,8 +60,13 @@ class TestEndToEnd:
         graph = parse_pipeline_file(PIPELINE_FILE)
         node_ids = {n.id for n in graph.nodes}
         expected_nodes = {
-            "quotes", "batch_quotes", "policies", "area_lookup",
-            "calculate_premium", "output", "results_write",
+            "quotes",
+            "batch_quotes",
+            "policies",
+            "area_lookup",
+            "calculate_premium",
+            "output",
+            "results_write",
         }
         assert node_ids == expected_nodes
         assert len(graph.edges) == 6
@@ -71,9 +76,7 @@ class TestEndToEnd:
         graph = parse_pipeline_file(PIPELINE_FILE)
         results = execute_graph(graph)
         for nid, result in results.items():
-            assert result.status == "ok", (
-                f"Node {nid!r} failed: {result.error}"
-            )
+            assert result.status == "ok", f"Node {nid!r} failed: {result.error}"
             assert result.row_count > 0
 
     def test_execute_target_node(self):
@@ -228,17 +231,21 @@ class TestFullPipelineLifecycle:
         """Build a small but realistic pipeline graph with data files."""
         # Write test data
         data_path = tmp_path / "data.parquet"
-        df = pl.DataFrame({
-            "id": [1, 2, 3, 4, 5],
-            "value": [10.0, 20.0, 30.0, 40.0, 50.0],
-            "region": ["A", "B", "A", "B", "A"],
-        })
+        df = pl.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "value": [10.0, 20.0, 30.0, 40.0, 50.0],
+                "region": ["A", "B", "A", "B", "A"],
+            }
+        )
         df.write_parquet(data_path)
 
         nodes = [
             _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
             _make_node(
-                "transform", "transform", NodeType.POLARS,
+                "transform",
+                "transform",
+                NodeType.POLARS,
                 {"code": ".with_columns(doubled=pl.col('value') * 2)"},
             ),
             _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
@@ -320,64 +327,121 @@ class TestAllNodeTypesRoundtrip:
         nodes = [
             _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
             _make_node("api", "api", NodeType.API_INPUT, {"path": _posix_path(json_path)}),
-            _make_node("const", "const", NodeType.CONSTANT, {
-                "values": [{"name": "base_rate", "value": "100"}],
-            }),
-            _make_node("switch", "switch", NodeType.LIVE_SWITCH, {
-                "input_scenario_map": {"ds": "test_batch", "api": "live"},
-            }),
+            _make_node(
+                "const",
+                "const",
+                NodeType.CONSTANT,
+                {
+                    "values": [{"name": "base_rate", "value": "100"}],
+                },
+            ),
+            _make_node(
+                "switch",
+                "switch",
+                NodeType.LIVE_SWITCH,
+                {
+                    "input_scenario_map": {"ds": "test_batch", "api": "live"},
+                },
+            ),
             _make_node("transform", "transform", NodeType.POLARS, {"code": ""}),
-            _make_node("band", "band", NodeType.BANDING, {
-                "factors": [{
-                    "banding": "continuous",
-                    "column": "x",
-                    "outputColumn": "x_band",
-                    "rules": [{"from": 0, "to": 1, "label": "low"}, {"from": 1, "to": 100, "label": "high"}],
-                }],
-            }),
-            _make_node("rating", "rating", NodeType.RATING_STEP, {
-                "tables": [{
-                    "name": "region_table",
-                    "factors": ["region"],
-                    "outputColumn": "region_factor",
-                    "entries": [
-                        {"region": "A", "region_factor": 1.0},
-                        {"region": "B", "region_factor": 1.5},
+            _make_node(
+                "band",
+                "band",
+                NodeType.BANDING,
+                {
+                    "factors": [
+                        {
+                            "banding": "continuous",
+                            "column": "x",
+                            "outputColumn": "x_band",
+                            "rules": [
+                                {"from": 0, "to": 1, "label": "low"},
+                                {"from": 1, "to": 100, "label": "high"},
+                            ],
+                        }
                     ],
-                }],
-            }),
-            _make_node("mscore", "mscore", NodeType.MODEL_SCORE, {
-                "sourceType": "run",
-                "run_id": "abc123",
-                "artifact_path": "model.cbm",
-                "task": "regression",
-                "output_column": "prediction",
-            }),
-            _make_node("expander", "expander", NodeType.SCENARIO_EXPANDER, {
-                "quote_id": "x",
-                "column_name": "scenario_val",
-                "min_value": 0.8,
-                "max_value": 1.2,
-                "steps": 3,
-                "step_column": "scenario_idx",
-            }),
-            _make_node("opt", "opt", NodeType.OPTIMISER, {
-                "mode": "online",
-                "quote_id": "x",
-                "objective": "premium",
-            }),
-            _make_node("opt_apply", "opt_apply", NodeType.OPTIMISER_APPLY, {
-                "artifact_path": "optimiser.json",
-            }),
-            _make_node("ext", "ext", NodeType.EXTERNAL_FILE, {
-                "path": _posix_path(lookup_path),
-                "fileType": "json",
-                "code": "",
-            }),
-            _make_node("sink", "sink", NodeType.DATA_SINK, {
-                "path": _posix_path(sink_path),
-                "format": "parquet",
-            }),
+                },
+            ),
+            _make_node(
+                "rating",
+                "rating",
+                NodeType.RATING_STEP,
+                {
+                    "tables": [
+                        {
+                            "name": "region_table",
+                            "factors": ["region"],
+                            "outputColumn": "region_factor",
+                            "entries": [
+                                {"region": "A", "region_factor": 1.0},
+                                {"region": "B", "region_factor": 1.5},
+                            ],
+                        }
+                    ],
+                },
+            ),
+            _make_node(
+                "mscore",
+                "mscore",
+                NodeType.MODEL_SCORE,
+                {
+                    "sourceType": "run",
+                    "run_id": "abc123",
+                    "artifact_path": "model.cbm",
+                    "task": "regression",
+                    "output_column": "prediction",
+                },
+            ),
+            _make_node(
+                "expander",
+                "expander",
+                NodeType.SCENARIO_EXPANDER,
+                {
+                    "quote_id": "x",
+                    "column_name": "scenario_val",
+                    "min_value": 0.8,
+                    "max_value": 1.2,
+                    "steps": 3,
+                    "step_column": "scenario_idx",
+                },
+            ),
+            _make_node(
+                "opt",
+                "opt",
+                NodeType.OPTIMISER,
+                {
+                    "mode": "online",
+                    "quote_id": "x",
+                    "objective": "premium",
+                },
+            ),
+            _make_node(
+                "opt_apply",
+                "opt_apply",
+                NodeType.OPTIMISER_APPLY,
+                {
+                    "artifact_path": "optimiser.json",
+                },
+            ),
+            _make_node(
+                "ext",
+                "ext",
+                NodeType.EXTERNAL_FILE,
+                {
+                    "path": _posix_path(lookup_path),
+                    "fileType": "json",
+                    "code": "",
+                },
+            ),
+            _make_node(
+                "sink",
+                "sink",
+                NodeType.DATA_SINK,
+                {
+                    "path": _posix_path(sink_path),
+                    "format": "parquet",
+                },
+            ),
             _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
         ]
 
@@ -438,12 +502,22 @@ class TestSubmodelLifecycle:
 
         nodes = [
             _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
-            _make_node("t1", "step_one", NodeType.POLARS, {
-                "code": ".with_columns(a=pl.col('x') + 1)",
-            }),
-            _make_node("t2", "step_two", NodeType.POLARS, {
-                "code": ".with_columns(b=pl.col('a') + 10)",
-            }),
+            _make_node(
+                "t1",
+                "step_one",
+                NodeType.POLARS,
+                {
+                    "code": ".with_columns(a=pl.col('x') + 1)",
+                },
+            ),
+            _make_node(
+                "t2",
+                "step_two",
+                NodeType.POLARS,
+                {
+                    "code": ".with_columns(b=pl.col('a') + 10)",
+                },
+            ),
             _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
         ]
         edges = [
@@ -512,10 +586,15 @@ class TestConfigRoundtrip:
         data_path = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(data_path)
 
-        node = _make_node("ds", "ds", NodeType.DATA_SOURCE, {
-            "path": _posix_path(data_path),
-            "sourceType": "flat_file",
-        })
+        node = _make_node(
+            "ds",
+            "ds",
+            NodeType.DATA_SOURCE,
+            {
+                "path": _posix_path(data_path),
+                "sourceType": "flat_file",
+            },
+        )
         graph = PipelineGraph(
             nodes=[node],
             edges=[],
@@ -532,16 +611,18 @@ class TestConfigRoundtrip:
 
     def test_banding_config_roundtrip(self, tmp_path, _widen_sandbox_root):
         banding_config = {
-            "factors": [{
-                "banding": "discrete",
-                "column": "region",
-                "outputColumn": "region_band",
-                "rules": [
-                    {"value": "urban", "label": "city"},
-                    {"value": "rural", "label": "country"},
-                ],
-                "default": "other",
-            }],
+            "factors": [
+                {
+                    "banding": "discrete",
+                    "column": "region",
+                    "outputColumn": "region_band",
+                    "rules": [
+                        {"value": "urban", "label": "city"},
+                        {"value": "rural", "label": "country"},
+                    ],
+                    "default": "other",
+                }
+            ],
         }
         nodes = [
             _make_node("ds", "ds", NodeType.DATA_SOURCE, {"path": "data.parquet"}),
@@ -565,17 +646,19 @@ class TestConfigRoundtrip:
 
     def test_rating_step_config_roundtrip(self, tmp_path, _widen_sandbox_root):
         rating_config = {
-            "tables": [{
-                "name": "age_table",
-                "factors": ["age_band"],
-                "outputColumn": "age_factor",
-                "entries": [
-                    {"age_band": "young", "age_factor": 1.5},
-                    {"age_band": "middle", "age_factor": 1.0},
-                    {"age_band": "senior", "age_factor": 1.2},
-                ],
-                "defaultValue": "1.0",
-            }],
+            "tables": [
+                {
+                    "name": "age_table",
+                    "factors": ["age_band"],
+                    "outputColumn": "age_factor",
+                    "entries": [
+                        {"age_band": "young", "age_factor": 1.5},
+                        {"age_band": "middle", "age_factor": 1.0},
+                        {"age_band": "senior", "age_factor": 1.2},
+                    ],
+                    "defaultValue": "1.0",
+                }
+            ],
             "operation": "multiply",
             "combinedColumn": "total_factor",
         }
@@ -672,7 +755,10 @@ class TestGitWorkflow:
         def _git(*args):
             return subprocess.run(
                 ["git"] + list(args),
-                capture_output=True, text=True, cwd=repo, check=True,
+                capture_output=True,
+                text=True,
+                cwd=repo,
+                check=True,
             ).stdout.strip()
 
         _git("init")
@@ -681,7 +767,8 @@ class TestGitWorkflow:
 
         # Create initial pipeline file
         pipeline_file = repo / "main.py"
-        pipeline_file.write_text(textwrap.dedent("""\
+        pipeline_file.write_text(
+            textwrap.dedent("""\
             import polars as pl
             import haute
 
@@ -690,7 +777,8 @@ class TestGitWorkflow:
             @pipeline.data_source(path="data.parquet")
             def source() -> pl.LazyFrame:
                 return pl.scan_parquet("data.parquet")
-        """))
+        """)
+        )
 
         _git("add", "-A")
         _git("commit", "-m", "Initial commit")
@@ -719,7 +807,8 @@ class TestGitWorkflow:
 
         # Step 2: Make changes
         pipeline_file = repo / "main.py"
-        pipeline_file.write_text(textwrap.dedent("""\
+        pipeline_file.write_text(
+            textwrap.dedent("""\
             import polars as pl
             import haute
 
@@ -732,7 +821,8 @@ class TestGitWorkflow:
             @pipeline.polars
             def transform(source: pl.LazyFrame) -> pl.LazyFrame:
                 return source
-        """))
+        """)
+        )
 
         status = get_status(cwd=repo)
         assert len(status.changed_files) > 0
@@ -778,12 +868,14 @@ class TestUtilityModuleLifecycle:
         util_dir = tmp_path / "utility"
         util_dir.mkdir()
         (util_dir / "__init__.py").write_text("")
-        (util_dir / "helpers.py").write_text(textwrap.dedent("""\
+        (util_dir / "helpers.py").write_text(
+            textwrap.dedent("""\
             MAGIC_CONSTANT = 42
 
             def double_it(x):
                 return x * 2
-        """))
+        """)
+        )
 
         # Step 2: Write test data
         data_path = tmp_path / "data.parquet"
@@ -793,13 +885,19 @@ class TestUtilityModuleLifecycle:
         preamble = "from utility.helpers import MAGIC_CONSTANT, double_it"
         nodes = [
             _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
-            _make_node("t", "transform", NodeType.POLARS, {
-                "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
-            }),
+            _make_node(
+                "t",
+                "transform",
+                NodeType.POLARS,
+                {
+                    "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
+                },
+            ),
         ]
         edges = [_make_edge("src", "t")]
         graph = PipelineGraph(
-            nodes=nodes, edges=edges,
+            nodes=nodes,
+            edges=edges,
             pipeline_name="util_test",
             preamble=preamble,
         )
@@ -812,12 +910,14 @@ class TestUtilityModuleLifecycle:
         assert all(row["result"] == 84 for row in preview)
 
         # Step 5: Update the utility module
-        (util_dir / "helpers.py").write_text(textwrap.dedent("""\
+        (util_dir / "helpers.py").write_text(
+            textwrap.dedent("""\
             MAGIC_CONSTANT = 100
 
             def double_it(x):
                 return x * 3  # changed to triple!
-        """))
+        """)
+        )
 
         # Evict utility from sys.modules so the new version is picked up
         for mod_name in [k for k in sys.modules if k.startswith("utility")]:
@@ -828,9 +928,14 @@ class TestUtilityModuleLifecycle:
         # (preamble is not part of the fingerprint).
         nodes2 = [
             _make_node("src", "src", NodeType.DATA_SOURCE, {"path": _posix_path(data_path)}),
-            _make_node("t2", "transform", NodeType.POLARS, {
-                "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
-            }),
+            _make_node(
+                "t2",
+                "transform",
+                NodeType.POLARS,
+                {
+                    "code": "df = df.with_columns(result=pl.lit(double_it(MAGIC_CONSTANT)))",
+                },
+            ),
         ]
         graph2 = PipelineGraph(
             nodes=nodes2,
@@ -867,14 +972,25 @@ class TestMultiScenarioExecution:
         live_path = tmp_path / "live.parquet"
         batch_path = tmp_path / "batch.parquet"
         pl.DataFrame({"id": [1], "source": ["live"], "val": [100.0]}).write_parquet(live_path)
-        pl.DataFrame({"id": [1, 2, 3], "source": ["batch"] * 3, "val": [10.0, 20.0, 30.0]}).write_parquet(batch_path)
+        pl.DataFrame(
+            {"id": [1, 2, 3], "source": ["batch"] * 3, "val": [10.0, 20.0, 30.0]}
+        ).write_parquet(batch_path)
 
         nodes = [
-            _make_node("live_src", "live_src", NodeType.DATA_SOURCE, {"path": _posix_path(live_path)}),
-            _make_node("batch_src", "batch_src", NodeType.DATA_SOURCE, {"path": _posix_path(batch_path)}),
-            _make_node("switch", "switch", NodeType.LIVE_SWITCH, {
-                "input_scenario_map": {"live_src": "live", "batch_src": "test_batch"},
-            }),
+            _make_node(
+                "live_src", "live_src", NodeType.DATA_SOURCE, {"path": _posix_path(live_path)}
+            ),
+            _make_node(
+                "batch_src", "batch_src", NodeType.DATA_SOURCE, {"path": _posix_path(batch_path)}
+            ),
+            _make_node(
+                "switch",
+                "switch",
+                NodeType.LIVE_SWITCH,
+                {
+                    "input_scenario_map": {"live_src": "live", "batch_src": "test_batch"},
+                },
+            ),
             _make_node("out", "out", NodeType.OUTPUT, {"fields": []}),
         ]
         edges = [
@@ -886,7 +1002,7 @@ class TestMultiScenarioExecution:
             nodes=nodes,
             edges=edges,
             pipeline_name="scenario_test",
-            scenarios=["live", "test_batch"],
+            sources=["live", "test_batch"],
         )
 
     def test_live_scenario_prunes_batch_edge(self, scenario_graph, _widen_sandbox_root):
@@ -911,14 +1027,14 @@ class TestMultiScenarioExecution:
 
     def test_execute_live_scenario_uses_live_data(self, scenario_graph, _widen_sandbox_root):
         """Executing in 'live' scenario should use live data (1 row)."""
-        results = execute_graph(scenario_graph, scenario="live")
+        results = execute_graph(scenario_graph, source="live")
         assert results["out"].status == "ok"
         assert results["out"].row_count == 1
         assert results["out"].preview[0]["source"] == "live"
 
     def test_execute_batch_scenario_uses_batch_data(self, scenario_graph, _widen_sandbox_root):
         """Executing in 'test_batch' scenario should use batch data (3 rows)."""
-        results = execute_graph(scenario_graph, scenario="test_batch")
+        results = execute_graph(scenario_graph, source="test_batch")
         assert results["out"].status == "ok"
         assert results["out"].row_count == 3
         assert all(row["source"] == "batch" for row in results["out"].preview)
@@ -927,8 +1043,10 @@ class TestMultiScenarioExecution:
         """Trace should only include nodes from the active scenario path."""
         # Live trace: should include live_src but not batch_src
         trace_live = execute_trace(
-            scenario_graph, row_index=0,
-            target_node_id="out", scenario="live",
+            scenario_graph,
+            row_index=0,
+            target_node_id="out",
+            source="live",
         )
         live_step_ids = {s.node_id for s in trace_live.steps}
         assert "live_src" in live_step_ids
@@ -936,8 +1054,10 @@ class TestMultiScenarioExecution:
 
         # Batch trace: should include batch_src but not live_src
         trace_batch = execute_trace(
-            scenario_graph, row_index=0,
-            target_node_id="out", scenario="test_batch",
+            scenario_graph,
+            row_index=0,
+            target_node_id="out",
+            source="test_batch",
         )
         batch_step_ids = {s.node_id for s in trace_batch.steps}
         assert "batch_src" in batch_step_ids

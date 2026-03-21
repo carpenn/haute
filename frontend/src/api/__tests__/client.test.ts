@@ -153,7 +153,7 @@ describe("endpoint contracts", () => {
     expect(body.graph).toEqual(dummyGraph)
     expect(body.node_id).toBe("node1")
     expect(body.row_limit).toBe(50)
-    expect(body.scenario).toBe("live")
+    expect(body.source).toBe("live")
   })
 
   it("savePipeline posts to /api/pipeline/save", async () => {
@@ -189,7 +189,7 @@ describe("endpoint contracts", () => {
     expect(url).toBe("/api/pipeline/sink")
     const body = JSON.parse(opts.body)
     expect(body.node_id).toBe("sink1")
-    expect(body.scenario).toBe("live")
+    expect(body.source).toBe("live")
   })
 
   it("fetchSchema GETs /api/schema with encoded path", async () => {
@@ -204,13 +204,13 @@ describe("endpoint contracts", () => {
     expect(url).toBe("/api/schema/databricks?table=catalog.schema.table")
   })
 
-  it("trainModel posts to /api/modelling/train with default scenario", async () => {
+  it("trainModel posts to /api/modelling/train with default source", async () => {
     await trainModel({ graph: dummyGraph, node_id: "model1" })
     const [url, opts] = mockFetch.mock.calls[0]
     expect(url).toBe("/api/modelling/train")
     const body = JSON.parse(opts.body)
     expect(body.node_id).toBe("model1")
-    expect(body.scenario).toBe("live")
+    expect(body.source).toBe("live")
   })
 
   it("solveOptimiser posts to /api/optimiser/solve", async () => {

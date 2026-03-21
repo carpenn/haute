@@ -66,6 +66,7 @@ class TestNodeType:
     def test_str_enum_in_json_serialization(self):
         """StrEnum values serialize to plain strings in JSON."""
         import json
+
         result = json.dumps({"type": NodeType.OUTPUT})
         assert '"output"' in result
 
@@ -182,8 +183,11 @@ class TestGraphEdge:
 
     def test_with_handles(self):
         edge = GraphEdge(
-            id="e1", source="a", target="b",
-            sourceHandle="out1", targetHandle="in1",
+            id="e1",
+            source="a",
+            target="b",
+            sourceHandle="out1",
+            targetHandle="in1",
         )
         assert edge.sourceHandle == "out1"
         assert edge.targetHandle == "in1"
@@ -211,8 +215,8 @@ class TestPipelineGraph:
         assert g.source_file is None
         assert g.submodels is None
         assert g.warning is None
-        assert g.scenarios == ["live"]
-        assert g.active_scenario == "live"
+        assert g.sources == ["live"]
+        assert g.active_source == "live"
 
     def test_construction_with_nodes_and_edges(self):
         g = PipelineGraph(
@@ -244,7 +248,9 @@ class TestPipelineGraph:
     def test_parents_of_cached_property(self):
         g = PipelineGraph(
             nodes=[
-                GraphNode(id="a"), GraphNode(id="b"), GraphNode(id="c"),
+                GraphNode(id="a"),
+                GraphNode(id="b"),
+                GraphNode(id="c"),
             ],
             edges=[
                 GraphEdge(id="e1", source="a", target="c"),
@@ -268,13 +274,13 @@ class TestPipelineGraph:
             ],
             "edges": [],
             "pipeline_name": "test",
-            "scenarios": ["live", "test_batch"],
-            "active_scenario": "test_batch",
+            "sources": ["live", "test_batch"],
+            "active_source": "test_batch",
         }
         g = PipelineGraph.model_validate(data)
         assert g.pipeline_name == "test"
-        assert g.scenarios == ["live", "test_batch"]
-        assert g.active_scenario == "test_batch"
+        assert g.sources == ["live", "test_batch"]
+        assert g.active_source == "test_batch"
         assert g.nodes[0].data.nodeType == NodeType.DATA_SOURCE
 
     def test_preserved_blocks_default_factory(self):

@@ -106,6 +106,7 @@ def _compile_preamble(
         return {}
 
     import hashlib
+
     cache_key = hashlib.md5(preamble.encode()).hexdigest()
 
     if not force_refresh and cache_key in _preamble_cache:
@@ -119,6 +120,7 @@ def _compile_preamble(
     # even when the server process was spawned by uvicorn reload.
     import os  # noqa: E401
     import sys
+
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
@@ -255,6 +257,7 @@ def _exec_user_code(
         # extract the line from the traceback and adjust for preamble offset.
         if exc.__traceback__:
             import traceback as _tb
+
             for frame in reversed(_tb.extract_tb(exc.__traceback__)):
                 if frame.filename == "<string>" and frame.lineno is not None:
                     exc._user_code_line = max(1, frame.lineno - line_offset)  # type: ignore[attr-defined]
@@ -277,8 +280,13 @@ def _exec_user_code(
 
 _preview_cache = FingerprintCache(
     slots=(
-        "eager_outputs", "errors", "order", "timings",
-        "memory_bytes", "error_lines", "available_columns",
+        "eager_outputs",
+        "errors",
+        "order",
+        "timings",
+        "memory_bytes",
+        "error_lines",
+        "available_columns",
     ),
 )
 
@@ -288,7 +296,7 @@ def execute_graph(
     target_node_id: str | None = None,
     row_limit: int | None = None,
     max_preview_rows: int = _MAX_PREVIEW_ROWS,
-    scenario: str = "live",
+    source: str = "live",
 ) -> dict[str, NodeResult]:
     """Execute a graph and return per-node results.
 
@@ -314,7 +322,7 @@ def execute_graph(
     if not graph.nodes:
         return {}
 
-    fp = graph_fingerprint(graph, f"{row_limit}:{scenario}")
+    fp = graph_fingerprint(graph, f"{row_limit}:{source}")
 
     errors: dict[str, str] = {}
     error_lines: dict[str, int] = {}
@@ -347,9 +355,13 @@ def execute_graph(
                 target=target_node_id,
                 cached_nodes=len(prev_outputs),
             )
-            (raw_outputs, order, errors, timings,
-             memory_bytes, error_lines, avail_cols) = _eager_execute(
-                graph, target_node_id, row_limit, scenario=scenario,
+            (raw_outputs, order, errors, timings, memory_bytes, error_lines, avail_cols) = (
+                _eager_execute(
+                    graph,
+                    target_node_id,
+                    row_limit,
+                    source=source,
+                )
             )
             eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
             merged = {**prev_outputs, **eager_outputs}
@@ -385,7 +397,10 @@ def execute_graph(
             prev_fingerprint=(_preview_cache.fingerprint or "")[:8],
         )
         raw_outputs, order, errors, timings, memory_bytes, error_lines, avail_cols = _eager_execute(
-            graph, target_node_id, row_limit, scenario=scenario,
+            graph,
+            target_node_id,
+            row_limit,
+            source=source,
         )
         eager_outputs = {k: v for k, v in raw_outputs.items() if v is not None}
         _preview_cache.store(
@@ -448,15 +463,10 @@ def execute_graph(
                 memory_bytes=memory_bytes.get(nid, 0),
             )
             continue
-        columns = [
-            ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns
-        ]
+        columns = [ColumnInfo(name=c, dtype=str(df[c].dtype)) for c in df.columns]
         # available_columns = full column set before selected_columns filtering
         avail = avail_cols.get(nid)
-        avail_col_infos = (
-            [ColumnInfo(name=n, dtype=d) for n, d in avail]
-            if avail else columns
-        )
+        avail_col_infos = [ColumnInfo(name=n, dtype=d) for n, d in avail] if avail else columns
         results[nid] = NodeResult(
             status="ok",
             row_count=len(df),
@@ -483,11 +493,15 @@ def _eager_execute(
     graph: PipelineGraph,
     target_node_id: str | None,
     row_limit: int | None,
-    scenario: str = "live",
+    source: str = "live",
 ) -> tuple[
-    dict[str, pl.DataFrame | None], list[str],
-    dict[str, str], dict[str, float], dict[str, int],
-    dict[str, int], dict[str, list[tuple[str, str]]],
+    dict[str, pl.DataFrame | None],
+    list[str],
+    dict[str, str],
+    dict[str, float],
+    dict[str, int],
+    dict[str, int],
+    dict[str, list[tuple[str, str]]],
 ]:
     """Execute the graph eagerly in topo order.
 
@@ -517,7 +531,7 @@ def _eager_execute(
         row_limit=row_limit,
         swallow_errors=True,
         preamble_ns=preamble_ns or None,
-        scenario=scenario,
+        source=source,
     )
     errors = result.errors
     if preamble_error:
@@ -530,8 +544,12 @@ def _eager_execute(
             if nd and nd.data.nodeType in preamble_types and nid not in errors:
                 errors[nid] = preamble_error
     return (
-        result.outputs, result.order, errors,
-        result.timings, result.memory_bytes, result.error_lines,
+        result.outputs,
+        result.order,
+        errors,
+        result.timings,
+        result.memory_bytes,
+        result.error_lines,
         result.available_columns,
     )
 
@@ -562,12 +580,12 @@ def _resolve_batch_scenario(graph: PipelineGraph) -> str | None:
     return batch_scenario
 
 
-def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live") -> SinkResponse:
+def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") -> SinkResponse:
     """Execute the pipeline up to a sink node and write its input to disk.
 
-    Sinks are batch-only — they always run with a non-``"live"`` scenario
+    Sinks are batch-only — they always run with a non-``"live"`` source
     so that model scoring uses the disk-batched path, keeping memory bounded.
-    The *scenario* parameter is still accepted (and passed through for
+    The *source* parameter is still accepted (and passed through for
     source-switch routing) but is coerced away from ``"live"`` for scoring.
 
     Uses Polars streaming sinks (``sink_parquet`` / ``sink_csv``) so the
@@ -595,10 +613,10 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
     # must match a value in the source-switch ISM so edge pruning routes
     # to the correct branch.  Resolve the first non-live ISM value from
     # the graph; fall back to "batch" if there are no live_switch nodes.
-    if scenario == "live":
+    if source == "live":
         sink_scenario = _resolve_batch_scenario(graph) or "batch"
     else:
-        sink_scenario = scenario
+        sink_scenario = source
 
     from haute._polars_utils import _malloc_trim, safe_sink
 
@@ -630,7 +648,7 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, scenario: str = "live"
                 _build_node_fn,
                 target_node_id=sink_node_id,
                 preamble_ns=preamble_ns or None,
-                scenario=sink_scenario,
+                source=sink_scenario,
                 checkpoint_dir=checkpoint_path,
             )
             lf = lazy_outputs.get(sink_node_id)

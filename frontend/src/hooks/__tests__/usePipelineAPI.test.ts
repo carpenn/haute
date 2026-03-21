@@ -65,7 +65,7 @@ describe("usePipelineAPI", () => {
   beforeEach(() => {
     vi.useRealTimers()
     useToastStore.setState({ toasts: [], _toastCounter: 0 })
-    useSettingsStore.setState({ rowLimit: 1000, activeScenario: "live", scenarios: ["live"] })
+    useSettingsStore.setState({ rowLimit: 1000, activeSource: "live", sources: ["live"] })
     useUIStore.setState({ dirty: false })
     useNodeResultsStore.setState({ previews: {}, graphVersion: 0, columnCache: {} })
     mockLoad.mockReset()
@@ -139,18 +139,18 @@ describe("usePipelineAPI", () => {
     })
   })
 
-  it("loads scenarios from backend", async () => {
+  it("loads sources from backend", async () => {
     mockLoad.mockResolvedValue({
       nodes: [],
       edges: [],
-      scenarios: ["live", "test_scenario"],
-      active_scenario: "test_scenario",
+      sources: ["live", "test_scenario"],
+      active_source: "test_scenario",
     })
     const params = makeParams()
     renderHook(() => usePipelineAPI(params))
     await waitFor(() => {
-      expect(useSettingsStore.getState().scenarios).toEqual(["live", "test_scenario"])
-      expect(useSettingsStore.getState().activeScenario).toBe("test_scenario")
+      expect(useSettingsStore.getState().sources).toEqual(["live", "test_scenario"])
+      expect(useSettingsStore.getState().activeSource).toBe("test_scenario")
     })
   })
 

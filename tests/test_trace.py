@@ -26,6 +26,7 @@ from tests.conftest import (
 # _jsonify_row
 # ---------------------------------------------------------------------------
 
+
 class TestJsonifyRow:
     def test_primitives_preserved(self):
         row = {"a": 1, "b": 2.5, "c": "hello", "d": True, "e": None}
@@ -93,6 +94,7 @@ class TestJsonifyRow:
 # _compute_schema_diff
 # ---------------------------------------------------------------------------
 
+
 class TestComputeSchemaDiff:
     def test_source_node_all_added(self):
         diff = _compute_schema_diff(None, {"a": 1, "b": 2})
@@ -120,23 +122,25 @@ class TestComputeSchemaDiff:
         assert diff.columns_modified == []
 
 
-
 # ---------------------------------------------------------------------------
 # execute_trace
 # ---------------------------------------------------------------------------
+
 
 class TestExecuteTrace:
     def test_basic_trace(self, tmp_path):
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(y=pl.col('x') * 10)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 10)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         result = execute_trace(graph, row_index=0)
 
         assert isinstance(result, TraceResult)
@@ -156,13 +160,15 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         result = execute_trace(graph)
         assert result.target_node_id == "t"
 
@@ -171,24 +177,26 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                # passthrough - doesn't have 'y' but feeds into t
-                _transform_node("mid"),
-                # adds 'y' - column_relevant, ancestors kept for calc path
-                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "mid"), _edge("mid", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    # passthrough - doesn't have 'y' but feeds into t
+                    _transform_node("mid"),
+                    # adds 'y' - column_relevant, ancestors kept for calc path
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "mid"), _edge("mid", "t")],
+            }
+        )
         result = execute_trace(graph, column="y")
 
         # 'y' is created at t → t is column_relevant, src/mid are ancestors
         ids = [s.node_id for s in result.steps]
         assert ids == ["src", "mid", "t"]
-        assert result.steps[2].column_relevant is True   # t: adds y
-        assert result.steps[0].column_relevant is False   # src: ancestor
-        assert result.steps[1].column_relevant is False   # mid: ancestor
+        assert result.steps[2].column_relevant is True  # t: adds y
+        assert result.steps[0].column_relevant is False  # src: ancestor
+        assert result.steps[1].column_relevant is False  # mid: ancestor
 
     def test_trace_passthrough_prunes_unrelated_branches(self, tmp_path):
         """Pass-through column prunes source branches that don't carry it."""
@@ -197,14 +205,16 @@ class TestExecuteTrace:
         pl.DataFrame({"x": [1], "shared": [10]}).write_parquet(p1)
         pl.DataFrame({"y": [2], "shared": [10]}).write_parquet(p2)
 
-        graph = _g({
-            "nodes": [
-                _source_node("a", str(p1)),   # has x
-                _source_node("b", str(p2)),   # has y, not x
-                _transform_node("join", "a.join(b, on='shared')"),
-            ],
-            "edges": [_edge("a", "join"), _edge("b", "join")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("a", str(p1)),  # has x
+                    _source_node("b", str(p2)),  # has y, not x
+                    _transform_node("join", "a.join(b, on='shared')"),
+                ],
+                "edges": [_edge("a", "join"), _edge("b", "join")],
+            }
+        )
         result = execute_trace(graph, column="x")
 
         # 'x' comes from 'a' only — 'b' should be pruned
@@ -218,14 +228,16 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1], "z": [99]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("mid"),  # passes x through
-                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "mid"), _edge("mid", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("mid"),  # passes x through
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "mid"), _edge("mid", "t")],
+            }
+        )
         result = execute_trace(graph, column="x")
 
         # 'x' exists in all 3 nodes → all 3 in trace
@@ -236,34 +248,44 @@ class TestExecuteTrace:
         """Trace discovers row_id_column from apiInput source and extracts its value."""
         p = tmp_path / "data.json"
         import json
-        p.write_text(json.dumps([
-            {"policy_id": 100, "x": 1},
-            {"policy_id": 200, "x": 2},
-            {"policy_id": 300, "x": 3},
-        ]))
+
+        p.write_text(
+            json.dumps(
+                [
+                    {"policy_id": 100, "x": 1},
+                    {"policy_id": 200, "x": 2},
+                    {"policy_id": 300, "x": 3},
+                ]
+            )
+        )
         # Pre-cache JSON as parquet (the builder expects this)
         from haute._json_flatten import _json_cache_path
+
         cache_path = _json_cache_path(str(p))
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         pl.DataFrame({"policy_id": [100, 200, 300], "x": [1, 2, 3]}).write_parquet(cache_path)
 
-        graph = _g({
-            "nodes": [
-                _n({
-                    "id": "src",
-                    "data": {
-                        "label": "src",
-                        "nodeType": "apiInput",
-                        "config": {
-                            "path": str(p),
-                            "row_id_column": "policy_id",
-                        },
-                    },
-                }),
-                _transform_node("t"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _n(
+                        {
+                            "id": "src",
+                            "data": {
+                                "label": "src",
+                                "nodeType": "apiInput",
+                                "config": {
+                                    "path": str(p),
+                                    "row_id_column": "policy_id",
+                                },
+                            },
+                        }
+                    ),
+                    _transform_node("t"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         result = execute_trace(graph, row_index=1)
         assert result.row_id_column == "policy_id"
         assert result.row_id_value == 200
@@ -273,10 +295,12 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
         result = execute_trace(graph, row_index=0)
         assert result.row_id_column is None
         assert result.row_id_value is None
@@ -286,10 +310,12 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [10, 20, 30]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p)), _transform_node("t")],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p)), _transform_node("t")],
+                "edges": [_edge("src", "t")],
+            }
+        )
 
         r0 = execute_trace(graph, row_index=0)
         assert r0.output_value["x"] == 10
@@ -303,20 +329,24 @@ class TestExecuteTrace:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph1 = _g({
-            "nodes": [_source_node("src", str(p)), _transform_node("t")],
-            "edges": [_edge("src", "t")],
-        })
+        graph1 = _g(
+            {
+                "nodes": [_source_node("src", str(p)), _transform_node("t")],
+                "edges": [_edge("src", "t")],
+            }
+        )
         r1 = execute_trace(graph1, row_index=0)
         assert "y" not in r1.output_value
 
-        graph2 = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph2 = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         r2 = execute_trace(graph2, row_index=0)
         assert r2.output_value["y"] == 2
 
@@ -342,30 +372,49 @@ class TestExecuteTrace:
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p_live)
         pl.DataFrame({"x": [10, 20]}).write_parquet(p_batch)
 
-        graph = PipelineGraph(nodes=[
-            GraphNode(id="live_src", data=NodeData(
-                label="live_src", nodeType="dataSource",
-                config={"path": str(p_live)},
-            )),
-            GraphNode(id="batch_src", data=NodeData(
-                label="batch_src", nodeType="dataSource",
-                config={"path": str(p_batch)},
-            )),
-            GraphNode(id="sw", data=NodeData(
-                label="switch", nodeType="liveSwitch",
-                config={"input_scenario_map": {
-                    "live_src": "live",
-                    "batch_src": "nb_batch",
-                }},
-            )),
-        ], edges=[
-            GraphEdge(id="e1", source="live_src", target="sw"),
-            GraphEdge(id="e2", source="batch_src", target="sw"),
-        ])
+        graph = PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="live_src",
+                    data=NodeData(
+                        label="live_src",
+                        nodeType="dataSource",
+                        config={"path": str(p_live)},
+                    ),
+                ),
+                GraphNode(
+                    id="batch_src",
+                    data=NodeData(
+                        label="batch_src",
+                        nodeType="dataSource",
+                        config={"path": str(p_batch)},
+                    ),
+                ),
+                GraphNode(
+                    id="sw",
+                    data=NodeData(
+                        label="switch",
+                        nodeType="liveSwitch",
+                        config={
+                            "input_scenario_map": {
+                                "live_src": "live",
+                                "batch_src": "nb_batch",
+                            }
+                        },
+                    ),
+                ),
+            ],
+            edges=[
+                GraphEdge(id="e1", source="live_src", target="sw"),
+                GraphEdge(id="e2", source="batch_src", target="sw"),
+            ],
+        )
 
         result = execute_trace(
-            graph, row_index=0, target_node_id="sw",
-            scenario="nb_batch",
+            graph,
+            row_index=0,
+            target_node_id="sw",
+            source="nb_batch",
         )
         step_ids = {s.node_id for s in result.steps}
         assert "batch_src" in step_ids
@@ -375,6 +424,7 @@ class TestExecuteTrace:
 # ---------------------------------------------------------------------------
 # trace_result_to_dict
 # ---------------------------------------------------------------------------
+
 
 class TestTraceResultToDict:
     def test_serialises_correctly(self):

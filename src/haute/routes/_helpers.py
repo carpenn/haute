@@ -243,7 +243,7 @@ def lookup_pipeline_by_name(name: str) -> Path | None:
 def load_sidecar(py_path: Path) -> dict[str, Any]:
     """Load the full sidecar .haute.json file as a dict.
 
-    Returns a dict with ``positions``, ``scenarios``, and ``active_scenario``
+    Returns a dict with ``positions``, ``sources``, and ``active_source``
     keys (all optional — callers should use ``.get()``).
     """
     sidecar = py_path.with_suffix(".haute.json")
@@ -262,27 +262,24 @@ def load_sidecar_positions(py_path: Path) -> dict[str, Any]:
 
 
 def save_sidecar(py_path: Path, graph: PipelineGraph) -> None:
-    """Write node positions + scenario state to the sidecar .haute.json file.
+    """Write node positions + source state to the sidecar .haute.json file.
 
     Keys are the sanitised function names (which the parser uses as node IDs
     on re-parse), so positions survive label renames.
     """
-    positions = {
-        _sanitize_func_name(node.data.label): node.position
-        for node in graph.nodes
-    }
+    positions = {_sanitize_func_name(node.data.label): node.position for node in graph.nodes}
     sidecar_data: dict[str, Any] = {"positions": positions}
-    # Persist scenario state
-    if graph.scenarios and graph.scenarios != ["live"]:
-        sidecar_data["scenarios"] = graph.scenarios
-    if graph.active_scenario and graph.active_scenario != "live":
-        sidecar_data["active_scenario"] = graph.active_scenario
+    # Persist source state
+    if graph.sources and graph.sources != ["live"]:
+        sidecar_data["sources"] = graph.sources
+    if graph.active_source and graph.active_source != "live":
+        sidecar_data["active_source"] = graph.active_source
     sidecar = py_path.with_suffix(".haute.json")
     sidecar.write_text(_json.dumps(sidecar_data, indent=2) + "\n")
 
 
 def parse_pipeline_to_graph(py_path: Path) -> PipelineGraph:
-    """Parse a .py file and merge with sidecar positions + scenario state."""
+    """Parse a .py file and merge with sidecar positions + source state."""
     from haute.parser import parse_pipeline_file
 
     graph = parse_pipeline_file(py_path)
@@ -293,17 +290,21 @@ def parse_pipeline_to_graph(py_path: Path) -> PipelineGraph:
         if node.id in positions:
             node.position = positions[node.id]
 
-    # Populate scenario state from sidecar
-    raw_scenarios = sidecar.get("scenarios")
-    if isinstance(raw_scenarios, list) and raw_scenarios:
+    # Populate source state from sidecar
+    raw_sources = sidecar.get("sources")
+    if isinstance(raw_sources, list) and raw_sources:
         # Ensure "live" is always first
-        if "live" not in raw_scenarios:
-            raw_scenarios = ["live", *raw_scenarios]
-        elif raw_scenarios[0] != "live":
-            raw_scenarios = ["live", *(s for s in raw_scenarios if s != "live")]
-        graph.scenarios = raw_scenarios
-    active = sidecar.get("active_scenario", "live")
-    if isinstance(active, str) and active in graph.scenarios:
-        graph.active_scenario = active
+        if "live" not in raw_sources:
+            raw_sources = ["live", *raw_sources]
+        elif raw_sources[0] != "live":
+            raw_sources = ["live", *(s for s in raw_sources if s != "live")]
+        graph.sources = raw_sources
+    active = sidecar.get("active_source", "live")
+    if isinstance(active, str):
+        # Ensure the active source is in the sources list
+        if active not in graph.sources and active != "live":
+            graph.sources = [*graph.sources, active]
+        if active in graph.sources:
+            graph.active_source = active
 
     return graph

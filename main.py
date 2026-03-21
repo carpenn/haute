@@ -13,17 +13,14 @@ from utility.features import (
     RENAME_MAP,
 )
 
-pipeline = haute.Pipeline("my_pipeline", description='')
+pipeline = haute.Pipeline("my_pipeline", description="")
 
 
 @pipeline.data_source(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
     df = pl.scan_parquet("output/nb_batch.parquet")
-    df = (
-        df
-        .limit(100000)
-    )
+    df = df.limit(100000)
     return df
 
 
@@ -49,7 +46,10 @@ def quoted_premiums() -> pl.LazyFrame:
 def quotes() -> pl.LazyFrame:
     """quotes node"""
     from haute._json_flatten import read_json_flat
-    return read_json_flat("data/quotes/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
+
+    return read_json_flat(
+        "data/quotes/quotes_10m.jsonl", config_path="config/quote_input/quotes.json"
+    )
 
 
 @pipeline.polars
@@ -57,36 +57,42 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Feature engineering for insurance pricing"""
     cols = quotes.collect_schema().names()
     cover_start = to_date("policy_details.cover_start_date")
-    
+
     # Helpers build the dynamic driver + addon expressions
     ad_derived, ad_age_cols, ad_renames, ad_keep = driver_features(cols, cover_start)
     addon_derived, addon_renames, addon_keep = addon_features(cols, ADDON_NAMES)
-    
+
     # Step 1 — Add calculated columns
     df = quotes.with_columns(
         # Proposer
         years_between(to_date("proposer.date_of_birth"), cover_start).alias("proposer_age"),
-        years_between(to_date("proposer.licence.licence_date"), cover_start).alias("proposer_licence_length_years"),
+        years_between(to_date("proposer.licence.licence_date"), cover_start).alias(
+            "proposer_licence_length_years"
+        ),
         # Vehicle
         (cover_start.dt.year() - pl.col("vehicle.year_of_manufacture")).alias("vehicle_age"),
         # Policy
-        (pl.col("policy_details.voluntary_excess") + pl.col("policy_details.compulsory_excess")).alias("total_excess"),
+        (
+            pl.col("policy_details.voluntary_excess") + pl.col("policy_details.compulsory_excess")
+        ).alias("total_excess"),
         # Address
-        (pl.col("address.years_at_address") * 12 + pl.col("address.months_at_address")).alias("address_total_months"),
+        (pl.col("address.years_at_address") * 12 + pl.col("address.months_at_address")).alias(
+            "address_total_months"
+        ),
         pl.col("address.postcode").str.split(" ").list.first().alias("postcode_area"),
         # Additional drivers + counts + addons
         *ad_derived,
         *addon_derived,
     )
-    
+
     # Step 2 — Youngest driver across proposer + any additional drivers
     df = df.with_columns(
         pl.min_horizontal("proposer_age", *ad_age_cols).alias("youngest_driver_age"),
     )
-    
+
     # Step 3 — Rename dot-notation columns to clean names
     df = df.rename({**RENAME_MAP, **ad_renames, **addon_renames})
-    
+
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
     return df
@@ -101,14 +107,7 @@ def policies(feature_processing: pl.LazyFrame, batch_quotes: pl.LazyFrame) -> pl
 @pipeline.polars
 def competitor_join(policies: pl.LazyFrame, competitor_insights: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_join node"""
-    df = (
-    policies
-    .join(
-        competitor_insights, 
-        on = 'quote_id', 
-        how = 'inner'
-    )
-    )
+    df = policies.join(competitor_insights, on="quote_id", how="inner")
     return df
 
 
@@ -123,62 +122,54 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_scoring node"""
     from pathlib import Path
     from haute.graph_utils import score_from_config
+
     base = str(Path(__file__).parent)
-    return score_from_config(policies, config="config/model_scoring/competitor_scoring.json", base_dir=base)
+    return score_from_config(
+        policies, config="config/model_scoring/competitor_scoring.json", base_dir=base
+    )
 
 
 @pipeline.polars
 def join_scoring(policies: pl.LazyFrame, competitor_scoring: pl.LazyFrame) -> pl.LazyFrame:
     """Join competitor scoring onto policies"""
-    df = (
-    policies
-    .join(
-        competitor_scoring,
-        on = 'quote_id',
-        how = 'left'
-    )
-    )
+    df = policies.join(competitor_scoring, on="quote_id", how="left")
     return df
 
 
 @pipeline.polars
 def join_policy_data(join_scoring: pl.LazyFrame, policy_data: pl.LazyFrame) -> pl.LazyFrame:
     """Join policy data"""
-    df = (
-    join_scoring
-    .join(
-        policy_data,
-        on = 'quote_id',
-        how = 'left'
-    )
-    )
+    df = join_scoring.join(policy_data, on="quote_id", how="left")
     return df
 
 
 @pipeline.polars
 def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """Join quoted premiums and derive sale_flag"""
-    df = (
-    join_policy_data
-    .join(
-        quoted_premiums,
-        on = 'quote_id',
-        how = 'left'
-    )
-    .with_columns(
-        sale_flag = pl.when(pl.col('policy_id').is_null()).then(pl.lit(0)).otherwise(pl.lit(1)),
-        burn_cost = pl.col('premium') * 0.7
-    )
+    df = join_policy_data.join(quoted_premiums, on="quote_id", how="left").with_columns(
+        sale_flag=pl.when(pl.col("policy_id").is_null()).then(pl.lit(0)).otherwise(pl.lit(1)),
+        burn_cost=pl.col("premium") * 0.7,
     )
     return df
 
 
-@pipeline.polars(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type', 'margin', 'burn_cost'])
+@pipeline.polars(
+    selected_columns=[
+        "quote_id",
+        "sale_flag",
+        "competitor_premium",
+        "premium",
+        "difference_to_market",
+        "proposer_age",
+        "cover_type",
+        "margin",
+        "burn_cost",
+    ]
+)
 def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
-    df = (
-    join_premiums
-    .with_columns(difference_to_market = pl.col('premium')/pl.col('competitor_premium'))
+    df = join_premiums.with_columns(
+        difference_to_market=pl.col("premium") / pl.col("competitor_premium")
     )
     return df
 
@@ -193,6 +184,7 @@ def conversion(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """Data Sink 9 node"""
     from haute._polars_utils import safe_sink
+
     safe_sink(competitor_features, "output/conversion_data.parquet")
     return competitor_features
 
@@ -201,10 +193,7 @@ def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 def premium(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """premium node"""
     df = join_premiums
-    df = (
-    df
-    .with_columns(premium = pl.col('premium') * pl.col('premium_multiplier'))
-    )
+    df = df.with_columns(premium=pl.col("premium") * pl.col("premium_multiplier"))
     return df
 
 
@@ -213,21 +202,22 @@ def conversion_scoring(competitor_features_scenarios: pl.LazyFrame) -> pl.LazyFr
     """conversion_scoring node"""
     from pathlib import Path
     from haute.graph_utils import score_from_config
+
     base = str(Path(__file__).parent)
-    return score_from_config(competitor_features_scenarios, config="config/model_scoring/conversion_scoring.json", base_dir=base)
+    return score_from_config(
+        competitor_features_scenarios,
+        config="config/model_scoring/conversion_scoring.json",
+        base_dir=base,
+    )
 
 
 @pipeline.polars
 def optimiser_input(conversion_scoring: pl.LazyFrame) -> pl.LazyFrame:
     """Polars 8 node"""
-    df = (
-    conversion_scoring
-    .with_columns(
-        margin = pl.col('premium') - pl.col('burn_cost'),
-    )
-    .with_columns(
-        expected_margin = pl.col('margin') * pl.col('conversion_prediction'),
-    )
+    df = conversion_scoring.with_columns(
+        margin=pl.col("premium") - pl.col("burn_cost"),
+    ).with_columns(
+        expected_margin=pl.col("margin") * pl.col("conversion_prediction"),
     )
     return df
 
@@ -242,7 +232,6 @@ def online_optimiser(optimiser_input: pl.LazyFrame) -> pl.LazyFrame:
 def competitor_features_scenarios(premium: pl.LazyFrame) -> pl.LazyFrame:
     """Instance of competitor_features"""
     return competitor_features(join_premiums=premium)
-
 
 
 # Wire nodes together - edges define data flow

@@ -2,7 +2,7 @@
  * Zustand store for application-level settings and caches:
  *   - Row limit (preview configuration)
  *   - MLflow connection status (fetched once, shared by all panels)
- *   - Scenario system (data source routing)
+ *   - Source system (data source routing)
  *   - Collapsible section states (persisted across panel mounts)
  *   - File listing cache (short-lived FS cache for file browsers)
  *
@@ -28,13 +28,13 @@ interface SettingsState {
   _mlflowLastAttempt: number
   fetchMlflow: () => void
 
-  // Scenario system
-  scenarios: string[]
-  activeScenario: string
-  setScenarios: (scenarios: string[]) => void
-  setActiveScenario: (scenario: string) => void
-  addScenario: (name: string) => string | null
-  removeScenario: (name: string) => void
+  // Source system
+  sources: string[]
+  activeSource: string
+  setSources: (sources: string[]) => void
+  setActiveSource: (source: string) => void
+  addSource: (name: string) => string | null
+  removeSource: (name: string) => void
 
   // File listing cache (keyed by "dir|extensions")
   fileListCache: Record<string, { items: { name: string; path: string; type: "file" | "directory"; size?: number }[]; fetchedAt: number }>
@@ -91,24 +91,24 @@ const useSettingsStore = create<SettingsState>()((set, get) => ({
       })
   },
 
-  // Scenario system
-  scenarios: ["live"],
-  activeScenario: "live",
-  setScenarios: (scenarios) => set({ scenarios }),
-  setActiveScenario: (scenario) => set({ activeScenario: scenario }),
-  addScenario: (name) => {
+  // Source system
+  sources: ["live"],
+  activeSource: "live",
+  setSources: (sources) => set({ sources }),
+  setActiveSource: (source) => set({ activeSource: source }),
+  addSource: (name) => {
     const trimmed = name.trim().toLowerCase().replace(/\s+/g, "_")
-    const current = get().scenarios
+    const current = get().sources
     if (!trimmed || current.includes(trimmed)) return null
-    set({ scenarios: [...current, trimmed] })
+    set({ sources: [...current, trimmed] })
     return trimmed
   },
-  removeScenario: (name) => set((s) => {
+  removeSource: (name) => set((s) => {
     if (name === "live") return s
-    const next = s.scenarios.filter((sc) => sc !== name)
+    const next = s.sources.filter((sc) => sc !== name)
     return {
-      scenarios: next,
-      activeScenario: s.activeScenario === name ? "live" : s.activeScenario,
+      sources: next,
+      activeSource: s.activeSource === name ? "live" : s.activeSource,
     }
   }),
 

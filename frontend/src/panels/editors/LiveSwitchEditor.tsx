@@ -15,13 +15,13 @@ export default function LiveSwitchEditor({
   inputSources: InputSource[]
   accentColor: string
 }) {
-  const scenarios = useSettingsStore((s) => s.scenarios)
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
+  const sources = useSettingsStore((s) => s.sources)
+  const activeSource = useSettingsStore((s) => s.activeSource)
   const inputScenarioMap = configField<Record<string, string>>(config, "input_scenario_map", {})
 
   /** Update the mapping for a single input. */
-  const setMapping = (inputName: string, scenario: string) => {
-    onUpdate("input_scenario_map", { ...inputScenarioMap, [inputName]: scenario })
+  const setMapping = (inputName: string, source: string) => {
+    onUpdate("input_scenario_map", { ...inputScenarioMap, [inputName]: source })
   }
 
   return (
@@ -30,31 +30,31 @@ export default function LiveSwitchEditor({
         style={{ background: withAlpha(accentColor, 0.1), border: `1px solid ${withAlpha(accentColor, 0.3)}`, color: accentColor }}
       >
         <ToggleLeft size={14} />
-        <span>Routes inputs based on the active scenario</span>
+        <span>Routes inputs based on the active source</span>
       </div>
 
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1 block" style={{ color: 'var(--text-muted)' }}>
-          Active Scenario
+          Active Source
         </label>
         <div className="px-2.5 py-1.5 text-xs rounded-lg font-mono"
           style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
         >
-          {activeScenario === "live" ? "● live" : activeScenario}
+          {activeSource === "live" ? "● live" : activeSource}
         </div>
         <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          Change the active scenario in the toolbar dropdown
+          Change the active source in the toolbar dropdown
         </div>
       </div>
 
       <div>
         <label className="text-[11px] font-bold uppercase tracking-[0.08em] mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-          Input → Scenario Mapping ({inputSources.length})
+          Input → Source Mapping ({inputSources.length})
         </label>
         <div className="space-y-1.5">
           {inputSources.map((src) => {
-            const mappedScenario = inputScenarioMap[src.varName] || ""
-            const isActive = mappedScenario === activeScenario
+            const mappedSource = inputScenarioMap[src.varName] || ""
+            const isActive = mappedSource === activeSource
             return (
               <div
                 key={src.varName}
@@ -72,7 +72,7 @@ export default function LiveSwitchEditor({
                   {src.sourceLabel}
                 </span>
                 <select
-                  value={mappedScenario}
+                  value={mappedSource}
                   onChange={(e) => setMapping(src.varName, e.target.value)}
                   className="px-1.5 py-0.5 text-[11px] font-mono rounded focus:outline-none"
                   style={{
@@ -82,7 +82,7 @@ export default function LiveSwitchEditor({
                   }}
                 >
                   <option value="">—</option>
-                  {scenarios.map((s) => (
+                  {sources.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>

@@ -170,12 +170,12 @@ class TestLoadSidecar:
         py_path = tmp_path / "pipeline.py"
         py_path.write_text("")
         sidecar = tmp_path / "pipeline.haute.json"
-        data = {"positions": {"a": {"x": 10, "y": 20}}, "scenarios": ["live", "test"]}
+        data = {"positions": {"a": {"x": 10, "y": 20}}, "sources": ["live", "test"]}
         sidecar.write_text(json.dumps(data))
 
         result = load_sidecar(py_path)
         assert result["positions"]["a"] == {"x": 10, "y": 20}
-        assert result["scenarios"] == ["live", "test"]
+        assert result["sources"] == ["live", "test"]
 
     def test_missing_sidecar(self, tmp_path):
         py_path = tmp_path / "pipeline.py"
@@ -216,7 +216,7 @@ class TestLoadSidecarPositions:
         py_path = tmp_path / "pipeline.py"
         py_path.write_text("")
         sidecar = tmp_path / "pipeline.haute.json"
-        sidecar.write_text(json.dumps({"scenarios": ["live"]}))
+        sidecar.write_text(json.dumps({"sources": ["live"]}))
 
         result = load_sidecar_positions(py_path)
         assert result == {}
@@ -232,8 +232,11 @@ class TestSaveSidecar:
         py_path = tmp_path / "pipeline.py"
         graph = PipelineGraph(
             nodes=[
-                GraphNode(id="a", position={"x": 100.0, "y": 200.0},
-                          data=NodeData(label="A", nodeType=NodeType.DATA_SOURCE)),
+                GraphNode(
+                    id="a",
+                    position={"x": 100.0, "y": 200.0},
+                    data=NodeData(label="A", nodeType=NodeType.DATA_SOURCE),
+                ),
             ],
             edges=[],
         )
@@ -245,28 +248,28 @@ class TestSaveSidecar:
         assert "positions" in data
         assert data["positions"]["A"] == {"x": 100.0, "y": 200.0}
 
-    def test_scenario_state_saved(self, tmp_path):
+    def test_source_state_saved(self, tmp_path):
         py_path = tmp_path / "pipeline.py"
         graph = PipelineGraph(
             nodes=[],
-            scenarios=["live", "test_batch"],
-            active_scenario="test_batch",
+            sources=["live", "test_batch"],
+            active_source="test_batch",
         )
         save_sidecar(py_path, graph)
 
         data = json.loads((tmp_path / "pipeline.haute.json").read_text())
-        assert data["scenarios"] == ["live", "test_batch"]
-        assert data["active_scenario"] == "test_batch"
+        assert data["sources"] == ["live", "test_batch"]
+        assert data["active_source"] == "test_batch"
 
-    def test_default_scenario_not_saved(self, tmp_path):
-        """Default scenario state (["live"], "live") is not persisted."""
+    def test_default_source_not_saved(self, tmp_path):
+        """Default source state (["live"], "live") is not persisted."""
         py_path = tmp_path / "pipeline.py"
-        graph = PipelineGraph(nodes=[], scenarios=["live"], active_scenario="live")
+        graph = PipelineGraph(nodes=[], sources=["live"], active_source="live")
         save_sidecar(py_path, graph)
 
         data = json.loads((tmp_path / "pipeline.haute.json").read_text())
-        assert "scenarios" not in data
-        assert "active_scenario" not in data
+        assert "sources" not in data
+        assert "active_source" not in data
 
     def test_roundtrip(self, tmp_path):
         """save_sidecar then load_sidecar should produce consistent data."""
@@ -275,29 +278,38 @@ class TestSaveSidecar:
 
         graph = PipelineGraph(
             nodes=[
-                GraphNode(id="a", position={"x": 1.0, "y": 2.0},
-                          data=NodeData(label="alpha", nodeType=NodeType.POLARS)),
-                GraphNode(id="b", position={"x": 3.0, "y": 4.0},
-                          data=NodeData(label="beta", nodeType=NodeType.OUTPUT)),
+                GraphNode(
+                    id="a",
+                    position={"x": 1.0, "y": 2.0},
+                    data=NodeData(label="alpha", nodeType=NodeType.POLARS),
+                ),
+                GraphNode(
+                    id="b",
+                    position={"x": 3.0, "y": 4.0},
+                    data=NodeData(label="beta", nodeType=NodeType.OUTPUT),
+                ),
             ],
-            scenarios=["live", "test"],
-            active_scenario="test",
+            sources=["live", "test"],
+            active_source="test",
         )
         save_sidecar(py_path, graph)
         loaded = load_sidecar(py_path)
 
         assert loaded["positions"]["alpha"] == {"x": 1.0, "y": 2.0}
         assert loaded["positions"]["beta"] == {"x": 3.0, "y": 4.0}
-        assert loaded["scenarios"] == ["live", "test"]
-        assert loaded["active_scenario"] == "test"
+        assert loaded["sources"] == ["live", "test"]
+        assert loaded["active_source"] == "test"
 
     def test_label_sanitized_as_key(self, tmp_path):
         """Position keys use sanitized label (matching parser node IDs)."""
         py_path = tmp_path / "pipeline.py"
         graph = PipelineGraph(
             nodes=[
-                GraphNode(id="n1", position={"x": 10.0, "y": 20.0},
-                          data=NodeData(label="My Node", nodeType=NodeType.POLARS)),
+                GraphNode(
+                    id="n1",
+                    position={"x": 10.0, "y": 20.0},
+                    data=NodeData(label="My Node", nodeType=NodeType.POLARS),
+                ),
             ],
         )
         save_sidecar(py_path, graph)
@@ -382,20 +394,22 @@ class TestScenarioNormalization:
 
         # Write sidecar with "live" NOT in first position
         sidecar = py_path.with_suffix(".haute.json")
-        sidecar.write_text(json.dumps({
-            "scenarios": ["test_batch", "live", "scenario_b"],
-            "active_scenario": "live",
-        }))
+        sidecar.write_text(
+            json.dumps(
+                {
+                    "sources": ["test_batch", "live", "source_b"],
+                    "active_source": "live",
+                }
+            )
+        )
 
         graph = parse_pipeline_to_graph(py_path)
 
-        assert graph.scenarios[0] == "live", (
-            f"Expected 'live' first, got: {graph.scenarios}"
-        )
-        # All original scenarios must still be present
-        assert set(graph.scenarios) == {"live", "test_batch", "scenario_b"}
+        assert graph.sources[0] == "live", f"Expected 'live' first, got: {graph.sources}"
+        # All original sources must still be present
+        assert set(graph.sources) == {"live", "test_batch", "source_b"}
         # No duplicates
-        assert len(graph.scenarios) == 3
+        assert len(graph.sources) == 3
 
 
 class TestInvalidatePipelineIndex:

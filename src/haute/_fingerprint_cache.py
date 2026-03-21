@@ -11,7 +11,7 @@ Both caches follow the same pattern:
 4. ``invalidate()`` clears everything.
 
 Supports multiple entries (default 8) so that switching between
-scenarios or row-limits does not invalidate unrelated cached results.
+sources or row-limits does not invalidate unrelated cached results.
 LRU eviction keeps the most recently accessed entries.
 
 Usage::
@@ -49,7 +49,7 @@ class FingerprintCache:
     max_entries:
         Maximum number of fingerprint entries to keep.  When exceeded,
         the least-recently-used entry is evicted.  Default ``8``
-        allows caching ~4 scenarios × 2 row-limits without thrashing.
+        allows caching ~4 sources × 2 row-limits without thrashing.
     """
 
     __slots__ = ("_slots", "_entries", "_max_entries", "_lock")
@@ -103,8 +103,7 @@ class FingerprintCache:
         unknown = set(slot_data) - set(self._slots)
         if unknown:
             raise ValueError(
-                f"Unknown slot(s): {sorted(unknown)}. "
-                f"Declared slots: {sorted(self._slots)}"
+                f"Unknown slot(s): {sorted(unknown)}. Declared slots: {sorted(self._slots)}"
             )
         with self._lock:
             entry = {name: slot_data.get(name, {}) for name in self._slots}
@@ -121,10 +120,7 @@ class FingerprintCache:
         slots are merged.
         """
         if slot not in self._slots:
-            raise ValueError(
-                f"Unknown slot: {slot!r}. "
-                f"Declared slots: {sorted(self._slots)}"
-            )
+            raise ValueError(f"Unknown slot: {slot!r}. Declared slots: {sorted(self._slots)}")
         with self._lock:
             if self._entries:
                 last_key = next(reversed(self._entries))
@@ -145,7 +141,4 @@ class FingerprintCache:
             n = len(self._entries)
             fps = list(self._entries.keys())
         fp_summary = ", ".join(f[:8] for f in fps[-3:])
-        return (
-            f"FingerprintCache(entries={n}/{self._max_entries}, "
-            f"recent=[{fp_summary}])"
-        )
+        return f"FingerprintCache(entries={n}/{self._max_entries}, recent=[{fp_summary}])"

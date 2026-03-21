@@ -40,33 +40,37 @@ def _make_model_score_graph(
         "output_column": output_column,
         "code": code,
     }
-    return make_graph({
-        "nodes": [
-            {
-                "id": "source",
-                "data": {
-                    "label": "source",
-                    "nodeType": "dataSource",
-                    "config": {"path": data_path},
+    return make_graph(
+        {
+            "nodes": [
+                {
+                    "id": "source",
+                    "data": {
+                        "label": "source",
+                        "nodeType": "dataSource",
+                        "config": {"path": data_path},
+                    },
                 },
-            },
-            {
-                "id": "score",
-                "data": {"label": "score", "nodeType": "modelScore", "config": config},
-            },
-        ],
-        "edges": [make_edge("source", "score").model_dump()],
-    })
+                {
+                    "id": "score",
+                    "data": {"label": "score", "nodeType": "modelScore", "config": config},
+                },
+            ],
+            "edges": [make_edge("source", "score").model_dump()],
+        }
+    )
 
 
 @pytest.fixture()
 def sample_data(tmp_path):
     """Create a small parquet file with features."""
-    df = pl.DataFrame({
-        "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "x2": [10.0, 20.0, 30.0, 40.0, 50.0],
-        "id": [1, 2, 3, 4, 5],
-    })
+    df = pl.DataFrame(
+        {
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "x2": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "id": [1, 2, 3, 4, 5],
+        }
+    )
     path = tmp_path / "data.parquet"
     df.write_parquet(path)
     return str(path)
@@ -80,13 +84,15 @@ def _make_mock_model(task: str = "regression", feature_names: list[str] | None =
     model.predict.return_value = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     model.get_cat_feature_indices.return_value = []
     if task == "classification":
-        model.predict_proba.return_value = np.array([
-            [0.9, 0.1],
-            [0.8, 0.2],
-            [0.3, 0.7],
-            [0.6, 0.4],
-            [0.2, 0.8],
-        ])
+        model.predict_proba.return_value = np.array(
+            [
+                [0.9, 0.1],
+                [0.8, 0.2],
+                [0.3, 0.7],
+                [0.6, 0.4],
+                [0.2, 0.8],
+            ]
+        )
     else:
         del model.predict_proba
     return ScoringModel(
@@ -139,7 +145,8 @@ class TestModelScoreClassification:
         mock_model = _make_mock_model("classification")
 
         graph = _make_model_score_graph(
-            data_path=sample_data, task="classification",
+            data_path=sample_data,
+            task="classification",
         )
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
@@ -158,23 +165,25 @@ class TestModelScoreClassification:
 class TestModelScorePassthrough:
     def test_empty_config_passthrough(self, sample_data):
         """Empty config (no sourceType) acts as passthrough."""
-        graph = make_graph({
-            "nodes": [
-                {
-                    "id": "source",
-                    "data": {
-                        "label": "source",
-                        "nodeType": "dataSource",
-                        "config": {"path": sample_data},
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "source",
+                        "data": {
+                            "label": "source",
+                            "nodeType": "dataSource",
+                            "config": {"path": sample_data},
+                        },
                     },
-                },
-                {
-                    "id": "score",
-                    "data": {"label": "score", "nodeType": "modelScore", "config": {}},
-                },
-            ],
-            "edges": [make_edge("source", "score").model_dump()],
-        })
+                    {
+                        "id": "score",
+                        "data": {"label": "score", "nodeType": "modelScore", "config": {}},
+                    },
+                ],
+                "edges": [make_edge("source", "score").model_dump()],
+            }
+        )
         results = execute_graph(graph, target_node_id="score", row_limit=100)
         assert results["score"].status == "ok"
         # Same columns as source (passthrough)
@@ -185,7 +194,9 @@ class TestModelScorePassthrough:
     def test_run_without_run_id_passthrough(self, sample_data):
         """sourceType=run without run_id is a passthrough."""
         graph = _make_model_score_graph(
-            data_path=sample_data, source_type="run", run_id="",
+            data_path=sample_data,
+            source_type="run",
+            run_id="",
         )
         results = execute_graph(graph, target_node_id="score", row_limit=100)
         assert results["score"].status == "ok"
@@ -195,8 +206,10 @@ class TestModelScorePassthrough:
     def test_registered_without_model_passthrough(self, sample_data):
         """sourceType=registered without registered_model is a passthrough."""
         graph = _make_model_score_graph(
-            data_path=sample_data, source_type="registered",
-            registered_model="", run_id="",
+            data_path=sample_data,
+            source_type="registered",
+            registered_model="",
+            run_id="",
         )
         results = execute_graph(graph, target_node_id="score", row_limit=100)
         assert results["score"].status == "ok"
@@ -258,7 +271,7 @@ class TestModelScorePostProcessing:
 
         graph = _make_model_score_graph(
             data_path=sample_data,
-            code='df = df.with_columns(n_features=pl.lit(len(model.feature_names_)))',
+            code="df = df.with_columns(n_features=pl.lit(len(model.feature_names_)))",
         )
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(graph, target_node_id="score", row_limit=100)
@@ -330,7 +343,7 @@ class TestModelScoreScenarioRouting:
         before = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
 
         with patch("haute._mlflow_io.load_mlflow_model", return_value=sm):
-            results = execute_graph(graph, target_node_id="score", scenario="live")
+            results = execute_graph(graph, target_node_id="score", source="live")
 
         assert results["score"].status == "ok"
         assert results["score"].row_count == 5
@@ -351,7 +364,7 @@ class TestModelScoreScenarioRouting:
         graph = _make_model_score_graph(data_path=sample_data)
 
         with patch("haute._mlflow_io.load_mlflow_model", return_value=sm):
-            results = execute_graph(graph, target_node_id="score", scenario="test_batch")
+            results = execute_graph(graph, target_node_id="score", source="test_batch")
 
         assert results["score"].status == "ok"
         assert results["score"].row_count == 5
@@ -373,17 +386,17 @@ class TestModelScoreScenarioRouting:
 
         with patch("haute._mlflow_io.load_mlflow_model", return_value=mock_model):
             results = execute_graph(
-                graph, target_node_id="score",
-                scenario="nb_batch", row_limit=1000,
+                graph,
+                target_node_id="score",
+                source="nb_batch",
+                row_limit=1000,
             )
 
         assert results["score"].status == "ok"
 
         after = set(glob.glob(os.path.join(tmp_dir, "*.parquet")))
         new_parquets = after - before
-        assert not new_parquets, (
-            f"Row-limited preview should use eager path, found: {new_parquets}"
-        )
+        assert not new_parquets, f"Row-limited preview should use eager path, found: {new_parquets}"
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +413,12 @@ class TestScoreEager:
         model.predict.return_value = np.arange(n_rows, dtype=float)
         model.get_cat_feature_indices.return_value = []
         if task == "classification":
-            model.predict_proba.return_value = np.column_stack([
-                np.linspace(0.9, 0.1, n_rows),
-                np.linspace(0.1, 0.9, n_rows),
-            ])
+            model.predict_proba.return_value = np.column_stack(
+                [
+                    np.linspace(0.9, 0.1, n_rows),
+                    np.linspace(0.1, 0.9, n_rows),
+                ]
+            )
         else:
             del model.predict_proba
         return ScoringModel(
@@ -431,7 +446,10 @@ class TestScoreEager:
         lf = pl.DataFrame({"x1": [1.0, 2.0], "x2": [10.0, 20.0]}).lazy()
 
         result = _score_eager(
-            sm, lf, ["x1", "x2"], task="classification",
+            sm,
+            lf,
+            ["x1", "x2"],
+            task="classification",
         )
         df = result.collect()
         assert "prediction" in df.columns

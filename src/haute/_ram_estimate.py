@@ -4,7 +4,7 @@ Before materialising a full pipeline for model training, estimate the
 memory footprint from parquet metadata alone:
 
 1. Walk the graph backwards from the training node (respecting the
-   active scenario and live-switch pruning) to find ancestor sources.
+   active source and live-switch pruning) to find ancestor sources.
 2. Read parquet row-group metadata — row count and column count — from
    those sources.  This is instant (reads only the file footer).
 3. Estimate ``bytes_per_row`` from column count × dtype width, then
@@ -153,7 +153,7 @@ def estimate_gpu_vram_bytes(
 ) -> int:
     """Estimate CatBoost GPU VRAM needed for *n_rows* × *n_features*."""
     feature_bytes = n_rows * n_features * 5  # float32 + binarised
-    per_row_bytes = n_rows * 12              # label + gradient + hessian
+    per_row_bytes = n_rows * 12  # label + gradient + hessian
     n_leaves = 2 ** min(depth, 10)
     histogram_bytes = n_features * border_count * n_leaves * 8
 
@@ -162,7 +162,7 @@ def estimate_gpu_vram_bytes(
 
 
 # ---------------------------------------------------------------------------
-# Source metadata — scenario-aware
+# Source metadata — source-aware
 # ---------------------------------------------------------------------------
 
 # Bytes per column for the analytical estimate.  Training features are
@@ -190,6 +190,7 @@ def _count_source_rows_for_node(node: GraphNode) -> int | None:
             path = config.get("path", "")
             if path.endswith((".json", ".jsonl")):
                 from haute._json_flatten import json_cache_info
+
                 info = json_cache_info(path)
                 if info is not None:
                     return info["row_count"]
@@ -233,6 +234,7 @@ def _source_metadata_for_node(node: GraphNode) -> tuple[int, int] | None:
         if node_type == NodeType.API_INPUT:
             if path.endswith((".json", ".jsonl")):
                 from haute._json_flatten import json_cache_info
+
                 info = json_cache_info(path)
                 if info is not None:
                     return info["row_count"], info["column_count"]
@@ -273,11 +275,11 @@ def _jsonl_row_count(path: str) -> int:
 def _ancestor_source_metadata(
     graph: PipelineGraph,
     target_node_id: str,
-    scenario: str = "live",
+    source: str = "live",
 ) -> tuple[int | None, int]:
     """Row count and column count from ancestor sources of the target node.
 
-    Prunes edges by scenario (respecting live-switch routing) then walks
+    Prunes edges by source (respecting live-switch routing) then walks
     backwards from the target to find only the relevant source nodes.
 
     Returns ``(max_rows, max_columns)`` across ancestor sources.
@@ -289,7 +291,7 @@ def _ancestor_source_metadata(
     node_map = {n.id: n for n in graph.nodes}
     all_ids = set(node_map)
 
-    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
+    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, source)
     ancestor_ids = ancestors(target_node_id, pruned_edges, all_ids)
 
     max_rows: int | None = None
@@ -315,7 +317,7 @@ def estimate_source_rows(graph: PipelineGraph) -> int | None:
     """Estimate total rows entering the pipeline from all source nodes.
 
     Returns the **maximum** row count across all source nodes.
-    Prefer :func:`_ancestor_source_metadata` when target and scenario
+    Prefer :func:`_ancestor_source_metadata` when target and source
     are known.
     """
     max_rows: int | None = None
@@ -387,11 +389,11 @@ class RamEstimate(NamedTuple):
 def _resolve_target_columns(
     graph: PipelineGraph,
     target_node_id: str,
-    scenario: str,
+    source: str,
 ) -> int | None:
     """Walk backwards from the target to determine column count.
 
-    BFS from the target through ancestor nodes (respecting scenario
+    BFS from the target through ancestor nodes (respecting source
     pruning).  Returns the column count from the first node that has
     a definitive schema — either a ``selected_columns`` config or a
     source parquet file with readable metadata.
@@ -402,7 +404,7 @@ def _resolve_target_columns(
 
     node_map = {n.id: n for n in graph.nodes}
     all_ids = set(node_map)
-    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
+    pruned_edges = _prune_live_switch_edges(graph.edges, node_map, source)
 
     parents = build_parents_of(pruned_edges, all_ids)
 
@@ -443,11 +445,11 @@ def estimate_safe_training_rows(
     overhead_multiplier: float = 1.0,  # kept for backward compat
     safety_factor: float = _RAM_SAFETY_FACTOR,
     preamble_ns: dict | None = None,
-    scenario: str = "live",
+    source: str = "live",
 ) -> RamEstimate:
     """Estimate whether the full pipeline fits in RAM for training.
 
-    1. Row count from source parquet metadata (scenario-aware).
+    1. Row count from source parquet metadata (source-aware).
     2. Column count resolved from the lazy plan at the training node
        (captures joins and transforms), minus excluded features.
     3. Peak memory estimate using the empirical 3× multiplier.
@@ -458,7 +460,9 @@ def estimate_safe_training_rows(
 
     # ── 1. Source metadata for row count ──────────────────────────────
     total_rows, source_cols = _ancestor_source_metadata(
-        graph, target_node_id, scenario,
+        graph,
+        target_node_id,
+        source,
     )
 
     if total_rows is None:
@@ -466,7 +470,7 @@ def estimate_safe_training_rows(
             "source_metadata_unavailable",
             total_rows=total_rows,
             target=target_node_id,
-            scenario=scenario,
+            source=source,
         )
         return RamEstimate(
             safe_row_limit=None,
@@ -482,13 +486,13 @@ def estimate_safe_training_rows(
     # ── 2. Column count at the training node ─────────────────────────
     #   Walk backwards through the graph from the target.  Returns the
     #   count from the first node with selected_columns or source metadata.
-    n_columns = _resolve_target_columns(graph, target_node_id, scenario)
+    n_columns = _resolve_target_columns(graph, target_node_id, source)
 
     if not n_columns:
         logger.info(
             "schema_unavailable",
             target=target_node_id,
-            scenario=scenario,
+            source=source,
         )
         return RamEstimate(
             safe_row_limit=None,

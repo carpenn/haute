@@ -231,10 +231,10 @@ class TestExecuteSinkScenario:
             return {"sink": lf}, ["s", "sink"], {}, {}
 
         with patch("haute.executor._execute_lazy", side_effect=mock_execute_lazy):
-            execute_sink(graph, "sink", scenario="live")
+            execute_sink(graph, "sink", source="live")
 
         # Should NOT be "live" — should be coerced to "batch"
-        assert captured_kwargs["scenario"] != "live"
+        assert captured_kwargs["source"] != "live"
 
     def test_custom_scenario_passed_through(self, tmp_path):
         """Non-'live' scenario is passed through unchanged."""
@@ -257,9 +257,9 @@ class TestExecuteSinkScenario:
             return {"sink": lf}, ["s", "sink"], {}, {}
 
         with patch("haute.executor._execute_lazy", side_effect=mock_execute_lazy):
-            execute_sink(graph, "sink", scenario="test_batch")
+            execute_sink(graph, "sink", source="test_batch")
 
-        assert captured_kwargs["scenario"] == "test_batch"
+        assert captured_kwargs["source"] == "test_batch"
 
 
 class TestExecuteSinkComputeFailure:

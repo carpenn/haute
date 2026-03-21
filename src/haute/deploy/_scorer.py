@@ -204,7 +204,7 @@ def score_graph(
                         output_col=_oc,
                         code=_c,
                         source_names=_sn,
-                        scenario="live",
+                        source="live",
                     )
 
                 return func_name, model_score_fn, False
@@ -232,14 +232,14 @@ def score_graph(
 
     preamble_ns = _compile_preamble(graph.preamble or "") or None
 
-    # Deployed API always runs in "live" scenario — eager scoring, live
+    # Deployed API always runs in "live" source — eager scoring, live
     # switch routes to the live input.
     lazy_outputs, order, _parents, _names = _execute_lazy(
         graph,
         builder,
         target_node_id=output_node_id,
         preamble_ns=preamble_ns,
-        scenario="live",
+        source="live",
     )
 
     output_lf = lazy_outputs.get(output_node_id)

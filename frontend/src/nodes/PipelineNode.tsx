@@ -17,8 +17,8 @@ export type PipelineNodeData = HauteNodeData
 
 /** Isolated component so only LiveSwitch nodes subscribe to the settings store. */
 function LiveSwitchBadge({ accent }: { accent: string }) {
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
-  if (activeScenario !== "live") return null
+  const activeSource = useSettingsStore((s) => s.activeSource)
+  if (activeSource !== "live") return null
   return (
     <span
       className="ml-auto inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-[0.08em] shrink-0"

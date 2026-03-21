@@ -221,7 +221,27 @@
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/typescript/bin/tsc -b --noEmit)",
       "Bash(\"/c/Program Files/nodejs/node.exe\" ./node_modules/eslint/bin/eslint.js .)",
       "Bash(chmod:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(.venv/Scripts/python.exe -c \"from haute.schemas import SavePipelineRequest, PreviewNodeRequest, TraceRequest, SinkRequest, TrainRequest, TrainEstimateRequest; print\\(''schemas OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\(''src/haute/executor.py''\\).read\\(\\)\\); print\\(''executor.py OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_model_score_executor.py::TestModelScoreScenarioRouting::test_row_limited_preview_uses_eager_path -x -q --tb=long)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_server.py::TestPreviewNode::test_preview_returns_node_data -x -q --tb=long)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_trace.py::TestExecuteTrace::test_trace_respects_scenario_pruning -x -q --tb=long)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -x -q --tb=line)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_types.py::TestPipelineGraph::test_empty_graph_defaults -x -q --tb=long)",
+      "Bash(npx.cmd tsc:*)",
+      "Bash(/c/Users/prici/haute/frontend/node_modules/.bin/tsc --noEmit)",
+      "Bash(node node_modules/.bin/tsc --noEmit)",
+      "Bash(node -e \"require\\(''''child_process''''\\).execSync\\(''''node_modules/.bin/tsc.cmd --noEmit'''', {stdio:''''inherit''''}\\)\")",
+      "Bash(py -m pytest tests/test_scenario_propagation.py -x -q)",
+      "Bash(ls /c/Users/prici/haute/.venv/Scripts/python*)",
+      "Bash(ls /c/Users/prici/haute/venv/Scripts/python*)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_scenario_propagation.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_execute_lazy.py tests/test_executor.py tests/test_model_score_executor.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_sink.py tests/test_builders.py -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_sink.py -x -q)",
+      "Bash(while read:*)",
+      "Bash(do uv:*)"
     ]
   }
 }

@@ -131,11 +131,11 @@ export function previewNode(
   graph: GraphPayload,
   nodeId: string,
   rowLimit: number,
-  scenario?: string,
+  source?: string,
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<NodeResult & { node_id: string }> {
   return post("/api/pipeline/preview", {
-    graph, node_id: nodeId, row_limit: rowLimit, scenario: scenario ?? "live",
+    graph, node_id: nodeId, row_limit: rowLimit, source: source ?? "live",
   }, {
     timeout: 120_000,
     ...options,
@@ -149,8 +149,8 @@ export function savePipeline(
     graph: GraphPayload
     preamble: string
     source_file: string
-    scenarios?: string[]
-    active_scenario?: string
+    sources?: string[]
+    active_source?: string
   },
   options?: { signal?: AbortSignal },
 ): Promise<SavePipelineResponse> {
@@ -164,7 +164,7 @@ export function traceCell(
     target_node_id: string
     column?: string | null
     row_limit?: number
-    scenario?: string
+    source?: string
   },
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<TraceResponse> {
@@ -174,10 +174,10 @@ export function traceCell(
 export function executeSink(
   graph: GraphPayload,
   nodeId: string,
-  scenario?: string,
+  source?: string,
   options?: { signal?: AbortSignal; timeout?: number },
 ): Promise<SinkResponse> {
-  return post("/api/pipeline/sink", { graph, node_id: nodeId, scenario: scenario ?? "live" }, { timeout: 300_000, ...options })
+  return post("/api/pipeline/sink", { graph, node_id: nodeId, source: source ?? "live" }, { timeout: 300_000, ...options })
 }
 
 // ---------------------------------------------------------------------------
@@ -257,18 +257,18 @@ export function getTrainStatus<T = unknown>(
 }
 
 export function trainModel(
-  payload: { graph: GraphPayload; node_id: string; scenario?: string },
+  payload: { graph: GraphPayload; node_id: string; source?: string },
   options?: { signal?: AbortSignal },
 ): Promise<Record<string, unknown>> {
   // Pipeline execution can take minutes for large datasets — use a 10-minute timeout
-  return post("/api/modelling/train", { ...payload, scenario: payload.scenario ?? "live" }, { ...options, timeout: 600_000 })
+  return post("/api/modelling/train", { ...payload, source: payload.source ?? "live" }, { ...options, timeout: 600_000 })
 }
 
 export function estimateTrainingRam(
-  payload: { graph: GraphPayload; node_id: string; scenario?: string },
+  payload: { graph: GraphPayload; node_id: string; source?: string },
   options?: { signal?: AbortSignal },
 ): Promise<TrainEstimate> {
-  return post("/api/modelling/estimate", { ...payload, scenario: payload.scenario ?? "live" }, { timeout: 30_000, ...options })
+  return post("/api/modelling/estimate", { ...payload, source: payload.source ?? "live" }, { timeout: 30_000, ...options })
 }
 
 export function logToMlflow(

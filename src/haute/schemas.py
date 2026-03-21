@@ -34,8 +34,8 @@ class SavePipelineRequest(BaseModel):
     preamble: str | None = ""
     preserved_blocks: list[str] = Field(default_factory=list)
     source_file: str = ""
-    scenarios: list[str] = Field(default_factory=lambda: ["live"])
-    active_scenario: str = "live"
+    sources: list[str] = Field(default_factory=lambda: ["live"])
+    active_source: str = "live"
 
 
 class SavePipelineResponse(BaseModel):
@@ -72,7 +72,7 @@ class PreviewNodeRequest(BaseModel):
     graph: Graph
     node_id: str
     row_limit: int = 100
-    scenario: str = "live"
+    source: str = "live"
 
 
 class NodeTimingInfo(BaseModel):
@@ -117,7 +117,7 @@ class TraceRequest(BaseModel):
     target_node_id: str | None = None
     column: str | None = None
     row_limit: int = 100
-    scenario: str = "live"
+    source: str = "live"
 
 
 class SchemaDiffResponse(BaseModel):
@@ -164,7 +164,7 @@ class TraceResponse(BaseModel):
 class SinkRequest(BaseModel):
     graph: Graph
     node_id: str
-    scenario: str = "live"
+    source: str = "live"
 
 
 class SinkResponse(BaseModel):
@@ -430,7 +430,7 @@ class SubmodelGraphResponse(BaseModel):
 class TrainRequest(BaseModel):
     graph: Graph
     node_id: str
-    scenario: str = "live"
+    source: str = "live"
 
 
 class TrainResponse(BaseModel):
@@ -479,7 +479,7 @@ class TrainStatusResponse(BaseModel):
 class TrainEstimateRequest(BaseModel):
     graph: Graph
     node_id: str
-    scenario: str = "live"
+    source: str = "live"
 
 
 class TrainEstimateResponse(BaseModel):

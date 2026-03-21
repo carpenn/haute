@@ -59,13 +59,13 @@ export default function Toolbar({
 }: ToolbarProps) {
   const rowLimit = useSettingsStore((s) => s.rowLimit)
   const setRowLimit = useSettingsStore((s) => s.setRowLimit)
-  const scenarios = useSettingsStore((s) => s.scenarios)
-  const activeScenario = useSettingsStore((s) => s.activeScenario)
-  const setActiveScenario = useSettingsStore((s) => s.setActiveScenario)
-  const addScenario = useSettingsStore((s) => s.addScenario)
-  const removeScenario = useSettingsStore((s) => s.removeScenario)
-  const [addingScenario, setAddingScenario] = useState(false)
-  const [newScenarioName, setNewScenarioName] = useState("")
+  const sources = useSettingsStore((s) => s.sources)
+  const activeSource = useSettingsStore((s) => s.activeSource)
+  const setActiveSource = useSettingsStore((s) => s.setActiveSource)
+  const addSource = useSettingsStore((s) => s.addSource)
+  const removeSource = useSettingsStore((s) => s.removeSource)
+  const [addingSource, setAddingSource] = useState(false)
+  const [newSourceName, setNewSourceName] = useState("")
   const [sourceOpen, setSourceOpen] = useState(false)
   const sourceRef = useRef<HTMLDivElement>(null)
   const closeSource = useCallback(() => setSourceOpen(false), [])
@@ -94,27 +94,27 @@ export default function Toolbar({
           title={wsConfig.title}
         />
       </div>
-      {/* Scenario selector — custom dropdown */}
+      {/* Source selector — custom dropdown */}
       <div ref={sourceRef} className="relative flex items-center gap-1 ml-12">
         <label className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Source</label>
-        {addingScenario ? (
+        {addingSource ? (
           <form
             className="flex items-center gap-0.5"
             onSubmit={(e) => {
               e.preventDefault()
-              if (newScenarioName.trim()) {
-                const slug = addScenario(newScenarioName)
-                if (slug) setActiveScenario(slug)
+              if (newSourceName.trim()) {
+                const slug = addSource(newSourceName)
+                if (slug) setActiveSource(slug)
               }
-              setAddingScenario(false)
-              setNewScenarioName("")
+              setAddingSource(false)
+              setNewSourceName("")
             }}
           >
             <input
               autoFocus
-              value={newScenarioName}
-              onChange={(e) => setNewScenarioName(e.target.value)}
-              onBlur={() => { setAddingScenario(false); setNewScenarioName("") }}
+              value={newSourceName}
+              onChange={(e) => setNewSourceName(e.target.value)}
+              onBlur={() => { setAddingSource(false); setNewSourceName("") }}
               placeholder="name"
               className="w-20 px-1.5 py-1 text-[11px] font-mono rounded focus:outline-none"
               style={{ background: 'var(--chrome-hover)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}
@@ -131,10 +131,10 @@ export default function Toolbar({
             }}
             title="Data source"
           >
-            {activeScenario === "live" && (
+            {activeSource === "live" && (
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
             )}
-            <span>{activeScenario}</span>
+            <span>{activeSource}</span>
             <ChevronDown size={11} style={{ color: 'var(--text-muted)', transition: 'transform 150ms', transform: sourceOpen ? 'rotate(180deg)' : undefined }} />
           </button>
         )}
@@ -144,17 +144,17 @@ export default function Toolbar({
             style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}
           >
             <div className="py-1">
-              {scenarios.map((s) => (
+              {sources.map((s) => (
                 <button
                   key={s}
-                  onClick={() => { setActiveScenario(s); setSourceOpen(false) }}
+                  onClick={() => { setActiveSource(s); setSourceOpen(false) }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono text-left transition-colors"
                   style={{
-                    color: s === activeScenario ? 'var(--accent)' : 'var(--text-secondary)',
-                    background: s === activeScenario ? 'var(--accent-soft)' : 'transparent',
+                    color: s === activeSource ? 'var(--accent)' : 'var(--text-secondary)',
+                    background: s === activeSource ? 'var(--accent-soft)' : 'transparent',
                   }}
-                  onMouseEnter={(e) => { if (s !== activeScenario) bgHover.onMouseEnter(e) }}
-                  onMouseLeave={(e) => { if (s !== activeScenario) bgHover.onMouseLeave(e) }}
+                  onMouseEnter={(e) => { if (s !== activeSource) bgHover.onMouseEnter(e) }}
+                  onMouseLeave={(e) => { if (s !== activeSource) bgHover.onMouseLeave(e) }}
                 >
                   {s === "live"
                     ? <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
@@ -165,23 +165,23 @@ export default function Toolbar({
             </div>
             <div className="py-1" style={{ borderTop: '1px solid var(--border)' }}>
               <button
-                onClick={() => { setAddingScenario(true); setSourceOpen(false) }}
+                onClick={() => { setAddingSource(true); setSourceOpen(false) }}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
                 style={{ color: 'var(--text-muted)' }}
                 {...hoverHandlers("var(--chrome-hover)", "var(--text-secondary)", "transparent", "var(--text-muted)")}
               >
                 <Plus size={12} />
-                Add scenario
+                Add source
               </button>
-              {activeScenario !== "live" && (
+              {activeSource !== "live" && (
                 <button
-                  onClick={() => { removeScenario(activeScenario); setSourceOpen(false) }}
+                  onClick={() => { removeSource(activeSource); setSourceOpen(false) }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors"
                   style={{ color: '#ef4444' }}
                   {...hoverBg("rgba(239,68,68,.1)")}
                 >
                   <Trash2 size={12} />
-                  Remove "{activeScenario}"
+                  Remove "{activeSource}"
                 </button>
               )}
             </div>

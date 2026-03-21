@@ -175,7 +175,7 @@ class TestPrepareGraph:
             ],
             edges=[_e("live", "sw"), _e("batch", "sw")],
         )
-        _, order, parents, _ = _prepare_graph(g, scenario="live")
+        _, order, parents, _ = _prepare_graph(g, source="live")
         # "batch" should not be a parent of "sw" in live scenario
         assert "batch" not in parents.get("sw", [])
 
@@ -277,7 +277,11 @@ class TestBuildFuncs:
         all_parents = {"b": ["a"]}
 
         funcs = _build_funcs(
-            order, node_map, parents_of, id_to_name, all_parents,
+            order,
+            node_map,
+            parents_of,
+            id_to_name,
+            all_parents,
             _simple_build_fn,
         )
         assert "a" in funcs
@@ -296,8 +300,13 @@ class TestBuildFuncs:
 
         node_map = {"a": _source_node("a")}
         _build_funcs(
-            ["a"], node_map, {"a": []}, {"a": "a"}, {},
-            build_fn, row_limit=100,
+            ["a"],
+            node_map,
+            {"a": []},
+            {"a": "a"},
+            {},
+            build_fn,
+            row_limit=100,
         )
         assert captured_kwargs["a"]["row_limit"] == 100
 
@@ -310,10 +319,15 @@ class TestBuildFuncs:
 
         node_map = {"a": _source_node("a")}
         _build_funcs(
-            ["a"], node_map, {"a": []}, {"a": "a"}, {},
-            build_fn, scenario="test_batch",
+            ["a"],
+            node_map,
+            {"a": []},
+            {"a": "a"},
+            {},
+            build_fn,
+            source="test_batch",
         )
-        assert captured_kwargs["a"]["scenario"] == "test_batch"
+        assert captured_kwargs["a"]["source"] == "test_batch"
 
 
 # ===========================================================================
@@ -354,6 +368,7 @@ class TestExecuteEagerCore:
 
     def test_swallow_errors_true_captures_error(self):
         """With swallow_errors=True, errors are captured, not raised."""
+
         def build_fn(node, **kwargs):
             if node.data.nodeType == NodeType.DATA_SOURCE:
                 return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
@@ -374,6 +389,7 @@ class TestExecuteEagerCore:
 
     def test_swallow_errors_false_raises(self):
         """With swallow_errors=False (default), errors are raised."""
+
         def build_fn(node, **kwargs):
             if node.data.nodeType == NodeType.DATA_SOURCE:
                 return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
@@ -392,6 +408,7 @@ class TestExecuteEagerCore:
 
     def test_row_limit_applied_to_lazy_source(self):
         """row_limit should head-truncate source LazyFrames."""
+
         def build_fn(node, **kwargs):
             return node.id, lambda: pl.DataFrame({"x": list(range(100))}).lazy(), True
 
@@ -424,6 +441,7 @@ class TestExecuteEagerCore:
 
     def test_eager_handles_dataframe_source(self):
         """A source that returns a DataFrame (not LazyFrame) should work."""
+
         def build_fn(node, **kwargs):
             return node.id, lambda: pl.DataFrame({"x": [1, 2]}), True
 
@@ -439,15 +457,16 @@ class TestExecuteEagerCore:
         captured = {}
 
         def build_fn(node, **kwargs):
-            captured[node.id] = kwargs.get("scenario")
+            captured[node.id] = kwargs.get("source")
             return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
 
         g = PipelineGraph(nodes=[_source_node("s")], edges=[])
-        _execute_eager_core(g, build_fn, scenario="test_batch")
+        _execute_eager_core(g, build_fn, source="test_batch")
         assert captured["s"] == "test_batch"
 
     def test_multiple_errors_captured_with_swallow(self):
         """Multiple node failures are all captured."""
+
         def build_fn(node, **kwargs):
             if node.data.nodeType == NodeType.DATA_SOURCE:
                 return node.id, lambda: pl.DataFrame({"x": [1]}).lazy(), True
@@ -502,7 +521,7 @@ class TestExtractErrorLine:
         assert _extract_error_line(exc) is None
 
     def test_traceback_style_message(self):
-        exc = RuntimeError("File \"<string>\", line 7, in <module>")
+        exc = RuntimeError('File "<string>", line 7, in <module>')
         assert _extract_error_line(exc) == 7
 
 
@@ -585,9 +604,11 @@ def _join_build_fn(node: GraphNode, source_names=None, **kwargs):
     """Build function that supports multi-input (join) nodes."""
     nid = node.id
     if node.data.nodeType == NodeType.DATA_SOURCE:
-        data = {"s1": {"key": [1, 2], "a": [10, 20]},
-                "s2": {"key": [1, 2], "b": [30, 40]},
-                "s3": {"key": [1, 2], "c": [50, 60]}}
+        data = {
+            "s1": {"key": [1, 2], "a": [10, 20]},
+            "s2": {"key": [1, 2], "b": [30, 40]},
+            "s3": {"key": [1, 2], "c": [50, 60]},
+        }
         return nid, lambda d=data.get(nid, {"key": [1]}): pl.DataFrame(d).lazy(), True
 
     def join_fn(*dfs):
@@ -650,12 +671,17 @@ class TestCheckpointing:
         """Both join nodes in s1+s2→j1, j1+s3→j2 should be checkpointed."""
         g = PipelineGraph(
             nodes=[
-                _source_node("s1"), _source_node("s2"), _source_node("s3"),
-                _transform_node("j1"), _transform_node("j2"),
+                _source_node("s1"),
+                _source_node("s2"),
+                _source_node("s3"),
+                _transform_node("j1"),
+                _transform_node("j2"),
             ],
             edges=[
-                _e("s1", "j1"), _e("s2", "j1"),
-                _e("j1", "j2"), _e("s3", "j2"),
+                _e("s1", "j1"),
+                _e("s2", "j1"),
+                _e("j1", "j2"),
+                _e("s3", "j2"),
             ],
         )
         outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
@@ -671,7 +697,8 @@ class TestCheckpointing:
         """selected_columns filtering should apply before checkpointing."""
         g = PipelineGraph(
             nodes=[
-                _source_node("s1"), _source_node("s2"),
+                _source_node("s1"),
+                _source_node("s2"),
                 _transform_node("j", selected_columns=["key", "a"]),
             ],
             edges=[_e("s1", "j"), _e("s2", "j")],
@@ -686,6 +713,7 @@ class TestCheckpointing:
 
         Uses a scenario not in the ISM so edge pruning keeps both parents.
         """
+
         def build_fn(node, **kwargs):
             if node.data.nodeType == NodeType.DATA_SOURCE:
                 return node.id, lambda: pl.DataFrame({"x": [1, 2]}).lazy(), True
@@ -700,12 +728,13 @@ class TestCheckpointing:
             edges=[_e("live_in", "sw"), _e("batch_in", "sw")],
         )
         # scenario="unknown" keeps both edges (ISM fallback)
-        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, scenario="unknown")
+        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, source="unknown")
 
         assert (tmp_path / "sw.parquet").exists()
 
     def test_live_switch_single_parent_single_child_not_checkpointed(self, tmp_path):
         """live_switch with 1 parent and 1 child — NOT checkpointed."""
+
         def build_fn(node, **kwargs):
             if node.data.nodeType == NodeType.DATA_SOURCE:
                 return node.id, lambda: pl.DataFrame({"x": [1, 2]}).lazy(), True
@@ -719,7 +748,7 @@ class TestCheckpointing:
             ],
             edges=[_e("live_in", "sw"), _e("sw", "t")],
         )
-        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, scenario="live")
+        _execute_lazy(g, build_fn, checkpoint_dir=tmp_path, source="live")
 
         assert not list(tmp_path.glob("*.parquet"))
 
@@ -768,7 +797,8 @@ class TestCheckpointing:
         """
         g = PipelineGraph(
             nodes=[
-                _source_node("s1"), _source_node("s2"),
+                _source_node("s1"),
+                _source_node("s2"),
                 _transform_node("t"),
                 _transform_node("join"),
             ],
@@ -785,7 +815,8 @@ class TestCheckpointing:
         """Checkpoint of join-feeder preserves correct results."""
         g = PipelineGraph(
             nodes=[
-                _source_node("s1"), _source_node("s2"),
+                _source_node("s1"),
+                _source_node("s2"),
                 _transform_node("t"),
                 _transform_node("join"),
             ],
@@ -824,14 +855,16 @@ class TestCheckpointing:
                 _source_node("s1"),
                 _source_node("s2"),
                 _source_node("s3"),
-                _transform_node("mid"),   # fan-out: feeds both j1 and j2
-                _transform_node("j1"),    # join: mid + s2
-                _transform_node("j2"),    # join: mid + s3
+                _transform_node("mid"),  # fan-out: feeds both j1 and j2
+                _transform_node("j1"),  # join: mid + s2
+                _transform_node("j2"),  # join: mid + s3
             ],
             edges=[
                 _e("s1", "mid"),
-                _e("mid", "j1"), _e("s2", "j1"),
-                _e("mid", "j2"), _e("s3", "j2"),
+                _e("mid", "j1"),
+                _e("s2", "j1"),
+                _e("mid", "j2"),
+                _e("s3", "j2"),
             ],
         )
         outputs, *_ = _execute_lazy(g, _join_build_fn, checkpoint_dir=tmp_path)
@@ -845,8 +878,7 @@ class TestCheckpointing:
         # After both consumers of mid have been checkpointed, mid's
         # LazyFrame should have been evicted from lazy_outputs.
         assert "mid" not in outputs, (
-            "Parent LazyFrame 'mid' should be cleaned up after all consumers "
-            "have been checkpointed"
+            "Parent LazyFrame 'mid' should be cleaned up after all consumers have been checkpointed"
         )
 
         # The final outputs (j1, j2) should still be present and correct
@@ -995,8 +1027,8 @@ class TestExecuteLazyDelegatesToBuildFuncs:
             nodes=[_source_node("src")],
             edges=[],
         )
-        _execute_lazy(g, build_fn, scenario="test_batch")
-        assert captured["src"]["scenario"] == "test_batch"
+        _execute_lazy(g, build_fn, source="test_batch")
+        assert captured["src"]["source"] == "test_batch"
 
     def test_lazy_execution_still_works_after_refactor(self):
         """End-to-end: lazy chain still works after switching to _build_funcs."""

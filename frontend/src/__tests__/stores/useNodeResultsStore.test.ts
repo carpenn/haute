@@ -778,13 +778,13 @@ describe("useNodeResultsStore", () => {
     })
 
     // ────────────────────────────────────────────────────────────
-    // Scenario-keyed columns
-    // Catches: if the scenario key separator changes or scenario
-    // parameter is ignored, columns from different scenarios would
+    // Source-keyed columns
+    // Catches: if the source key separator changes or source
+    // parameter is ignored, columns from different sources would
     // overwrite each other, showing stale schema in the panel.
     // ────────────────────────────────────────────────────────────
 
-    it("setColumns with scenario key isolates columns per scenario", () => {
+    it("setColumns with source key isolates columns per source", () => {
       const s = useNodeResultsStore.getState()
       const liveColumns = [{ name: "premium", dtype: "float64" }]
       const stagingColumns = [{ name: "premium", dtype: "float64" }, { name: "discount", dtype: "float64" }]
@@ -800,18 +800,18 @@ describe("useNodeResultsStore", () => {
       expect(liveResult!.columns).not.toEqual(stagingResult!.columns)
     })
 
-    it("getColumns without scenario returns bare nodeId entry", () => {
+    it("getColumns without source returns bare nodeId entry", () => {
       const s = useNodeResultsStore.getState()
       const cols = [{ name: "x", dtype: "int64" }]
       s.setColumns("src-1", cols, 0)
 
       // Bare key should work
       expect(useNodeResultsStore.getState().getColumns("src-1")!.columns).toEqual(cols)
-      // Scenario-keyed lookup should not find it
+      // Source-keyed lookup should not find it
       expect(useNodeResultsStore.getState().getColumns("src-1", "live")).toBeNull()
     })
 
-    it("scenario-keyed columns become stale after bumpGraphVersion", () => {
+    it("source-keyed columns become stale after bumpGraphVersion", () => {
       const s = useNodeResultsStore.getState()
       s.setColumns("src-1", [{ name: "a", dtype: "float64" }], 0, "staging")
       s.bumpGraphVersion()

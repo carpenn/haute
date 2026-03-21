@@ -3,7 +3,7 @@
  * sync banner, dirty flag, and node panel width.
  *
  * Toast notifications live in useToastStore.
- * Application settings (MLflow, scenarios, caches) live in useSettingsStore.
+ * Application settings (MLflow, sources, caches) live in useSettingsStore.
  */
 import { create } from "zustand"
 

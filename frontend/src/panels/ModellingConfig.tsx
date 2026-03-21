@@ -70,7 +70,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
 
     const { allNodes: n, edges: e, submodels: s, preamble: p } = graphInputsRef.current
     estimateTrainingRam(
-      { graph: buildGraph(n, e, s, p), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario },
+      { graph: buildGraph(n, e, s, p), node_id: nodeId, source: useSettingsStore.getState().activeSource },
       { signal: controller.signal },
     )
       .then((est) => {
@@ -121,7 +121,7 @@ export default function ModellingConfig({ config, onUpdate, upstreamColumns, all
     const nodeLabel = allNodes.find(n => n.id === nodeId)?.data.label || "Model Training"
     setSubmitting(true)
     try {
-      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, scenario: useSettingsStore.getState().activeScenario })
+      const result = await trainModel({ graph: buildGraphCb(), node_id: nodeId, source: useSettingsStore.getState().activeSource })
 
       if (result.status === "started" && result.job_id) {
         // Register job in store — background hook picks up polling

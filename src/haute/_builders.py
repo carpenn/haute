@@ -63,10 +63,12 @@ def resolve_instance_node(node: GraphNode, node_map: dict[str, GraphNode]) -> Gr
     # Preserve instance-specific keys (inputMapping) that the UI sets
     instance_keys = {k: v for k, v in config.items() if k in ("inputMapping",)}
     merged_config = {**orig_config, "instanceOf": ref, **instance_keys}
-    merged_data = node.data.model_copy(update={
-        "nodeType": original.data.nodeType,
-        "config": merged_config,
-    })
+    merged_data = node.data.model_copy(
+        update={
+            "nodeType": original.data.nodeType,
+            "config": merged_config,
+        }
+    )
     return node.model_copy(update={"data": merged_data})
 
 
@@ -85,7 +87,7 @@ class NodeBuildContext:
     node_map: dict[str, GraphNode] | None
     orig_source_names: list[str] | None
     preamble_ns: dict[str, Any] | None
-    scenario: str | None
+    source: str | None
 
     @property
     def func_name(self) -> str:
@@ -106,9 +108,11 @@ _NODE_BUILDERS: dict[NodeType, NodeBuilder] = {}
 
 def _register(node_type: NodeType) -> Callable[[NodeBuilder], NodeBuilder]:
     """Decorator to register a node builder for a given NodeType."""
+
     def decorator(fn: NodeBuilder) -> NodeBuilder:
         _NODE_BUILDERS[node_type] = fn
         return fn
+
     return decorator
 
 
@@ -125,6 +129,7 @@ def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
     api_source_fn: Callable[..., _Frame]
     if path.endswith((".json", ".jsonl")):
+
         def _api_source_json(_path: str = path, _schema: dict | None = flat_schema) -> _Frame:
             from haute._json_flatten import _json_cache_path
 
@@ -135,10 +140,13 @@ def _build_api_input(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
                 "JSON data has not been cached yet. "
                 "Click 'Cache as Parquet' on the API Input node to process it."
             )
+
         api_source_fn = _api_source_json
     else:
+
         def _api_source_flat() -> _Frame:
             return read_source(path)
+
         api_source_fn = _api_source_flat
 
     return ctx.func_name, api_source_fn, True
@@ -163,6 +171,7 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
         base_fn = _databricks_source
     else:
+
         def source_fn() -> _Frame:
             if not path:
                 return pl.LazyFrame()
@@ -210,12 +219,12 @@ def _build_live_switch(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     input_scenario_map: dict[str, str] = config.get("input_scenario_map", {})
     input_names = list(ctx.source_names)
-    _scenario = ctx.scenario or "live"
+    _source = ctx.source or "live"
 
     def switch_fn(*dfs: _Frame) -> _Frame:
-        # Find the input mapped to the active scenario
+        # Find the input mapped to the active source
         for inp, scn in input_scenario_map.items():
-            if scn == _scenario:
+            if scn == _source:
                 for i, name in enumerate(input_names):
                     if name == inp:
                         return dfs[i]
@@ -223,7 +232,7 @@ def _build_live_switch(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
         if input_scenario_map:
             logger.warning(
                 "live_switch_unmapped_scenario",
-                scenario=_scenario,
+                source=_source,
                 mapped_scenarios=list(input_scenario_map.values()),
                 falling_back_to=input_names[0] if input_names else "<none>",
             )
@@ -259,7 +268,9 @@ def _build_external_file(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
             ens = {"obj": load_external_object(path, file_type, model_class)}
             ens.update(_preamble_ext)
             return _exec_user_code(
-                code, _src_names, dfs,
+                code,
+                _src_names,
+                dfs,
                 extra_ns=ens,
                 orig_source_names=_orig_src,
                 input_mapping=_in_map,
@@ -298,8 +309,12 @@ def _build_banding(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
             if not col or not out or not rules:
                 continue
             lf = _apply_banding(
-                lf, col, out, f.get("banding", "continuous"),
-                rules, f.get("default"),
+                lf,
+                col,
+                out,
+                f.get("banding", "continuous"),
+                rules,
+                f.get("default"),
             )
         return lf
 
@@ -422,8 +437,7 @@ def _build_optimiser_apply(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     # Determine if we have a valid source configured
     _has_file = bool(_artifact_path) and _source_type in ("", "file")
     _has_mlflow = _source_type in ("run", "registered") and (
-        (_source_type == "run" and _run_id)
-        or (_source_type == "registered" and _registered_model)
+        (_source_type == "run" and _run_id) or (_source_type == "registered" and _registered_model)
     )
 
     if not _has_file and not _has_mlflow:
@@ -476,8 +490,10 @@ def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     _task = config.get("task", "regression")
 
     # If no model source configured, passthrough
-    if not source_type or (source_type == "run" and not _run_id) or (
-        source_type == "registered" and not _registered_model
+    if (
+        not source_type
+        or (source_type == "run" and not _run_id)
+        or (source_type == "registered" and not _registered_model)
     ):
         return ctx.func_name, _passthrough_fn, False
 
@@ -493,7 +509,7 @@ def _build_model_score(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
         output_col=config.get("output_column", "prediction"),
         code=config.get("code", "").strip(),
         source_names=list(ctx.source_names),
-        scenario=ctx.scenario or "live",
+        source=ctx.source or "live",
         row_limit=ctx.row_limit,
     )
 
@@ -515,7 +531,9 @@ def _build_transform(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
             from haute.executor import _exec_user_code
 
             return _exec_user_code(
-                code, _src_names, dfs,
+                code,
+                _src_names,
+                dfs,
                 extra_ns=_preamble,
                 orig_source_names=_orig_src,
                 input_mapping=_in_map,
@@ -550,7 +568,7 @@ def _build_node_fn(
     node_map: dict[str, GraphNode] | None = None,
     orig_source_names: list[str] | None = None,
     preamble_ns: dict[str, Any] | None = None,
-    scenario: str | None = None,
+    source: str | None = None,
 ) -> tuple[str, Callable, bool]:
     """Build an executable function from a graph node dict.
 
@@ -559,7 +577,7 @@ def _build_node_fn(
     row_limit: if set, Databricks sources push this into SQL LIMIT so the
         full table is never fetched during preview/trace.
     node_map: full graph node_map — used to resolve ``instanceOf`` references.
-    scenario: the active execution scenario (``"live"`` for eager scoring,
+    source: the active execution source (``"live"`` for eager scoring,
         anything else for batched parquet scoring).
     """
     # Resolve instance → use original's config/nodeType
@@ -576,7 +594,7 @@ def _build_node_fn(
         node_map=node_map,
         orig_source_names=orig_source_names,
         preamble_ns=preamble_ns,
-        scenario=scenario,
+        source=source,
     )
 
     builder = _NODE_BUILDERS.get(node.data.nodeType)
@@ -702,7 +720,10 @@ def _apply_ratebook(
         # Combine individual factor columns into a single relativity
         if len(factor_cols) > 1:
             result_lf = _combine_rating_columns(
-                result_lf, factor_cols, "multiply", "optimised_factor",
+                result_lf,
+                factor_cols,
+                "multiply",
+                "optimised_factor",
             )
         elif len(factor_cols) == 1:
             result_lf = result_lf.with_columns(

@@ -85,9 +85,9 @@
       "y": 283.66666666666663
     }
   },
-  "scenarios": [
+  "sources": [
     "live",
     "nb_batch"
   ],
-  "active_scenario": "nb_batch"
+  "active_source": "nb_batch"
 }

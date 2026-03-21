@@ -44,7 +44,7 @@ class TestNodeBuildContextProperties:
             node_map=None,
             orig_source_names=None,
             preamble_ns=None,
-            scenario=None,
+            source=None,
         )
 
     def test_func_name_sanitizes_spaces(self) -> None:
@@ -101,14 +101,18 @@ class TestNodeBuildContextProperties:
 
 
 def _build(
-    node_type: str, config: dict, label: str = "test_node",
+    node_type: str,
+    config: dict,
+    label: str = "test_node",
     source_names: list[str] | None = None,
 ):
     """Build a node function via _build_node_fn and return (func_name, fn, is_source)."""
-    node = _n({
-        "id": "n1",
-        "data": {"label": label, "nodeType": node_type, "config": config},
-    })
+    node = _n(
+        {
+            "id": "n1",
+            "data": {"label": label, "nodeType": node_type, "config": config},
+        }
+    )
     return _build_node_fn(node, source_names=source_names or [])
 
 
@@ -135,10 +139,12 @@ class TestBuildConstant:
     def test_multiple_values(self) -> None:
         _, fn, _ = _build(
             "constant",
-            {"values": [
-                {"name": "a", "value": "10"},
-                {"name": "b", "value": "20.5"},
-            ]},
+            {
+                "values": [
+                    {"name": "a", "value": "10"},
+                    {"name": "b", "value": "20.5"},
+                ]
+            },
         )
         result = fn().collect()
         assert result.shape == (1, 2)
@@ -182,10 +188,12 @@ class TestBuildConstant:
     def test_mixed_numeric_and_string(self) -> None:
         _, fn, _ = _build(
             "constant",
-            {"values": [
-                {"name": "count", "value": "42"},
-                {"name": "label", "value": "hello"},
-            ]},
+            {
+                "values": [
+                    {"name": "count", "value": "42"},
+                    {"name": "label", "value": "hello"},
+                ]
+            },
         )
         result = fn().collect()
         assert result["count"].to_list() == [42.0]
@@ -273,16 +281,30 @@ class TestBuildBanding:
         _, fn, is_source = _build(
             "banding",
             {
-                "factors": [{
-                    "column": "age",
-                    "outputColumn": "age_band",
-                    "banding": "continuous",
-                    "rules": [
-                        {"op1": ">=", "val1": 0, "op2": "<", "val2": 25, "assignment": "young"},
-                        {"op1": ">=", "val1": 25, "op2": "<", "val2": 65, "assignment": "adult"},
-                        {"op1": ">=", "val1": 65, "op2": "<=", "val2": 200, "assignment": "senior"},
-                    ],
-                }],
+                "factors": [
+                    {
+                        "column": "age",
+                        "outputColumn": "age_band",
+                        "banding": "continuous",
+                        "rules": [
+                            {"op1": ">=", "val1": 0, "op2": "<", "val2": 25, "assignment": "young"},
+                            {
+                                "op1": ">=",
+                                "val1": 25,
+                                "op2": "<",
+                                "val2": 65,
+                                "assignment": "adult",
+                            },
+                            {
+                                "op1": ">=",
+                                "val1": 65,
+                                "op2": "<=",
+                                "val2": 200,
+                                "assignment": "senior",
+                            },
+                        ],
+                    }
+                ],
             },
             source_names=["upstream"],
         )
@@ -296,16 +318,18 @@ class TestBuildBanding:
         _, fn, _ = _build(
             "banding",
             {
-                "factors": [{
-                    "column": "vehicle",
-                    "outputColumn": "vehicle_group",
-                    "banding": "categorical",
-                    "rules": [
-                        {"value": "sedan", "assignment": "car"},
-                        {"value": "suv", "assignment": "car"},
-                        {"value": "motorcycle", "assignment": "bike"},
-                    ],
-                }],
+                "factors": [
+                    {
+                        "column": "vehicle",
+                        "outputColumn": "vehicle_group",
+                        "banding": "categorical",
+                        "rules": [
+                            {"value": "sedan", "assignment": "car"},
+                            {"value": "suv", "assignment": "car"},
+                            {"value": "motorcycle", "assignment": "bike"},
+                        ],
+                    }
+                ],
             },
             source_names=["data"],
         )
@@ -324,12 +348,18 @@ class TestBuildBanding:
                         "banding": "continuous",
                         "rules": [
                             {
-                                "op1": ">=", "val1": 0, "op2": "<",
-                                "val2": 50, "assignment": "under50",
+                                "op1": ">=",
+                                "val1": 0,
+                                "op2": "<",
+                                "val2": 50,
+                                "assignment": "under50",
                             },
                             {
-                                "op1": ">=", "val1": 50, "op2": "<=",
-                                "val2": 200, "assignment": "50plus",
+                                "op1": ">=",
+                                "val1": 50,
+                                "op2": "<=",
+                                "val2": 200,
+                                "assignment": "50plus",
                             },
                         ],
                     },
@@ -346,10 +376,12 @@ class TestBuildBanding:
             },
             source_names=["data"],
         )
-        input_df = pl.DataFrame({
-            "age": [20, 60],
-            "region": ["north", "south"],
-        }).lazy()
+        input_df = pl.DataFrame(
+            {
+                "age": [20, 60],
+                "region": ["north", "south"],
+            }
+        ).lazy()
         result = fn(input_df).collect()
         assert result["age_band"].to_list() == ["under50", "50plus"]
         assert result["region_group"].to_list() == ["cold", "warm"]
@@ -372,14 +404,16 @@ class TestBuildBanding:
         _, fn, _ = _build(
             "banding",
             {
-                "factors": [{
-                    "column": "",
-                    "outputColumn": "out",
-                    "banding": "continuous",
-                    "rules": [
-                        {"op1": ">=", "val1": 0, "op2": "<", "val2": 10, "assignment": "low"},
-                    ],
-                }],
+                "factors": [
+                    {
+                        "column": "",
+                        "outputColumn": "out",
+                        "banding": "continuous",
+                        "rules": [
+                            {"op1": ">=", "val1": 0, "op2": "<", "val2": 10, "assignment": "low"},
+                        ],
+                    }
+                ],
             },
             source_names=["data"],
         )
@@ -392,12 +426,14 @@ class TestBuildBanding:
         _, fn, _ = _build(
             "banding",
             {
-                "factors": [{
-                    "column": "age",
-                    "outputColumn": "age_band",
-                    "banding": "continuous",
-                    "rules": [],
-                }],
+                "factors": [
+                    {
+                        "column": "age",
+                        "outputColumn": "age_band",
+                        "banding": "continuous",
+                        "rules": [],
+                    }
+                ],
             },
             source_names=["data"],
         )
@@ -409,15 +445,17 @@ class TestBuildBanding:
         _, fn, _ = _build(
             "banding",
             {
-                "factors": [{
-                    "column": "age",
-                    "outputColumn": "age_band",
-                    "banding": "continuous",
-                    "default": "unknown",
-                    "rules": [
-                        {"op1": ">=", "val1": 0, "op2": "<", "val2": 25, "assignment": "young"},
-                    ],
-                }],
+                "factors": [
+                    {
+                        "column": "age",
+                        "outputColumn": "age_band",
+                        "banding": "continuous",
+                        "default": "unknown",
+                        "rules": [
+                            {"op1": ">=", "val1": 0, "op2": "<", "val2": 25, "assignment": "young"},
+                        ],
+                    }
+                ],
             },
             source_names=["data"],
         )
@@ -612,10 +650,12 @@ class TestBuildNodeFnFallback:
     """Ensure unknown node types fall back to passthrough."""
 
     def test_unknown_type_passthrough(self) -> None:
-        node = _n({
-            "id": "n1",
-            "data": {"label": "Unknown", "nodeType": "polars", "config": {}},
-        })
+        node = _n(
+            {
+                "id": "n1",
+                "data": {"label": "Unknown", "nodeType": "polars", "config": {}},
+            }
+        )
         func_name, fn, is_source = _build_node_fn(node, source_names=["upstream"])
         assert func_name == "Unknown"
         assert is_source is False
@@ -667,26 +707,32 @@ class TestBuildOptimiser:
         """When data_input is set, the optimiser should pick that specific
         input rather than blindly using dfs[0]."""
         # Build node map: two upstream nodes — banding + data
-        banding_node = _n({
-            "id": "banding_1",
-            "data": {"label": "Banding", "nodeType": "banding", "config": {}},
-        })
-        data_node = _n({
-            "id": "data_1",
-            "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
-        })
-        opt_node = _n({
-            "id": "opt_1",
-            "data": {
-                "label": "Optimiser",
-                "nodeType": "optimiser",
-                "config": {
-                    "mode": "online",
-                    "objective": "profit",
-                    "data_input": "data_1",
+        banding_node = _n(
+            {
+                "id": "banding_1",
+                "data": {"label": "Banding", "nodeType": "banding", "config": {}},
+            }
+        )
+        data_node = _n(
+            {
+                "id": "data_1",
+                "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
+            }
+        )
+        opt_node = _n(
+            {
+                "id": "opt_1",
+                "data": {
+                    "label": "Optimiser",
+                    "nodeType": "optimiser",
+                    "config": {
+                        "mode": "online",
+                        "objective": "profit",
+                        "data_input": "data_1",
+                    },
                 },
-            },
-        })
+            }
+        )
         node_map = {
             "banding_1": banding_node,
             "data_1": data_node,
@@ -700,11 +746,13 @@ class TestBuildOptimiser:
             node_map=node_map,
         )
         banding_df = pl.DataFrame({"quote_id": ["q1"], "factor": [1.1]}).lazy()
-        data_df = pl.DataFrame({
-            "quote_id": ["q1", "q1", "q1"],
-            "scenario_index": [0, 1, 2],
-            "profit": [100.0, 110.0, 120.0],
-        }).lazy()
+        data_df = pl.DataFrame(
+            {
+                "quote_id": ["q1", "q1", "q1"],
+                "scenario_index": [0, 1, 2],
+                "profit": [100.0, 110.0, 120.0],
+            }
+        ).lazy()
         result = fn(banding_df, data_df).collect()
         # Should pick data_df (index 1), not banding_df (index 0)
         assert result.shape[0] == 3
@@ -723,14 +771,16 @@ class TestBuildOptimiser:
 
     def test_data_input_fallback_when_id_not_in_node_map(self) -> None:
         """If data_input references a missing node, fall back to dfs[0]."""
-        opt_node = _n({
-            "id": "opt_1",
-            "data": {
-                "label": "Optimiser",
-                "nodeType": "optimiser",
-                "config": {"data_input": "nonexistent_node"},
-            },
-        })
+        opt_node = _n(
+            {
+                "id": "opt_1",
+                "data": {
+                    "label": "Optimiser",
+                    "nodeType": "optimiser",
+                    "config": {"data_input": "nonexistent_node"},
+                },
+            }
+        )
         _, fn, _ = _build_node_fn(
             opt_node,
             source_names=["upstream"],
@@ -743,18 +793,22 @@ class TestBuildOptimiser:
     def test_data_input_raises_on_index_mismatch(self) -> None:
         """If data_input resolves to an index beyond the actual inputs,
         raise rather than silently falling back."""
-        data_node = _n({
-            "id": "data_1",
-            "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
-        })
-        opt_node = _n({
-            "id": "opt_1",
-            "data": {
-                "label": "Optimiser",
-                "nodeType": "optimiser",
-                "config": {"data_input": "data_1"},
-            },
-        })
+        data_node = _n(
+            {
+                "id": "data_1",
+                "data": {"label": "Scored Data", "nodeType": "polars", "config": {}},
+            }
+        )
+        opt_node = _n(
+            {
+                "id": "opt_1",
+                "data": {
+                    "label": "Optimiser",
+                    "nodeType": "optimiser",
+                    "config": {"data_input": "data_1"},
+                },
+            }
+        )
         node_map = {"data_1": data_node, "opt_1": opt_node}
         # source_names has two entries but we only pass one df
         _, fn, _ = _build_node_fn(
@@ -787,18 +841,22 @@ class TestBuildLiveSwitch:
         assert result["source"].to_list() == ["live"]
 
     def test_selects_non_live_scenario(self) -> None:
-        node = _n({
-            "id": "n1",
-            "data": {
-                "label": "Switch",
-                "nodeType": "liveSwitch",
-                "config": {"input_scenario_map": {"live_src": "live", "batch_src": "test_batch"}},
-            },
-        })
+        node = _n(
+            {
+                "id": "n1",
+                "data": {
+                    "label": "Switch",
+                    "nodeType": "liveSwitch",
+                    "config": {
+                        "input_scenario_map": {"live_src": "live", "batch_src": "test_batch"}
+                    },
+                },
+            }
+        )
         _, fn, _ = _build_node_fn(
             node,
             source_names=["live_src", "batch_src"],
-            scenario="test_batch",
+            source="test_batch",
         )
         live_df = pl.DataFrame({"source": ["live"]}).lazy()
         batch_df = pl.DataFrame({"source": ["batch"]}).lazy()
@@ -806,18 +864,20 @@ class TestBuildLiveSwitch:
         assert result["source"].to_list() == ["batch"]
 
     def test_fallback_to_first_input_on_unmapped_scenario(self) -> None:
-        node = _n({
-            "id": "n1",
-            "data": {
-                "label": "Switch",
-                "nodeType": "liveSwitch",
-                "config": {"input_scenario_map": {"a": "live", "b": "test"}},
-            },
-        })
+        node = _n(
+            {
+                "id": "n1",
+                "data": {
+                    "label": "Switch",
+                    "nodeType": "liveSwitch",
+                    "config": {"input_scenario_map": {"a": "live", "b": "test"}},
+                },
+            }
+        )
         _, fn, _ = _build_node_fn(
             node,
             source_names=["a", "b"],
-            scenario="unknown_scenario",
+            source="unknown_scenario",
         )
         df_a = pl.DataFrame({"val": [1]}).lazy()
         df_b = pl.DataFrame({"val": [2]}).lazy()

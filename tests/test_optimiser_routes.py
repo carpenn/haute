@@ -60,13 +60,15 @@ def _make_scored_data(tmp_path, n_quotes: int = 50, n_steps: int = 5) -> str:
             mults.append(float(m))
             incomes.append(float(base_income * m))
             volumes.append(float(base_volume * (2.0 - m)))
-    df = pl.DataFrame({
-        "quote_id": quote_ids,
-        "scenario_index": pl.Series(steps, dtype=pl.Int32),
-        "scenario_value": pl.Series(mults, dtype=pl.Float32),
-        "expected_income": pl.Series(incomes, dtype=pl.Float32),
-        "volume": pl.Series(volumes, dtype=pl.Float32),
-    })
+    df = pl.DataFrame(
+        {
+            "quote_id": quote_ids,
+            "scenario_index": pl.Series(steps, dtype=pl.Int32),
+            "scenario_value": pl.Series(mults, dtype=pl.Float32),
+            "expected_income": pl.Series(incomes, dtype=pl.Float32),
+            "volume": pl.Series(volumes, dtype=pl.Float32),
+        }
+    )
     path = tmp_path / "scored.parquet"
     df.write_parquet(path)
     return str(path)
@@ -92,23 +94,29 @@ def _make_optimiser_graph(data_path: str, config: dict | None = None) -> dict:
     if config:
         default_config.update(config)
 
-    graph = make_graph({
-        "nodes": [
-            {
-                "id": "source",
-                "data": {
-                    "label": "source",
-                    "nodeType": "dataSource",
-                    "config": {"path": data_path},
+    graph = make_graph(
+        {
+            "nodes": [
+                {
+                    "id": "source",
+                    "data": {
+                        "label": "source",
+                        "nodeType": "dataSource",
+                        "config": {"path": data_path},
+                    },
                 },
-            },
-            {
-                "id": "opt",
-                "data": {"label": "optimiser", "nodeType": "optimiser", "config": default_config},
-            },
-        ],
-        "edges": [make_edge("source", "opt").model_dump()],
-    })
+                {
+                    "id": "opt",
+                    "data": {
+                        "label": "optimiser",
+                        "nodeType": "optimiser",
+                        "config": default_config,
+                    },
+                },
+            ],
+            "edges": [make_edge("source", "opt").model_dump()],
+        }
+    )
     return graph.model_dump()
 
 
@@ -311,6 +319,7 @@ class TestSaveRoute:
         assert data["path"] == out_path
 
         import json
+
         saved = json.loads((tmp_path / "result.json").read_text())
         assert "lambdas" in saved
 
@@ -371,21 +380,25 @@ def _make_ratebook_data(tmp_path, n_quotes: int = 50, n_steps: int = 5):
             incomes.append(float(base_income * m))
             volumes.append(float(base_volume * (2.0 - m)))
 
-    scored_df = pl.DataFrame({
-        "quote_id": quote_ids,
-        "scenario_index": pl.Series(steps, dtype=pl.Int32),
-        "scenario_value": pl.Series(mults, dtype=pl.Float32),
-        "expected_income": pl.Series(incomes, dtype=pl.Float32),
-        "volume": pl.Series(volumes, dtype=pl.Float32),
-    })
+    scored_df = pl.DataFrame(
+        {
+            "quote_id": quote_ids,
+            "scenario_index": pl.Series(steps, dtype=pl.Int32),
+            "scenario_value": pl.Series(mults, dtype=pl.Float32),
+            "expected_income": pl.Series(incomes, dtype=pl.Float32),
+            "volume": pl.Series(volumes, dtype=pl.Float32),
+        }
+    )
     scored_path = tmp_path / "scored.parquet"
     scored_df.write_parquet(scored_path)
 
     # Build banding data: one row per quote with a region factor
-    banding_df = pl.DataFrame({
-        "quote_id": [f"q_{q:04d}" for q in range(n_quotes)],
-        "region": [regions[q % len(regions)] for q in range(n_quotes)],
-    })
+    banding_df = pl.DataFrame(
+        {
+            "quote_id": [f"q_{q:04d}" for q in range(n_quotes)],
+            "region": [regions[q % len(regions)] for q in range(n_quotes)],
+        }
+    )
     banding_path = tmp_path / "banding.parquet"
     banding_df.write_parquet(banding_path)
 
@@ -394,52 +407,54 @@ def _make_ratebook_data(tmp_path, n_quotes: int = 50, n_steps: int = 5):
 
 def _make_ratebook_graph(data_path: str, banding_data_path: str) -> dict:
     """Build a 3-node graph: dataSource → optimiser ← banding."""
-    graph = make_graph({
-        "nodes": [
-            {
-                "id": "source",
-                "data": {
-                    "label": "source",
-                    "nodeType": "dataSource",
-                    "config": {"path": data_path},
-                },
-            },
-            {
-                "id": "banding",
-                "data": {
-                    "label": "banding",
-                    "nodeType": "dataSource",
-                    "config": {"path": banding_data_path},
-                },
-            },
-            {
-                "id": "opt",
-                "data": {
-                    "label": "optimiser",
-                    "nodeType": "optimiser",
-                    "config": {
-                        "mode": "ratebook",
-                        "objective": "expected_income",
-                        "constraints": {"volume": {"min": 0.90}},
-                        "quote_id": "quote_id",
-                        "scenario_index": "scenario_index",
-                        "scenario_value": "scenario_value",
-                        "max_iter": 20,
-                        "tolerance": 1e-4,
-                        "max_cd_iterations": 5,
-                        "cd_tolerance": 1e-3,
-                        "factor_columns": [["region"]],
-                        "banding_source": "banding",
-                        "data_input": "source",
+    graph = make_graph(
+        {
+            "nodes": [
+                {
+                    "id": "source",
+                    "data": {
+                        "label": "source",
+                        "nodeType": "dataSource",
+                        "config": {"path": data_path},
                     },
                 },
-            },
-        ],
-        "edges": [
-            make_edge("source", "opt").model_dump(),
-            make_edge("banding", "opt").model_dump(),
-        ],
-    })
+                {
+                    "id": "banding",
+                    "data": {
+                        "label": "banding",
+                        "nodeType": "dataSource",
+                        "config": {"path": banding_data_path},
+                    },
+                },
+                {
+                    "id": "opt",
+                    "data": {
+                        "label": "optimiser",
+                        "nodeType": "optimiser",
+                        "config": {
+                            "mode": "ratebook",
+                            "objective": "expected_income",
+                            "constraints": {"volume": {"min": 0.90}},
+                            "quote_id": "quote_id",
+                            "scenario_index": "scenario_index",
+                            "scenario_value": "scenario_value",
+                            "max_iter": 20,
+                            "tolerance": 1e-4,
+                            "max_cd_iterations": 5,
+                            "cd_tolerance": 1e-3,
+                            "factor_columns": [["region"]],
+                            "banding_source": "banding",
+                            "data_input": "source",
+                        },
+                    },
+                },
+            ],
+            "edges": [
+                make_edge("source", "opt").model_dump(),
+                make_edge("banding", "opt").model_dump(),
+            ],
+        }
+    )
     return graph.model_dump()
 
 
@@ -490,9 +505,7 @@ class TestRatebookSolve:
 class TestSolveWithHistory:
     @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_solve_with_history(self, client, scored_data):
-        graph = _make_optimiser_graph(
-            scored_data, config={"record_history": True}
-        )
+        graph = _make_optimiser_graph(scored_data, config={"record_history": True})
         resp = client.post(
             "/api/optimiser/solve",
             json={"graph": graph, "node_id": "opt"},
@@ -539,17 +552,15 @@ class TestColumnValidation:
     @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_solve_missing_column(self, client, tmp_path):
         """Data without a constraint column returns 400."""
-        df = pl.DataFrame({
-            "quote_id": ["q_0"] * 5,
-            "scenario_index": pl.Series(range(5), dtype=pl.Int32),
-            "scenario_value": pl.Series(
-                np.linspace(0.8, 1.2, 5).tolist(), dtype=pl.Float32
-            ),
-            "expected_income": pl.Series(
-                [100.0] * 5, dtype=pl.Float32
-            ),
-            # no "volume" column!
-        })
+        df = pl.DataFrame(
+            {
+                "quote_id": ["q_0"] * 5,
+                "scenario_index": pl.Series(range(5), dtype=pl.Int32),
+                "scenario_value": pl.Series(np.linspace(0.8, 1.2, 5).tolist(), dtype=pl.Float32),
+                "expected_income": pl.Series([100.0] * 5, dtype=pl.Float32),
+                # no "volume" column!
+            }
+        )
         path = str(tmp_path / "no_volume.parquet")
         df.write_parquet(path)
         graph = _make_optimiser_graph(path)
@@ -564,9 +575,7 @@ class TestColumnValidation:
 class TestNonConvergenceWarning:
     @pytest.mark.usefixtures("_widen_sandbox_root")
     def test_solve_non_convergence_warning(self, client, scored_data):
-        graph = _make_optimiser_graph(
-            scored_data, config={"max_iter": 1}
-        )
+        graph = _make_optimiser_graph(scored_data, config={"max_iter": 1})
         resp = client.post(
             "/api/optimiser/solve",
             json={"graph": graph, "node_id": "opt"},
@@ -598,6 +607,7 @@ class TestSaveEndpointFields:
         assert resp.status_code == 200
 
         import json as json_mod
+
         saved = json_mod.loads((tmp_path / "result.json").read_text())
         assert "lambdas" in saved
         assert "mode" in saved
@@ -623,17 +633,19 @@ class TestSaveEndpointFields:
 def _make_base_data(tmp_path, n_quotes: int = 50) -> str:
     """Create base data (one row per quote, no scenario expansion)."""
     rng = np.random.RandomState(42)
-    df = pl.DataFrame({
-        "quote_id": [f"q_{q:04d}" for q in range(n_quotes)],
-        "base_income": pl.Series(
-            rng.uniform(100, 1000, n_quotes).tolist(),
-            dtype=pl.Float64,
-        ),
-        "base_volume": pl.Series(
-            rng.uniform(0.5, 1.5, n_quotes).tolist(),
-            dtype=pl.Float64,
-        ),
-    })
+    df = pl.DataFrame(
+        {
+            "quote_id": [f"q_{q:04d}" for q in range(n_quotes)],
+            "base_income": pl.Series(
+                rng.uniform(100, 1000, n_quotes).tolist(),
+                dtype=pl.Float64,
+            ),
+            "base_volume": pl.Series(
+                rng.uniform(0.5, 1.5, n_quotes).tolist(),
+                dtype=pl.Float64,
+            ),
+        }
+    )
     path = tmp_path / "base.parquet"
     df.write_parquet(path)
     return str(path)
@@ -645,73 +657,75 @@ def _make_expander_graph(data_path: str) -> dict:
     The expander cross-joins scenario_value and scenario_index columns.
     The transform computes objective and constraint columns.
     """
-    graph = make_graph({
-        "nodes": [
-            {
-                "id": "source",
-                "data": {
-                    "label": "source",
-                    "nodeType": "dataSource",
-                    "config": {"path": data_path},
-                },
-            },
-            {
-                "id": "transform",
-                "data": {
-                    "label": "compute_metrics",
-                    "nodeType": "polars",
-                    "config": {
-                        "code": (
-                            "df = df.with_columns([\n"
-                            "    (pl.col('base_income') * "
-                            "pl.col('scenario_value'))"
-                            ".alias('expected_income'),\n"
-                            "    (pl.col('base_volume') * "
-                            "(2.0 - pl.col('scenario_value')))"
-                            ".alias('volume'),\n"
-                            "])"
-                        ),
+    graph = make_graph(
+        {
+            "nodes": [
+                {
+                    "id": "source",
+                    "data": {
+                        "label": "source",
+                        "nodeType": "dataSource",
+                        "config": {"path": data_path},
                     },
                 },
-            },
-            {
-                "id": "expander",
-                "data": {
-                    "label": "expander",
-                    "nodeType": "scenarioExpander",
-                    "config": {
-                        "column_name": "scenario_value",
-                        "min_value": 0.8,
-                        "max_value": 1.2,
-                        "steps": 5,
-                        "step_column": "scenario_index",
+                {
+                    "id": "transform",
+                    "data": {
+                        "label": "compute_metrics",
+                        "nodeType": "polars",
+                        "config": {
+                            "code": (
+                                "df = df.with_columns([\n"
+                                "    (pl.col('base_income') * "
+                                "pl.col('scenario_value'))"
+                                ".alias('expected_income'),\n"
+                                "    (pl.col('base_volume') * "
+                                "(2.0 - pl.col('scenario_value')))"
+                                ".alias('volume'),\n"
+                                "])"
+                            ),
+                        },
                     },
                 },
-            },
-            {
-                "id": "opt",
-                "data": {
-                    "label": "optimiser",
-                    "nodeType": "optimiser",
-                    "config": {
-                        "mode": "online",
-                        "objective": "expected_income",
-                        "constraints": {"volume": {"min": 0.90}},
-                        "quote_id": "quote_id",
-                        "scenario_index": "scenario_index",
-                        "scenario_value": "scenario_value",
-                        "max_iter": 20,
-                        "tolerance": 1e-4,
+                {
+                    "id": "expander",
+                    "data": {
+                        "label": "expander",
+                        "nodeType": "scenarioExpander",
+                        "config": {
+                            "column_name": "scenario_value",
+                            "min_value": 0.8,
+                            "max_value": 1.2,
+                            "steps": 5,
+                            "step_column": "scenario_index",
+                        },
                     },
                 },
-            },
-        ],
-        "edges": [
-            make_edge("source", "expander").model_dump(),
-            make_edge("expander", "transform").model_dump(),
-            make_edge("transform", "opt").model_dump(),
-        ],
-    })
+                {
+                    "id": "opt",
+                    "data": {
+                        "label": "optimiser",
+                        "nodeType": "optimiser",
+                        "config": {
+                            "mode": "online",
+                            "objective": "expected_income",
+                            "constraints": {"volume": {"min": 0.90}},
+                            "quote_id": "quote_id",
+                            "scenario_index": "scenario_index",
+                            "scenario_value": "scenario_value",
+                            "max_iter": 20,
+                            "tolerance": 1e-4,
+                        },
+                    },
+                },
+            ],
+            "edges": [
+                make_edge("source", "expander").model_dump(),
+                make_edge("expander", "transform").model_dump(),
+                make_edge("transform", "opt").model_dump(),
+            ],
+        }
+    )
     return graph.model_dump()
 
 
@@ -834,9 +848,11 @@ class TestComputeScenarioValueStats:
 
     def test_valid_scenario_values(self):
         """Normal case with optimal_scenario_value column."""
-        df = pl.DataFrame({
-            "optimal_scenario_value": [0.9, 1.0, 1.1, 1.2, 0.8],
-        })
+        df = pl.DataFrame(
+            {
+                "optimal_scenario_value": [0.9, 1.0, 1.1, 1.2, 0.8],
+            }
+        )
         result = SimpleNamespace(dataframe=df)
         stats, hist = _compute_scenario_value_stats(result)
         assert "mean" in stats
@@ -885,7 +901,9 @@ class TestBuildArtifactPayload:
             "node_label": "rb_opt",
             "config": {"mode": "ratebook", "constraints": {}, "objective": "income"},
             "result": {
-                "factor_tables": {"region": [{"__factor_group__": "North", "optimal_scenario_value": 1.1}]},
+                "factor_tables": {
+                    "region": [{"__factor_group__": "North", "optimal_scenario_value": 1.1}]
+                },
             },
         }
         solve_result = SimpleNamespace(
@@ -904,7 +922,10 @@ class TestBuildArtifactPayload:
         """User-specified version overrides auto-generated one."""
         job = {"node_label": "opt", "config": {"mode": "online"}}
         solve_result = SimpleNamespace(
-            lambdas={}, total_objective=0.0, total_constraints={}, converged=True,
+            lambdas={},
+            total_objective=0.0,
+            total_constraints={},
+            converged=True,
         )
         payload = _build_artifact_payload(job, solve_result, version_override="v2.0")
         assert payload["version"] == "v2.0"
@@ -971,21 +992,28 @@ class TestOptimiserMlflowLog:
     """Tests for /mlflow/log endpoint."""
 
     def test_mlflow_log_missing_job(self, client):
-        resp = client.post("/api/optimiser/mlflow/log", json={
-            "job_id": "nonexistent",
-            "experiment_name": "/test",
-        })
+        resp = client.post(
+            "/api/optimiser/mlflow/log",
+            json={
+                "job_id": "nonexistent",
+                "experiment_name": "/test",
+            },
+        )
         assert resp.status_code == 404
 
     def test_mlflow_log_not_completed(self, client, clean_job_store):
         clean_job_store.jobs["running_job"] = {
-            "status": "running", "progress": 0.5,
+            "status": "running",
+            "progress": 0.5,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/mlflow/log", json={
-            "job_id": "running_job",
-            "experiment_name": "/test",
-        })
+        resp = client.post(
+            "/api/optimiser/mlflow/log",
+            json={
+                "job_id": "running_job",
+                "experiment_name": "/test",
+            },
+        )
         assert resp.status_code == 400
         assert "not completed" in resp.json()["detail"]
 
@@ -996,10 +1024,13 @@ class TestOptimiserMlflowLog:
             "solve_result": None,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/mlflow/log", json={
-            "job_id": "no_result",
-            "experiment_name": "/test",
-        })
+        resp = client.post(
+            "/api/optimiser/mlflow/log",
+            json={
+                "job_id": "no_result",
+                "experiment_name": "/test",
+            },
+        )
         assert resp.status_code == 400
         assert "no solve result" in resp.json()["detail"].lower()
 
@@ -1017,10 +1048,13 @@ class TestOptimiserMlflowLog:
         }
 
         with patch.dict("sys.modules", {"mlflow": None}):
-            resp = client.post("/api/optimiser/mlflow/log", json={
-                "job_id": "import_err",
-                "experiment_name": "/test",
-            })
+            resp = client.post(
+                "/api/optimiser/mlflow/log",
+                json={
+                    "job_id": "import_err",
+                    "experiment_name": "/test",
+                },
+            )
         assert resp.status_code == 400
         assert "mlflow" in resp.json()["detail"].lower()
 
@@ -1083,7 +1117,8 @@ class TestJobStateGuards:
 
     def test_apply_not_completed(self, client, clean_job_store):
         clean_job_store.jobs["running"] = {
-            "status": "running", "progress": 0.5,
+            "status": "running",
+            "progress": 0.5,
             "created_at": time.time(),
         }
         resp = client.post("/api/optimiser/apply", json={"job_id": "running"})
@@ -1092,7 +1127,8 @@ class TestJobStateGuards:
 
     def test_apply_no_solve_result(self, client, clean_job_store):
         clean_job_store.jobs["no_sr"] = {
-            "status": "completed", "solve_result": None,
+            "status": "completed",
+            "solve_result": None,
             "created_at": time.time(),
         }
         resp = client.post("/api/optimiser/apply", json={"job_id": "no_sr"})
@@ -1101,13 +1137,17 @@ class TestJobStateGuards:
 
     def test_frontier_not_completed(self, client, clean_job_store):
         clean_job_store.jobs["running2"] = {
-            "status": "running", "progress": 0.1,
+            "status": "running",
+            "progress": 0.1,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/frontier", json={
-            "job_id": "running2",
-            "threshold_ranges": {"volume": [0.85, 0.95]},
-        })
+        resp = client.post(
+            "/api/optimiser/frontier",
+            json={
+                "job_id": "running2",
+                "threshold_ranges": {"volume": [0.85, 0.95]},
+            },
+        )
         assert resp.status_code == 400
         assert "not completed" in resp.json()["detail"]
 
@@ -1118,21 +1158,29 @@ class TestJobStateGuards:
             "quote_grid": None,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/frontier", json={
-            "job_id": "no_solver",
-            "threshold_ranges": {"volume": [0.85, 0.95]},
-        })
+        resp = client.post(
+            "/api/optimiser/frontier",
+            json={
+                "job_id": "no_solver",
+                "threshold_ranges": {"volume": [0.85, 0.95]},
+            },
+        )
         assert resp.status_code == 400
         assert "no solver" in resp.json()["detail"].lower()
 
     def test_save_not_completed(self, client, clean_job_store):
         clean_job_store.jobs["running3"] = {
-            "status": "running", "progress": 0.1,
+            "status": "running",
+            "progress": 0.1,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/save", json={
-            "job_id": "running3", "output_path": "/tmp/x.json",
-        })
+        resp = client.post(
+            "/api/optimiser/save",
+            json={
+                "job_id": "running3",
+                "output_path": "/tmp/x.json",
+            },
+        )
         assert resp.status_code == 400
         assert "not completed" in resp.json()["detail"]
 
@@ -1143,9 +1191,13 @@ class TestJobStateGuards:
             "solver": None,
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/save", json={
-            "job_id": "no_sr2", "output_path": "/tmp/x.json",
-        })
+        resp = client.post(
+            "/api/optimiser/save",
+            json={
+                "job_id": "no_sr2",
+                "output_path": "/tmp/x.json",
+            },
+        )
         assert resp.status_code == 400
         assert "no solve result" in resp.json()["detail"].lower()
 
@@ -1234,8 +1286,8 @@ class TestExecutePipelineArgs:
         ):
             service._execute_pipeline(body, job_id, checkpoint_dir)
 
-        # scenario should come from _resolve_batch_scenario (not default "batch")
-        assert captured["scenario"] == "ism_scenario"
+        # source should come from _resolve_batch_scenario (not default "batch")
+        assert captured["source"] == "ism_scenario"
         # checkpoint_dir is the one we passed in
         assert captured["checkpoint_dir"] == checkpoint_dir
         # preamble_ns is the dict returned by _compile_preamble
@@ -1270,7 +1322,7 @@ class TestExecutePipelineArgs:
         ):
             service._execute_pipeline(body, job_id, checkpoint_dir)
 
-        assert captured["scenario"] == "batch"
+        assert captured["source"] == "batch"
 
     def test_execute_pipeline_preamble_ns_none_for_empty_preamble(self, scored_data, tmp_path):
         """When _compile_preamble returns empty/falsy, preamble_ns is None."""
@@ -1561,10 +1613,13 @@ class TestFrontierSelect:
         assert n_points > 0
 
         # Select the first point
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": job_id,
-            "point_index": 0,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": job_id,
+                "point_index": 0,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -1583,10 +1638,13 @@ class TestFrontierSelect:
         frontier = status["result"]["frontier"]
         n_points = frontier["n_points"]
 
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": job_id,
-            "point_index": n_points - 1,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": job_id,
+                "point_index": n_points - 1,
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
@@ -1605,10 +1663,13 @@ class TestFrontierSelect:
             "result": {},
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": "sel_oob",
-            "point_index": 5,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": "sel_oob",
+                "point_index": 5,
+            },
+        )
         assert resp.status_code == 400
         assert "out of range" in resp.json()["detail"].lower()
 
@@ -1627,10 +1688,13 @@ class TestFrontierSelect:
             "result": {},
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": "sel_neg",
-            "point_index": -1,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": "sel_neg",
+                "point_index": -1,
+            },
+        )
         assert resp.status_code == 400
 
     def test_select_no_frontier_data(self, client, clean_job_store):
@@ -1643,19 +1707,25 @@ class TestFrontierSelect:
             "result": {},
             "created_at": time.time(),
         }
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": "sel_nf",
-            "point_index": 0,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": "sel_nf",
+                "point_index": 0,
+            },
+        )
         assert resp.status_code == 400
         assert "no frontier" in resp.json()["detail"].lower()
 
     def test_select_missing_job(self, client):
         """Non-existent job returns 404."""
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": "nonexistent",
-            "point_index": 0,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": "nonexistent",
+                "point_index": 0,
+            },
+        )
         assert resp.status_code == 404
 
     @pytest.mark.usefixtures("_widen_sandbox_root")
@@ -1668,20 +1738,29 @@ class TestFrontierSelect:
         original_obj = status["result"]["total_objective"]
 
         # Select point 0
-        resp = client.post("/api/optimiser/frontier/select", json={
-            "job_id": job_id, "point_index": 0,
-        })
+        resp = client.post(
+            "/api/optimiser/frontier/select",
+            json={
+                "job_id": job_id,
+                "point_index": 0,
+            },
+        )
         assert resp.status_code == 200
         selected_obj = resp.json()["total_objective"]
 
         # Save should use the selected result
         out_path = str(tmp_path / "result.json")
-        resp = client.post("/api/optimiser/save", json={
-            "job_id": job_id, "output_path": out_path,
-        })
+        resp = client.post(
+            "/api/optimiser/save",
+            json={
+                "job_id": job_id,
+                "output_path": out_path,
+            },
+        )
         assert resp.status_code == 200
 
         import json
+
         saved = json.loads((tmp_path / "result.json").read_text())
         assert saved["total_objective"] == pytest.approx(selected_obj, rel=1e-4)
         # Frontier provenance should be present

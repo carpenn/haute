@@ -60,7 +60,7 @@ class SavePipelineService:
         self._infer_flatten_schemas(graph)
         self._write_config_files(graph)
         self._remove_stale_config_files(graph)
-        self._write_sidecar(py_path, graph, body.scenarios, body.active_scenario)
+        self._write_sidecar(py_path, graph, body.sources, body.active_source)
 
         return SavePipelineResponse(
             file=str(py_path.relative_to(self._root)),
@@ -203,10 +203,10 @@ class SavePipelineService:
     def _write_sidecar(
         py_path: Path,
         graph: PipelineGraph,
-        scenarios: list[str],
-        active_scenario: str,
+        sources: list[str],
+        active_source: str,
     ) -> None:
-        """Persist node positions and scenario state to ``.haute.json``."""
-        graph.scenarios = scenarios
-        graph.active_scenario = active_scenario
+        """Persist node positions and source state to ``.haute.json``."""
+        graph.sources = sources
+        graph.active_source = active_source
         save_sidecar(py_path, graph)

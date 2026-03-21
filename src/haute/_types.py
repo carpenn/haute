@@ -109,20 +109,20 @@ class TransformConfig(TypedDict, total=False):
 class ModelScoreConfig(TypedDict, total=False):
     """Config for modelScore nodes."""
 
-    sourceType: str          # "run" | "registered"
+    sourceType: str  # "run" | "registered"
     # run-based selection
-    experiment_name: str     # UI-only: display name for panel re-open
-    experiment_id: str       # UI-only: MLflow experiment ID for API calls
+    experiment_name: str  # UI-only: display name for panel re-open
+    experiment_id: str  # UI-only: MLflow experiment ID for API calls
     run_id: str
-    run_name: str            # UI-only: display name for panel re-open
-    artifact_path: str       # e.g. "model.cbm"
+    run_name: str  # UI-only: display name for panel re-open
+    artifact_path: str  # e.g. "model.cbm"
     # registered model selection
-    registered_model: str    # e.g. "catalog.schema.model" or "my-model"
-    version: str             # "1", "2", etc. or "latest"
+    registered_model: str  # e.g. "catalog.schema.model" or "my-model"
+    version: str  # "1", "2", etc. or "latest"
     # common
-    task: str                # "regression" | "classification"
-    output_column: str       # prediction column name, default "prediction"
-    code: str                # optional post-processing code
+    task: str  # "regression" | "classification"
+    output_column: str  # prediction column name, default "prediction"
+    code: str  # optional post-processing code
     instanceOf: str
     inputMapping: dict[str, str]
 
@@ -287,28 +287,28 @@ class OptimiserConfig(TypedDict, total=False):
 class OptimiserApplyConfig(TypedDict, total=False):
     """Config for optimiserApply nodes."""
 
-    artifact_path: str          # path to saved optimiser artifact JSON
-    version_column: str         # column name for version tracking (default "__optimiser_version__")
+    artifact_path: str  # path to saved optimiser artifact JSON
+    version_column: str  # column name for version tracking (default "__optimiser_version__")
     # MLflow source fields
-    sourceType: str             # "file" | "run" | "registered"
-    registered_model: str       # registered model name (when sourceType="registered")
-    version: str                # model version or "latest" (when sourceType="registered")
-    experiment_id: str          # MLflow experiment ID (when sourceType="run")
-    experiment_name: str        # UI-only: display name for panel re-open
-    run_id: str                 # MLflow run ID (when sourceType="run")
-    run_name: str               # UI-only: display name for panel re-open
+    sourceType: str  # "file" | "run" | "registered"
+    registered_model: str  # registered model name (when sourceType="registered")
+    version: str  # model version or "latest" (when sourceType="registered")
+    experiment_id: str  # MLflow experiment ID (when sourceType="run")
+    experiment_name: str  # UI-only: display name for panel re-open
+    run_id: str  # MLflow run ID (when sourceType="run")
+    run_name: str  # UI-only: display name for panel re-open
 
 
 class ScenarioExpanderConfig(TypedDict, total=False):
     """Config for scenarioExpander nodes."""
 
-    quote_id: str       # column identifying each quote/row-group
-    column_name: str    # name of the new value column (e.g. "scenario_value")
-    min_value: float    # start of linspace
-    max_value: float    # end of linspace
-    steps: int          # number of steps
-    step_column: str    # name of the 0-based step index column (e.g. "scenario_index")
-    code: str           # optional Polars transformation code (post-expansion)
+    quote_id: str  # column identifying each quote/row-group
+    column_name: str  # name of the new value column (e.g. "scenario_value")
+    min_value: float  # start of linspace
+    max_value: float  # end of linspace
+    steps: int  # number of steps
+    step_column: str  # name of the 0-based step index column (e.g. "scenario_index")
+    code: str  # optional Polars transformation code (post-expansion)
 
 
 # ---------------------------------------------------------------------------
@@ -392,36 +392,81 @@ class RatebookSolveResultLike(SolveResultLike, Protocol):
 
 
 MODEL_SCORE_CONFIG_KEYS: tuple[str, ...] = (
-    "sourceType", "run_id", "artifact_path", "run_name",
-    "registered_model", "version", "task", "output_column",
-    "experiment_name", "experiment_id",
+    "sourceType",
+    "run_id",
+    "artifact_path",
+    "run_name",
+    "registered_model",
+    "version",
+    "task",
+    "output_column",
+    "experiment_name",
+    "experiment_id",
 )
 
 MODELLING_CONFIG_KEYS: tuple[str, ...] = (
-    "name", "target", "weight", "exclude", "algorithm", "task",
-    "params", "split", "metrics", "mlflow_experiment", "model_name",
+    "name",
+    "target",
+    "weight",
+    "exclude",
+    "algorithm",
+    "task",
+    "params",
+    "split",
+    "metrics",
+    "mlflow_experiment",
+    "model_name",
     "output_dir",
 )
 
 OPTIMISER_CONFIG_KEYS: tuple[str, ...] = (
-    "mode", "quote_id", "scenario_index", "scenario_value", "objective",
-    "constraints", "max_iter", "tolerance", "chunk_size", "record_history",
-    "frontier_enabled", "frontier_points_per_dim", "frontier_threshold_ranges",
-    "factor_columns", "candidate_min", "candidate_max", "candidate_steps",
-    "max_cd_iterations", "cd_tolerance", "structure_mode",
-    "scored_input", "factors_input",
-    "data_input", "banding_source",
-    "mlflow_experiment", "model_name",
+    "mode",
+    "quote_id",
+    "scenario_index",
+    "scenario_value",
+    "objective",
+    "constraints",
+    "max_iter",
+    "tolerance",
+    "chunk_size",
+    "record_history",
+    "frontier_enabled",
+    "frontier_points_per_dim",
+    "frontier_threshold_ranges",
+    "factor_columns",
+    "candidate_min",
+    "candidate_max",
+    "candidate_steps",
+    "max_cd_iterations",
+    "cd_tolerance",
+    "structure_mode",
+    "scored_input",
+    "factors_input",
+    "data_input",
+    "banding_source",
+    "mlflow_experiment",
+    "model_name",
 )
 
 OPTIMISER_APPLY_CONFIG_KEYS: tuple[str, ...] = (
-    "artifact_path", "version_column",
-    "sourceType", "registered_model", "version",
-    "experiment_id", "experiment_name", "run_id", "run_name",
+    "artifact_path",
+    "version_column",
+    "sourceType",
+    "registered_model",
+    "version",
+    "experiment_id",
+    "experiment_name",
+    "run_id",
+    "run_name",
 )
 
 SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (
-    "quote_id", "column_name", "min_value", "max_value", "steps", "step_column",
+    "quote_id",
+    "column_name",
+    "min_value",
+    "max_value",
+    "steps",
+    "step_column",
 )
 
 
@@ -503,8 +548,8 @@ class PipelineGraph(BaseModel):
     source_file: str | None = None
     submodels: dict[str, Any] | None = None
     warning: str | None = None
-    scenarios: list[str] = Field(default_factory=lambda: ["live"])
-    active_scenario: str = "live"
+    sources: list[str] = Field(default_factory=lambda: ["live"])
+    active_source: str = "live"
 
     @cached_property
     def node_map(self) -> dict[str, GraphNode]:

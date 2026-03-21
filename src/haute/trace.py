@@ -194,7 +194,7 @@ def execute_trace(
     target_node_id: str | None = None,
     column: str | None = None,
     row_limit: int = 1000,
-    scenario: str = "live",
+    source: str = "live",
 ) -> TraceResult:
     """Execute a pipeline graph and return a single-row trace.
 
@@ -205,7 +205,7 @@ def execute_trace(
         column: Optional column name - if set, only include nodes that touch it.
         row_limit: Max rows to process per source node (matches the preview limit
                    so the trace operates on the same data the user sees).
-        scenario: Active execution scenario (``"live"`` = API path).
+        source: Active execution source (``"live"`` = API path).
 
     Returns:
         TraceResult with per-node steps showing how the row was produced.
@@ -230,7 +230,7 @@ def execute_trace(
     # The pipeline structure doesn't change between trace clicks — only the
     # row_index and column change.  Cache the materialized DataFrames and
     # reuse them: first click ~1.7s, subsequent clicks <10ms.
-    fp = graph_fingerprint(graph, target_node_id, f"{row_limit}:{scenario}")
+    fp = graph_fingerprint(graph, target_node_id, f"{row_limit}:{source}")
 
     cached = _cache.try_get(fp)
     if cached is not None:
@@ -258,7 +258,7 @@ def execute_trace(
         # --- Try to reuse outputs from the preview cache ----------------
         # Preview uses fingerprint f"{row_limit}:{scenario}" (no target),
         # so compute that separately and check if we can skip execution.
-        preview_fp = graph_fingerprint(graph, f"{row_limit}:{scenario}")
+        preview_fp = graph_fingerprint(graph, f"{row_limit}:{source}")
         preview_data = _preview_cache.try_get(preview_fp)
         reused_preview = False
 
@@ -266,26 +266,18 @@ def execute_trace(
             prev_outputs = preview_data["eager_outputs"]
             # Preview uses swallow_errors=True, so some outputs may be
             # None on error.  Only reuse if target node has a real value.
-            if (
-                target_node_id in prev_outputs
-                and prev_outputs[target_node_id] is not None
-            ):
+            if target_node_id in prev_outputs and prev_outputs[target_node_id] is not None:
                 # Graph-structure metadata still needs computing for
                 # the trace-specific fields (parents_of, node_map, etc.)
                 node_map, order, parents_of, _id_to_name = _prepare_graph(
-                    graph, target_node_id, scenario=scenario,
+                    graph,
+                    target_node_id,
+                    source=source,
                 )
                 # Verify all nodes in the topo order have non-None outputs
-                if all(
-                    nid in prev_outputs and prev_outputs[nid] is not None
-                    for nid in order
-                ):
-                    eager_outputs = {
-                        nid: prev_outputs[nid] for nid in order
-                    }
-                    source_ids = {
-                        nid for nid in order if not parents_of.get(nid)
-                    }
+                if all(nid in prev_outputs and prev_outputs[nid] is not None for nid in order):
+                    eager_outputs = {nid: prev_outputs[nid] for nid in order}
+                    source_ids = {nid for nid in order if not parents_of.get(nid)}
                     reused_preview = True
                     logger.debug(
                         "trace_reused_preview_cache",
@@ -305,12 +297,10 @@ def execute_trace(
                 row_limit=row_limit,
                 swallow_errors=False,
                 preamble_ns=preamble_ns or None,
-                scenario=scenario,
+                source=source,
             )
             # Trace never swallows errors so all values are DataFrames here.
-            eager_outputs = {
-                nid: df for nid, df in result.outputs.items() if df is not None
-            }
+            eager_outputs = {nid: df for nid, df in result.outputs.items() if df is not None}
             order = result.order
             parents_of = result.parents_of
             node_map = result.node_map
@@ -390,9 +380,7 @@ def execute_trace(
         _tag_column_relevance(steps, column)
 
         # Find nodes where the column is first created
-        origin_ids = {
-            s.node_id for s in steps if column in s.schema_diff.columns_added
-        }
+        origin_ids = {s.node_id for s in steps if column in s.schema_diff.columns_added}
         # Collect all ancestors of origin nodes — they contribute to the calc
         ancestor_ids: set[str] = set()
         if origin_ids:
@@ -404,9 +392,7 @@ def execute_trace(
                         ancestor_ids.add(pid)
                         queue.append(pid)
 
-        steps = [
-            s for s in steps if s.column_relevant or s.node_id in ancestor_ids
-        ]
+        steps = [s for s in steps if s.column_relevant or s.node_id in ancestor_ids]
 
     # ---------- Output value (already in cache from batch collect) ----------
     target_row = cached_rows[target_node_id]

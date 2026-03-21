@@ -175,7 +175,8 @@ def _finalize_solve_result(
                     "constraint_names": list(ranges.keys()),
                 }
                 logger.info(
-                    "frontier_computed", n_points=frontier_data["n_points"],
+                    "frontier_computed",
+                    n_points=frontier_data["n_points"],
                     job_id=job_id,
                 )
         except Exception as exc:
@@ -189,17 +190,20 @@ def _finalize_solve_result(
     # (consumed by OptimiserStatusResponse).  "frontier_data" is a top-level
     # job key used by internal endpoints (e.g. /frontier/select) to look up
     # raw frontier points without going through the result dict.
-    store.atomic_update(job_id, {
-        "status": "completed",
-        "progress": 1.0,
-        "message": "Completed",
-        "elapsed_seconds": elapsed,
-        "solver": solver,
-        "solve_result": solve_result,
-        "quote_grid": quote_grid,
-        "result": result_dict,
-        "frontier_data": frontier_data,
-    })
+    store.atomic_update(
+        job_id,
+        {
+            "status": "completed",
+            "progress": 1.0,
+            "message": "Completed",
+            "elapsed_seconds": elapsed,
+            "solver": solver,
+            "solve_result": solve_result,
+            "quote_grid": quote_grid,
+            "result": result_dict,
+            "frontier_data": frontier_data,
+        },
+    )
 
 
 def _solve_online(
@@ -223,8 +227,10 @@ def _solve_online(
     solve_result: OnlineSolveResultLike = solver.solve(quote_grid)
     elapsed = time.monotonic() - start_time
     logger.info(
-        "solve_completed", mode="online",
-        elapsed=f"{elapsed:.2f}s", converged=solve_result.converged,
+        "solve_completed",
+        mode="online",
+        elapsed=f"{elapsed:.2f}s",
+        converged=solve_result.converged,
     )
 
     _finalize_solve_result(
@@ -268,8 +274,7 @@ def _solve_ratebook(
     raw_factor_columns = config.get("factor_columns", [])
     available_cols = set(factors_df.columns)
     factor_columns_valid = [
-        group for group in raw_factor_columns
-        if all(c in available_cols for c in group)
+        group for group in raw_factor_columns if all(c in available_cols for c in group)
     ]
     if not factor_columns_valid:
         missing = [c for group in raw_factor_columns for c in group if c not in available_cols]
@@ -316,8 +321,7 @@ def _solve_ratebook(
     factor_tables_serialised = {}
     for name, table in solve_result.factor_tables.items():
         factor_tables_serialised[name] = [
-            {"__factor_group__": level, "optimal_scenario_value": sv}
-            for level, sv in table.items()
+            {"__factor_group__": level, "optimal_scenario_value": sv} for level, sv in table.items()
         ]
 
     _finalize_solve_result(
@@ -364,13 +368,15 @@ class OptimiserSolveService:
 
         mode = self._validate_config(config)
 
-        job_id = self._store.create_job({
-            "status": "running",
-            "progress": 0.0,
-            "message": "Starting",
-            "config": dict(config),
-            "node_label": node.data.label,
-        })
+        job_id = self._store.create_job(
+            {
+                "status": "running",
+                "progress": 0.0,
+                "message": "Starting",
+                "config": dict(config),
+                "node_label": node.data.label,
+            }
+        )
         logger.info("solve_started", node_id=body.node_id, mode=mode, job_id=job_id)
 
         checkpoint_dir = Path(tempfile.mkdtemp(prefix="haute_opt_"))
@@ -378,14 +384,20 @@ class OptimiserSolveService:
             lazy_outputs = self._execute_pipeline(body, job_id, checkpoint_dir)
             source_lf = self._resolve_data_source(lazy_outputs, config, body.node_id, job_id)
             constraint_cols, scored_lf = self._validate_and_project(
-                source_lf, config, job_id,
+                source_lf,
+                config,
+                job_id,
             )
             factors_df = self._extract_factors(lazy_outputs, config, mode)
             del lazy_outputs
             gc.collect()
 
             quote_grid = self._build_grid(
-                scored_lf, constraint_cols, config, body.node_id, job_id,
+                scored_lf,
+                constraint_cols,
+                config,
+                body.node_id,
+                job_id,
             )
         finally:
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
@@ -426,7 +438,9 @@ class OptimiserSolveService:
         return str(mode)
 
     def _execute_pipeline(
-        self, body: OptimiserSolveRequest, job_id: str,
+        self,
+        body: OptimiserSolveRequest,
+        job_id: str,
         checkpoint_dir: Path,
     ) -> dict[str, Any]:
         """Execute the pipeline lazily up to the optimiser node.
@@ -442,9 +456,13 @@ class OptimiserSolveService:
             # Resolve scenario: optimiser runs on batch data, not live.
             scenario = _resolve_batch_scenario(body.graph) or "batch"
 
-            preamble_ns = _compile_preamble(
-                body.graph.preamble or "", force_refresh=False,
-            ) or None
+            preamble_ns = (
+                _compile_preamble(
+                    body.graph.preamble or "",
+                    force_refresh=False,
+                )
+                or None
+            )
 
             # Reduce streaming chunk size for the optimiser path (same
             # rationale as execute_sink — wide schemas with 100+ columns
@@ -453,10 +471,11 @@ class OptimiserSolveService:
             pl.Config.set_streaming_chunk_size(50_000)
             try:
                 lazy_outputs, *_ = _execute_lazy(
-                    body.graph, _build_node_fn,
+                    body.graph,
+                    _build_node_fn,
                     target_node_id=body.node_id,
                     preamble_ns=preamble_ns,
-                    scenario=scenario,
+                    source=scenario,
                     checkpoint_dir=checkpoint_dir,
                 )
             finally:
@@ -543,8 +562,7 @@ class OptimiserSolveService:
         cast_exprs = [pl.col(c).cast(t) for c, t in cast_map.items()]
 
         scored_lf = (
-            source_lf
-            .select(solver_cols)
+            source_lf.select(solver_cols)
             .with_columns(cast_exprs)
             .filter(pl.col(qid_col).is_not_null())
         )
@@ -620,30 +638,43 @@ class OptimiserSolveService:
     ) -> None:
         """Start the solver in a background thread."""
         start_time = time.monotonic()
-        self._store.atomic_update(job_id, {
-            "start_time": start_time,
-            "timeout": config.get("timeout", _DEFAULT_TIMEOUT),
-        })
+        self._store.atomic_update(
+            job_id,
+            {
+                "start_time": start_time,
+                "timeout": config.get("timeout", _DEFAULT_TIMEOUT),
+            },
+        )
 
         def _solve_background() -> None:
             try:
                 # P7: Use atomic_update instead of mutating the job dict
                 # directly, so status-polling reads on the main thread
                 # always see a consistent snapshot.
-                self._store.atomic_update(job_id, {
-                    "message": "Solving",
-                    "progress": 0.1,
-                    "elapsed_seconds": time.monotonic() - start_time,
-                })
+                self._store.atomic_update(
+                    job_id,
+                    {
+                        "message": "Solving",
+                        "progress": 0.1,
+                        "elapsed_seconds": time.monotonic() - start_time,
+                    },
+                )
                 if mode == "ratebook":
                     _solve_ratebook(
-                        quote_grid, config, factors_df,
-                        self._store, job_id, start_time,
+                        quote_grid,
+                        config,
+                        factors_df,
+                        self._store,
+                        job_id,
+                        start_time,
                     )
                 else:
                     _solve_online(
-                        quote_grid, config,
-                        self._store, job_id, start_time,
+                        quote_grid,
+                        config,
+                        self._store,
+                        job_id,
+                        start_time,
                     )
             except Exception as exc:
                 error_categories: dict[type, tuple[str, str]] = {
@@ -651,15 +682,19 @@ class OptimiserSolveService:
                     RuntimeError: ("Algorithm error", "algorithm"),
                 }
                 prefix, category = error_categories.get(
-                    type(exc), ("Unexpected error", "unexpected"),
+                    type(exc),
+                    ("Unexpected error", "unexpected"),
                 )
                 error_msg = f"{prefix}: {exc}"
                 logger.error("solve_failed", error=str(exc), node_id=node_id, category=category)
-                self._store.atomic_update(job_id, {
-                    "status": "error",
-                    "message": error_msg,
-                    "elapsed_seconds": time.monotonic() - start_time,
-                })
+                self._store.atomic_update(
+                    job_id,
+                    {
+                        "status": "error",
+                        "message": error_msg,
+                        "elapsed_seconds": time.monotonic() - start_time,
+                    },
+                )
 
         thread = threading.Thread(target=_solve_background, daemon=True)
         thread.start()

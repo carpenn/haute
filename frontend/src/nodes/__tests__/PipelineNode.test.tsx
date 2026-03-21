@@ -237,8 +237,8 @@ describe("PipelineNode", () => {
 
   // ── Source switch mode badge ────────────────────────────────────────
 
-  it("shows LIVE badge when active scenario is live", () => {
-    useSettingsStore.setState({ activeScenario: "live" })
+  it("shows LIVE badge when active source is live", () => {
+    useSettingsStore.setState({ activeSource: "live" })
     renderNode({
       label: "Switch",
       nodeType: NODE_TYPES.LIVE_SWITCH,
@@ -246,8 +246,8 @@ describe("PipelineNode", () => {
     expect(screen.getByText("LIVE")).toBeInTheDocument()
   })
 
-  it("hides LIVE badge when active scenario is not live", () => {
-    useSettingsStore.setState({ activeScenario: "backtest" })
+  it("hides LIVE badge when active source is not live", () => {
+    useSettingsStore.setState({ activeSource: "backtest" })
     renderNode({
       label: "Switch",
       nodeType: NODE_TYPES.LIVE_SWITCH,

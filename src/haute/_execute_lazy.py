@@ -82,11 +82,7 @@ def _checkpoint_decision(
 
     # MODEL_SCORE in batch mode already returns scan_parquet — skip.
     node = node_map.get(nid)
-    if (
-        node is not None
-        and node.data.nodeType == NodeType.MODEL_SCORE
-        and scenario != "live"
-    ):
+    if node is not None and node.data.nodeType == NodeType.MODEL_SCORE and scenario != "live":
         return _CheckpointAction.SKIP
 
     return _CheckpointAction.PARQUET
@@ -126,18 +122,17 @@ def _apply_selected_columns(
 def _prune_live_switch_edges(
     edges: list[GraphEdge],
     node_map: dict[str, GraphNode],
-    scenario: str,
+    source: str,
 ) -> list[GraphEdge]:
-    """Remove edges to live_switch nodes from inputs inactive for *scenario*.
+    """Remove edges to live_switch nodes from inputs inactive for *source*.
 
     A live_switch node's config contains ``input_scenario_map`` which maps
     each input name to the scenario it serves.  Only edges from inputs
-    matching the active scenario are kept; the unused branch is pruned so
+    matching the active source are kept; the unused branch is pruned so
     it is neither executed nor shown in profilers.
     """
     switch_nodes = {
-        nid: node for nid, node in node_map.items()
-        if node.data.nodeType == NodeType.LIVE_SWITCH
+        nid: node for nid, node in node_map.items() if node.data.nodeType == NodeType.LIVE_SWITCH
     }
     if not switch_nodes:
         return edges
@@ -145,16 +140,17 @@ def _prune_live_switch_edges(
     exclude: set[tuple[str, str]] = set()
     for nid, node in switch_nodes.items():
         ism: dict[str, str] = node.data.config.get(
-            "input_scenario_map", {},
+            "input_scenario_map",
+            {},
         )
         if not ism:
             continue
-        # If no input matches the active scenario, keep all edges
+        # If no input matches the active source, keep all edges
         # so the runtime fallback in switch_fn still works.
-        if scenario not in ism.values():
+        if source not in ism.values():
             continue
         # For each direct parent edge, check if its name maps to a
-        # different scenario — if so, exclude the edge.
+        # different source — if so, exclude the edge.
         for e in edges:
             if e.target != nid:
                 continue
@@ -163,21 +159,18 @@ def _prune_live_switch_edges(
                 continue
             parent_name = _sanitize_func_name(parent.data.label)
             mapped = ism.get(parent_name)
-            if mapped is not None and mapped != scenario:
+            if mapped is not None and mapped != source:
                 exclude.add((e.source, nid))
 
     if not exclude:
         return edges
-    return [
-        e for e in edges
-        if (e.source, e.target) not in exclude
-    ]
+    return [e for e in edges if (e.source, e.target) not in exclude]
 
 
 def _prepare_graph(
     graph: PipelineGraph,
     target_node_id: str | None = None,
-    scenario: str = "live",
+    source: str = "live",
 ) -> tuple[
     dict[str, GraphNode],  # node_map
     list[str],  # order (topo-sorted node IDs)
@@ -189,7 +182,7 @@ def _prepare_graph(
     Returns (node_map, order, parents_of, id_to_name).
     """
     node_map = graph.node_map
-    edges = _prune_live_switch_edges(graph.edges, node_map, scenario)
+    edges = _prune_live_switch_edges(graph.edges, node_map, source)
     all_ids = set(node_map.keys())
 
     if target_node_id:
@@ -215,7 +208,7 @@ def _execute_lazy(
     build_node_fn: Callable,
     target_node_id: str | None = None,
     preamble_ns: dict | None = None,
-    scenario: str = "live",
+    source: str = "live",
     checkpoint_dir: Path | None = None,
 ) -> tuple[dict[str, _Frame], list[str], dict[str, list[str]], dict[str, str]]:
     """Execute a graph lazily and return per-node LazyFrames.
@@ -229,7 +222,7 @@ def _execute_lazy(
         graph: React Flow graph with "nodes" and "edges".
         build_node_fn: Function (node_dict, source_names) -> (name, fn, is_source).
         target_node_id: If set, only execute ancestors of this node.
-        scenario: Active execution scenario (``"live"`` = eager scoring).
+        source: Active execution source (``"live"`` = eager scoring).
         checkpoint_dir: If set, multi-input nodes (joins) and fan-out
             nodes (>1 downstream consumer) are checkpointed to parquet
             files in this directory and replaced with ``scan_parquet``
@@ -241,7 +234,9 @@ def _execute_lazy(
         (lazy_outputs, order, parents_of, id_to_name)
     """
     node_map, order, parents_of, id_to_name = _prepare_graph(
-        graph, target_node_id, scenario=scenario,
+        graph,
+        target_node_id,
+        source=source,
     )
 
     # Full parent lookup from ALL edges for instance resolution
@@ -250,9 +245,15 @@ def _execute_lazy(
     # Build executable functions — delegates to _build_funcs with
     # row_limit=None (lazy path never caps source output).
     funcs = _build_funcs(
-        order, node_map, parents_of, id_to_name, all_parents,
-        build_node_fn, row_limit=None, preamble_ns=preamble_ns,
-        scenario=scenario,
+        order,
+        node_map,
+        parents_of,
+        id_to_name,
+        all_parents,
+        build_node_fn,
+        row_limit=None,
+        preamble_ns=preamble_ns,
+        source=source,
     )
 
     # Execute - all intermediate results stay lazy
@@ -311,14 +312,16 @@ def _execute_lazy(
         #                  internally, or nodes that don't need it)
         n_parents = len(parents_of.get(nid, []))
         n_children = children_count.get(nid, 0)
-        feeds_join = any(
-            len(parents_of.get(cid, [])) > 1
-            for cid in children_of.get(nid, [])
-        )
+        feeds_join = any(len(parents_of.get(cid, [])) > 1 for cid in children_of.get(nid, []))
 
         action = _checkpoint_decision(
-            nid, is_source, n_parents, n_children, feeds_join,
-            node_map, scenario or "live",
+            nid,
+            is_source,
+            n_parents,
+            n_children,
+            feeds_join,
+            node_map,
+            source or "live",
         )
 
         if checkpoint_dir is not None and action == _CheckpointAction.PARQUET:
@@ -371,7 +374,7 @@ def _build_funcs(
     *,
     row_limit: int | None = None,
     preamble_ns: dict | None = None,
-    scenario: str = "live",
+    source: str = "live",
 ) -> dict[str, tuple[Callable, bool]]:
     """Build per-node executable functions from the graph.
 
@@ -379,22 +382,25 @@ def _build_funcs(
     ``build_node_fn`` so Databricks sources can push LIMIT into SQL.
     ``preamble_ns`` is a compiled namespace of user-defined helpers from
     the pipeline file's preamble section.
-    ``scenario`` is the active execution scenario forwarded to build_node_fn.
+    ``source`` is the active execution source forwarded to build_node_fn.
     """
     funcs: dict[str, tuple[Callable, bool]] = {}
     for nid in order:
-        src_names = [
-            id_to_name[pid]
-            for pid in parents_of.get(nid, [])
-            if pid in id_to_name
-        ]
+        src_names = [id_to_name[pid] for pid in parents_of.get(nid, []) if pid in id_to_name]
         orig_src_names = resolve_orig_source_names(
-            node_map[nid], node_map, all_parents, id_to_name,
+            node_map[nid],
+            node_map,
+            all_parents,
+            id_to_name,
         )
         _, fn, is_source = build_node_fn(
-            node_map[nid], source_names=src_names, row_limit=row_limit,
-            node_map=node_map, orig_source_names=orig_src_names,
-            preamble_ns=preamble_ns, scenario=scenario,
+            node_map[nid],
+            source_names=src_names,
+            row_limit=row_limit,
+            node_map=node_map,
+            orig_source_names=orig_src_names,
+            preamble_ns=preamble_ns,
+            source=source,
         )
         funcs[nid] = (fn, is_source)
     return funcs
@@ -444,7 +450,7 @@ def _execute_eager_core(
     row_limit: int | None = None,
     swallow_errors: bool = False,
     preamble_ns: dict | None = None,
-    scenario: str = "live",
+    source: str = "live",
 ) -> EagerResult:
     """Execute the graph eagerly in topo order and collect DataFrames.
 
@@ -457,7 +463,7 @@ def _execute_eager_core(
         row_limit: Cap source-node output to this many rows.
         swallow_errors: If ``True``, record per-node errors and continue
             (preview behaviour).  If ``False``, raise immediately (trace).
-        scenario: Active execution scenario (``"live"`` = eager scoring).
+        source: Active execution source (``"live"`` = eager scoring).
 
     Returns:
         An ``EagerResult`` with named fields for outputs, order,
@@ -465,16 +471,24 @@ def _execute_eager_core(
         memory_bytes.
     """
     node_map, order, parents_of, id_to_name = _prepare_graph(
-        graph, target_node_id, scenario=scenario,
+        graph,
+        target_node_id,
+        source=source,
     )
 
     # Full parent lookup from ALL edges for instance resolution
     all_parents = graph.parents_of
 
     funcs = _build_funcs(
-        order, node_map, parents_of, id_to_name, all_parents,
-        build_node_fn, row_limit=row_limit, preamble_ns=preamble_ns,
-        scenario=scenario,
+        order,
+        node_map,
+        parents_of,
+        id_to_name,
+        all_parents,
+        build_node_fn,
+        row_limit=row_limit,
+        preamble_ns=preamble_ns,
+        source=source,
     )
 
     eager_outputs: dict[str, pl.DataFrame | None] = {}
@@ -508,9 +522,7 @@ def _execute_eager_core(
             df = result.collect(engine="streaming") if isinstance(result, pl.LazyFrame) else result
 
             # Capture full column set before selected_columns filtering
-            available_columns[nid] = [
-                (c, str(df[c].dtype)) for c in df.columns
-            ]
+            available_columns[nid] = [(c, str(df[c].dtype)) for c in df.columns]
 
             # Apply selected_columns filter for downstream propagation
             filtered = _apply_selected_columns(df, node_map[nid].data.config)
@@ -530,7 +542,14 @@ def _execute_eager_core(
         timings[nid] = round((time.perf_counter() - t0) * 1000, 1)
 
     return EagerResult(
-        eager_outputs, order, parents_of, node_map,
-        id_to_name, errors, timings, memory_bytes, error_lines,
+        eager_outputs,
+        order,
+        parents_of,
+        node_map,
+        id_to_name,
+        errors,
+        timings,
+        memory_bytes,
+        error_lines,
         available_columns,
     )

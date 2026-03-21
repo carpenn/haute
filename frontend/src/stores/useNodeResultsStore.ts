@@ -150,15 +150,15 @@ interface NodeResultsState {
   trainResults: Record<string, CachedTrainResult>
   trainJobs: Record<string, ActiveTrainJob>
 
-  // Column cache — keyed by "nodeId:scenario", cached across panel mounts
+  // Column cache — keyed by "nodeId:source", cached across panel mounts
   columnCache: Record<string, { columns: ColumnInfo[]; graphVersion: number }>
 
   // Graph version — bumped on any node/edge change
   graphVersion: number
 
   // ── Column cache actions ──
-  setColumns: (sourceNodeId: string, columns: ColumnInfo[], graphVersion: number, scenario?: string) => void
-  getColumns: (sourceNodeId: string, scenario?: string) => { columns: ColumnInfo[]; fresh: boolean } | null
+  setColumns: (sourceNodeId: string, columns: ColumnInfo[], graphVersion: number, source?: string) => void
+  getColumns: (sourceNodeId: string, source?: string) => { columns: ColumnInfo[]; fresh: boolean } | null
 
   // ── Preview actions ──
   setPreview: (nodeId: string, data: PreviewData, graphVersion: number) => void
@@ -201,15 +201,15 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
 
   // ── Column cache ──
 
-  setColumns: (sourceNodeId, columns, graphVersion, scenario) => {
-    const key = scenario ? `${sourceNodeId}:${scenario}` : sourceNodeId
+  setColumns: (sourceNodeId, columns, graphVersion, source) => {
+    const key = source ? `${sourceNodeId}:${source}` : sourceNodeId
     set((s) => ({
       columnCache: { ...s.columnCache, [key]: { columns, graphVersion } },
     }))
   },
 
-  getColumns: (sourceNodeId, scenario) => {
-    const key = scenario ? `${sourceNodeId}:${scenario}` : sourceNodeId
+  getColumns: (sourceNodeId, source) => {
+    const key = source ? `${sourceNodeId}:${source}` : sourceNodeId
     const entry = get().columnCache[key]
     if (!entry) return null
     return { columns: entry.columns, fresh: entry.graphVersion === get().graphVersion }

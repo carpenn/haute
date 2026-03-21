@@ -35,20 +35,28 @@ _DEFAULT_DEPTH = 6  # CatBoost tree depth for VRAM estimation
 # GLM config keys live at the top level of ModellingConfig (not inside
 # config.params).  Must be merged into train_params for GLMAlgorithm.
 _GLM_CONFIG_KEYS: tuple[str, ...] = (
-    "terms", "family", "link", "interactions",
-    "regularization", "alpha", "l1_ratio", "intercept",
-    "var_power", "offset", "cv_folds",
+    "terms",
+    "family",
+    "link",
+    "interactions",
+    "regularization",
+    "alpha",
+    "l1_ratio",
+    "intercept",
+    "var_power",
+    "offset",
+    "cv_folds",
 )
 
 
 # Valid GLM family → link combinations.  The canonical link (used when
 # the user leaves "link" empty) is listed first.
 _VALID_GLM_LINKS: dict[str, tuple[str, ...]] = {
-    "gaussian":  ("identity", "log", "inverse"),
-    "binomial":  ("logit", "probit", "cloglog"),
-    "poisson":   ("log", "identity", "sqrt"),
-    "gamma":     ("inverse", "log", "identity"),
-    "tweedie":   ("log", "identity"),
+    "gaussian": ("identity", "log", "inverse"),
+    "binomial": ("logit", "probit", "cloglog"),
+    "poisson": ("log", "identity", "sqrt"),
+    "gamma": ("inverse", "log", "identity"),
+    "tweedie": ("log", "identity"),
     "inverse_gaussian": ("inverse_squared", "inverse", "log", "identity"),
 }
 
@@ -60,10 +68,7 @@ def _validate_glm_family_link(family: str, link: str) -> None:
     if family not in _VALID_GLM_LINKS:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Unknown GLM family '{family}'. "
-                f"Available: {', '.join(_VALID_GLM_LINKS)}."
-            ),
+            detail=(f"Unknown GLM family '{family}'. Available: {', '.join(_VALID_GLM_LINKS)}."),
         )
     if not link:
         return  # canonical link will be used
@@ -155,7 +160,8 @@ def _check_gpu_vram(
     from haute._ram_estimate import available_vram_bytes, estimate_gpu_vram_bytes
 
     vram_needed = estimate_gpu_vram_bytes(
-        effective_rows, probe_columns,
+        effective_rows,
+        probe_columns,
         border_count=params.get("border_count", _DEFAULT_BORDER_COUNT),
         depth=params.get("depth", _DEFAULT_DEPTH),
         validation_size=validation_size,
@@ -210,17 +216,23 @@ class TrainService:
 
         with self._start_lock:
             self._check_no_concurrent_jobs()
-            job_id = self._store.create_job({
-                "status": "running",
-                "progress": 0.0,
-                "message": "Starting",
-                "config": dict(config),
-                "node_label": node.data.label,
-            })
+            job_id = self._store.create_job(
+                {
+                    "status": "running",
+                    "progress": 0.0,
+                    "message": "Starting",
+                    "config": dict(config),
+                    "node_label": node.data.label,
+                }
+            )
 
         preamble_ns = self._compile_preamble(body.graph)
         ram_warning, row_limit, total_source_rows, probe_columns = self._estimate_ram(
-            body.graph, body.node_id, preamble_ns, job_id, scenario=body.scenario,
+            body.graph,
+            body.node_id,
+            preamble_ns,
+            job_id,
+            source=body.source,
         )
         user_limit = config.get("row_limit")
         row_limit = _clamp_row_limit(row_limit, user_limit)
@@ -244,10 +256,15 @@ class TrainService:
 
         split_cfg = config.get("split", {})
         ram_warning = self._check_gpu_fallback(
-            train_params, row_limit, total_source_rows, probe_columns,
-            ram_warning, job_id,
-            validation_size=float(split_cfg.get("validation_size",
-                                  split_cfg.get("test_size", 0.2))),
+            train_params,
+            row_limit,
+            total_source_rows,
+            probe_columns,
+            ram_warning,
+            job_id,
+            validation_size=float(
+                split_cfg.get("validation_size", split_cfg.get("test_size", 0.2))
+            ),
             holdout_size=float(split_cfg.get("holdout_size", 0.0)),
         )
 
@@ -261,14 +278,22 @@ class TrainService:
             keep_cols.append(config["offset"])
 
         tmp_parquet = self._execute_and_sink(
-            body, preamble_ns, row_limit, job_id,
+            body,
+            preamble_ns,
+            row_limit,
+            job_id,
             exclude=excluded or None,
             keep_columns=keep_cols,
         )
 
         self._launch_background(
-            job_id, body.node_id, config, train_params, tmp_parquet,
-            ram_warning, total_source_rows,
+            job_id,
+            body.node_id,
+            config,
+            train_params,
+            tmp_parquet,
+            ram_warning,
+            total_source_rows,
         )
         return TrainResponse(status="started", job_id=job_id)
 
@@ -306,10 +331,7 @@ class TrainService:
     def _check_no_concurrent_jobs(self) -> None:
         """Reject if a training job is already running."""
         self._store._evict_stale()
-        running = [
-            jid for jid, j in self._store.jobs.items()
-            if j.get("status") == "running"
-        ]
+        running = [jid for jid, j in self._store.jobs.items() if j.get("status") == "running"]
         if running:
             raise HTTPException(
                 status_code=409,
@@ -319,6 +341,7 @@ class TrainService:
     @staticmethod
     def _compile_preamble(graph: PipelineGraph) -> dict[str, Any] | None:
         from haute.executor import _compile_preamble
+
         return _compile_preamble(graph.preamble or "") or None
 
     def _estimate_ram(
@@ -327,7 +350,7 @@ class TrainService:
         node_id: str,
         preamble_ns: dict[str, Any] | None,
         job_id: str,
-        scenario: str = "live",
+        source: str = "live",
     ) -> tuple[str | None, int | None, int | None, int]:
         """Estimate safe row limit from available RAM.
 
@@ -344,9 +367,11 @@ class TrainService:
 
             self._store.update_job(job_id, message="Estimating memory requirements")
             ram_est = estimate_safe_training_rows(
-                graph, node_id, _build_node_fn,
+                graph,
+                node_id,
+                _build_node_fn,
                 preamble_ns=preamble_ns,
-                scenario=scenario,
+                source=source,
             )
             row_limit = ram_est.safe_row_limit
             ram_warning = ram_est.warning
@@ -382,7 +407,9 @@ class TrainService:
         try:
             effective_rows = row_limit or (total_source_rows or 0)
             vram_check = _check_gpu_vram(
-                effective_rows, probe_columns, train_params,
+                effective_rows,
+                probe_columns,
+                train_params,
                 validation_size=validation_size,
                 holdout_size=holdout_size,
             )
@@ -395,10 +422,7 @@ class TrainService:
                     available_mb=vram_check.available_mb,
                 )
                 self._store.update_job(job_id, gpu_warning=gpu_warning)
-                ram_warning = (
-                    f"{ram_warning}\n{gpu_warning}" if ram_warning
-                    else gpu_warning
-                )
+                ram_warning = f"{ram_warning}\n{gpu_warning}" if ram_warning else gpu_warning
                 self._store.update_job(job_id, warning=ram_warning)
         except Exception as exc:
             logger.warning("vram_estimate_failed", error=str(exc))
@@ -433,8 +457,10 @@ class TrainService:
 
         # Free the preview cache to reclaim memory
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
         from haute.trace import _cache as _trace_cache
+
         _trace_cache.invalidate()
         gc.collect()
         _mem_checkpoint("cleared preview cache")
@@ -449,10 +475,11 @@ class TrainService:
 
             checkpoint_dir = Path(tempfile.mkdtemp(prefix="haute_train_ckpt_"))
             lazy_outputs, _order, _parents, _id_to_name = _execute_lazy(
-                body.graph, _build_node_fn,
+                body.graph,
+                _build_node_fn,
                 target_node_id=body.node_id,
                 preamble_ns=preamble_ns,
-                scenario=body.scenario,
+                source=body.source,
                 checkpoint_dir=checkpoint_dir,
             )
 
@@ -471,15 +498,13 @@ class TrainService:
             # phases (split, pool construction, diagnostics).
             if exclude and keep_columns:
                 import polars as pl
+
                 all_cols = (
                     target_lf.collect_schema().names()
                     if isinstance(target_lf, pl.LazyFrame)
                     else target_lf.columns
                 )
-                drop_cols = [
-                    c for c in all_cols
-                    if c in exclude and c not in keep_columns
-                ]
+                drop_cols = [c for c in all_cols if c in exclude and c not in keep_columns]
                 if drop_cols:
                     target_lf = target_lf.drop(drop_cols)
                     _mem_checkpoint(f"projected: dropped {len(drop_cols)} excluded columns")
@@ -531,14 +556,16 @@ class TrainService:
         self._store.update_job(job_id, start_time=start_time)
 
         def _progress(msg: str, frac: float) -> None:
-            self._store.update_job(job_id,
+            self._store.update_job(
+                job_id,
                 progress=frac,
                 message=msg,
                 elapsed_seconds=time.monotonic() - start_time,
             )
 
         def _on_iteration(iteration: int, total: int, metrics: dict[str, float]) -> None:
-            self._store.update_job(job_id,
+            self._store.update_job(
+                job_id,
                 iteration=iteration,
                 total_iterations=total,
                 train_loss=metrics,
@@ -596,7 +623,8 @@ class TrainService:
                     warning=ram_warning,
                     total_source_rows=total_source_rows,
                 )
-                self._store.update_job(job_id,
+                self._store.update_job(
+                    job_id,
                     status="completed",
                     result=response,
                     elapsed_seconds=time.monotonic() - start_time,

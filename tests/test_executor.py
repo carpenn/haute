@@ -29,6 +29,7 @@ from tests.conftest import (
 # _exec_user_code
 # ---------------------------------------------------------------------------
 
+
 class TestExecUserCode:
     def test_chain_syntax(self):
         lf = pl.DataFrame({"x": [1, 2, 3]}).lazy()
@@ -97,7 +98,8 @@ class TestExecUserCode:
         lf = pl.DataFrame({"x": [1]}).lazy()
         result = _exec_user_code(
             "df = df.with_columns(y=pl.lit(99))",
-            ["df"], (lf,),
+            ["df"],
+            (lf,),
         )
         assert result.collect()["y"].to_list() == [99]
 
@@ -131,13 +133,7 @@ class TestCompilePreamble:
         assert ns["MY_LIST"] == [1, 2]
 
     def test_functions_can_call_each_other(self):
-        code = (
-            "def helper(x):\n"
-            "    return x + 1\n"
-            "\n"
-            "def main(x):\n"
-            "    return helper(x) * 2\n"
-        )
+        code = "def helper(x):\n    return x + 1\n\ndef main(x):\n    return helper(x) * 2\n"
         ns = _compile_preamble(code)
         assert ns["main"](3) == 8  # (3 + 1) * 2
 
@@ -210,9 +206,7 @@ class TestCompilePreamble:
 
 class TestBuildNodeFnWithPreamble:
     def test_transform_can_call_preamble_function(self):
-        preamble_ns = _compile_preamble(
-            "def add_ten(col):\n    return pl.col(col) + 10\n"
-        )
+        preamble_ns = _compile_preamble("def add_ten(col):\n    return pl.col(col) + 10\n")
         node = _transform_node("t", code="df = df.with_columns(y=add_ten('x'))")
         _, fn, _ = _build_node_fn(node, source_names=["df"], preamble_ns=preamble_ns)
         lf = pl.DataFrame({"x": [1, 2]}).lazy()
@@ -231,6 +225,7 @@ class TestBuildNodeFnWithPreamble:
 # ---------------------------------------------------------------------------
 # _build_node_fn
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.usefixtures("_widen_sandbox_root")
 class TestBuildNodeFn:
@@ -257,14 +252,16 @@ class TestBuildNodeFn:
         assert df[col].to_list() == values
 
     def test_data_source_databricks_is_source(self):
-        node = _n({
-            "id": "db",
-            "data": {
-                "label": "db",
-                "nodeType": "dataSource",
-                "config": {"sourceType": "databricks", "table": "cat.sch.tbl"},
-            },
-        })
+        node = _n(
+            {
+                "id": "db",
+                "data": {
+                    "label": "db",
+                    "nodeType": "dataSource",
+                    "config": {"sourceType": "databricks", "table": "cat.sch.tbl"},
+                },
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
         # Without a cached parquet file, calling fn() raises CacheNotFoundError
@@ -277,14 +274,16 @@ class TestBuildNodeFn:
         """DataSource with user code applies code after loading data."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1, 2, 3], "y": [10, 20, 30]}).write_parquet(p)
-        node = _n({
-            "id": "src",
-            "data": {
-                "label": "src",
-                "nodeType": "dataSource",
-                "config": {"path": str(p), "code": ".filter(pl.col('x') > 1)"},
-            },
-        })
+        node = _n(
+            {
+                "id": "src",
+                "data": {
+                    "label": "src",
+                    "nodeType": "dataSource",
+                    "config": {"path": str(p), "code": ".filter(pl.col('x') > 1)"},
+                },
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True  # still a source node
         df = fn().collect()
@@ -294,14 +293,16 @@ class TestBuildNodeFn:
         """DataSource code supports chain syntax (starting with '.')."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"a": [1, 2, 3]}).write_parquet(p)
-        node = _n({
-            "id": "src",
-            "data": {
-                "label": "src",
-                "nodeType": "dataSource",
-                "config": {"path": str(p), "code": ".select('a')"},
-            },
-        })
+        node = _n(
+            {
+                "id": "src",
+                "data": {
+                    "label": "src",
+                    "nodeType": "dataSource",
+                    "config": {"path": str(p), "code": ".select('a')"},
+                },
+            }
+        )
         _, fn, _ = _build_node_fn(node)
         df = fn().collect()
         assert df.columns == ["a"]
@@ -311,14 +312,16 @@ class TestBuildNodeFn:
         """DataSource with empty code behaves like no code."""
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
-        node = _n({
-            "id": "src",
-            "data": {
-                "label": "src",
-                "nodeType": "dataSource",
-                "config": {"path": str(p), "code": ""},
-            },
-        })
+        node = _n(
+            {
+                "id": "src",
+                "data": {
+                    "label": "src",
+                    "nodeType": "dataSource",
+                    "config": {"path": str(p), "code": ""},
+                },
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is True
         df = fn().collect()
@@ -354,10 +357,12 @@ class TestBuildNodeFn:
         assert set(df.columns) == {"a", "b"}
 
     def test_sink_passthrough(self):
-        node = _n({
-            "id": "sink",
-            "data": {"label": "sink", "nodeType": "dataSink", "config": {}},
-        })
+        node = _n(
+            {
+                "id": "sink",
+                "data": {"label": "sink", "nodeType": "dataSink", "config": {}},
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [1]}).lazy()
@@ -367,21 +372,24 @@ class TestBuildNodeFn:
     def test_external_file_with_json(self, tmp_path):
         """externalFile with JSON file type loads and injects obj."""
         import json as _json
+
         p = tmp_path / "data.json"
         p.write_text(_json.dumps({"multiplier": 10}))
 
-        node = _n({
-            "id": "ext",
-            "data": {
-                "label": "ext",
-                "nodeType": "externalFile",
-                "config": {
-                    "path": str(p),
-                    "fileType": "json",
-                    "code": "df = df.with_columns(y=pl.lit(obj['multiplier']))",
+        node = _n(
+            {
+                "id": "ext",
+                "data": {
+                    "label": "ext",
+                    "nodeType": "externalFile",
+                    "config": {
+                        "path": str(p),
+                        "fileType": "json",
+                        "code": "df = df.with_columns(y=pl.lit(obj['multiplier']))",
+                    },
                 },
-            },
-        })
+            }
+        )
         _, fn, is_source = _build_node_fn(node, source_names=["df"])
         assert is_source is False
         lf = pl.DataFrame({"x": [1]}).lazy()
@@ -391,22 +399,25 @@ class TestBuildNodeFn:
     def test_external_file_with_pickle(self, tmp_path):
         """externalFile with pickle file type loads and injects obj."""
         import pickle
+
         p = tmp_path / "data.pkl"
         with open(p, "wb") as f:
             pickle.dump({"factor": 5}, f)
 
-        node = _n({
-            "id": "ext",
-            "data": {
-                "label": "ext",
-                "nodeType": "externalFile",
-                "config": {
-                    "path": str(p),
-                    "fileType": "pickle",
-                    "code": "df = df.with_columns(y=pl.lit(obj['factor']))",
+        node = _n(
+            {
+                "id": "ext",
+                "data": {
+                    "label": "ext",
+                    "nodeType": "externalFile",
+                    "config": {
+                        "path": str(p),
+                        "fileType": "pickle",
+                        "code": "df = df.with_columns(y=pl.lit(obj['factor']))",
+                    },
                 },
-            },
-        })
+            }
+        )
         _, fn, _ = _build_node_fn(node, source_names=["df"])
         lf = pl.DataFrame({"x": [1]}).lazy()
         df = fn(lf).collect()
@@ -414,14 +425,16 @@ class TestBuildNodeFn:
 
     def test_external_file_passthrough_without_code(self):
         """externalFile without code acts as passthrough."""
-        node = _n({
-            "id": "ext",
-            "data": {
-                "label": "ext",
-                "nodeType": "externalFile",
-                "config": {"path": "model.pkl", "fileType": "pickle", "code": ""},
-            },
-        })
+        node = _n(
+            {
+                "id": "ext",
+                "data": {
+                    "label": "ext",
+                    "nodeType": "externalFile",
+                    "config": {"path": "model.pkl", "fileType": "pickle", "code": ""},
+                },
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [7]}).lazy()
@@ -435,17 +448,21 @@ class TestBuildNodeFn:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="Input should be"):
-            _n({
-                "id": "unk",
-                "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
-            })
+            _n(
+                {
+                    "id": "unk",
+                    "data": {"label": "unk", "nodeType": "unknownFutureType", "config": {}},
+                }
+            )
 
     def test_unhandled_node_type_passthrough(self):
         """Node type without dedicated handler falls through to passthrough."""
-        node = _n({
-            "id": "port1",
-            "data": {"label": "port1", "nodeType": "submodelPort", "config": {}},
-        })
+        node = _n(
+            {
+                "id": "port1",
+                "data": {"label": "port1", "nodeType": "submodelPort", "config": {}},
+            }
+        )
         _, fn, is_source = _build_node_fn(node)
         assert is_source is False
         lf = pl.DataFrame({"x": [3]}).lazy()
@@ -465,36 +482,61 @@ class TestPruneLiveSwitchEdges:
         """Build a graph with a live_switch: api → feat → switch ← batch."""
         from haute._types import GraphEdge, GraphNode, NodeData, PipelineGraph
 
-        return PipelineGraph(nodes=[
-            GraphNode(id="api", data=NodeData(
-                label="quotes", nodeType="apiInput",
-                config={"path": "data/q.jsonl"},
-            )),
-            GraphNode(id="feat", data=NodeData(
-                label="feature_processing", nodeType="polars",
-                config={"code": ""},
-            )),
-            GraphNode(id="batch", data=NodeData(
-                label="batch_quotes", nodeType="dataSource",
-                config={"path": "data/batch.parquet"},
-            )),
-            GraphNode(id="sw", data=NodeData(
-                label="policies", nodeType="liveSwitch",
-                config={"input_scenario_map": {
-                    "feature_processing": "live",
-                    "batch_quotes": "nb_batch",
-                }},
-            )),
-            GraphNode(id="down", data=NodeData(
-                label="downstream", nodeType="polars",
-                config={"code": ""},
-            )),
-        ], edges=[
-            GraphEdge(id="e1", source="api", target="feat"),
-            GraphEdge(id="e2", source="feat", target="sw"),
-            GraphEdge(id="e3", source="batch", target="sw"),
-            GraphEdge(id="e4", source="sw", target="down"),
-        ])
+        return PipelineGraph(
+            nodes=[
+                GraphNode(
+                    id="api",
+                    data=NodeData(
+                        label="quotes",
+                        nodeType="apiInput",
+                        config={"path": "data/q.jsonl"},
+                    ),
+                ),
+                GraphNode(
+                    id="feat",
+                    data=NodeData(
+                        label="feature_processing",
+                        nodeType="polars",
+                        config={"code": ""},
+                    ),
+                ),
+                GraphNode(
+                    id="batch",
+                    data=NodeData(
+                        label="batch_quotes",
+                        nodeType="dataSource",
+                        config={"path": "data/batch.parquet"},
+                    ),
+                ),
+                GraphNode(
+                    id="sw",
+                    data=NodeData(
+                        label="policies",
+                        nodeType="liveSwitch",
+                        config={
+                            "input_scenario_map": {
+                                "feature_processing": "live",
+                                "batch_quotes": "nb_batch",
+                            }
+                        },
+                    ),
+                ),
+                GraphNode(
+                    id="down",
+                    data=NodeData(
+                        label="downstream",
+                        nodeType="polars",
+                        config={"code": ""},
+                    ),
+                ),
+            ],
+            edges=[
+                GraphEdge(id="e1", source="api", target="feat"),
+                GraphEdge(id="e2", source="feat", target="sw"),
+                GraphEdge(id="e3", source="batch", target="sw"),
+                GraphEdge(id="e4", source="sw", target="down"),
+            ],
+        )
 
     def test_live_scenario_prunes_batch_branch(self):
         from haute._execute_lazy import _prune_live_switch_edges
@@ -513,7 +555,9 @@ class TestPruneLiveSwitchEdges:
 
         g = self._make_live_switch_graph()
         pruned = _prune_live_switch_edges(
-            g.edges, g.node_map, "nb_batch",
+            g.edges,
+            g.node_map,
+            "nb_batch",
         )
         edge_pairs = {(e.source, e.target) for e in pruned}
         # feat→sw edge should be removed
@@ -525,13 +569,15 @@ class TestPruneLiveSwitchEdges:
         """Graph without live_switch nodes should return edges unchanged."""
         from haute._execute_lazy import _prune_live_switch_edges
 
-        g = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _transform_node("t", ""),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        g = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _transform_node("t", ""),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         pruned = _prune_live_switch_edges(g.edges, g.node_map, "live")
         assert len(pruned) == len(g.edges)
 
@@ -542,7 +588,9 @@ class TestPruneLiveSwitchEdges:
 
         g = self._make_live_switch_graph()
         _, order, parents_of, id_to_name = _prepare_graph(
-            g, target_node_id="down", scenario="live",
+            g,
+            target_node_id="down",
+            source="live",
         )
         # batch should not be in the execution order
         assert "batch" not in order
@@ -555,7 +603,9 @@ class TestPruneLiveSwitchEdges:
 
         g = self._make_live_switch_graph()
         _, order, parents_of, id_to_name = _prepare_graph(
-            g, target_node_id="down", scenario="nb_batch",
+            g,
+            target_node_id="down",
+            source="nb_batch",
         )
         # api and feat should not be in the execution order
         assert "api" not in order
@@ -568,18 +618,21 @@ class TestPruneLiveSwitchEdges:
 # execute_graph
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteGraph:
     def test_simple_pipeline(self, tmp_path):
         p = tmp_path / "input.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         assert results["src"].status == "ok"
         assert results["t"].status == "ok"
@@ -590,13 +643,15 @@ class TestExecuteGraph:
         p = tmp_path / "t.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(y=pl.col('x') + 1)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(y=pl.col('x') + 1)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         for nid in ("src", "t"):
             assert isinstance(results[nid].timing_ms, float)
@@ -606,13 +661,15 @@ class TestExecuteGraph:
         p = tmp_path / "mem.parquet"
         pl.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(z=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(z=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         for nid in ("src", "t"):
             assert isinstance(results[nid].memory_bytes, int)
@@ -622,13 +679,15 @@ class TestExecuteGraph:
         p = tmp_path / "ok.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("bad", "df.select('nonexistent_column')"),
-            ],
-            "edges": [_edge("src", "bad")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("bad", "df.select('nonexistent_column')"),
+                ],
+                "edges": [_edge("src", "bad")],
+            }
+        )
         results = execute_graph(graph)
         assert results["bad"].status == "error"
         assert results["bad"].memory_bytes == 0
@@ -648,14 +707,16 @@ class TestExecuteGraph:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("a", str(p)),
-                _transform_node("b"),
-                _transform_node("c"),
-            ],
-            "edges": [_edge("a", "b"), _edge("b", "c")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("a", str(p)),
+                    _transform_node("b"),
+                    _transform_node("c"),
+                ],
+                "edges": [_edge("a", "b"), _edge("b", "c")],
+            }
+        )
         results = execute_graph(graph, target_node_id="b")
         assert "b" in results
         assert "c" not in results
@@ -664,19 +725,22 @@ class TestExecuteGraph:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                # Select a column that doesn't exist - triggers ColumnNotFoundError at collect
-                _transform_node("bad", code=".select('nonexistent_col')"),
-            ],
-            "edges": [_edge("src", "bad")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    # Select a column that doesn't exist - triggers ColumnNotFoundError at collect
+                    _transform_node("bad", code=".select('nonexistent_col')"),
+                ],
+                "edges": [_edge("src", "bad")],
+            }
+        )
         results = execute_graph(graph)
         assert results["bad"].status == "error"
-        assert "nonexistent_col" in results["bad"].error.lower() or "not found" in results["bad"].error.lower(), (
-            f"Expected column-not-found error, got: {results['bad'].error}"
-        )
+        assert (
+            "nonexistent_col" in results["bad"].error.lower()
+            or "not found" in results["bad"].error.lower()
+        ), f"Expected column-not-found error, got: {results['bad'].error}"
         assert results["bad"].row_count == 0
         assert results["bad"].columns == []
 
@@ -685,14 +749,16 @@ class TestExecuteGraph:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("mid", code=".select('nonexistent_col')"),
-                _transform_node("leaf", code=".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("mid", code=".select('nonexistent_col')"),
+                    _transform_node("leaf", code=".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
+            }
+        )
         results = execute_graph(graph)
         # Mid node should fail
         assert results["mid"].status == "error"
@@ -707,10 +773,12 @@ class TestExecuteGraph:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": list(range(10))}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
         results = execute_graph(graph, row_limit=0)
         assert results["src"].status == "ok"
         assert results["src"].row_count == 10
@@ -720,13 +788,15 @@ class TestExecuteGraph:
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": list(range(10))}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", code=".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", code=".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph, row_limit=1)
         assert results["src"].row_count == 1
         assert results["t"].row_count == 1
@@ -737,7 +807,9 @@ class TestExecuteGraph:
     def test_empty_source_dataframe(self, tmp_path):
         """A source file with 0 rows should still have schema metadata."""
         p = tmp_path / "empty.parquet"
-        pl.DataFrame({"a": pl.Series([], dtype=pl.Int64), "b": pl.Series([], dtype=pl.Utf8)}).write_parquet(p)
+        pl.DataFrame(
+            {"a": pl.Series([], dtype=pl.Int64), "b": pl.Series([], dtype=pl.Utf8)}
+        ).write_parquet(p)
 
         graph = _g({"nodes": [_source_node("src", str(p))], "edges": []})
         results = execute_graph(graph)
@@ -769,22 +841,26 @@ class TestDataSourceUserCode:
         p = tmp_path / "big.parquet"
         pl.DataFrame({"x": range(1000)}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _n({
-                    "id": "src",
-                    "data": {
-                        "label": "src",
-                        "nodeType": "dataSource",
-                        "config": {
-                            "path": str(p),
-                            "code": "df = df.limit(10)",
-                        },
-                    },
-                }),
-            ],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _n(
+                        {
+                            "id": "src",
+                            "data": {
+                                "label": "src",
+                                "nodeType": "dataSource",
+                                "config": {
+                                    "path": str(p),
+                                    "code": "df = df.limit(10)",
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [],
+            }
+        )
         results = execute_graph(graph)
         assert results["src"].status == "ok"
         assert results["src"].row_count == 10
@@ -795,30 +871,36 @@ class TestDataSourceUserCode:
         out = tmp_path / "out.parquet"
         pl.DataFrame({"x": range(1000)}).write_parquet(src)
 
-        graph = _g({
-            "nodes": [
-                _n({
-                    "id": "src",
-                    "data": {
-                        "label": "src",
-                        "nodeType": "dataSource",
-                        "config": {
-                            "path": str(src),
-                            "code": "df = df.limit(10)",
-                        },
-                    },
-                }),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(out), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _n(
+                        {
+                            "id": "src",
+                            "data": {
+                                "label": "src",
+                                "nodeType": "dataSource",
+                                "config": {
+                                    "path": str(src),
+                                    "code": "df = df.limit(10)",
+                                },
+                            },
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(out), "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+            }
+        )
         resp = execute_sink(graph, "sink")
         assert resp.status == "ok"
         assert resp.row_count == 10
@@ -828,19 +910,23 @@ class TestDataSourceUserCode:
         p = tmp_path / "full.parquet"
         pl.DataFrame({"x": range(500)}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _n({
-                    "id": "src",
-                    "data": {
-                        "label": "src",
-                        "nodeType": "dataSource",
-                        "config": {"path": str(p)},
-                    },
-                }),
-            ],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _n(
+                        {
+                            "id": "src",
+                            "data": {
+                                "label": "src",
+                                "nodeType": "dataSource",
+                                "config": {"path": str(p)},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [],
+            }
+        )
         results = execute_graph(graph)
         assert results["src"].row_count == 500
 
@@ -848,22 +934,26 @@ class TestDataSourceUserCode:
         """The JSON config sidecar must not contain 'code' — it lives in .py."""
         from haute._config_io import collect_node_configs
 
-        graph = _g({
-            "nodes": [
-                _n({
-                    "id": "src",
-                    "data": {
-                        "label": "my_source",
-                        "nodeType": "dataSource",
-                        "config": {
-                            "path": "data.parquet",
-                            "code": "df = df.limit(100)",
-                        },
-                    },
-                }),
-            ],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _n(
+                        {
+                            "id": "src",
+                            "data": {
+                                "label": "my_source",
+                                "nodeType": "dataSource",
+                                "config": {
+                                    "path": "data.parquet",
+                                    "code": "df = df.limit(100)",
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [],
+            }
+        )
         configs = collect_node_configs(graph)
         for _path, content in configs.items():
             parsed = json.loads(content)
@@ -883,21 +973,19 @@ class TestDataSourceUserCode:
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(parquet_path)
 
         py_file.write_text(
-            f'import polars as pl\n'
-            f'import haute\n'
+            f"import polars as pl\n"
+            f"import haute\n"
             f'pipeline = haute.Pipeline("test")\n\n'
             f'@pipeline.data_source(config="config/data_source/my_src.json")\n'
-            f'def my_src() -> pl.LazyFrame:\n'
+            f"def my_src() -> pl.LazyFrame:\n"
             f'    """my_src node"""\n'
             f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
-            f'    df = df.limit(2)\n'
-            f'    return df\n'
+            f"    df = df.limit(2)\n"
+            f"    return df\n"
         )
         cfg_dir = tmp_path / "config" / "data_source"
         cfg_dir.mkdir(parents=True)
-        (cfg_dir / "my_src.json").write_text(
-            json.dumps({"path": str(parquet_path)})
-        )
+        (cfg_dir / "my_src.json").write_text(json.dumps({"path": str(parquet_path)}))
 
         from haute.parser import parse_pipeline_file
 
@@ -917,22 +1005,20 @@ class TestDataSourceUserCode:
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(parquet_path)
 
         py_file.write_text(
-            f'import polars as pl\n'
-            f'import haute\n'
+            f"import polars as pl\n"
+            f"import haute\n"
             f'pipeline = haute.Pipeline("test")\n\n'
             f'@pipeline.data_source(config="config/data_source/my_src.json")\n'
-            f'def my_src() -> pl.LazyFrame:\n'
+            f"def my_src() -> pl.LazyFrame:\n"
             f'    """my_src node"""\n'
             f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
-            f'    # -- user code --\n'
-            f'    df = df.limit(2)\n'
-            f'    return df\n'
+            f"    # -- user code --\n"
+            f"    df = df.limit(2)\n"
+            f"    return df\n"
         )
         cfg_dir = tmp_path / "config" / "data_source"
         cfg_dir.mkdir(parents=True)
-        (cfg_dir / "my_src.json").write_text(
-            json.dumps({"path": str(parquet_path)})
-        )
+        (cfg_dir / "my_src.json").write_text(json.dumps({"path": str(parquet_path)}))
 
         from haute.parser import parse_pipeline_file
 
@@ -947,21 +1033,19 @@ class TestDataSourceUserCode:
         pl.DataFrame({"x": range(100)}).write_parquet(parquet_path)
 
         py_file.write_text(
-            f'import polars as pl\n'
-            f'import haute\n'
+            f"import polars as pl\n"
+            f"import haute\n"
             f'pipeline = haute.Pipeline("test")\n\n'
             f'@pipeline.data_source(config="config/data_source/src.json")\n'
-            f'def src() -> pl.LazyFrame:\n'
+            f"def src() -> pl.LazyFrame:\n"
             f'    """src node"""\n'
             f'    df = pl.scan_parquet("{parquet_path.as_posix()}")\n'
-            f'    df = df.limit(5)\n'
-            f'    return df\n'
+            f"    df = df.limit(5)\n"
+            f"    return df\n"
         )
         cfg_dir = tmp_path / "config" / "data_source"
         cfg_dir.mkdir(parents=True)
-        (cfg_dir / "src.json").write_text(
-            json.dumps({"path": str(parquet_path)})
-        )
+        (cfg_dir / "src.json").write_text(json.dumps({"path": str(parquet_path)}))
 
         from haute.parser import parse_pipeline_file
 
@@ -983,20 +1067,24 @@ def _make_sink_graph(tmp_path, *, src_data=None):
     src_path = tmp_path / "in.parquet"
     out_path = tmp_path / "out.parquet"
     pl.DataFrame(src_data or {"x": [1]}).write_parquet(src_path)
-    graph = _g({
-        "nodes": [
-            _source_node("src", str(src_path)),
-            _n({
-                "id": "sink",
-                "data": {
-                    "label": "sink",
-                    "nodeType": "dataSink",
-                    "config": {"path": str(out_path), "format": "parquet"},
-                },
-            }),
-        ],
-        "edges": [_edge("src", "sink")],
-    })
+    graph = _g(
+        {
+            "nodes": [
+                _source_node("src", str(src_path)),
+                _n(
+                    {
+                        "id": "sink",
+                        "data": {
+                            "label": "sink",
+                            "nodeType": "dataSink",
+                            "config": {"path": str(out_path), "format": "parquet"},
+                        },
+                    }
+                ),
+            ],
+            "edges": [_edge("src", "sink")],
+        }
+    )
     return graph, out_path
 
 
@@ -1006,20 +1094,24 @@ class TestExecuteSink:
         out_path = tmp_path / "out.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(src_path)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(src_path)),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(out_path), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(src_path)),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(out_path), "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+            }
+        )
         result = execute_sink(graph, sink_node_id="sink")
         assert result.status == "ok"
         assert result.row_count == 2
@@ -1032,20 +1124,24 @@ class TestExecuteSink:
         out_path = tmp_path / "out.csv"
         pl.DataFrame({"a": [10]}).write_parquet(src_path)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(src_path)),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(out_path), "format": "csv"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(src_path)),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(out_path), "format": "csv"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+            }
+        )
         result = execute_sink(graph, sink_node_id="sink")
         assert result.status == "ok"
         assert out_path.exists()
@@ -1060,53 +1156,57 @@ class TestExecuteSink:
         so model scoring uses the disk-batched path instead of OOM-prone eager."""
         graph, _ = _make_sink_graph(tmp_path, src_data={"x": [1, 2]})
 
-        captured_scenarios: list[str] = []
+        captured_sources: list[str] = []
         from haute._execute_lazy import _execute_lazy as original_execute_lazy
         from unittest.mock import patch
 
         def spy(*args, **kwargs):
-            captured_scenarios.append(kwargs.get("scenario", "???"))
+            captured_sources.append(kwargs.get("source", "???"))
             return original_execute_lazy(*args, **kwargs)
 
         with patch("haute.executor._execute_lazy", side_effect=spy):
-            execute_sink(graph, sink_node_id="sink", scenario="live")
+            execute_sink(graph, sink_node_id="sink", source="live")
 
-        assert captured_scenarios == ["batch"]
+        assert captured_sources == ["batch"]
 
     def test_custom_scenario_preserved_for_sink(self, tmp_path):
         """Non-live scenarios are passed through unchanged for source-switch routing."""
         graph, _ = _make_sink_graph(tmp_path)
 
-        captured_scenarios: list[str] = []
+        captured_sources: list[str] = []
         from haute._execute_lazy import _execute_lazy as original_execute_lazy
         from unittest.mock import patch
 
         def spy(*args, **kwargs):
-            captured_scenarios.append(kwargs.get("scenario", "???"))
+            captured_sources.append(kwargs.get("source", "???"))
             return original_execute_lazy(*args, **kwargs)
 
         with patch("haute.executor._execute_lazy", side_effect=spy):
-            execute_sink(graph, sink_node_id="sink", scenario="my_custom")
+            execute_sink(graph, sink_node_id="sink", source="my_custom")
 
-        assert captured_scenarios == ["my_custom"]
+        assert captured_sources == ["my_custom"]
 
     def test_no_path_raises(self, tmp_path):
         src = tmp_path / "in.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(src)
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(src)),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": "", "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(src)),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": "", "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+            }
+        )
         with pytest.raises(ValueError, match="no.*output path"):
             execute_sink(graph, sink_node_id="sink")
 
@@ -1118,33 +1218,39 @@ class TestExecuteSink:
         pl.DataFrame({"key": [1, 2], "a": [10, 20]}).write_parquet(src1)
         pl.DataFrame({"key": [1, 2], "b": [30, 40]}).write_parquet(src2)
 
-        graph = _g({
-            "nodes": [
-                _source_node("s1", str(src1)),
-                _source_node("s2", str(src2)),
-                _n({
-                    "id": "join",
-                    "data": {
-                        "label": "join",
-                        "nodeType": "polars",
-                        "config": {"code": "s1.join(s2, on='key', how='left')"},
-                    },
-                }),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(out), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [
-                _edge("s1", "join"),
-                _edge("s2", "join"),
-                _edge("join", "sink"),
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("s1", str(src1)),
+                    _source_node("s2", str(src2)),
+                    _n(
+                        {
+                            "id": "join",
+                            "data": {
+                                "label": "join",
+                                "nodeType": "polars",
+                                "config": {"code": "s1.join(s2, on='key', how='left')"},
+                            },
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(out), "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [
+                    _edge("s1", "join"),
+                    _edge("s2", "join"),
+                    _edge("join", "sink"),
+                ],
+            }
+        )
         result = execute_sink(graph, sink_node_id="sink")
         assert result.status == "ok"
         assert result.row_count == 2
@@ -1204,57 +1310,64 @@ class TestExecuteSink:
         pl.DataFrame({"x": [1]}).write_parquet(live_src)
         pl.DataFrame({"x": [2]}).write_parquet(batch_src)
 
-        graph = _g({
-            "nodes": [
-                _source_node("live_src", str(live_src)),
-                _source_node("batch_src", str(batch_src)),
-                _n({
-                    "id": "sw",
-                    "data": {
-                        "label": "sw",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {
-                                "live_src": "live",
-                                "batch_src": "nb_batch",
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("live_src", str(live_src)),
+                    _source_node("batch_src", str(batch_src)),
+                    _n(
+                        {
+                            "id": "sw",
+                            "data": {
+                                "label": "sw",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {
+                                        "live_src": "live",
+                                        "batch_src": "nb_batch",
+                                    },
+                                },
                             },
-                        },
-                    },
-                }),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(out_path), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [
-                _edge("live_src", "sw"),
-                _edge("batch_src", "sw"),
-                _edge("sw", "sink"),
-            ],
-        })
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(out_path), "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [
+                    _edge("live_src", "sw"),
+                    _edge("batch_src", "sw"),
+                    _edge("sw", "sink"),
+                ],
+            }
+        )
 
-        captured_scenarios: list[str] = []
+        captured_sources: list[str] = []
         from haute._execute_lazy import _execute_lazy as original_execute_lazy
         from unittest.mock import patch
 
         def spy(*args, **kwargs):
-            captured_scenarios.append(kwargs.get("scenario", "???"))
+            captured_sources.append(kwargs.get("source", "???"))
             return original_execute_lazy(*args, **kwargs)
 
         with patch("haute.executor._execute_lazy", side_effect=spy):
-            execute_sink(graph, sink_node_id="sink", scenario="live")
+            execute_sink(graph, sink_node_id="sink", source="live")
 
         # Should resolve to "nb_batch" from the ISM, not generic "batch"
-        assert captured_scenarios == ["nb_batch"]
+        assert captured_sources == ["nb_batch"]
 
 
 # ---------------------------------------------------------------------------
 # Instance node alias injection
 # ---------------------------------------------------------------------------
+
 
 class TestInstanceAliasInjection:
     """Regression tests for instance node input mapping."""
@@ -1297,29 +1410,33 @@ class TestInstanceAliasInjection:
         pl.DataFrame({"k": [3], "v": [50]}).write_parquet(alt_a)
         pl.DataFrame({"k": [3], "w": [60]}).write_parquet(alt_b)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src_a", str(src_a)),
-                _source_node("src_b", str(src_b)),
-                _transform_node("joiner", "df = src_a.join(src_b, on='k')"),
-                _source_node("alt_a", str(alt_a)),
-                _source_node("alt_b", str(alt_b)),
-                _n({
-                    "id": "joiner_inst",
-                    "data": {
-                        "label": "joiner_inst",
-                        "nodeType": "polars",
-                        "config": {"instanceOf": "joiner"},
-                    },
-                }),
-            ],
-            "edges": [
-                _edge("src_a", "joiner"),
-                _edge("src_b", "joiner"),
-                _edge("alt_a", "joiner_inst"),
-                _edge("alt_b", "joiner_inst"),
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src_a", str(src_a)),
+                    _source_node("src_b", str(src_b)),
+                    _transform_node("joiner", "df = src_a.join(src_b, on='k')"),
+                    _source_node("alt_a", str(alt_a)),
+                    _source_node("alt_b", str(alt_b)),
+                    _n(
+                        {
+                            "id": "joiner_inst",
+                            "data": {
+                                "label": "joiner_inst",
+                                "nodeType": "polars",
+                                "config": {"instanceOf": "joiner"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [
+                    _edge("src_a", "joiner"),
+                    _edge("src_b", "joiner"),
+                    _edge("alt_a", "joiner_inst"),
+                    _edge("alt_b", "joiner_inst"),
+                ],
+            }
+        )
         results = execute_graph(graph, target_node_id="joiner_inst")
         assert results["joiner_inst"].status == "ok"
         assert results["joiner_inst"].row_count == 1
@@ -1347,57 +1464,61 @@ class TestLiveSwitch:
         ]
         if reverse_edges:
             edges = list(reversed(edges))
-        return _g({
-            "nodes": [
-                _source_node("live_src", str(p1)),
-                _source_node("batch_src", str(p2)),
-                _n({
-                    "id": "switch",
-                    "type": "liveSwitch",
-                    "data": {
-                        "label": "switch",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": scenario_map,
-                            "inputs": ["live_src", "batch_src"],
-                        },
-                    },
-                    "position": {"x": 0, "y": 0},
-                }),
-            ],
-            "edges": edges,
-        })
+        return _g(
+            {
+                "nodes": [
+                    _source_node("live_src", str(p1)),
+                    _source_node("batch_src", str(p2)),
+                    _n(
+                        {
+                            "id": "switch",
+                            "type": "liveSwitch",
+                            "data": {
+                                "label": "switch",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": scenario_map,
+                                    "inputs": ["live_src", "batch_src"],
+                                },
+                            },
+                            "position": {"x": 0, "y": 0},
+                        }
+                    ),
+                ],
+                "edges": edges,
+            }
+        )
 
     def test_live_scenario_selects_mapped_input(self, tmp_path):
         graph = self._switch_graph(tmp_path)
-        results = execute_graph(graph, target_node_id="switch", scenario="live")
+        results = execute_graph(graph, target_node_id="switch", source="live")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
     def test_live_scenario_works_regardless_of_edge_order(self, tmp_path):
         """Edge order in the graph JSON is arbitrary — live must still pick the correct input."""
         graph = self._switch_graph(tmp_path, reverse_edges=True)
-        results = execute_graph(graph, target_node_id="switch", scenario="live")
+        results = execute_graph(graph, target_node_id="switch", source="live")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
     def test_batch_scenario_selects_mapped_input(self, tmp_path):
         graph = self._switch_graph(tmp_path)
-        results = execute_graph(graph, target_node_id="switch", scenario="test_batch")
+        results = execute_graph(graph, target_node_id="switch", source="test_batch")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 4
 
     def test_unmapped_scenario_falls_back_to_first_input(self, tmp_path):
         """An unmapped scenario should fall back to the first input."""
         graph = self._switch_graph(tmp_path)
-        results = execute_graph(graph, target_node_id="switch", scenario="unknown_scenario")
+        results = execute_graph(graph, target_node_id="switch", source="unknown_scenario")
         assert results["switch"].status == "ok"
         assert results["switch"].row_count == 3
 
     def test_empty_scenario_map_falls_back_to_first_input(self, tmp_path):
         """Empty input_scenario_map {} should fall back to the first input."""
         graph = self._switch_graph(tmp_path, scenario_map={})
-        results = execute_graph(graph, target_node_id="switch", scenario="live")
+        results = execute_graph(graph, target_node_id="switch", source="live")
         assert results["switch"].status == "ok"
         # With empty map, should fall back to first input (live_src, 3 rows)
         assert results["switch"].row_count == 3
@@ -1410,14 +1531,16 @@ class TestLiveSwitch:
 
 def _api_input_node(nid: str, path: str) -> _n:
     """Build a minimal apiInput node."""
-    return _n({
-        "id": nid,
-        "data": {
-            "label": nid,
-            "nodeType": "apiInput",
-            "config": {"path": path},
-        },
-    })
+    return _n(
+        {
+            "id": nid,
+            "data": {
+                "label": nid,
+                "nodeType": "apiInput",
+                "config": {"path": path},
+            },
+        }
+    )
 
 
 class TestApiInputLargeFileGating:
@@ -1571,18 +1694,20 @@ class TestBuildNodeFnErrorPaths:
 
     def test_external_file_missing_path(self, tmp_path):
         """External file node with non-existent path should fail when invoked."""
-        node = _n({
-            "id": "ext",
-            "data": {
-                "label": "ext",
-                "nodeType": "externalFile",
-                "config": {
-                    "path": str(tmp_path / "does_not_exist.pkl"),
-                    "fileType": "pickle",
-                    "code": "df = obj",
+        node = _n(
+            {
+                "id": "ext",
+                "data": {
+                    "label": "ext",
+                    "nodeType": "externalFile",
+                    "config": {
+                        "path": str(tmp_path / "does_not_exist.pkl"),
+                        "fileType": "pickle",
+                        "code": "df = obj",
+                    },
                 },
-            },
-        })
+            }
+        )
         _, fn, _ = _build_node_fn(node, source_names=["df"])
         lf = pl.DataFrame({"x": [1]}).lazy()
         with pytest.raises((ValueError, FileNotFoundError)):
@@ -1597,23 +1722,27 @@ class TestSelectedColumns:
         p = tmp_path / "sel.parquet"
         pl.DataFrame({"a": [1], "b": [2], "c": [3]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _n({
-                    "id": "t",
-                    "data": {
-                        "label": "t",
-                        "nodeType": "polars",
-                        "config": {
-                            "code": ".with_columns(d=pl.col('a') + pl.col('b'))",
-                            "selected_columns": ["a", "d"],
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _n(
+                        {
+                            "id": "t",
+                            "data": {
+                                "label": "t",
+                                "nodeType": "polars",
+                                "config": {
+                                    "code": ".with_columns(d=pl.col('a') + pl.col('b'))",
+                                    "selected_columns": ["a", "d"],
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         assert results["t"].status == "ok"
         col_names = [c.name for c in results["t"].columns]
@@ -1627,20 +1756,24 @@ class TestSelectedColumns:
         p = tmp_path / "all.parquet"
         pl.DataFrame({"x": [1], "y": [2]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _n({
-                    "id": "t",
-                    "data": {
-                        "label": "t",
-                        "nodeType": "polars",
-                        "config": {"code": "", "selected_columns": []},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _n(
+                        {
+                            "id": "t",
+                            "data": {
+                                "label": "t",
+                                "nodeType": "polars",
+                                "config": {"code": "", "selected_columns": []},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         col_names = [c.name for c in results["t"].columns]
         assert set(col_names) == {"x", "y"}
@@ -1668,13 +1801,15 @@ class TestSelectedColumns:
         src = _source_node("src", str(p))
         src.data.config["selected_columns"] = ["a"]
 
-        graph = _g({
-            "nodes": [
-                src,
-                _transform_node("t", ".with_columns(x=pl.col('a') * 10)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    src,
+                    _transform_node("t", ".with_columns(x=pl.col('a') * 10)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         results = execute_graph(graph)
         assert results["t"].status == "ok"
         col_names = [c.name for c in results["t"].columns]
@@ -1704,13 +1839,15 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("bad", code=".select('no_such_column')"),
-            ],
-            "edges": [_edge("src", "bad")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("bad", code=".select('no_such_column')"),
+                ],
+                "edges": [_edge("src", "bad")],
+            }
+        )
         results = execute_graph(graph)
         assert results["bad"].status == "error"
         assert results["bad"].row_count == 0
@@ -1720,19 +1857,21 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t1", code="df = 1 / 0"),
-                _transform_node("t2"),
-                _transform_node("t3"),
-            ],
-            "edges": [
-                _edge("src", "t1"),
-                _edge("t1", "t2"),
-                _edge("t2", "t3"),
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t1", code="df = 1 / 0"),
+                    _transform_node("t2"),
+                    _transform_node("t3"),
+                ],
+                "edges": [
+                    _edge("src", "t1"),
+                    _edge("t1", "t2"),
+                    _edge("t2", "t3"),
+                ],
+            }
+        )
         results = execute_graph(graph)
         assert results["src"].status == "ok"
         assert results["t1"].status == "error"
@@ -1744,13 +1883,15 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("bad", code="df = 1 / 0"),
-            ],
-            "edges": [_edge("src", "bad")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("bad", code="df = 1 / 0"),
+                ],
+                "edges": [_edge("src", "bad")],
+            }
+        )
         results = execute_graph(graph)
         assert results["bad"].status == "error"
         assert "division" in results["bad"].error.lower() or "zero" in results["bad"].error.lower()
@@ -1760,13 +1901,15 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("bad", code=".filter(pl.col('x') >"),
-            ],
-            "edges": [_edge("src", "bad")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("bad", code=".filter(pl.col('x') >"),
+                ],
+                "edges": [_edge("src", "bad")],
+            }
+        )
         results = execute_graph(graph)
         assert results["bad"].status == "error"
 
@@ -1777,18 +1920,20 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("a"),
-                _transform_node("b"),
-            ],
-            "edges": [
-                _edge("src", "a"),
-                _edge("a", "b"),
-                _edge("b", "a"),  # circular
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("a"),
+                    _transform_node("b"),
+                ],
+                "edges": [
+                    _edge("src", "a"),
+                    _edge("a", "b"),
+                    _edge("b", "a"),  # circular
+                ],
+            }
+        )
         with pytest.raises(CycleError, match="Cycle detected") as exc_info:
             execute_graph(graph)
         assert set(exc_info.value.cycle_nodes) == {"a", "b"}
@@ -1800,13 +1945,15 @@ class TestExecuteGraphErrorPaths:
         pl.DataFrame({"x": [1]}).write_parquet(p1)
         pl.DataFrame({"y": [2]}).write_parquet(p2)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src1", str(p1)),
-                _source_node("src2", str(p2)),
-            ],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src1", str(p1)),
+                    _source_node("src2", str(p2)),
+                ],
+                "edges": [],
+            }
+        )
         results = execute_graph(graph)
         assert results["src1"].status == "ok"
         assert results["src2"].status == "ok"
@@ -1816,16 +1963,18 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t"),
-            ],
-            "edges": [
-                _edge("src", "t"),
-                _edge("ghost", "t"),  # ghost doesn't exist
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t"),
+                ],
+                "edges": [
+                    _edge("src", "t"),
+                    _edge("ghost", "t"),  # ghost doesn't exist
+                ],
+            }
+        )
         # Should not crash — the ghost edge is simply ignored by topo sort
         results = execute_graph(graph)
         assert results["src"].status == "ok"
@@ -1845,14 +1994,16 @@ class TestExecuteGraphErrorPaths:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t"),
-            ],
-            "edges": [_edge("src", "t")],
-            "preamble": "from utility.bad import *\n",
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t"),
+                ],
+                "edges": [_edge("src", "t")],
+                "preamble": "from utility.bad import *\n",
+            }
+        )
         results = execute_graph(graph)
         # Data source should succeed — it doesn't need the preamble
         assert results["src"].status == "ok"
@@ -1871,83 +2022,99 @@ class TestResolveBatchScenario:
 
     def test_no_live_switch_returns_none(self):
         """Graph with no live_switch nodes returns None."""
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _transform_node("t"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _transform_node("t"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
         assert _resolve_batch_scenario(graph) is None
 
     def test_all_live_returns_none(self):
         """live_switch with ISM where all values are 'live' returns None."""
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _n({
-                    "id": "sw",
-                    "data": {
-                        "label": "sw",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"a": "live", "b": "live"},
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sw")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _n(
+                        {
+                            "id": "sw",
+                            "data": {
+                                "label": "sw",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"a": "live", "b": "live"},
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sw")],
+            }
+        )
         assert _resolve_batch_scenario(graph) is None
 
     def test_returns_first_non_live(self):
         """live_switch with ISM containing a non-live value returns it."""
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _n({
-                    "id": "sw",
-                    "data": {
-                        "label": "sw",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"a": "live", "b": "nb_batch"},
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sw")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _n(
+                        {
+                            "id": "sw",
+                            "data": {
+                                "label": "sw",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"a": "live", "b": "nb_batch"},
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sw")],
+            }
+        )
         assert _resolve_batch_scenario(graph) == "nb_batch"
 
     def test_conflicting_non_live_raises(self):
         """Two live_switch nodes with different non-live scenarios raise ValueError."""
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _n({
-                    "id": "sw1",
-                    "data": {
-                        "label": "sw1",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"a": "live", "b": "batch_A"},
-                        },
-                    },
-                }),
-                _n({
-                    "id": "sw2",
-                    "data": {
-                        "label": "sw2",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"c": "live", "d": "batch_B"},
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _n(
+                        {
+                            "id": "sw1",
+                            "data": {
+                                "label": "sw1",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"a": "live", "b": "batch_A"},
+                                },
+                            },
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sw2",
+                            "data": {
+                                "label": "sw2",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"c": "live", "d": "batch_B"},
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
+            }
+        )
         with pytest.raises(ValueError, match="Conflicting batch scenarios"):
             _resolve_batch_scenario(graph)
 
@@ -1970,6 +2137,7 @@ class TestResolveBatchScenario:
 # return incomplete results.
 # ---------------------------------------------------------------------------
 
+
 class TestPreviewCachePartialHit:
     """Verify the cache-extend (partial-hit) path in execute_graph."""
 
@@ -1989,14 +2157,16 @@ class TestPreviewCachePartialHit:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("mid", ".with_columns(y=pl.col('x') + 1)"),
-                _transform_node("leaf", ".with_columns(z=pl.col('y') * 10)"),
-            ],
-            "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("mid", ".with_columns(y=pl.col('x') + 1)"),
+                    _transform_node("leaf", ".with_columns(z=pl.col('y') * 10)"),
+                ],
+                "edges": [_edge("src", "mid"), _edge("mid", "leaf")],
+            }
+        )
 
         # First call: only up to "mid"
         results1 = execute_graph(graph, target_node_id="mid")
@@ -2029,10 +2199,12 @@ class TestPreviewCachePartialHit:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
 
         # Populate cache
         execute_graph(graph, target_node_id="src")
@@ -2053,6 +2225,7 @@ class TestPreviewCachePartialHit:
 # or didn't actually clear the cache.
 # ---------------------------------------------------------------------------
 
+
 class TestPreviewCacheInvalidation:
     """Verify _preview_cache.invalidate() actually clears cached results."""
 
@@ -2070,10 +2243,12 @@ class TestPreviewCacheInvalidation:
         p = tmp_path / "d.parquet"
         pl.DataFrame({"x": [1, 2]}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
 
         results1 = execute_graph(graph)
         assert results1["src"].status == "ok"
@@ -2083,6 +2258,7 @@ class TestPreviewCacheInvalidation:
 
         # After invalidation, try_get should return None for any fingerprint
         from haute.graph_utils import graph_fingerprint
+
         fp = graph_fingerprint(graph, "None:live")
         assert _preview_cache.try_get(fp) is None
 
@@ -2101,6 +2277,7 @@ class TestPreviewCacheInvalidation:
 # while the other is mid-import, causing KeyError inside
 # importlib._bootstrap._load_unlocked.
 # ---------------------------------------------------------------------------
+
 
 class TestPreambleLockConcurrency:
     """Verify _preamble_lock prevents race conditions during preamble compilation."""
@@ -2149,6 +2326,7 @@ class TestPreambleLockConcurrency:
         slowing down all subsequent imports.
         """
         import sys
+
         monkeypatch.chdir(tmp_path)
 
         cwd = str(tmp_path)
@@ -2175,6 +2353,7 @@ class TestPreambleLockConcurrency:
 # and the server to OOM on JSON serialization.
 # ---------------------------------------------------------------------------
 
+
 class TestMaxPreviewRowsTruncation:
     """Verify max_preview_rows limits the preview payload size."""
 
@@ -2186,15 +2365,18 @@ class TestMaxPreviewRowsTruncation:
         JSON preview payload.
         """
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
         p = tmp_path / "big.parquet"
         pl.DataFrame({"x": list(range(500))}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
 
         results = execute_graph(graph, max_preview_rows=10)
         assert results["src"].status == "ok"
@@ -2213,18 +2395,21 @@ class TestMaxPreviewRowsTruncation:
         shows 'showing 50 of 50' instead of 'showing 50 of 10000'.
         """
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
         p = tmp_path / "data.parquet"
         pl.DataFrame({"x": list(range(200))}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
-            ],
-            "edges": [_edge("src", "t")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t", ".with_columns(y=pl.col('x') * 2)"),
+                ],
+                "edges": [_edge("src", "t")],
+            }
+        )
 
         results = execute_graph(graph, max_preview_rows=5)
         assert results["t"].row_count == 200
@@ -2241,16 +2426,19 @@ class TestMaxPreviewRowsTruncation:
         Real failure: the default value is ignored or not applied.
         """
         from haute.executor import _MAX_PREVIEW_ROWS, _preview_cache
+
         _preview_cache.invalidate()
 
         p = tmp_path / "huge.parquet"
         n_rows = _MAX_PREVIEW_ROWS + 100
         pl.DataFrame({"x": list(range(n_rows))}).write_parquet(p)
 
-        graph = _g({
-            "nodes": [_source_node("src", str(p))],
-            "edges": [],
-        })
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
 
         results = execute_graph(graph)  # uses default max_preview_rows
         assert results["src"].row_count == n_rows
@@ -2265,6 +2453,7 @@ class TestMaxPreviewRowsTruncation:
 # crashes downstream joins or transforms that assume at least 1 row.
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyDataFrameFullPipeline:
     """Verify 0-row DataFrames propagate through transforms and joins."""
 
@@ -2276,22 +2465,27 @@ class TestEmptyDataFrameFullPipeline:
         'invalid schema' when receiving 0-row input.
         """
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
         p = tmp_path / "empty.parquet"
-        pl.DataFrame({
-            "x": pl.Series([], dtype=pl.Int64),
-            "y": pl.Series([], dtype=pl.Float64),
-        }).write_parquet(p)
+        pl.DataFrame(
+            {
+                "x": pl.Series([], dtype=pl.Int64),
+                "y": pl.Series([], dtype=pl.Float64),
+            }
+        ).write_parquet(p)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t1", ".with_columns(z=pl.col('x') + 1)"),
-                _transform_node("t2", ".with_columns(w=pl.col('z') * pl.col('y'))"),
-            ],
-            "edges": [_edge("src", "t1"), _edge("t1", "t2")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t1", ".with_columns(z=pl.col('x') + 1)"),
+                    _transform_node("t2", ".with_columns(w=pl.col('z') * pl.col('y'))"),
+                ],
+                "edges": [_edge("src", "t1"), _edge("t1", "t2")],
+            }
+        )
 
         results = execute_graph(graph)
         for nid in ("src", "t1", "t2"):
@@ -2312,36 +2506,43 @@ class TestEmptyDataFrameFullPipeline:
         when one side is empty.
         """
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
         p_empty = tmp_path / "empty.parquet"
         p_full = tmp_path / "full.parquet"
-        pl.DataFrame({
-            "key": pl.Series([], dtype=pl.Int64),
-            "a": pl.Series([], dtype=pl.Int64),
-        }).write_parquet(p_empty)
+        pl.DataFrame(
+            {
+                "key": pl.Series([], dtype=pl.Int64),
+                "a": pl.Series([], dtype=pl.Int64),
+            }
+        ).write_parquet(p_empty)
         pl.DataFrame({"key": [1, 2], "b": [10, 20]}).write_parquet(p_full)
 
-        graph = _g({
-            "nodes": [
-                _source_node("empty_src", str(p_empty)),
-                _source_node("full_src", str(p_full)),
-                _n({
-                    "id": "join",
-                    "data": {
-                        "label": "join",
-                        "nodeType": "polars",
-                        "config": {
-                            "code": "empty_src.join(full_src, on='key', how='left')",
-                        },
-                    },
-                }),
-            ],
-            "edges": [
-                _edge("empty_src", "join"),
-                _edge("full_src", "join"),
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("empty_src", str(p_empty)),
+                    _source_node("full_src", str(p_full)),
+                    _n(
+                        {
+                            "id": "join",
+                            "data": {
+                                "label": "join",
+                                "nodeType": "polars",
+                                "config": {
+                                    "code": "empty_src.join(full_src, on='key', how='left')",
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [
+                    _edge("empty_src", "join"),
+                    _edge("full_src", "join"),
+                ],
+            }
+        )
 
         results = execute_graph(graph)
         assert results["join"].status == "ok"
@@ -2360,24 +2561,30 @@ class TestEmptyDataFrameFullPipeline:
         """
         p_src = tmp_path / "empty.parquet"
         p_out = tmp_path / "out.parquet"
-        pl.DataFrame({
-            "x": pl.Series([], dtype=pl.Int64),
-        }).write_parquet(p_src)
+        pl.DataFrame(
+            {
+                "x": pl.Series([], dtype=pl.Int64),
+            }
+        ).write_parquet(p_src)
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p_src)),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(p_out), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p_src)),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {"path": str(p_out), "format": "parquet"},
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+            }
+        )
 
         result = execute_sink(graph, sink_node_id="sink")
         assert result.status == "ok"
@@ -2395,6 +2602,7 @@ class TestEmptyDataFrameFullPipeline:
 # silently picks one, routing half the pipeline to the wrong data source.
 # ---------------------------------------------------------------------------
 
+
 class TestConflictingBatchScenarios:
     """Verify _resolve_batch_scenario raises on conflicting non-live names."""
 
@@ -2405,33 +2613,39 @@ class TestConflictingBatchScenarios:
         Real failure: false positive conflict detection when multiple
         switches agree on the same batch scenario name.
         """
-        graph = _g({
-            "nodes": [
-                _source_node("src1", "d1.parquet"),
-                _source_node("src2", "d2.parquet"),
-                _n({
-                    "id": "sw1",
-                    "data": {
-                        "label": "sw1",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"a": "live", "b": "nb_batch"},
-                        },
-                    },
-                }),
-                _n({
-                    "id": "sw2",
-                    "data": {
-                        "label": "sw2",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"c": "live", "d": "nb_batch"},
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src1", "sw1"), _edge("src2", "sw2")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src1", "d1.parquet"),
+                    _source_node("src2", "d2.parquet"),
+                    _n(
+                        {
+                            "id": "sw1",
+                            "data": {
+                                "label": "sw1",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"a": "live", "b": "nb_batch"},
+                                },
+                            },
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sw2",
+                            "data": {
+                                "label": "sw2",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"c": "live", "d": "nb_batch"},
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src1", "sw1"), _edge("src2", "sw2")],
+            }
+        )
         assert _resolve_batch_scenario(graph) == "nb_batch"
 
     def test_conflicting_scenarios_error_message_informative(self):
@@ -2440,32 +2654,38 @@ class TestConflictingBatchScenarios:
         Real failure: generic error message makes it impossible for the
         user to identify which live_switch nodes are misconfigured.
         """
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _n({
-                    "id": "sw1",
-                    "data": {
-                        "label": "sw1",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"a": "live", "b": "alpha_batch"},
-                        },
-                    },
-                }),
-                _n({
-                    "id": "sw2",
-                    "data": {
-                        "label": "sw2",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {"c": "live", "d": "beta_batch"},
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _n(
+                        {
+                            "id": "sw1",
+                            "data": {
+                                "label": "sw1",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"a": "live", "b": "alpha_batch"},
+                                },
+                            },
+                        }
+                    ),
+                    _n(
+                        {
+                            "id": "sw2",
+                            "data": {
+                                "label": "sw2",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {"c": "live", "d": "beta_batch"},
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sw1"), _edge("src", "sw2")],
+            }
+        )
         with pytest.raises(ValueError, match="Conflicting batch scenarios") as exc_info:
             _resolve_batch_scenario(graph)
         msg = str(exc_info.value)
@@ -2479,26 +2699,30 @@ class TestConflictingBatchScenarios:
         Real failure: the duplicate-detection logic incorrectly flags
         the same value appearing twice within a single ISM.
         """
-        graph = _g({
-            "nodes": [
-                _source_node("src", "data.parquet"),
-                _n({
-                    "id": "sw",
-                    "data": {
-                        "label": "sw",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {
-                                "a": "live",
-                                "b": "nb_batch",
-                                "c": "nb_batch",
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", "data.parquet"),
+                    _n(
+                        {
+                            "id": "sw",
+                            "data": {
+                                "label": "sw",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {
+                                        "a": "live",
+                                        "b": "nb_batch",
+                                        "c": "nb_batch",
+                                    },
+                                },
                             },
-                        },
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sw")],
-        })
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sw")],
+            }
+        )
         assert _resolve_batch_scenario(graph) == "nb_batch"
 
 
@@ -2508,6 +2732,7 @@ class TestConflictingBatchScenarios:
 # ALL nodes to fail, including data sources that don't use preamble
 # bindings.  The user can't even see their data to debug the issue.
 # ---------------------------------------------------------------------------
+
 
 class TestPreambleFailureIsolation:
     """Verify preamble errors inject only into POLARS and LIVE_SWITCH nodes."""
@@ -2530,17 +2755,20 @@ class TestPreambleFailureIsolation:
         pl.DataFrame({"x": [1, 2, 3]}).write_parquet(p)
 
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _transform_node("t1", ".with_columns(y=pl.col('x') + 1)"),
-                _transform_node("t2", ".filter(pl.col('x') > 0)"),
-            ],
-            "edges": [_edge("src", "t1"), _edge("t1", "t2")],
-            "preamble": "from utility.broken import *\n",
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _transform_node("t1", ".with_columns(y=pl.col('x') + 1)"),
+                    _transform_node("t2", ".filter(pl.col('x') > 0)"),
+                ],
+                "edges": [_edge("src", "t1"), _edge("t1", "t2")],
+                "preamble": "from utility.broken import *\n",
+            }
+        )
 
         results = execute_graph(graph)
         # Data source should succeed
@@ -2571,34 +2799,39 @@ class TestPreambleFailureIsolation:
         pl.DataFrame({"x": [2]}).write_parquet(p2)
 
         from haute.executor import _preview_cache
+
         _preview_cache.invalidate()
 
-        graph = _g({
-            "nodes": [
-                _source_node("live_src", str(p1)),
-                _source_node("batch_src", str(p2)),
-                _n({
-                    "id": "sw",
-                    "data": {
-                        "label": "sw",
-                        "nodeType": "liveSwitch",
-                        "config": {
-                            "input_scenario_map": {
-                                "live_src": "live",
-                                "batch_src": "nb_batch",
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("live_src", str(p1)),
+                    _source_node("batch_src", str(p2)),
+                    _n(
+                        {
+                            "id": "sw",
+                            "data": {
+                                "label": "sw",
+                                "nodeType": "liveSwitch",
+                                "config": {
+                                    "input_scenario_map": {
+                                        "live_src": "live",
+                                        "batch_src": "nb_batch",
+                                    },
+                                },
                             },
-                        },
-                    },
-                }),
-            ],
-            "edges": [
-                _edge("live_src", "sw"),
-                _edge("batch_src", "sw"),
-            ],
-            "preamble": "from utility.broken import *\n",
-        })
+                        }
+                    ),
+                ],
+                "edges": [
+                    _edge("live_src", "sw"),
+                    _edge("batch_src", "sw"),
+                ],
+                "preamble": "from utility.broken import *\n",
+            }
+        )
 
-        results = execute_graph(graph, scenario="live")
+        results = execute_graph(graph, source="live")
         # Data sources should succeed
         assert results["live_src"].status == "ok"
         # liveSwitch should get the preamble error
@@ -2625,26 +2858,34 @@ class TestPreambleFailureIsolation:
         pl.DataFrame({"x": [1]}).write_parquet(p)
 
         from haute.executor import _preview_cache, _eager_execute
+
         _preview_cache.invalidate()
 
-        graph = _g({
-            "nodes": [
-                _source_node("src", str(p)),
-                _n({
-                    "id": "sink",
-                    "data": {
-                        "label": "sink",
-                        "nodeType": "dataSink",
-                        "config": {"path": str(tmp_path / "out.parquet"), "format": "parquet"},
-                    },
-                }),
-            ],
-            "edges": [_edge("src", "sink")],
-            "preamble": "from utility.broken import *\n",
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    _source_node("src", str(p)),
+                    _n(
+                        {
+                            "id": "sink",
+                            "data": {
+                                "label": "sink",
+                                "nodeType": "dataSink",
+                                "config": {
+                                    "path": str(tmp_path / "out.parquet"),
+                                    "format": "parquet",
+                                },
+                            },
+                        }
+                    ),
+                ],
+                "edges": [_edge("src", "sink")],
+                "preamble": "from utility.broken import *\n",
+            }
+        )
 
         # Use _eager_execute directly to check error injection logic
-        outputs, order, errors, *_ = _eager_execute(graph, None, None, scenario="live")
+        outputs, order, errors, *_ = _eager_execute(graph, None, None, source="live")
         # dataSink is NOT in the preamble_types set, so it should not
         # have the preamble error injected
         assert "sink" not in errors or "bad_name" not in errors.get("sink", "")

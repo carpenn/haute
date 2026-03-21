@@ -28,8 +28,8 @@ describe("Toolbar", () => {
   beforeEach(() => {
     useSettingsStore.setState({
       rowLimit: 1000,
-      scenarios: ["live"],
-      activeScenario: "live",
+      sources: ["live"],
+      activeSource: "live",
     })
   })
 
@@ -194,14 +194,14 @@ describe("Toolbar", () => {
     expect(screen.queryByTitle("Unsaved changes")).not.toBeInTheDocument()
   })
 
-  it("scenario selector shows active scenario on trigger button", () => {
+  it("source selector shows active source on trigger button", () => {
     render(<Toolbar {...makeProps()} />)
     const trigger = screen.getByTitle("Data source")
     expect(trigger.textContent).toContain("live")
   })
 
-  it("scenario selector shows all scenarios when opened", () => {
-    useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "live" })
+  it("source selector shows all sources when opened", () => {
+    useSettingsStore.setState({ sources: ["live", "test_scenario"], activeSource: "live" })
     render(<Toolbar {...makeProps()} />)
     fireEvent.click(screen.getByTitle("Data source"))
     // "live" appears in trigger + dropdown item, so check both exist
@@ -209,23 +209,23 @@ describe("Toolbar", () => {
     expect(screen.getByText("test_scenario")).toBeInTheDocument()
   })
 
-  it("switching scenario updates store", () => {
-    useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "live" })
+  it("switching source updates store", () => {
+    useSettingsStore.setState({ sources: ["live", "test_scenario"], activeSource: "live" })
     render(<Toolbar {...makeProps()} />)
     fireEvent.click(screen.getByTitle("Data source"))
     fireEvent.click(screen.getByText("test_scenario"))
-    expect(useSettingsStore.getState().activeScenario).toBe("test_scenario")
+    expect(useSettingsStore.getState().activeSource).toBe("test_scenario")
   })
 
-  it("shows remove option for non-live scenarios", () => {
-    useSettingsStore.setState({ scenarios: ["live", "test_scenario"], activeScenario: "test_scenario" })
+  it("shows remove option for non-live sources", () => {
+    useSettingsStore.setState({ sources: ["live", "test_scenario"], activeSource: "test_scenario" })
     render(<Toolbar {...makeProps()} />)
     fireEvent.click(screen.getByTitle("Data source"))
     expect(screen.getByText(/Remove "test_scenario"/)).toBeInTheDocument()
   })
 
   it("does not show remove option when live is active", () => {
-    useSettingsStore.setState({ scenarios: ["live"], activeScenario: "live" })
+    useSettingsStore.setState({ sources: ["live"], activeSource: "live" })
     render(<Toolbar {...makeProps()} />)
     fireEvent.click(screen.getByTitle("Data source"))
     expect(screen.queryByText(/Remove/)).not.toBeInTheDocument()

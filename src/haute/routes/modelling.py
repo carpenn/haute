@@ -78,8 +78,9 @@ def estimate_training(body: TrainEstimateRequest) -> TrainEstimateResponse:
 
     try:
         ram_est = estimate_safe_training_rows(
-            body.graph, body.node_id,
-            scenario=body.scenario,
+            body.graph,
+            body.node_id,
+            source=body.source,
         )
     except Exception as exc:
         logger.warning("estimate_failed", error=str(exc), node_id=body.node_id)
@@ -143,6 +144,7 @@ async def mlflow_check() -> MlflowCheckResponse:
     """Check whether MLflow is installed and detect the tracking backend."""
     try:
         import mlflow as _mlflow  # noqa: F401
+
         mlflow_installed = True
     except ImportError:
         return MlflowCheckResponse(mlflow_installed=False)
@@ -175,9 +177,7 @@ async def mlflow_log(body: LogExperimentRequest) -> LogExperimentResponse:
 
     # Build experiment name: user override > config > default
     experiment_name = (
-        body.experiment_name
-        or config.get("mlflow_experiment")
-        or f"/Shared/haute/{node_label}"
+        body.experiment_name or config.get("mlflow_experiment") or f"/Shared/haute/{node_label}"
     )
     model_name = body.model_name or config.get("model_name") or None
 

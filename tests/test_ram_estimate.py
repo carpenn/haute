@@ -195,12 +195,14 @@ class TestEstimateSourceRows:
         pl.DataFrame({"a": range(5000)}).write_parquet(str(p2))
 
         n1 = _make_source_node(
-            node_id="s1", label="small",
+            node_id="s1",
+            label="small",
             node_type="dataSource",
             config={"path": str(p1), "sourceType": "flat_file"},
         )
         n2 = _make_source_node(
-            node_id="s2", label="big",
+            node_id="s2",
+            label="big",
             node_type="dataSource",
             config={"path": str(p2), "sourceType": "flat_file"},
         )
@@ -213,9 +215,17 @@ class TestEstimateSourceRows:
 # ---------------------------------------------------------------------------
 
 
-def _build_dummy_node_fn(node, *, source_names=None, row_limit=None,
-                         node_map=None, orig_source_names=None,
-                         preamble_ns=None, scenario="live", **_kwargs):
+def _build_dummy_node_fn(
+    node,
+    *,
+    source_names=None,
+    row_limit=None,
+    node_map=None,
+    orig_source_names=None,
+    preamble_ns=None,
+    source="live",
+    **_kwargs,
+):
     """Minimal build_node_fn that creates a dummy source or passthrough."""
     label = node.data.label
     nt = node.data.nodeType
@@ -224,11 +234,13 @@ def _build_dummy_node_fn(node, *, source_names=None, row_limit=None,
         n_rows = row_limit or 10_000
 
         def source_fn():
-            return pl.LazyFrame({
-                "a": range(n_rows),
-                "b": [f"val_{i}" for i in range(n_rows)],
-                "c": [float(i) for i in range(n_rows)],
-            })
+            return pl.LazyFrame(
+                {
+                    "a": range(n_rows),
+                    "b": [f"val_{i}" for i in range(n_rows)],
+                    "c": [float(i) for i in range(n_rows)],
+                }
+            )
 
         return label, source_fn, True
 
@@ -261,7 +273,9 @@ class TestEstimateSafeTrainingRows:
         graph = PipelineGraph(nodes=[src, target], edges=[edge])
 
         result = estimate_safe_training_rows(
-            graph, target.id, _build_dummy_node_fn,
+            graph,
+            target.id,
+            _build_dummy_node_fn,
         )
         assert not result.was_downsampled
         assert result.safe_row_limit is None
@@ -284,7 +298,9 @@ class TestEstimateSafeTrainingRows:
         # Pretend we only have 1 KB of RAM
         with patch("haute._ram_estimate.available_ram_bytes", return_value=1024):
             result = estimate_safe_training_rows(
-                graph, target.id, _build_dummy_node_fn,
+                graph,
+                target.id,
+                _build_dummy_node_fn,
             )
         assert result.was_downsampled
         assert result.safe_row_limit is not None
@@ -304,7 +320,9 @@ class TestEstimateSafeTrainingRows:
         graph = PipelineGraph(nodes=[src, target], edges=[edge])
 
         result = estimate_safe_training_rows(
-            graph, target.id, _build_dummy_node_fn,
+            graph,
+            target.id,
+            _build_dummy_node_fn,
         )
         assert not result.was_downsampled
         assert result.safe_row_limit is None
@@ -325,7 +343,9 @@ class TestEstimateSafeTrainingRows:
         # Very low RAM to force downsampling
         with patch("haute._ram_estimate.available_ram_bytes", return_value=5000):
             result = estimate_safe_training_rows(
-                graph, target.id, _build_dummy_node_fn,
+                graph,
+                target.id,
+                _build_dummy_node_fn,
             )
         assert result.was_downsampled
         assert "50,000" in result.warning
@@ -346,7 +366,9 @@ class TestEstimateSafeTrainingRows:
         # Absurdly low RAM — should clamp to _MIN_PROBE_ROWS (500)
         with patch("haute._ram_estimate.available_ram_bytes", return_value=1):
             result = estimate_safe_training_rows(
-                graph, target.id, _build_dummy_node_fn,
+                graph,
+                target.id,
+                _build_dummy_node_fn,
             )
         assert result.was_downsampled
         assert result.safe_row_limit >= 500
@@ -365,7 +387,9 @@ class TestEstimateSafeTrainingRows:
         graph = PipelineGraph(nodes=[src, target], edges=[edge])
 
         result = estimate_safe_training_rows(
-            graph, target.id, _build_dummy_node_fn,
+            graph,
+            target.id,
+            _build_dummy_node_fn,
         )
         # Column count is resolved from the parquet file metadata (2 cols)
         assert result.probe_columns == 2
@@ -409,17 +433,13 @@ class TestEstimateGpuVram:
         """10M rows × 100 features should exceed 8 GB VRAM."""
         estimate = estimate_gpu_vram_bytes(10_000_000, 100)
         eight_gb = 8 * 1024**3
-        assert estimate > eight_gb, (
-            f"Expected >8 GB for 10M×100, got {estimate / 1024**3:.1f} GB"
-        )
+        assert estimate > eight_gb, f"Expected >8 GB for 10M×100, got {estimate / 1024**3:.1f} GB"
 
     def test_small_dataset_fits_in_8gb(self) -> None:
         """100K rows × 50 features should fit in 8 GB."""
         estimate = estimate_gpu_vram_bytes(100_000, 50)
         eight_gb = 8 * 1024**3
-        assert estimate < eight_gb, (
-            f"Expected <8 GB for 100K×50, got {estimate / 1024**3:.1f} GB"
-        )
+        assert estimate < eight_gb, f"Expected <8 GB for 100K×50, got {estimate / 1024**3:.1f} GB"
 
     def test_depth_affects_estimate(self) -> None:
         shallow = estimate_gpu_vram_bytes(1_000_000, 100, depth=4)

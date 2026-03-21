@@ -21,8 +21,8 @@ function resetStore() {
     mlflow: { status: "pending", backend: "", host: "" },
     _mlflowFetching: false,
     _mlflowLastAttempt: 0,
-    scenarios: ["live"],
-    activeScenario: "live",
+    sources: ["live"],
+    activeSource: "live",
     fileListCache: {},
   })
 }
@@ -234,108 +234,108 @@ describe("useSettingsStore", () => {
   })
 
   // ────────────────────────────────────────────────────────────────
-  // Scenario slug (B12 fix)
+  // Source slug (B12 fix)
   // ────────────────────────────────────────────────────────────────
 
-  describe("addScenario returns normalized slug", () => {
+  describe("addSource returns normalized slug", () => {
     it("returns the slugified name on success", () => {
-      const result = useSettingsStore.getState().addScenario("My Test Scenario")
-      expect(result).toBe("my_test_scenario")
-      expect(useSettingsStore.getState().scenarios).toContain("my_test_scenario")
+      const result = useSettingsStore.getState().addSource("My Test Source")
+      expect(result).toBe("my_test_source")
+      expect(useSettingsStore.getState().sources).toContain("my_test_source")
     })
 
-    it("returns null for duplicate scenario", () => {
-      useSettingsStore.getState().addScenario("dup")
-      const result = useSettingsStore.getState().addScenario("dup")
+    it("returns null for duplicate source", () => {
+      useSettingsStore.getState().addSource("dup")
+      const result = useSettingsStore.getState().addSource("dup")
       expect(result).toBeNull()
     })
 
     it("returns null for empty name", () => {
-      const result = useSettingsStore.getState().addScenario("   ")
+      const result = useSettingsStore.getState().addSource("   ")
       expect(result).toBeNull()
     })
 
     it("normalizes whitespace to underscores", () => {
-      const result = useSettingsStore.getState().addScenario("  Two  Words  ")
+      const result = useSettingsStore.getState().addSource("  Two  Words  ")
       expect(result).toBe("two_words")
     })
 
-    it("slug is consistent with what gets stored in scenarios list", () => {
-      const slug = useSettingsStore.getState().addScenario("New Scenario")
-      const scenarios = useSettingsStore.getState().scenarios
-      expect(scenarios).toContain(slug)
+    it("slug is consistent with what gets stored in sources list", () => {
+      const slug = useSettingsStore.getState().addSource("New Source")
+      const sources = useSettingsStore.getState().sources
+      expect(sources).toContain(slug)
     })
   })
 
   // ────────────────────────────────────────────────────────────────
-  // removeScenario
-  // Catches: removing a scenario that is currently active would leave
-  // activeScenario pointing at a nonexistent scenario, breaking data
+  // removeSource
+  // Catches: removing a source that is currently active would leave
+  // activeSource pointing at a nonexistent source, breaking data
   // source routing.
   // ────────────────────────────────────────────────────────────────
 
-  describe("removeScenario", () => {
-    it("removes a non-live scenario from the list", () => {
-      useSettingsStore.getState().addScenario("test_sc")
-      expect(useSettingsStore.getState().scenarios).toContain("test_sc")
+  describe("removeSource", () => {
+    it("removes a non-live source from the list", () => {
+      useSettingsStore.getState().addSource("test_sc")
+      expect(useSettingsStore.getState().sources).toContain("test_sc")
 
-      useSettingsStore.getState().removeScenario("test_sc")
-      expect(useSettingsStore.getState().scenarios).not.toContain("test_sc")
+      useSettingsStore.getState().removeSource("test_sc")
+      expect(useSettingsStore.getState().sources).not.toContain("test_sc")
     })
 
-    it("cannot remove the 'live' scenario (always present)", () => {
-      useSettingsStore.getState().removeScenario("live")
-      expect(useSettingsStore.getState().scenarios).toContain("live")
+    it("cannot remove the 'live' source (always present)", () => {
+      useSettingsStore.getState().removeSource("live")
+      expect(useSettingsStore.getState().sources).toContain("live")
     })
 
-    it("resets activeScenario to 'live' when removing the active scenario", () => {
-      useSettingsStore.getState().addScenario("staging")
-      useSettingsStore.getState().setActiveScenario("staging")
-      expect(useSettingsStore.getState().activeScenario).toBe("staging")
+    it("resets activeSource to 'live' when removing the active source", () => {
+      useSettingsStore.getState().addSource("staging")
+      useSettingsStore.getState().setActiveSource("staging")
+      expect(useSettingsStore.getState().activeSource).toBe("staging")
 
-      useSettingsStore.getState().removeScenario("staging")
-      expect(useSettingsStore.getState().activeScenario).toBe("live")
+      useSettingsStore.getState().removeSource("staging")
+      expect(useSettingsStore.getState().activeSource).toBe("live")
     })
 
-    it("does not change activeScenario when removing a non-active scenario", () => {
-      useSettingsStore.getState().addScenario("sc_a")
-      useSettingsStore.getState().addScenario("sc_b")
-      useSettingsStore.getState().setActiveScenario("sc_a")
+    it("does not change activeSource when removing a non-active source", () => {
+      useSettingsStore.getState().addSource("sc_a")
+      useSettingsStore.getState().addSource("sc_b")
+      useSettingsStore.getState().setActiveSource("sc_a")
 
-      useSettingsStore.getState().removeScenario("sc_b")
-      expect(useSettingsStore.getState().activeScenario).toBe("sc_a")
+      useSettingsStore.getState().removeSource("sc_b")
+      expect(useSettingsStore.getState().activeSource).toBe("sc_a")
     })
 
-    it("removing a nonexistent scenario is a no-op", () => {
-      const before = useSettingsStore.getState().scenarios.slice()
-      useSettingsStore.getState().removeScenario("ghost")
-      expect(useSettingsStore.getState().scenarios).toEqual(before)
+    it("removing a nonexistent source is a no-op", () => {
+      const before = useSettingsStore.getState().sources.slice()
+      useSettingsStore.getState().removeSource("ghost")
+      expect(useSettingsStore.getState().sources).toEqual(before)
     })
   })
 
   // ────────────────────────────────────────────────────────────────
-  // setScenarios / setActiveScenario — direct setters
-  // Catches: if setScenarios were accidentally removed or renamed,
-  // pipeline load (which bulk-sets scenarios from the backend) would
+  // setSources / setActiveSource — direct setters
+  // Catches: if setSources were accidentally removed or renamed,
+  // pipeline load (which bulk-sets sources from the backend) would
   // break silently.
   // ────────────────────────────────────────────────────────────────
 
-  describe("setScenarios / setActiveScenario", () => {
-    it("setScenarios replaces the entire scenario list", () => {
-      useSettingsStore.getState().setScenarios(["live", "staging", "prod"])
-      expect(useSettingsStore.getState().scenarios).toEqual(["live", "staging", "prod"])
+  describe("setSources / setActiveSource", () => {
+    it("setSources replaces the entire source list", () => {
+      useSettingsStore.getState().setSources(["live", "staging", "prod"])
+      expect(useSettingsStore.getState().sources).toEqual(["live", "staging", "prod"])
     })
 
-    it("setActiveScenario switches the active scenario", () => {
-      useSettingsStore.getState().setScenarios(["live", "staging"])
-      useSettingsStore.getState().setActiveScenario("staging")
-      expect(useSettingsStore.getState().activeScenario).toBe("staging")
+    it("setActiveSource switches the active source", () => {
+      useSettingsStore.getState().setSources(["live", "staging"])
+      useSettingsStore.getState().setActiveSource("staging")
+      expect(useSettingsStore.getState().activeSource).toBe("staging")
     })
 
-    it("setScenarios does not affect activeScenario", () => {
-      useSettingsStore.getState().setActiveScenario("live")
-      useSettingsStore.getState().setScenarios(["live", "new_sc"])
-      expect(useSettingsStore.getState().activeScenario).toBe("live")
+    it("setSources does not affect activeSource", () => {
+      useSettingsStore.getState().setActiveSource("live")
+      useSettingsStore.getState().setSources(["live", "new_sc"])
+      expect(useSettingsStore.getState().activeSource).toBe("live")
     })
   })
 
