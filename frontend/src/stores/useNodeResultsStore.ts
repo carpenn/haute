@@ -273,7 +273,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       }
     }),
 
-  failSolveJob: (nodeId, error) =>
+  failSolveJob: (nodeId, _error) =>
     set((s) => {
       const job = s.solveJobs[nodeId]
       if (!job) return s
@@ -361,7 +361,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       }
     }),
 
-  failTrainJob: (nodeId, error) =>
+  failTrainJob: (nodeId, _error) =>
     set((s) => {
       const job = s.trainJobs[nodeId]
       if (!job) return s
