@@ -297,8 +297,8 @@ describe("useBackgroundJobs", () => {
       // Advance past the lifetime limit in one shot.
       await advance(86_400_500)
 
-      const job = useNodeResultsStore.getState().solveJobs["n1"]
-      expect(job?.error).toBe("Job timed out after 24 hours")
+      // Job is removed from store on failure (timeout)
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
     }, 120_000)
   })
 
@@ -369,9 +369,8 @@ describe("useBackgroundJobs", () => {
 
       await advance(500)
 
-      // Job should be failed
-      const job = useNodeResultsStore.getState().solveJobs["n1"]
-      expect(job?.error).toBe("Infeasible")
+      // Job should be removed from store on failure
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
 
       // A toast should have been created
       const toasts = useToastStore.getState().toasts

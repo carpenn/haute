@@ -64,7 +64,7 @@ describe("useEdgeHandlers", () => {
   it("onConnect prevents duplicate edges", () => {
     const params = makeParams()
     params.graphRef.current.edges = [
-      { id: "e1", source: "a", target: "b" } as Edge,
+      { id: "e1", source: "a", target: "b", sourceHandle: null, targetHandle: null } as Edge,
     ]
     const { result } = renderHook(() => useEdgeHandlers(params))
     act(() => {
@@ -78,7 +78,7 @@ describe("useEdgeHandlers", () => {
     expect(params.setEdges).not.toHaveBeenCalled()
   })
 
-  it("onConnect strips targetHandle for submodel nodes", () => {
+  it("onConnect preserves targetHandle for submodel nodes", () => {
     const params = makeParams()
     params.graphRef.current.nodes = [
       { id: "sm1", data: { label: "SM", nodeType: NODE_TYPES.SUBMODEL } } as unknown as Node,
@@ -93,10 +93,10 @@ describe("useEdgeHandlers", () => {
       })
     })
     expect(params.setEdges).toHaveBeenCalledOnce()
-    // The updater should produce an edge with targetHandle: null
+    // targetHandle is preserved for submodel navigation
     const updater = params.setEdges.mock.calls[0][0] as (eds: Edge[]) => Edge[]
     const newEdges = updater([])
-    expect(newEdges[0]).toHaveProperty("targetHandle", null)
+    expect(newEdges[0]).toHaveProperty("targetHandle", "in__child1")
   })
 
   it("onConnect blocks when target node has reached maxInputs", () => {

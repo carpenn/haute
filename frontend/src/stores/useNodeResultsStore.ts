@@ -347,10 +347,11 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
   completeTrainJob: (nodeId, result) =>
     set((s) => {
       const job = s.trainJobs[nodeId]
-      if (!job) return s
+      // Remove the active job if present; also works for direct completion
+      // (no active job) used by ModellingConfig for sync/error results.
       const { [nodeId]: _removedJob, ...remainingJobs } = s.trainJobs; void _removedJob
       return {
-        trainJobs: remainingJobs,
+        trainJobs: job ? remainingJobs : s.trainJobs,
         trainResults: {
           ...s.trainResults,
           [nodeId]: {

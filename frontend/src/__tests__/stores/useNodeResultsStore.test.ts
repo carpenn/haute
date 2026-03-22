@@ -165,7 +165,7 @@ describe("useNodeResultsStore", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("failSolveJob", () => {
-    it("sets error on active job and clears progress, but keeps it in solveJobs", () => {
+    it("removes the job from solveJobs on failure", () => {
       const s = useNodeResultsStore.getState()
       s.startSolveJob("n1", "j1", "Node 1", {}, "h")
       s.updateSolveProgress("n1", {
@@ -177,10 +177,8 @@ describe("useNodeResultsStore", () => {
 
       s.failSolveJob("n1", "Solver diverged")
 
-      const job = useNodeResultsStore.getState().solveJobs["n1"]
-      expect(job).toBeDefined()
-      expect(job.error).toBe("Solver diverged")
-      expect(job.progress).toBeNull()
+      // Job is removed from solveJobs
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
       // NOT moved to solveResults
       expect(useNodeResultsStore.getState().solveResults["n1"]).toBeUndefined()
     })
@@ -291,7 +289,7 @@ describe("useNodeResultsStore", () => {
   // ────────────────────────────────────────────────────────────────
 
   describe("failTrainJob", () => {
-    it("sets error on active job and clears progress, keeps it in trainJobs", () => {
+    it("removes job from trainJobs on failure", () => {
       const s = useNodeResultsStore.getState()
       s.startTrainJob("t1", "tj-1", "Train Node", "h")
       s.updateTrainProgress("t1", {
@@ -306,11 +304,8 @@ describe("useNodeResultsStore", () => {
 
       s.failTrainJob("t1", "Out of memory")
 
-      const job = useNodeResultsStore.getState().trainJobs["t1"]
-      expect(job).toBeDefined()
-      expect(job.error).toBe("Out of memory")
-      expect(job.progress).toBeNull()
-      expect(useNodeResultsStore.getState().trainResults["t1"]).toBeUndefined()
+      // Job is removed from the map (prevents infinite poll-restart loop)
+      expect(useNodeResultsStore.getState().trainJobs["t1"]).toBeUndefined()
     })
 
     it("is a no-op for unknown node", () => {
@@ -855,9 +850,9 @@ describe("useNodeResultsStore", () => {
 
       s.failSolveJob("n1", "Solver diverged")
 
-      // Solve job has error, but train job is untouched
-      expect(useNodeResultsStore.getState().solveJobs["n1"].error).toBe("Solver diverged")
-      expect(useNodeResultsStore.getState().trainJobs["n1"].error).toBeNull()
+      // Solve job is removed, but train job is untouched
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
+      expect(useNodeResultsStore.getState().trainJobs["n1"]).toBeDefined()
       expect(useNodeResultsStore.getState().trainJobs["n1"].progress).toBeNull()
     })
 

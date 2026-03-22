@@ -164,7 +164,7 @@ describe("useConstraintHandlers", () => {
   // ─── handleConstraintValueChange ────────────────────────────────
 
   describe("handleConstraintValueChange", () => {
-    it("updates constraint type and value", () => {
+    it("updates constraint type and value, preserving siblings", () => {
       const onUpdate = vi.fn()
       const existing = { volume: { min: 0.9 } }
       const { result } = renderHook(() =>
@@ -173,12 +173,13 @@ describe("useConstraintHandlers", () => {
 
       act(() => result.current.handleConstraintValueChange("volume", "max", 1.1))
 
+      // Both min and max are preserved
       expect(onUpdate).toHaveBeenCalledWith("constraints", {
-        volume: { max: 1.1 },
+        volume: { min: 0.9, max: 1.1 },
       })
     })
 
-    it("replaces existing constraint spec entirely", () => {
+    it("adds new constraint type without destroying existing ones", () => {
       const onUpdate = vi.fn()
       const existing = { volume: { min: 0.9 } }
       const { result } = renderHook(() =>
@@ -187,9 +188,9 @@ describe("useConstraintHandlers", () => {
 
       act(() => result.current.handleConstraintValueChange("volume", "max_abs", 500000))
 
-      // The old {min: 0.9} should be replaced with {max_abs: 500000}
+      // The old {min: 0.9} is preserved alongside the new max_abs
       expect(onUpdate).toHaveBeenCalledWith("constraints", {
-        volume: { max_abs: 500000 },
+        volume: { min: 0.9, max_abs: 500000 },
       })
     })
   })

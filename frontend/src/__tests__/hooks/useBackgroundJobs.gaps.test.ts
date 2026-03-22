@@ -220,9 +220,8 @@ describe("useBackgroundJobs — gap tests", () => {
 
       await advance(500)
 
-      // Job should be failed
-      const job = useNodeResultsStore.getState().trainJobs["t1"]
-      expect(job?.error).toBe("CUDA out of memory")
+      // Job should be removed from store (prevents infinite restart loop)
+      expect(useNodeResultsStore.getState().trainJobs["t1"]).toBeUndefined()
 
       // Toast should contain "Training failed"
       const toasts = useToastStore.getState().toasts
@@ -256,8 +255,8 @@ describe("useBackgroundJobs — gap tests", () => {
 
       await advance(500)
 
-      const job = useNodeResultsStore.getState().solveJobs["n1"]
-      expect(job?.error).toBe("Unknown error")
+      // Job should be removed from store
+      expect(useNodeResultsStore.getState().solveJobs["n1"]).toBeUndefined()
 
       const toasts = useToastStore.getState().toasts
       expect(toasts.some((t) => t.text.includes("Unknown error"))).toBe(true)

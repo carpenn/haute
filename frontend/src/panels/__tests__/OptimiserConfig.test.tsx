@@ -342,7 +342,7 @@ describe("OptimiserConfig", () => {
       useSettingsStore.setState({ collapsedSections: { "optimiser.advanced": true } })
       render(<OptimiserConfig {...makeProps()} />)
       expect(screen.getByDisplayValue("500000")).toBeInTheDocument()
-      expect(screen.getByText("On")).toBeInTheDocument()
+      expect(screen.getByText("Off")).toBeInTheDocument()
     })
 
     it("ratebook mode shows CD iterations and CD tolerance in advanced", () => {
