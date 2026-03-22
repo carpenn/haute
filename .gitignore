@@ -228,3 +228,6 @@ src/haute/static/
 # Internal docs - not for public repos
 WTW_RADAR_REPORT.md
 CLAUDE.md
+
+# Claude Code workspace
+.claude/
