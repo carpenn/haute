@@ -130,7 +130,7 @@ class BaseAlgorithm(ABC):
     @abstractmethod
     def fit(
         self,
-        train_df: pl.DataFrame,
+        train_df: pl.DataFrame | None,
         features: list[str],
         cat_features: list[str],
         target: str,
@@ -142,12 +142,20 @@ class BaseAlgorithm(ABC):
         offset: str | None = None,
         monotone_constraints: dict[str, int] | None = None,
         feature_weights: dict[str, float] | None = None,
+        **kwargs: Any,
     ) -> FitResult:
-        """Train a model and return a FitResult."""
+        """Train a model and return a FitResult.
+
+        *train_df* may be ``None`` when a pre-built pool is passed
+        via the ``pool`` keyword argument (CatBoost path).
+        """
 
     @abstractmethod
     def predict(
-        self, model: Any, df: pl.DataFrame, features: list[str],
+        self,
+        model: Any,
+        df: pl.DataFrame,
+        features: list[str],
     ) -> np.ndarray:
         """Generate predictions from a fitted model."""
 
@@ -187,8 +195,7 @@ class _CatBoostProgressCallback:
             for dataset_name, metric_dict in info.metrics.items():
                 for metric_name, values in metric_dict.items():
                     label = (
-                        metric_name if dataset_name == "learn"
-                        else f"{dataset_name}_{metric_name}"
+                        metric_name if dataset_name == "learn" else f"{dataset_name}_{metric_name}"
                     )
                     if values:
                         metrics[label] = values[-1]
@@ -209,7 +216,9 @@ CLASSIFICATION_LOSSES = {"Logloss", "CrossEntropy"}
 
 
 def resolve_loss_function(
-    loss_name: str | None, task: str, variance_power: float | None = None,
+    loss_name: str | None,
+    task: str,
+    variance_power: float | None = None,
 ) -> str | None:
     """Map a user-facing loss name to a CatBoost ``loss_function`` param value.
 
@@ -221,8 +230,7 @@ def resolve_loss_function(
     valid = REGRESSION_LOSSES if task == "regression" else CLASSIFICATION_LOSSES
     if loss_name not in valid:
         raise ValueError(
-            f"Loss '{loss_name}' is not valid for task '{task}'. "
-            f"Choose from: {sorted(valid)}"
+            f"Loss '{loss_name}' is not valid for task '{task}'. Choose from: {sorted(valid)}"
         )
 
     if loss_name == "Tweedie":
@@ -273,8 +281,10 @@ def _build_pool(
     selected = df.select(cols_to_select) if cols_to_select != df.columns else df
 
     x_data = _prepare_predict_frame(
-        selected, cols_to_select,
-        cat_feature_names=frozenset(cat_set), flavor="catboost",
+        selected,
+        cols_to_select,
+        cat_feature_names=frozenset(cat_set),
+        flavor="catboost",
     )
     del selected
     gc.collect()
@@ -293,7 +303,9 @@ def _build_pool(
         baseline = df[offset].cast(pl.Float64).to_numpy()
 
     pool = Pool(
-        data=x_data, label=y, weight=w,
+        data=x_data,
+        label=y,
+        weight=w,
         cat_features=cat_indices if cat_indices else None,
         baseline=baseline,
     )
@@ -311,7 +323,7 @@ class CatBoostAlgorithm(BaseAlgorithm):
 
     def fit(
         self,
-        train_df: pl.DataFrame,
+        train_df: pl.DataFrame | None,
         features: list[str],
         cat_features: list[str],
         target: str,
@@ -323,22 +335,32 @@ class CatBoostAlgorithm(BaseAlgorithm):
         offset: str | None = None,
         monotone_constraints: dict[str, int] | None = None,
         feature_weights: dict[str, float] | None = None,
-        *,
-        pool: Any | None = None,
-        eval_pool: Any | None = None,
+        **kwargs: Any,
     ) -> FitResult:
         from catboost import CatBoostClassifier, CatBoostRegressor
 
+        pool = kwargs.get("pool")
+        eval_pool = kwargs.get("eval_pool")
+
         if pool is None:
+            assert train_df is not None, "Either train_df or pool must be provided"
             pool = _build_pool(
-                train_df, features, cat_features,
-                target=target, weight=weight, offset=offset,
+                train_df,
+                features,
+                cat_features,
+                target=target,
+                weight=weight,
+                offset=offset,
             )
 
         if eval_pool is None and eval_df is not None:
             eval_pool = _build_pool(
-                eval_df, features, cat_features,
-                target=target, weight=weight, offset=offset,
+                eval_df,
+                features,
+                cat_features,
+                target=target,
+                weight=weight,
+                offset=offset,
             )
 
         model_params = {**params}
@@ -355,6 +377,7 @@ class CatBoostAlgorithm(BaseAlgorithm):
         _gpu_train_dir: str | None = None
         if is_gpu and on_iteration:
             import tempfile as _tf
+
             _gpu_train_dir = _tf.mkdtemp(prefix="catboost_gpu_")
             model_params["allow_writing_files"] = True
             model_params["train_dir"] = _gpu_train_dir
@@ -474,17 +497,22 @@ class CatBoostAlgorithm(BaseAlgorithm):
         )
 
     def predict(
-        self, model: Any, df: pl.DataFrame, features: list[str],
+        self,
+        model: Any,
+        df: pl.DataFrame,
+        features: list[str],
     ) -> np.ndarray:
         from haute._mlflow_io import _prepare_predict_frame
 
         selected = df.select(features)
         cat_cols = frozenset(
-            c for c in features
-            if selected[c].dtype in (pl.Utf8, pl.Categorical, pl.String)
+            c for c in features if selected[c].dtype in (pl.Utf8, pl.Categorical, pl.String)
         )
         x_data = _prepare_predict_frame(
-            selected, features, cat_feature_names=cat_cols, flavor="catboost",
+            selected,
+            features,
+            cat_feature_names=cat_cols,
+            flavor="catboost",
         )
         del selected
         preds: np.ndarray = model.predict(x_data).flatten()
@@ -495,15 +523,17 @@ class CatBoostAlgorithm(BaseAlgorithm):
         names = model.feature_names_
         importances = model.get_feature_importance()
         pairs = sorted(
-            zip(names, importances), key=lambda x: x[1], reverse=True,
+            zip(names, importances),
+            key=lambda x: x[1],
+            reverse=True,
         )
-        return [
-            {"feature": name, "importance": float(imp)}
-            for name, imp in pairs
-        ]
+        return [{"feature": name, "importance": float(imp)} for name, imp in pairs]
 
     def feature_importance_typed(
-        self, model: Any, pool: Any, type_name: str,
+        self,
+        model: Any,
+        pool: Any,
+        type_name: str,
     ) -> list[dict[str, Any]]:
         """Get feature importance using a specific CatBoost importance type.
 
@@ -512,15 +542,17 @@ class CatBoostAlgorithm(BaseAlgorithm):
         names = model.feature_names_
         importances = model.get_feature_importance(data=pool, type=type_name)
         pairs = sorted(
-            zip(names, importances), key=lambda x: x[1], reverse=True,
+            zip(names, importances),
+            key=lambda x: x[1],
+            reverse=True,
         )
-        return [
-            {"feature": name, "importance": float(imp)}
-            for name, imp in pairs
-        ]
+        return [{"feature": name, "importance": float(imp)} for name, imp in pairs]
 
     def shap_summary(
-        self, model: Any, df: pl.DataFrame, features: list[str],
+        self,
+        model: Any,
+        df: pl.DataFrame,
+        features: list[str],
         max_rows: int = 1000,
     ) -> list[dict[str, Any]]:
         """Compute mean |SHAP| per feature using CatBoost's native SHAP.
@@ -539,10 +571,7 @@ class CatBoostAlgorithm(BaseAlgorithm):
 
         mean_abs = np.abs(shap_values).mean(axis=0)
         pairs = sorted(zip(features, mean_abs), key=lambda x: x[1], reverse=True)
-        return [
-            {"feature": name, "mean_abs_shap": float(val)}
-            for name, val in pairs
-        ]
+        return [{"feature": name, "mean_abs_shap": float(val)} for name, val in pairs]
 
     def cross_validate(
         self,
@@ -565,8 +594,11 @@ class CatBoostAlgorithm(BaseAlgorithm):
         from catboost import cv
 
         pool = _build_pool(
-            train_df, features, cat_features,
-            target=target, weight=weight,
+            train_df,
+            features,
+            cat_features,
+            target=target,
+            weight=weight,
         )
 
         cv_params = {**params}

@@ -611,10 +611,10 @@ class TrainingJob:
                 _mem_checkpoint("eval pool built")
 
             _report("Training model", 0.3)
-            fit_result = algo.fit(  # type: ignore[call-arg]  # CatBoost uses pool instead of train_df
+            fit_result = algo.fit(
                 None,
                 features,
-                cat_features,  # type: ignore[arg-type]
+                cat_features,
                 self.target,
                 self.weight,
                 fit_params,
