@@ -220,6 +220,9 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
             continue
         func_name = _sanitize_func_name(node.data.label)
         rel_path = config_path_for_node(nt, func_name).as_posix()
-        filtered = {k: v for k, v in node.data.config.items() if k not in _CODE_KEYS and not k.startswith("_")}
+        filtered = {
+            k: v for k, v in node.data.config.items()
+            if k not in _CODE_KEYS and not k.startswith("_")
+        }
         configs[rel_path] = json.dumps(filtered, indent=2, ensure_ascii=False) + "\n"
     return configs

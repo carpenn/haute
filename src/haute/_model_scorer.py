@@ -7,6 +7,7 @@ while keeping behaviour identical.
 from __future__ import annotations
 
 import contextvars
+import os
 from typing import Any
 
 import polars as pl
@@ -124,9 +125,6 @@ def _score_batched_standalone(
     task: str,
 ) -> pl.LazyFrame:
     """Sink → batch score → lazy scan (low-memory path)."""
-    import atexit
-    import os
-
     input_path = _sink_to_temp(lf)
     scored_path = _batch_score_to_parquet(
         scoring_model,
@@ -260,9 +258,6 @@ class ModelScorer:
         features: list[str],
     ) -> pl.LazyFrame:
         """Sink -> batch score -> lazy scan -- low-memory path."""
-        import atexit
-        import os
-
         input_path = _sink_to_temp(lf)
         scored_path = _batch_score_to_parquet(
             scoring_model,

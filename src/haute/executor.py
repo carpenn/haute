@@ -79,7 +79,9 @@ class PreambleError(HauteError):
 _PREAMBLE_CACHE_MAX = 64
 _preamble_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
-_DANGEROUS_MODULES = frozenset({"os", "sys", "subprocess", "shutil", "signal", "ctypes", "importlib"})
+_DANGEROUS_MODULES = frozenset({
+    "os", "sys", "subprocess", "shutil", "signal", "ctypes", "importlib",
+})
 
 _polars_config_lock = threading.Lock()
 

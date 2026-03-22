@@ -38,7 +38,6 @@ def _live_only_edges(
     node_map = {n.id: n for n in nodes}
     for sid in switch_ids:
         config = node_map[sid].data.config
-        inputs = config.get("inputs", [])
         input_scenario_map = config.get("input_scenario_map", {})
         live_input_name = next(
             (k for k, v in input_scenario_map.items() if v == "live"),

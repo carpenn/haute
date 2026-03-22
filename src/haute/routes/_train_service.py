@@ -591,7 +591,11 @@ class TrainService:
             model_name=config.get("model_name") or None,
             output_dir=config.get("output_dir", "models"),
             loss_function=config.get("loss_function") or None,
-            variance_power=config.get("variance_power") if config.get("variance_power") is not None else config.get("var_power"),
+            variance_power=(
+                config.get("variance_power")
+                if config.get("variance_power") is not None
+                else config.get("var_power")
+            ),
             offset=config.get("offset") or None,
             monotone_constraints=config.get("monotone_constraints") or None,
             feature_weights=config.get("feature_weights") or None,
