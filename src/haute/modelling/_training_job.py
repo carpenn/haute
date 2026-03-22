@@ -279,14 +279,20 @@ class TrainingJob:
 
         _report("Training model", 0.2)
         train_result = self._train_model(
-            split_result, prepared.features, prepared.cat_features,
-            on_iteration, _report,
+            split_result,
+            prepared.features,
+            prepared.cat_features,
+            on_iteration,
+            _report,
         )
 
         _report("Evaluating model", 0.7)
         metrics_result = self._compute_metrics(
-            split_result, prepared.features, prepared.cat_features,
-            train_result, _report,
+            split_result,
+            prepared.features,
+            prepared.cat_features,
+            train_result,
+            _report,
         )
 
         _report("Saving model", 0.9)
@@ -359,7 +365,9 @@ class TrainingJob:
                     _mem_checkpoint(f"target has {null_count:,} null rows (will be cleaned)")
 
             with tempfile.NamedTemporaryFile(
-                suffix=".parquet", prefix="haute_split_", delete=False,
+                suffix=".parquet",
+                prefix="haute_split_",
+                delete=False,
             ) as f:
                 data_path = f.name
             owns_tmp = True
@@ -372,6 +380,7 @@ class TrainingJob:
         # Validate schema from parquet metadata (cheap, no data loaded)
         _report("Validating columns", 0.05)
         from haute._polars_utils import read_parquet_metadata
+
         pq_meta = read_parquet_metadata(Path(data_path))
         if pq_meta["row_count"] == 0:
             raise ValueError("DataFrame is empty — cannot train on zero rows")
@@ -381,15 +390,14 @@ class TrainingJob:
 
         # Drop null targets -- re-write parquet without nulls if needed
         null_count = (
-            pl.scan_parquet(data_path)
-            .select(pl.col(self.target).is_null().sum())
-            .collect()
-            .item()
+            pl.scan_parquet(data_path).select(pl.col(self.target).is_null().sum()).collect().item()
         )
         if null_count is not None and null_count > 0:
             clean_lf = pl.scan_parquet(data_path).filter(pl.col(self.target).is_not_null())
             with tempfile.NamedTemporaryFile(
-                suffix=".parquet", prefix="haute_clean_", delete=False,
+                suffix=".parquet",
+                prefix="haute_clean_",
+                delete=False,
             ) as f:
                 clean_path = f.name
             from haute._polars_utils import safe_sink
@@ -445,7 +453,9 @@ class TrainingJob:
         # Read eagerly (data already fits after RAM-based downsampling),
         # add partition mask, write back.
         with tempfile.NamedTemporaryFile(
-            suffix=".parquet", prefix="haute_split_", delete=False,
+            suffix=".parquet",
+            prefix="haute_split_",
+            delete=False,
         ) as f:
             split_path = f.name
         df_data = pl.read_parquet(data_path)
@@ -486,8 +496,7 @@ class TrainingJob:
         algo_cls = ALGORITHM_REGISTRY.get(self.algorithm)
         if algo_cls is None:
             raise ValueError(
-                f"Unknown algorithm: {self.algorithm}. "
-                f"Available: {list(ALGORITHM_REGISTRY.keys())}"
+                f"Unknown algorithm: {self.algorithm}. Available: {list(ALGORITHM_REGISTRY.keys())}"
             )
         algo = algo_cls()
 
@@ -498,7 +507,9 @@ class TrainingJob:
         is_glm = self.algorithm == "glm"
         if not is_glm:
             resolved_loss = resolve_loss_function(
-                self.loss_function, self.task, self.variance_power,
+                self.loss_function,
+                self.task,
+                self.variance_power,
             )
             if resolved_loss:
                 fit_params["loss_function"] = resolved_loss
@@ -528,8 +539,13 @@ class TrainingJob:
             # GLM: pass DataFrames directly (no Pool conversion needed)
             _report("Fitting GLM", 0.3)
             fit_result = algo.fit(
-                train_df, features, cat_features,
-                self.target, self.weight, fit_params, self.task,
+                train_df,
+                features,
+                cat_features,
+                self.target,
+                self.weight,
+                fit_params,
+                self.task,
                 on_iteration=on_iteration,
                 eval_df=eval_df,
                 offset=self.offset,
@@ -545,13 +561,9 @@ class TrainingJob:
             from haute.modelling._algorithms import _build_pool
 
             train_y = train_df[self.target].cast(pl.Float64).to_numpy()
-            train_w = (
-                train_df[self.weight].cast(pl.Float64).to_numpy()
-                if self.weight else None
-            )
+            train_w = train_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
             train_baseline = (
-                train_df[self.offset].cast(pl.Float64).to_numpy()
-                if self.offset else None
+                train_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
             )
             train_features_df = train_df.select(features)
             del train_df
@@ -560,8 +572,12 @@ class TrainingJob:
             _mem_checkpoint("extracted labels, freed train_df")
 
             train_pool = _build_pool(
-                train_features_df, features, cat_features,
-                y=train_y, w=train_w, baseline=train_baseline,
+                train_features_df,
+                features,
+                cat_features,
+                y=train_y,
+                w=train_w,
+                baseline=train_baseline,
             )
             del train_features_df, train_y, train_w, train_baseline
             gc.collect()
@@ -572,13 +588,9 @@ class TrainingJob:
             if eval_df is not None:
                 _report("Building eval pool", 0.25)
                 val_y = eval_df[self.target].cast(pl.Float64).to_numpy()
-                val_w = (
-                    eval_df[self.weight].cast(pl.Float64).to_numpy()
-                    if self.weight else None
-                )
+                val_w = eval_df[self.weight].cast(pl.Float64).to_numpy() if self.weight else None
                 val_baseline = (
-                    eval_df[self.offset].cast(pl.Float64).to_numpy()
-                    if self.offset else None
+                    eval_df[self.offset].cast(pl.Float64).to_numpy() if self.offset else None
                 )
                 val_features_df = eval_df.select(features)
                 del eval_df
@@ -586,8 +598,12 @@ class TrainingJob:
                 _malloc_trim()
 
                 eval_pool = _build_pool(
-                    val_features_df, features, cat_features,
-                    y=val_y, w=val_w, baseline=val_baseline,
+                    val_features_df,
+                    features,
+                    cat_features,
+                    y=val_y,
+                    w=val_w,
+                    baseline=val_baseline,
                 )
                 del val_features_df, val_y, val_w, val_baseline
                 gc.collect()
@@ -596,8 +612,13 @@ class TrainingJob:
 
             _report("Training model", 0.3)
             fit_result = algo.fit(  # type: ignore[call-arg]  # CatBoost uses pool instead of train_df
-                None, features, cat_features,  # type: ignore[arg-type]
-                self.target, self.weight, fit_params, self.task,
+                None,
+                features,
+                cat_features,  # type: ignore[arg-type]
+                self.target,
+                self.weight,
+                fit_params,
+                self.task,
                 on_iteration=on_iteration,
                 offset=self.offset,
                 monotone_constraints=self.monotone_constraints,
@@ -659,12 +680,7 @@ class TrainingJob:
             # Always need _partition for the filter; drop it after
             select_cols = columns if "_partition" in columns else [*columns, "_partition"]
             scan = scan.select(select_cols)
-        return (
-            scan
-            .filter(pl.col("_partition") == partition)
-            .drop("_partition")
-            .collect()
-        )
+        return scan.filter(pl.col("_partition") == partition).drop("_partition").collect()
 
     def _compute_metrics(
         self,
@@ -725,19 +741,50 @@ class TrainingJob:
         w = diag_df[self.weight].to_numpy() if self.weight else None
 
         # Primary metrics from the diagnostics set
-        metrics = compute_metrics(y_true, y_pred, w, self.metrics)
+        vp = self.variance_power
+        metrics = compute_metrics(
+            y_true,
+            y_pred,
+            w,
+            self.metrics,
+            variance_power=vp,
+        )
 
-        # Derive holdout metrics from the same computation (no extra read)
+        # When holdout is present, diagnostics were computed on holdout.
+        # Also compute validation metrics separately so both are available.
         holdout_metrics: dict[str, float] = {}
         if diagnostics_set == "holdout":
             holdout_metrics = metrics
+            # Compute validation metrics separately if a validation set exists
+            if has_validation:
+                val_df = self._read_partition(
+                    data_path,
+                    PARTITION_VALIDATION,
+                    columns=glm_columns,
+                )
+                val_y_true = val_df[self.target].to_numpy()
+                val_y_pred = algo.predict(model, val_df, features)
+                val_w = val_df[self.weight].to_numpy() if self.weight else None
+                metrics = compute_metrics(
+                    val_y_true,
+                    val_y_pred,
+                    val_w,
+                    self.metrics,
+                    variance_power=vp,
+                )
+                del val_df
 
         # Double-lift
         double_lift = compute_double_lift(y_true, y_pred, w)
 
         # AvE per feature
         ave_per_feature = compute_ave_per_feature(
-            diag_df, sorted_features, cat_features, y_true, y_pred, w,
+            diag_df,
+            sorted_features,
+            cat_features,
+            y_true,
+            y_pred,
+            w,
         )
 
         # SHAP + LossFunctionChange importance
@@ -752,10 +799,15 @@ class TrainingJob:
         if hasattr(algo, "feature_importance_typed"):
             try:
                 _diag_pool = _build_pool(
-                    diag_df, features, cat_features, target=self.target,
+                    diag_df,
+                    features,
+                    cat_features,
+                    target=self.target,
                 )
                 feature_importance_loss = algo.feature_importance_typed(
-                    model, _diag_pool, "LossFunctionChange",
+                    model,
+                    _diag_pool,
+                    "LossFunctionChange",
                 )
                 del _diag_pool
             except Exception as exc:
@@ -797,8 +849,7 @@ class TrainingJob:
                 rp = model.regularization_path
                 glm_regularization_path = {
                     "selected_alpha": float(getattr(rp, "selected_alpha", 0)),
-                    "n_nonzero": int(model.n_nonzero())
-                        if hasattr(model, "n_nonzero") else 0,
+                    "n_nonzero": int(model.n_nonzero()) if hasattr(model, "n_nonzero") else 0,
                 }
             except Exception as exc:
                 logger.warning("glm_regularization_path_failed", error=str(exc))
@@ -813,12 +864,18 @@ class TrainingJob:
             try:
                 _cv_df = (
                     self._scan_with_columns(data_path, features)
+                    .filter(pl.col("_partition") == PARTITION_TRAIN)
                     .drop("_partition")
                     .collect()
                 )
                 cv_results = algo.cross_validate(
-                    _cv_df, features, cat_features,
-                    self.target, self.weight, train_result.fit_params, self.task,
+                    _cv_df,
+                    features,
+                    cat_features,
+                    self.target,
+                    self.weight,
+                    train_result.fit_params,
+                    self.task,
                     n_folds=self.cv_folds,
                 )
                 del _cv_df
@@ -881,20 +938,11 @@ class TrainingJob:
     def _validate_columns(self, df: pl.DataFrame) -> None:
         """Validate that required columns exist in the DataFrame."""
         if self.target not in df.columns:
-            raise ValueError(
-                f"Target column '{self.target}' not found. "
-                f"Available: {df.columns}"
-            )
+            raise ValueError(f"Target column '{self.target}' not found. Available: {df.columns}")
         if self.weight and self.weight not in df.columns:
-            raise ValueError(
-                f"Weight column '{self.weight}' not found. "
-                f"Available: {df.columns}"
-            )
+            raise ValueError(f"Weight column '{self.weight}' not found. Available: {df.columns}")
         if self.offset and self.offset not in df.columns:
-            raise ValueError(
-                f"Offset column '{self.offset}' not found. "
-                f"Available: {df.columns}"
-            )
+            raise ValueError(f"Offset column '{self.offset}' not found. Available: {df.columns}")
         # Excluded columns may already have been projected out during
         # pipeline execution — only flag genuinely unknown columns.
         available = set(df.columns)

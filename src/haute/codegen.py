@@ -26,6 +26,19 @@ from haute.graph_utils import (
 
 logger = get_logger(component="codegen")
 
+
+def _safe_str(value: str) -> str:
+    """Produce a double-quoted Python string literal with proper escaping.
+
+    Escapes backslashes, double quotes, and newlines to prevent code
+    injection via config values.
+    """
+    escaped = (
+        value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
+    )
+    return f'"{escaped}"'
+
+
 __all__ = [
     "graph_to_code",
     "graph_to_code_multi",
@@ -124,20 +137,20 @@ def _api_input_template(path: str) -> str:
     lower = path.lower()
     if lower.endswith((".json", ".jsonl")):
         body = (
-            '    from haute._json_flatten import read_json_flat\n'
-            '    return read_json_flat("{path}", config_path="{config_path}")'
+            "    from haute._json_flatten import read_json_flat\n"
+            "    return read_json_flat({path_repr}, config_path={config_path_repr})"
         )
     elif lower.endswith(".csv"):
-        body = '    return pl.scan_csv("{path}")'
+        body = "    return pl.scan_csv({path_repr})"
     else:
-        body = '    return pl.scan_parquet("{path}")'
+        body = "    return pl.scan_parquet({path_repr})"
 
     return (
-        '@pipeline.api_input(path="{path}"{row_id_kw})\n'
-        'def {func_name}() -> pl.LazyFrame:\n'
-        '    """{description}"""\n'
-        + body + '\n'
+        "@pipeline.api_input(path={path_repr}{row_id_kw})\n"
+        "def {func_name}() -> pl.LazyFrame:\n"
+        '    """{description}"""\n' + body + "\n"
     )
+
 
 _LIVE_SWITCH = '''\
 @pipeline.live_switch(input_scenario_map={input_scenario_map_repr})
@@ -153,8 +166,9 @@ def {func_name}({params}) -> pl.LazyFrame:
     from pathlib import Path
     from haute.graph_utils import score_from_config
     base = str(Path(__file__).parent)
-    return score_from_config({first_param}, config="{config_path}", base_dir=base)
+    return score_from_config({first_param}, config={config_path_repr}, base_dir=base)
 '''
+
 
 def _data_source_parts(config: dict) -> tuple[str, str, str]:
     """Return (decorator, imports, load_expr) for a DataSource node.
@@ -169,36 +183,37 @@ def _data_source_parts(config: dict) -> tuple[str, str, str]:
         table = config.get("table", "catalog.schema.table")
         http_path = config.get("http_path", "")
         query = config.get("query", "")
-        parts = [f'table="{table}"']
+        parts = [f"table={_safe_str(table)}"]
         if http_path:
-            parts.append(f'http_path="{http_path}"')
+            parts.append(f"http_path={repr(http_path)}")
         if query:
-            parts.append(f'query="{query}"')
+            parts.append(f"query={repr(query)}")
         decorator = f"@pipeline.data_source({', '.join(parts)})"
         imports = "    from haute._databricks_io import read_cached_table\n"
-        load_expr = f'read_cached_table("{table}")'
+        load_expr = f"read_cached_table({_safe_str(table)})"
     elif path.lower().endswith(".csv"):
-        decorator = f'@pipeline.data_source(path="{path}")'
+        decorator = f"@pipeline.data_source(path={_safe_str(path)})"
         imports = ""
-        load_expr = f'pl.scan_csv("{path}")'
+        load_expr = f"pl.scan_csv({_safe_str(path)})"
     elif path.lower().endswith(".jsonl"):
-        decorator = f'@pipeline.data_source(path="{path}")'
+        decorator = f"@pipeline.data_source(path={_safe_str(path)})"
         imports = ""
-        load_expr = f'pl.scan_ndjson("{path}")'
+        load_expr = f"pl.scan_ndjson({_safe_str(path)})"
     elif path.lower().endswith(".json"):
-        decorator = f'@pipeline.data_source(path="{path}")'
+        decorator = f"@pipeline.data_source(path={_safe_str(path)})"
         imports = ""
-        load_expr = f'pl.read_json("{path}").lazy()'
+        load_expr = f"pl.read_json({_safe_str(path)}).lazy()"
     else:
-        decorator = f'@pipeline.data_source(path="{path}")'
+        decorator = f"@pipeline.data_source(path={_safe_str(path)})"
         imports = ""
-        load_expr = f'pl.scan_parquet("{path}")'
+        load_expr = f"pl.scan_parquet({_safe_str(path)})"
 
     return decorator, imports, load_expr
 
+
 _BANDING_SINGLE = '''\
-@pipeline.banding(banding="{banding}", column="{column}",
-               output_column="{output_column}"{rules_kw}{default_kw})
+@pipeline.banding(banding={banding_repr}, column={column_repr},
+               output_column={output_column_repr}{rules_kw}{default_kw})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
@@ -219,20 +234,20 @@ def {func_name}({params}) -> pl.LazyFrame:
 '''
 
 _SINK_PARQUET = '''\
-@pipeline.data_sink(path="{path}", format="parquet")
+@pipeline.data_sink(path={path_repr}, format="parquet")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute._polars_utils import safe_sink
-    safe_sink({first}, "{path}")
+    safe_sink({first}, {path_repr})
     return {first}
 '''
 
 _SINK_CSV = '''\
-@pipeline.data_sink(path="{path}", format="csv")
+@pipeline.data_sink(path={path_repr}, format="csv")
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute._polars_utils import safe_sink
-    safe_sink({first}, "{path}", fmt="csv")
+    safe_sink({first}, {path_repr}, fmt="csv")
     return {first}
 '''
 
@@ -272,11 +287,11 @@ def {func_name}() -> pl.LazyFrame:
 '''
 
 _EXTERNAL = '''\
-@pipeline.external_file(path="{path}", file_type="{file_type}"{extra_dec})
+@pipeline.external_file(path={path_repr}, file_type={file_type_repr}{extra_dec})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     from haute.graph_utils import load_external_object
-    obj = load_external_object("{path}", "{file_type}"{extra_load})
+    obj = load_external_object({path_repr}, {file_type_repr}{extra_load})
 {body}
 '''
 
@@ -340,7 +355,7 @@ def _node_to_code(node: GraphNode, source_names: list[str] | None = None) -> str
         try:
             dec_name = NODE_TYPE_TO_DECORATOR.get(node_type, "polars")
             def_idx = code.index("\ndef ")
-            code = f'@pipeline.{dec_name}(config="{cfg_path}")' + code[def_idx:]
+            code = f"@pipeline.{dec_name}(config={_safe_str(cfg_path)})" + code[def_idx:]
         except ValueError:
             logger.warning("no_def_in_generated_code", node=node.data.label)
     return code
@@ -358,9 +373,11 @@ _CODEGEN_BUILDERS: dict[NodeType, CodegenBuilder] = {}
 
 def _register_codegen(node_type: NodeType) -> Callable[[CodegenBuilder], CodegenBuilder]:
     """Decorator to register a codegen builder for a given NodeType."""
+
     def decorator(fn: CodegenBuilder) -> CodegenBuilder:
         _CODEGEN_BUILDERS[node_type] = fn
         return fn
+
     return decorator
 
 
@@ -375,15 +392,16 @@ def _gen_api_input(node: GraphNode, source_names: list[str]) -> str:
     path = config.get("path", "")
     row_id_kw = ""
     if config.get("row_id_column"):
-        row_id_kw = f', row_id_column="{config["row_id_column"]}"'
+        row_id_kw = f", row_id_column={_safe_str(config['row_id_column'])}"
     cfg_path = config_path_for_node(node.data.nodeType, func_name).as_posix()
     template = _api_input_template(path)
     return template.format(
         func_name=func_name,
         description=description,
-        path=path,
+        path_repr=_safe_str(path),
         row_id_kw=row_id_kw,
         config_path=cfg_path,
+        config_path_repr=_safe_str(cfg_path),
     )
 
 
@@ -439,10 +457,9 @@ def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
     func_name, description, config = _common_node_fields(node)
     raw_values = config.get("values", []) or []
     # Build the repr for the decorator kwarg
-    values_repr = repr([
-        {"name": v.get("name", ""), "value": v.get("value", "")}
-        for v in raw_values
-    ])
+    values_repr = repr(
+        [{"name": v.get("name", ""), "value": v.get("value", "")} for v in raw_values]
+    )
     # Build a dict literal for the LazyFrame constructor
     data_pairs: list[str] = []
     for v in raw_values:
@@ -451,9 +468,9 @@ def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
         # Try numeric coercion for the code literal
         try:
             num = float(val)
-            data_pairs.append(f'"{name}": [{num!r}]')
+            data_pairs.append(f"{_safe_str(name)}: [{num!r}]")
         except (ValueError, TypeError):
-            data_pairs.append(f'"{name}": ["{val}"]')
+            data_pairs.append(f"{_safe_str(name)}: [{_safe_str(val)}]")
     data_dict = "{" + ", ".join(data_pairs) + "}" if data_pairs else '{"constant": [0]}'
     return _CONSTANT.format(
         func_name=func_name,
@@ -480,8 +497,8 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         ver = config.get("version", "latest")
         decorator_kwargs = (
             f'source_type="registered", '
-            f'registered_model="{reg_model}", version="{ver}", '
-            f'task="{task_val}", output_column="{output_column}"'
+            f"registered_model={repr(reg_model)}, version={repr(ver)}, "
+            f"task={repr(task_val)}, output_column={repr(output_column)}"
         )
     else:
         rid = config.get("run_id", "")
@@ -491,28 +508,31 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         exp_id = config.get("experiment_id", "")
         decorator_kwargs = (
             f'source_type="run", '
-            f'run_id="{rid}", artifact_path="{apath}", '
-            f'task="{task_val}", output_column="{output_column}"'
+            f"run_id={repr(rid)}, artifact_path={repr(apath)}, "
+            f"task={repr(task_val)}, output_column={repr(output_column)}"
         )
         if rname:
-            decorator_kwargs += f', run_name="{rname}"'
+            decorator_kwargs += f", run_name={repr(rname)}"
         if exp_name:
-            decorator_kwargs += f', experiment_name="{exp_name}"'
+            decorator_kwargs += f", experiment_name={repr(exp_name)}"
         if exp_id:
-            decorator_kwargs += f', experiment_id="{exp_id}"'
+            decorator_kwargs += f", experiment_id={repr(exp_id)}"
 
     if user_code:
         indented = "\n".join(f"    {line}" for line in user_code.splitlines())
         return (
-            f'@pipeline.model_score({decorator_kwargs})\n'
-            f'def {func_name}({params}) -> pl.LazyFrame:\n'
+            f"@pipeline.model_score({decorator_kwargs})\n"
+            f"def {func_name}({params}) -> pl.LazyFrame:\n"
             f'    """{description}"""\n'
-            f'    from pathlib import Path\n'
-            f'    from haute.graph_utils import score_from_config\n'
-            f'    base = str(Path(__file__).parent)\n'
-            f'    result = score_from_config({first_param}, config="{cfg_path}", base_dir=base)\n'
-            f'{indented}\n'
-            f'    return result\n'
+            f"    from pathlib import Path\n"
+            f"    from haute.graph_utils import score_from_config\n"
+            f"    base = str(Path(__file__).parent)\n"
+            f"    result = score_from_config(\n"
+            f"        {first_param}, config={_safe_str(cfg_path)},\n"
+            f"        base_dir=base,\n"
+            f"    )\n"
+            f"{indented}\n"
+            f"    return result\n"
         )
 
     return _MODEL_SCORE.format(
@@ -521,7 +541,7 @@ def _gen_model_score(node: GraphNode, source_names: list[str]) -> str:
         params=params,
         first_param=first_param,
         decorator_kwargs=decorator_kwargs,
-        config_path=cfg_path,
+        config_path_repr=_safe_str(cfg_path),
     )
 
 
@@ -538,14 +558,14 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
         rules = f.get("rules", []) or []
         default = f.get("default")
         rules_kw = f", rules={rules!r}" if rules else ""
-        default_kw = f', default="{default}"' if default else ""
+        default_kw = f", default={repr(default)}" if default else ""
         first = _first_source(source_names)
         return _BANDING_SINGLE.format(
             func_name=func_name,
             description=description,
-            banding=banding,
-            column=column,
-            output_column=output_column,
+            banding_repr=_safe_str(banding),
+            column_repr=_safe_str(column),
+            output_column_repr=_safe_str(output_column),
             rules_kw=rules_kw,
             default_kw=default_kw,
             params=params,
@@ -610,7 +630,8 @@ def _gen_rating_step(node: GraphNode, source_names: list[str]) -> str:
 
 
 def _make_passthrough_builder(
-    template: str, config_keys: tuple[str, ...],
+    template: str,
+    config_keys: tuple[str, ...],
 ) -> CodegenBuilder:
     """Factory for codegen builders that share the same passthrough pattern.
 
@@ -664,14 +685,18 @@ def _gen_scenario_expander(node: GraphNode, source_names: list[str]) -> str:
         f"{user_body}\n"
     )
 
+
 _CODEGEN_BUILDERS[NodeType.OPTIMISER] = _make_passthrough_builder(
-    _OPTIMISER, OPTIMISER_CONFIG_KEYS,
+    _OPTIMISER,
+    OPTIMISER_CONFIG_KEYS,
 )
 _CODEGEN_BUILDERS[NodeType.OPTIMISER_APPLY] = _make_passthrough_builder(
-    _OPTIMISER_APPLY, OPTIMISER_APPLY_CONFIG_KEYS,
+    _OPTIMISER_APPLY,
+    OPTIMISER_APPLY_CONFIG_KEYS,
 )
 _CODEGEN_BUILDERS[NodeType.MODELLING] = _make_passthrough_builder(
-    _MODELLING, MODELLING_CONFIG_KEYS,
+    _MODELLING,
+    MODELLING_CONFIG_KEYS,
 )
 
 
@@ -687,13 +712,13 @@ def _gen_external_file(node: GraphNode, source_names: list[str]) -> str:
     extra_load = ""
     if file_type == "catboost":
         model_class = config.get("modelClass", "classifier")
-        extra_dec = f', model_class="{model_class}"'
-        extra_load = f', "{model_class}"'
+        extra_dec = f", model_class={_safe_str(model_class)}"
+        extra_load = f", {_safe_str(model_class)}"
     return _EXTERNAL.format(
         func_name=func_name,
         description=description,
-        path=path,
-        file_type=file_type,
+        path_repr=_safe_str(path),
+        file_type_repr=_safe_str(file_type),
         params=params,
         body=body,
         extra_dec=extra_dec,
@@ -713,7 +738,7 @@ def _gen_data_sink(node: GraphNode, source_names: list[str]) -> str:
     return template.format(
         func_name=func_name,
         description=description,
-        path=path,
+        path_repr=_safe_str(path),
         params=params,
         first=first,
     )
@@ -728,7 +753,7 @@ def _gen_output(node: GraphNode, source_names: list[str]) -> str:
     dec_parts: list[str] = []
     if fields:
         dec_parts.append(f"fields={fields!r}")
-        select_args = ", ".join(f'"{f}"' for f in fields)
+        select_args = ", ".join(_safe_str(f) for f in fields)
         body = f"    return {first}.select({select_args})"
     else:
         body = f"    return {first}"
@@ -803,9 +828,7 @@ def _instance_to_code(
     """
     data = node.data
     label = data.label
-    description = _sanitize_description(
-        data.description or f"Instance of {original_func_name}"
-    )
+    description = _sanitize_description(data.description or f"Instance of {original_func_name}")
     func_name = _sanitize_func_name(label)
 
     if source_names is None:
@@ -958,7 +981,8 @@ def _generate_pipeline_lines(
         orig_func = id_to_func.get(orig_id, orig_id)
         orig_src = node_sources.get(orig_id, [])
         inst_code = _instance_to_code(
-            node, orig_func,
+            node,
+            orig_func,
             source_names=srcs,
             orig_source_names=orig_src,
         )
@@ -1056,8 +1080,7 @@ def graph_to_code_multi(
 
         # Build connect pairs from edges
         connect_pairs = [
-            (id_to_func.get(e.source, e.source), id_to_func.get(e.target, e.target))
-            for e in edges
+            (id_to_func.get(e.source, e.source), id_to_func.get(e.target, e.target)) for e in edges
         ]
 
         lines = _generate_pipeline_lines(
@@ -1087,10 +1110,7 @@ def graph_to_code_multi(
     edges = graph.edges
 
     # Root-level nodes: not children and not the submodel placeholder itself
-    root_nodes = [
-        n for n in nodes
-        if n.id not in all_child_ids and n.id not in submodel_node_ids
-    ]
+    root_nodes = [n for n in nodes if n.id not in all_child_ids and n.id not in submodel_node_ids]
 
     # Root-level edges: only between root-level nodes OR crossing submodel boundary
     root_node_ids = {n.id for n in root_nodes}
@@ -1106,14 +1126,8 @@ def graph_to_code_multi(
         sm_file = sm_meta.get("file", f"modules/{sm_name}.py").replace("\\", "/")
         raw_nodes = sm_graph.get("nodes", [])
         raw_edges = sm_graph.get("edges", [])
-        sm_nodes = [
-            GraphNode.model_validate(n) if isinstance(n, dict) else n
-            for n in raw_nodes
-        ]
-        sm_edges = [
-            GraphEdge.model_validate(e) if isinstance(e, dict) else e
-            for e in raw_edges
-        ]
+        sm_nodes = [GraphNode.model_validate(n) if isinstance(n, dict) else n for n in raw_nodes]
+        sm_edges = [GraphEdge.model_validate(e) if isinstance(e, dict) else e for e in raw_edges]
 
         sorted_sm_nodes = _topo_sort(sm_nodes, sm_edges)
         sm_id_to_func = _build_id_to_func(sorted_sm_nodes)
@@ -1152,10 +1166,14 @@ def graph_to_code_multi(
 
     # ── Generate main pipeline file ──────────────────────────────────
 
-    sorted_root = _topo_sort(root_nodes, [
-        e for e in edges
-        if e.source in root_node_ids and e.target in root_node_ids
-    ]) if root_nodes else []
+    sorted_root = (
+        _topo_sort(
+            root_nodes,
+            [e for e in edges if e.source in root_node_ids and e.target in root_node_ids],
+        )
+        if root_nodes
+        else []
+    )
 
     # Also map submodel child node IDs to func names (for edge generation)
     for sm_name, sm_meta in submodels.items():

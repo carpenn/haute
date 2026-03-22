@@ -132,7 +132,7 @@ def deploy_to_mlflow(
     client = mlflow.tracking.MlflowClient()
     versions = client.search_model_versions(f"name='{uc_model_name}'")
     if versions:
-        latest_version = max(v.version for v in versions)
+        latest_version = max(versions, key=lambda v: int(v.version)).version
     else:
         latest_version = "1"
 
@@ -369,13 +369,11 @@ def _check_databricks_connectivity(
 
     if not host:
         raise RuntimeError(
-            "DATABRICKS_RATING_HOST is not set."
-            " Add it to .env or set it as a CI secret."
+            "DATABRICKS_RATING_HOST is not set. Add it to .env or set it as a CI secret."
         )
     if not token:
         raise RuntimeError(
-            "DATABRICKS_RATING_TOKEN is not set."
-            " Add it to .env or set it as a CI secret."
+            "DATABRICKS_RATING_TOKEN is not set. Add it to .env or set it as a CI secret."
         )
 
     url = f"{host.rstrip('/')}/api/2.0/clusters/list-zones"
@@ -399,5 +397,3 @@ def _check_databricks_connectivity(
             f"and that the workspace allows connections from this network "
             f"(e.g. GitHub Actions IP ranges may need allowlisting)."
         ) from exc
-
-

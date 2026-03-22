@@ -26,9 +26,7 @@ from haute._types import HauteError
 
 # Fully-qualified Databricks table names: catalog.schema.table (each part is
 # alphanumeric + underscores/hyphens, optionally backtick-quoted).
-_TABLE_NAME_RE = re.compile(
-    r"^`?[\w-]+`?\.`?[\w-]+`?\.`?[\w-]+`?$"
-)
+_TABLE_NAME_RE = re.compile(r"^`?[\w-]+`?\.`?[\w-]+`?\.`?[\w-]+`?$")
 
 # Dangerous SQL keywords that must never appear in user-supplied SELECT clauses.
 _DANGEROUS_SQL_RE = re.compile(
@@ -44,6 +42,7 @@ _fetch_lock = threading.Lock()
 
 
 # -- Test helpers for fetch progress state -----------------------------------
+
 
 def _set_fetch_progress(table: str, data: dict[str, object]) -> None:
     """Set fetch progress for *table* (test helper)."""
@@ -68,27 +67,17 @@ def _validate_select_clause(query: str) -> None:
     """
     stripped = query.strip()
     if not stripped.upper().startswith("SELECT"):
-        raise ValueError(
-            f"Query must start with SELECT, got: {stripped[:40]!r}"
-        )
+        raise ValueError(f"Query must start with SELECT, got: {stripped[:40]!r}")
     if ";" in stripped:
-        raise ValueError(
-            "Query must not contain semicolons."
-        )
+        raise ValueError("Query must not contain semicolons.")
     # Block SQL comments that could neutralize the appended FROM clause.
     if "--" in stripped:
-        raise ValueError(
-            "Query must not contain SQL line comments (--)."
-        )
+        raise ValueError("Query must not contain SQL line comments (--).")
     if "/*" in stripped:
-        raise ValueError(
-            "Query must not contain SQL block comments (/*)."
-        )
+        raise ValueError("Query must not contain SQL block comments (/*).")
     match = _DANGEROUS_SQL_RE.search(stripped)
     if match:
-        raise ValueError(
-            f"Query contains forbidden SQL keyword: {match.group()!r}"
-        )
+        raise ValueError(f"Query contains forbidden SQL keyword: {match.group()!r}")
 
 
 class DatabricksConfigError(HauteError):
@@ -118,10 +107,7 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
     if not token:
         missing.append("DATABRICKS_TOKEN")
     if not resolved_http_path:
-        missing.append(
-            "http_path on the data source node "
-            "(or DATABRICKS_HTTP_PATH env var)"
-        )
+        missing.append("http_path on the data source node (or DATABRICKS_HTTP_PATH env var)")
 
     if missing:
         raise DatabricksConfigError(
@@ -133,9 +119,9 @@ def _get_credentials(http_path: str | None = None) -> tuple[str, str, str]:
     # Strip protocol for the SQL connector (it wants bare hostname)
     host = host.rstrip("/")
     if host.startswith("https://"):
-        host = host[len("https://"):]
+        host = host[len("https://") :]
     elif host.startswith("http://"):
-        host = host[len("http://"):]
+        host = host[len("http://") :]
 
     assert resolved_http_path is not None
     return host, token, resolved_http_path
@@ -163,7 +149,8 @@ def _cache_path_for(table: str, project_root: Path | None = None) -> Path:
 
 
 def cached_path(
-    table: str, project_root: Path | None = None,
+    table: str,
+    project_root: Path | None = None,
 ) -> Path | None:
     """Return the cache file path if it exists, else ``None``."""
     p = _cache_path_for(table, project_root)
@@ -190,7 +177,8 @@ class CacheInfoDict(TypedDict):
 
 
 def cache_info(
-    table: str, project_root: Path | None = None,
+    table: str,
+    project_root: Path | None = None,
 ) -> CacheInfoDict | None:
     """Return metadata about a cached table, or ``None`` if not cached."""
     from haute._polars_utils import read_parquet_metadata
@@ -249,6 +237,7 @@ def fetch_and_cache(
 
     Returns metadata dict with row_count, column_count, path, etc.
     """
+    import pyarrow as pa
     import pyarrow.parquet as pq
     from databricks import sql as dbsql
 
@@ -297,14 +286,16 @@ def fetch_and_cache(
                         except Exception:
                             if attempt == _FETCH_MAX_RETRIES - 1:
                                 raise
-                            backoff = _FETCH_INITIAL_BACKOFF * (2 ** attempt)
+                            backoff = _FETCH_INITIAL_BACKOFF * (2**attempt)
                             time.sleep(backoff)
                     assert batch is not None
                     if batch.num_rows == 0:
                         break
                     if writer is None:
                         writer = pq.ParquetWriter(
-                            str(tmp_path), batch.schema, compression="zstd",
+                            str(tmp_path),
+                            batch.schema,
+                            compression="zstd",
                         )
                     writer.write_table(batch)
                     row_count += batch.num_rows
@@ -318,6 +309,9 @@ def fetch_and_cache(
         if writer is not None:
             writer.close()
             writer = None
+        else:
+            # Zero rows returned -- write an empty parquet so the cache file exists
+            pq.write_table(pa.table({}), str(tmp_path))
         tmp_path.replace(out_path)
     except BaseException:
         if writer is not None:

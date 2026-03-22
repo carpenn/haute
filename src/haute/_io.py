@@ -75,8 +75,9 @@ def load_external_object(path: str, file_type: str, model_class: str = "classifi
         mtime = 0.0
     key = (path, mtime, file_type, model_class)
 
-    if key in _object_cache:
-        return _object_cache.get(key)
+    cached = _object_cache.get(key)
+    if cached is not None:
+        return cached
 
     obj = _load_external_object_uncached(path, file_type, model_class)
     _object_cache.put(key, obj)
@@ -84,13 +85,15 @@ def load_external_object(path: str, file_type: str, model_class: str = "classifi
 
 
 def _load_external_object_uncached(
-    path: str, file_type: str, model_class: str,
+    path: str,
+    file_type: str,
+    model_class: str,
 ) -> object:
     """Deserialize an external file from disk (no caching)."""
     if file_type == "json":
         import json as _json
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return _json.load(f)
     elif file_type == "joblib":
         from haute._sandbox import safe_joblib_load

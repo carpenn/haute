@@ -104,12 +104,9 @@ def _wrap_catboost(model: CatBoostRegressor | CatBoostClassifier) -> ScoringMode
     """Wrap a raw CatBoost model in a ``ScoringModel``."""
     feature_names = list(model.feature_names_)
     cat_idx = (
-        set(model.get_cat_feature_indices())
-        if hasattr(model, "get_cat_feature_indices") else set()
+        set(model.get_cat_feature_indices()) if hasattr(model, "get_cat_feature_indices") else set()
     )
-    cat_names = frozenset(
-        feature_names[i] for i in cat_idx if i < len(feature_names)
-    )
+    cat_names = frozenset(feature_names[i] for i in cat_idx if i < len(feature_names))
     return ScoringModel(
         model=model,
         feature_names=feature_names,
@@ -124,7 +121,14 @@ def _load_rustystats_model(path: str) -> ScoringModel:
 
     with open(path, "rb") as f:
         model = rs.GLMModel.from_bytes(f.read())
-    feature_names = list(model.feature_names) if hasattr(model, "feature_names") else []
+    # Use raw input column names (terms_dict keys) rather than design matrix
+    # names (feature_names) -- the GLM handles spline/basis expansion internally.
+    if hasattr(model, "terms_dict") and model.terms_dict:
+        feature_names = list(model.terms_dict.keys())
+    elif hasattr(model, "feature_names"):
+        feature_names = list(model.feature_names)
+    else:
+        feature_names = []
     return ScoringModel(
         model=model,
         feature_names=feature_names,
@@ -194,7 +198,10 @@ def _extract_pyfunc_features(model: Any) -> list[str]:
 
 
 def _find_artifact_by_extension(
-    client: MlflowClient, run_id: str, ext: str, label: str,
+    client: MlflowClient,
+    run_id: str,
+    ext: str,
+    label: str,
 ) -> str:
     """Find the first artifact with the given extension in a run.
 
@@ -273,7 +280,9 @@ def _find_model_artifact(client: MlflowClient, run_id: str) -> tuple[str, str]:
 
 
 def _resolve_artifact_local(
-    mlflow: Any, run_id: str, artifact_path: str,
+    mlflow: Any,
+    run_id: str,
+    artifact_path: str,
 ) -> str:
     """Return a local path to the model artifact, downloading only if needed.
 
@@ -414,9 +423,7 @@ def load_mlflow_model(
     """
     valid_tasks = ("regression", "classification")
     if task not in valid_tasks:
-        raise ValueError(
-            f"Invalid task {task!r}. Expected one of: {', '.join(valid_tasks)}"
-        )
+        raise ValueError(f"Invalid task {task!r}. Expected one of: {', '.join(valid_tasks)}")
 
     # Fast-path cache check using the raw inputs — avoids calling
     # resolve_mlflow_source() (which hits the MLflow tracking server)
@@ -466,7 +473,9 @@ def load_mlflow_model(
     # and re-download once before giving up.
     if flavor in ("catboost", "rustystats"):
         local_path = _resolve_artifact_local(
-            mlflow_mod, resolved_run_id, resolved_artifact,
+            mlflow_mod,
+            resolved_run_id,
+            resolved_artifact,
         )
         try:
             if flavor == "catboost":
@@ -485,7 +494,9 @@ def load_mlflow_model(
             if cached_file.is_file():
                 cached_file.unlink()
             local_path = _resolve_artifact_local(
-                mlflow_mod, resolved_run_id, resolved_artifact,
+                mlflow_mod,
+                resolved_run_id,
+                resolved_artifact,
             )
             if flavor == "catboost":
                 raw_model = _load_catboost_model(local_path, task)
@@ -534,15 +545,13 @@ def _prepare_predict_frame(
     """
     # RustyStats handles its own preprocessing — pass Polars directly
     if flavor == "rustystats":
-        return df_eager
+        return df_eager.select(features) if features else df_eager
 
     numeric_cols = [c for c in features if c not in cat_feature_names]
     cat_cols = [c for c in features if c in cat_feature_names]
     selected = df_eager.select(features)
     if numeric_cols:
-        selected = selected.with_columns(
-            [pl.col(c).cast(pl.Float32) for c in numeric_cols]
-        )
+        selected = selected.with_columns([pl.col(c).cast(pl.Float32) for c in numeric_cols])
     if cat_cols:
         selected = selected.with_columns(
             [pl.col(c).fill_null("_MISSING_").cast(pl.Categorical) for c in cat_cols]
@@ -588,7 +597,8 @@ def _score_eager(
     """
     df_eager = lf.collect(engine="streaming")
     x_data = _prepare_predict_frame(
-        df_eager, features,
+        df_eager,
+        features,
         cat_feature_names=scoring_model.cat_feature_names,
         flavor=scoring_model.flavor,
     )
@@ -598,6 +608,9 @@ def _score_eager(
     )
     if task == "classification":
         df_eager = _append_classification_proba(
-            df_eager, scoring_model, x_data, output_col,
+            df_eager,
+            scoring_model,
+            x_data,
+            output_col,
         )
     return df_eager.lazy()

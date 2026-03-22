@@ -136,7 +136,7 @@ async def broadcast(data: dict[str, Any]) -> None:
         return
 
     dead: list[WebSocket] = []
-    for ws in ws_clients:
+    for ws in list(ws_clients):
         try:
             await ws.send_text(payload)
         except Exception:

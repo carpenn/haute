@@ -10,36 +10,21 @@ from haute._types import PipelineGraph
 
 logger = get_logger(component="cache")
 
-_FINGERPRINT_ATTR = "_haute_base_fingerprint"
-
 
 def _graph_base_fingerprint(graph: PipelineGraph) -> str:
-    """Compute (and cache) the base fingerprint of a graph's structure.
+    """Compute the base fingerprint of a graph's structure.
 
-    The expensive part — JSON-serializing every node config and sorting
-    nodes/edges — is done once per ``PipelineGraph`` instance.  Subsequent
-    calls return the cached value in O(1).
+    Always recomputed to avoid serving stale cached results when the
+    graph instance is mutated (e.g. node config changes).
     """
-    cached = getattr(graph, _FINGERPRINT_ATTR, None)
-    if cached is not None:
-        return cached  # type: ignore[return-value, no-any-return]
-
     parts: list[str] = []
     for n in sorted(graph.nodes, key=lambda n: n.id):
         parts.append(
-            f"{n.id}|{n.data.nodeType}|{_json.dumps(n.data.config, sort_keys=True, default=str)}",
+            f"{n.id}|{n.data.nodeType}|{_json.dumps(n.data.config, sort_keys=True, default=repr)}",
         )
     for e in sorted(graph.edges, key=lambda e: (e.source, e.target)):
         parts.append(f"{e.source}->{e.target}")
-    fp = hashlib.md5("\n".join(parts).encode()).hexdigest()
-
-    # Cache on the instance — bypasses Pydantic validation via object.__setattr__
-    try:
-        object.__setattr__(graph, _FINGERPRINT_ATTR, fp)
-    except (TypeError, AttributeError):
-        pass  # frozen/slots model — just don't cache
-
-    return fp
+    return hashlib.md5("\n".join(parts).encode()).hexdigest()
 
 
 def graph_fingerprint(graph: PipelineGraph, *extra_keys: str) -> str:

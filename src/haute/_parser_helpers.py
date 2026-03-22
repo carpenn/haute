@@ -67,9 +67,11 @@ def _get_decorator_kwargs(decorator: ast.expr) -> dict[str, Any]:
 def _is_pipeline_node_decorator(decorator: ast.expr) -> bool:
     """Check if a decorator is @pipeline.<type>(...) for any type in DECORATOR_TO_NODE_TYPE."""
     if isinstance(decorator, ast.Attribute):
-        if (isinstance(decorator.value, ast.Name)
-                and decorator.value.id == "pipeline"
-                and decorator.attr in DECORATOR_TO_NODE_TYPE):
+        if (
+            isinstance(decorator.value, ast.Name)
+            and decorator.value.id == "pipeline"
+            and decorator.attr in DECORATOR_TO_NODE_TYPE
+        ):
             return True
 
     if isinstance(decorator, ast.Call):
@@ -84,9 +86,11 @@ def _get_decorator_node_type(decorator: ast.expr) -> NodeType | None:
     Returns ``None`` if the decorator is not a recognized pipeline decorator.
     """
     if isinstance(decorator, ast.Attribute):
-        if (isinstance(decorator.value, ast.Name)
-                and decorator.value.id in ("pipeline", "submodel")
-                and decorator.attr in DECORATOR_TO_NODE_TYPE):
+        if (
+            isinstance(decorator.value, ast.Name)
+            and decorator.value.id in ("pipeline", "submodel")
+            and decorator.attr in DECORATOR_TO_NODE_TYPE
+        ):
             return DECORATOR_TO_NODE_TYPE[decorator.attr]
     if isinstance(decorator, ast.Call):
         return _get_decorator_node_type(decorator.func)
@@ -152,7 +156,11 @@ def _extract_decorated_nodes(
         explicit_node_type = _get_decorator_node_type(matched_decorator)
 
         node_type, config = _resolve_node_config(
-            decorator_kwargs, body, param_names, n_params, base_dir,
+            decorator_kwargs,
+            body,
+            param_names,
+            n_params,
+            base_dir,
             func_name=func_name,
             explicit_node_type=explicit_node_type,
         )
@@ -255,12 +263,13 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     in_return = False
     for line in code.splitlines():
         s = line.strip()
-        if s.startswith("return ") and not in_return:
-            stripped_lines.append(line.replace("return ", "", 1))
+        is_return = s == "return" or (s.startswith("return ") and not s.startswith("return_"))
+        if is_return and not in_return:
+            stripped_lines.append(line.replace("return ", "", 1) if "return " in line else "")
             in_return = True
         elif in_return:
             stripped_lines.append(line)
-        elif not s.startswith("return"):
+        elif not is_return:
             stripped_lines.append(line)
 
     return _dedent("\n".join(stripped_lines)).strip()
@@ -395,7 +404,7 @@ def _extract_model_score_user_code(body_source: str) -> str:
     if score_idx is None:
         return ""
 
-    rest = cleaned[score_idx + 1:]
+    rest = cleaned[score_idx + 1 :]
     if not rest:
         return ""
 
@@ -616,13 +625,15 @@ def _build_node_config(
             ]
         else:
             # Single-factor format → wrap into factors array
-            config["factors"] = [{
-                "banding": decorator_kwargs.get("banding", "continuous"),
-                "column": decorator_kwargs.get("column", ""),
-                "outputColumn": decorator_kwargs.get("output_column", ""),
-                "rules": decorator_kwargs.get("rules", []),
-                "default": decorator_kwargs.get("default"),
-            }]
+            config["factors"] = [
+                {
+                    "banding": decorator_kwargs.get("banding", "continuous"),
+                    "column": decorator_kwargs.get("column", ""),
+                    "outputColumn": decorator_kwargs.get("output_column", ""),
+                    "rules": decorator_kwargs.get("rules", []),
+                    "default": decorator_kwargs.get("default"),
+                }
+            ]
     elif node_type == NodeType.RATING_STEP:
         if "tables" in decorator_kwargs:
             raw_tables = decorator_kwargs["tables"]
@@ -647,7 +658,8 @@ def _build_node_config(
         if op:
             config["operation"] = str(op)
         combined = decorator_kwargs.get(
-            "combined_column", decorator_kwargs.get("combinedColumn"),
+            "combined_column",
+            decorator_kwargs.get("combinedColumn"),
         )
         if combined:
             config["combinedColumn"] = str(combined)
@@ -705,19 +717,18 @@ def _build_edges(
             edges.append(GraphEdge(id=f"e_{src}_{tgt}", source=src, target=tgt))
 
     # Implicit edges from parameter names matching node names
-    targets_with_explicit = {tgt for _, tgt in explicit_edges}
     for node_info in raw_nodes:
-        if node_info["func_name"] in targets_with_explicit:
-            continue
         for param in node_info["param_names"]:
             if param in node_names and param != node_info["func_name"]:
                 pair = (param, node_info["func_name"])
                 if pair not in explicit_edges:
-                    edges.append(GraphEdge(
-                        id=f"e_{pair[0]}_{pair[1]}",
-                        source=pair[0],
-                        target=pair[1],
-                    ))
+                    edges.append(
+                        GraphEdge(
+                            id=f"e_{pair[0]}_{pair[1]}",
+                            source=pair[0],
+                            target=pair[1],
+                        )
+                    )
 
     # Fallback: if still no edges, infer linear chain from definition order
     if not edges and len(raw_nodes) > 1:
@@ -753,7 +764,9 @@ def _build_rf_nodes(raw_nodes: list[dict], x_spacing: int = 300) -> list[GraphNo
 
 
 def _extract_meta(
-    tree: ast.Module, var_name: str, default_name: str = "main",
+    tree: ast.Module,
+    var_name: str,
+    default_name: str = "main",
 ) -> tuple[str, str]:
     """Find ``<var_name> = haute.<Class>("name", description="...")`` at module level."""
     name = default_name
@@ -834,7 +847,7 @@ def _extract_preamble(source: str) -> str:
             break
         if stripped.startswith("@pipeline."):
             # Check if the decorator name after @pipeline. is a known type
-            dot_rest = stripped[len("@pipeline."):]
+            dot_rest = stripped[len("@pipeline.") :]
             dec_name = dot_rest.split("(")[0].split()[0] if dot_rest else ""
             if dec_name in DECORATOR_TO_NODE_TYPE:
                 pipeline_start_idx = i

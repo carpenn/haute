@@ -692,6 +692,7 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") 
         )
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        # Restore previous streaming chunk size.
-        if _prev_chunk_size is not None:
-            pl.Config.set_streaming_chunk_size(int(_prev_chunk_size))
+        # Restore previous streaming chunk size (0 resets to Polars default).
+        pl.Config.set_streaming_chunk_size(
+            int(_prev_chunk_size) if _prev_chunk_size is not None else 0
+        )

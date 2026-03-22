@@ -82,13 +82,15 @@ def _make_node(config: dict, label: str = "apply_opt") -> GraphNode:
 
 def _scored_df() -> pl.DataFrame:
     """Two quotes x 3 steps — standard test data for online apply."""
-    return pl.DataFrame({
-        "quote_id": ["q1", "q1", "q1", "q2", "q2", "q2"],
-        "scenario_index": [0, 1, 2, 0, 1, 2],
-        "scenario_value": [0.9, 1.0, 1.1, 0.9, 1.0, 1.1],
-        "predicted_income": [90.0, 100.0, 110.0, 45.0, 50.0, 55.0],
-        "predicted_volume": [1.0, 0.9, 0.7, 1.0, 0.95, 0.8],
-    })
+    return pl.DataFrame(
+        {
+            "quote_id": ["q1", "q1", "q1", "q2", "q2", "q2"],
+            "scenario_index": [0, 1, 2, 0, 1, 2],
+            "scenario_value": [0.9, 1.0, 1.1, 0.9, 1.0, 1.1],
+            "predicted_income": [90.0, 100.0, 110.0, 45.0, 50.0, 55.0],
+            "predicted_volume": [1.0, 0.9, 0.7, 1.0, 0.95, 0.8],
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -173,19 +175,23 @@ class TestCodegen:
         assert 'config="config/apply_optimisation/apply_opt.json"' in code
 
     def test_codegen_mlflow_registered(self):
-        node = _make_node({
-            "sourceType": "registered",
-            "registered_model": "opt_model",
-            "version": "2",
-        })
+        node = _make_node(
+            {
+                "sourceType": "registered",
+                "registered_model": "opt_model",
+                "version": "2",
+            }
+        )
         code = _node_to_code(node, source_names=["df"])
         assert 'config="config/apply_optimisation/apply_opt.json"' in code
 
     def test_codegen_mlflow_run(self):
-        node = _make_node({
-            "sourceType": "run",
-            "run_id": "abc123",
-        })
+        node = _make_node(
+            {
+                "sourceType": "run",
+                "run_id": "abc123",
+            }
+        )
         code = _node_to_code(node, source_names=["df"])
         assert 'config="config/apply_optimisation/apply_opt.json"' in code
 
@@ -246,11 +252,13 @@ class TestExecutorPassthrough:
         """No sourceType (empty string) with artifact_path should still work."""
         path = _write_artifact(_make_ratebook_artifact())
         try:
-            df = pl.DataFrame({
-                "quote_id": ["q1"],
-                "region": ["London"],
-                "price": [100.0],
-            })
+            df = pl.DataFrame(
+                {
+                    "quote_id": ["q1"],
+                    "region": ["London"],
+                    "price": [100.0],
+                }
+            )
             node = _make_node({"artifact_path": path})
             _, fn, _ = _build_node_fn(node, source_names=["base"])
             result = fn(df.lazy()).collect()
@@ -325,11 +333,13 @@ class TestExecutorRatebook:
     def test_ratebook_apply_basic(self):
         path = _write_artifact(_make_ratebook_artifact())
         try:
-            df = pl.DataFrame({
-                "quote_id": ["q1", "q2", "q3"],
-                "region": ["London", "Manchester", "London"],
-                "price": [100.0, 200.0, 150.0],
-            })
+            df = pl.DataFrame(
+                {
+                    "quote_id": ["q1", "q2", "q3"],
+                    "region": ["London", "Manchester", "London"],
+                    "price": [100.0, 200.0, 150.0],
+                }
+            )
             node = _make_node({"artifact_path": path})
             _, fn, _ = _build_node_fn(node, source_names=["base"])
             result = fn(df.lazy()).collect()
@@ -356,12 +366,14 @@ class TestExecutorRatebook:
         ]
         path = _write_artifact(artifact)
         try:
-            df = pl.DataFrame({
-                "quote_id": ["q1", "q2"],
-                "region": ["London", "Manchester"],
-                "age_band": ["young", "old"],
-                "price": [100.0, 200.0],
-            })
+            df = pl.DataFrame(
+                {
+                    "quote_id": ["q1", "q2"],
+                    "region": ["London", "Manchester"],
+                    "age_band": ["young", "old"],
+                    "price": [100.0, 200.0],
+                }
+            )
             node = _make_node({"artifact_path": path})
             _, fn, _ = _build_node_fn(node, source_names=["base"])
             result = fn(df.lazy()).collect()
@@ -378,11 +390,13 @@ class TestExecutorRatebook:
     def test_ratebook_missing_level_gets_default(self):
         path = _write_artifact(_make_ratebook_artifact())
         try:
-            df = pl.DataFrame({
-                "quote_id": ["q1"],
-                "region": ["Edinburgh"],  # not in factor table
-                "price": [100.0],
-            })
+            df = pl.DataFrame(
+                {
+                    "quote_id": ["q1"],
+                    "region": ["Edinburgh"],  # not in factor table
+                    "price": [100.0],
+                }
+            )
             node = _make_node({"artifact_path": path})
             _, fn, _ = _build_node_fn(node, source_names=["base"])
             result = fn(df.lazy()).collect()
@@ -431,7 +445,7 @@ class TestArtifactLoader:
         try:
             a1 = load_optimiser_artifact(path)
             a2 = load_optimiser_artifact(path)
-            assert a1 is a2  # same object from cache
+            assert a1 == a2  # same content from cache (deepcopy)
         finally:
             os.unlink(path)
 
@@ -484,10 +498,12 @@ class TestApplyOnlineHelper:
 class TestApplyRatebookHelper:
     def test_apply_ratebook(self):
         artifact = _make_ratebook_artifact()
-        df = pl.DataFrame({
-            "region": ["London", "Manchester"],
-            "price": [100.0, 200.0],
-        })
+        df = pl.DataFrame(
+            {
+                "region": ["London", "Manchester"],
+                "price": [100.0, 200.0],
+            }
+        )
         result = _apply_ratebook(df.lazy(), artifact, "v1", "__ver__").collect()
         assert "region_optimised_factor" in result.columns
         assert "optimised_factor" in result.columns
@@ -528,10 +544,12 @@ class TestApplyRatebookHelper:
         from unittest.mock import patch
 
         artifact = _make_ratebook_artifact()
-        df = pl.DataFrame({
-            "region": ["London", "Manchester"],
-            "price": [100.0, 200.0],
-        })
+        df = pl.DataFrame(
+            {
+                "region": ["London", "Manchester"],
+                "price": [100.0, 200.0],
+            }
+        )
 
         with patch("haute._builders.logger") as mock_logger:
             _apply_ratebook(df.lazy(), artifact, "v1", "__ver__").collect()

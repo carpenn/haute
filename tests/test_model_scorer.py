@@ -190,17 +190,14 @@ class TestModelScorerScore:
 
     @patch("haute._mlflow_io._score_eager")
     @patch("haute._mlflow_io.load_mlflow_model")
-    def test_empty_input_doesnt_crash(self, mock_load, mock_score_eager):
-        """score() with no dfs should use an empty LazyFrame."""
-        sm = _make_scoring_model(feature_names=[])
-        sm._model.predict.return_value = np.array([])
+    def test_empty_input_raises_when_features_missing(self, mock_load, mock_score_eager):
+        """score() with no dfs raises ValueError when model expects features."""
+        sm = _make_scoring_model()
         mock_load.return_value = sm
-        mock_score_eager.return_value = pl.LazyFrame()
 
         scorer = ModelScorer(source_type="run", run_id="abc", source="live")
-        result = scorer.score()  # no dfs passed
-        mock_score_eager.assert_called_once()
-        assert isinstance(result, pl.LazyFrame)
+        with pytest.raises(ValueError, match="All model features are missing"):
+            scorer.score()  # no dfs passed -- empty LazyFrame has no feature columns
 
     @patch("haute.executor._exec_user_code")
     @patch("haute._mlflow_io._score_eager")

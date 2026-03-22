@@ -63,16 +63,21 @@ def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
         if src in submodel_node_ids or tgt in submodel_node_ids:
             continue
 
-        rewired.append(GraphEdge(
-            id=eid, source=src, target=tgt,
-            sourceHandle=new_sh, targetHandle=new_th,
-        ))
+        rewired.append(
+            GraphEdge(
+                id=eid,
+                source=src,
+                target=tgt,
+                sourceHandle=new_sh,
+                targetHandle=new_th,
+            )
+        )
 
-    # Deduplicate edges by (source, target)
-    seen: set[tuple[str, str]] = set()
+    # Deduplicate edges by (source, target, sourceHandle, targetHandle)
+    seen: set[tuple[str, str, str | None, str | None]] = set()
     deduped: list[GraphEdge] = []
     for e in rewired:
-        key = (e.source, e.target)
+        key = (e.source, e.target, e.sourceHandle, e.targetHandle)
         if key not in seen:
             seen.add(key)
             deduped.append(e)

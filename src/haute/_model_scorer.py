@@ -64,6 +64,18 @@ def _run_score_pipeline(
 
     available_cols = set(lf.collect_schema().names())
     features = [f for f in scoring_model.feature_names if f in available_cols]
+    missing = [f for f in scoring_model.feature_names if f not in available_cols]
+    if missing and not features:
+        raise ValueError(
+            "All model features are missing from the input DataFrame. "
+            f"Expected features: {scoring_model.feature_names}"
+        )
+    if missing:
+        logger.warning(
+            "Missing %d model feature(s) — scoring will proceed without them: %s",
+            len(missing),
+            missing,
+        )
 
     if source == "live" or row_limit:
         result_lf = score_eager_(scoring_model, lf, features, output_col, task)
@@ -394,4 +406,10 @@ def _batch_score_to_parquet(
     finally:
         if writer is not None:
             writer.close()
+        else:
+            # Zero-row input: write an empty parquet with the correct schema
+            empty = pl.DataFrame({c: pl.Series([], dtype=pl.Utf8) for c in features}).with_columns(
+                pl.Series(output_col, [], dtype=pl.Utf8)
+            )
+            pq.write_table(empty.to_arrow(), out_path)
     return out_path

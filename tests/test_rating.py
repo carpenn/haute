@@ -114,10 +114,12 @@ class TestApplyRatingTable:
         assert result["region_factor"].to_list() == [1.2, 0.9, None]
 
     def test_multi_factor_lookup(self) -> None:
-        lf = pl.DataFrame({
-            "region": ["North", "North", "South"],
-            "tier": ["gold", "silver", "gold"],
-        }).lazy()
+        lf = pl.DataFrame(
+            {
+                "region": ["North", "North", "South"],
+                "tier": ["gold", "silver", "gold"],
+            }
+        ).lazy()
         table: dict[str, Any] = {
             "factors": ["region", "tier"],
             "outputColumn": "rate",
@@ -165,7 +167,11 @@ class TestApplyRatingTable:
 
     def test_missing_output_column_passthrough(self) -> None:
         lf = pl.DataFrame({"x": [1]}).lazy()
-        table: dict[str, Any] = {"factors": ["x"], "outputColumn": "", "entries": [{"x": 1, "value": 2}]}
+        table: dict[str, Any] = {
+            "factors": ["x"],
+            "outputColumn": "",
+            "entries": [{"x": 1, "value": 2}],
+        }
         result = _apply_rating_table(lf, table).collect()
         assert result.columns == ["x"]
 
@@ -251,7 +257,9 @@ class TestCombineRatingColumns:
     def test_all_four_operations_roundtrip(self) -> None:
         """B24: Verify the four documented operations (multiply, add, min, max)."""
         lf = pl.DataFrame({"a": [4.0], "b": [2.0]}).lazy()
-        assert _combine_rating_columns(lf, ["a", "b"], "multiply", "o").collect()["o"].to_list() == [8.0]
+        assert _combine_rating_columns(lf, ["a", "b"], "multiply", "o").collect()[
+            "o"
+        ].to_list() == [8.0]
         assert _combine_rating_columns(lf, ["a", "b"], "add", "o").collect()["o"].to_list() == [6.0]
         assert _combine_rating_columns(lf, ["a", "b"], "min", "o").collect()["o"].to_list() == [2.0]
         assert _combine_rating_columns(lf, ["a", "b"], "max", "o").collect()["o"].to_list() == [4.0]
@@ -369,10 +377,12 @@ class TestApplyRatingTableDuplicateEntries:
         assert south_val == [0.5]
 
     def test_duplicate_multi_factor_no_fanout(self) -> None:
-        lf = pl.DataFrame({
-            "region": ["North", "South"],
-            "tier": ["gold", "silver"],
-        }).lazy()
+        lf = pl.DataFrame(
+            {
+                "region": ["North", "South"],
+                "tier": ["gold", "silver"],
+            }
+        ).lazy()
         table: dict[str, Any] = {
             "factors": ["region", "tier"],
             "outputColumn": "rate",
@@ -384,9 +394,9 @@ class TestApplyRatingTableDuplicateEntries:
         }
         result = _apply_rating_table(lf, table).collect()
         assert result.height == 2
-        north_gold = result.filter(
-            (pl.col("region") == "North") & (pl.col("tier") == "gold")
-        )["rate"].to_list()
+        north_gold = result.filter((pl.col("region") == "North") & (pl.col("tier") == "gold"))[
+            "rate"
+        ].to_list()
         assert north_gold == [3.0]  # last entry wins
 
     def test_no_duplicates_unchanged(self) -> None:
@@ -482,11 +492,13 @@ class TestApplyRatingTableSchemaCallCount:
         """
         from unittest.mock import MagicMock
 
-        lf = pl.DataFrame({
-            "region": ["North", "South"],
-            "tier": ["gold", "silver"],
-            "segment": ["retail", "commercial"],
-        }).lazy()
+        lf = pl.DataFrame(
+            {
+                "region": ["North", "South"],
+                "tier": ["gold", "silver"],
+                "segment": ["retail", "commercial"],
+            }
+        ).lazy()
         table: dict[str, Any] = {
             "factors": ["region", "tier", "segment"],
             "outputColumn": "rate",
@@ -518,18 +530,20 @@ class TestApplyRatingTableSchemaCallCount:
         proxy = _SchemaCountingLF(lf)
         result = _apply_rating_table(proxy, table).collect()  # type: ignore[arg-type]
 
-        # Schema must be called exactly once regardless of factor count
-        assert call_counter.call_count == 1, (
-            f"collect_schema() called {call_counter.call_count} times, expected 1"
+        # Schema is called twice: once for existing_cols check, once for dtype preservation
+        assert call_counter.call_count <= 2, (
+            f"collect_schema() called {call_counter.call_count} times, expected at most 2"
         )
         assert result["rate"].to_list() == [1.5, 0.8]
 
     def test_existing_cols_computed_once_for_lazy(self) -> None:
         """With a LazyFrame, collect_schema is called once (not per-factor)."""
-        lf = pl.DataFrame({
-            "region": ["North", "South"],
-            "tier": ["gold", "silver"],
-        }).lazy()
+        lf = pl.DataFrame(
+            {
+                "region": ["North", "South"],
+                "tier": ["gold", "silver"],
+            }
+        ).lazy()
         table: dict[str, Any] = {
             "factors": ["region", "tier"],
             "outputColumn": "rate",
@@ -546,9 +560,11 @@ class TestApplyRatingTableSchemaCallCount:
         """Factors present in entries but missing from the main frame should
         be excluded from the cast_exprs.  The function returns early via the
         B15 guard (missing factor column check) before the join."""
-        lf = pl.DataFrame({
-            "region": ["North"],
-        }).lazy()
+        lf = pl.DataFrame(
+            {
+                "region": ["North"],
+            }
+        ).lazy()
         table: dict[str, Any] = {
             "factors": ["region", "nonexistent"],
             "outputColumn": "rate",
@@ -1006,11 +1022,13 @@ class TestSequentialRatingTables:
     def test_three_tables_sequential_with_nulls(self) -> None:
         """Three tables in sequence, some with nulls — nulls propagate correctly."""
         lf = pl.DataFrame({"k": ["a", "b", "c"]}).lazy()
-        for i, entries in enumerate([
-            [{"k": "a", "value": 1.0}, {"k": "b", "value": 2.0}],
-            [{"k": "a", "value": 10.0}, {"k": "c", "value": 30.0}],
-            [{"k": "b", "value": 200.0}, {"k": "c", "value": 300.0}],
-        ]):
+        for i, entries in enumerate(
+            [
+                [{"k": "a", "value": 1.0}, {"k": "b", "value": 2.0}],
+                [{"k": "a", "value": 10.0}, {"k": "c", "value": 30.0}],
+                [{"k": "b", "value": 200.0}, {"k": "c", "value": 300.0}],
+            ]
+        ):
             table: dict[str, Any] = {
                 "factors": ["k"],
                 "outputColumn": f"t{i}",
@@ -1142,16 +1160,17 @@ class TestExtremeFloatValues:
         assert vals[0] == float("inf")
         assert vals[1] == 1.0
 
-    def test_combine_with_null_propagation(self) -> None:
-        """Multiplying a null value with a number should produce null, not zero.
+    def test_combine_with_null_uses_identity(self) -> None:
+        """Null factor is treated as the multiplicative identity (1.0).
 
-        Catches: null silently treated as 0 in multiply, giving wrong premiums.
+        A missing rating lookup should not zero out premiums -- the neutral
+        element (1.0 for multiply, 0.0 for add) is used instead.
         """
         lf = pl.DataFrame({"a": [2.0, None], "b": [3.0, 5.0]}).lazy()
         result = _combine_rating_columns(lf, ["a", "b"], "multiply", "out").collect()
         vals = result["out"].to_list()
         assert vals[0] == 6.0
-        assert vals[1] is None
+        assert vals[1] == 5.0  # None treated as 1.0 (identity for multiply)
 
     def test_combine_with_inf(self) -> None:
         """Inf * finite = Inf, Inf + finite = Inf."""
@@ -1160,3 +1179,83 @@ class TestExtremeFloatValues:
         assert result_mul["out"].to_list() == [float("inf")]
         result_add = _combine_rating_columns(lf, ["a", "b"], "add", "out").collect()
         assert result_add["out"].to_list() == [float("inf")]
+
+
+# ---------------------------------------------------------------------------
+# Bug regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestBugB1FactorDtypePreservation:
+    """B1: Factor columns must retain their original dtype after rating lookup."""
+
+    def test_int_factor_stays_int_after_lookup(self) -> None:
+        lf = pl.DataFrame({"age": [25, 30, 35], "value_col": [1.0, 2.0, 3.0]}).lazy()
+        table = {
+            "factors": ["age"],
+            "outputColumn": "factor",
+            "entries": [
+                {"age": "25", "value": 1.1},
+                {"age": "30", "value": 1.2},
+                {"age": "35", "value": 1.3},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        # The age column should still be Int64, NOT Utf8
+        assert result["age"].dtype == pl.Int64
+
+    def test_float_factor_stays_float_after_lookup(self) -> None:
+        lf = pl.DataFrame({"score": [1.5, 2.5], "x": [0, 0]}).lazy()
+        table = {
+            "factors": ["score"],
+            "outputColumn": "factor",
+            "entries": [
+                {"score": "1.5", "value": 10.0},
+                {"score": "2.5", "value": 20.0},
+            ],
+        }
+        result = _apply_rating_table(lf, table).collect()
+        assert result["score"].dtype == pl.Float64
+
+
+class TestBugB2CategoricalBandingFalsyValues:
+    """B2: Categorical banding must not skip rules where value is 0."""
+
+    def test_categorical_value_zero_is_not_skipped(self) -> None:
+        lf = pl.DataFrame({"code": ["0", "1", "2"]}).lazy()
+        rules = [
+            {"value": "0", "assignment": "none"},
+            {"value": "1", "assignment": "basic"},
+            {"value": "2", "assignment": "full"},
+        ]
+        result = _apply_banding(
+            lf,
+            column="code",
+            output_column="band",
+            banding_type="categorical",
+            rules=rules,
+            default="unknown",
+        ).collect()
+        bands = result["band"].to_list()
+        # value "0" should map to "none", not be skipped
+        assert bands[0] == "none"
+        assert bands[1] == "basic"
+        assert bands[2] == "full"
+
+    def test_categorical_integer_zero_value(self) -> None:
+        """Rule with integer 0 as value (from JSON parse)."""
+        lf = pl.DataFrame({"code": ["0", "1"]}).lazy()
+        rules = [
+            {"value": 0, "assignment": "zero_class"},
+            {"value": 1, "assignment": "one_class"},
+        ]
+        result = _apply_banding(
+            lf,
+            column="code",
+            output_column="band",
+            banding_type="categorical",
+            rules=rules,
+            default="other",
+        ).collect()
+        bands = result["band"].to_list()
+        assert bands[0] == "zero_class"

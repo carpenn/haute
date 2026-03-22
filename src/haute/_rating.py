@@ -73,7 +73,7 @@ def _apply_banding(
         for rule in rules:
             val = rule.get("value", "")
             assignment = rule.get("assignment", "")
-            if val and assignment:
+            if (val is not None and val != "") and (assignment is not None and assignment != ""):
                 remap[str(val)] = str(assignment)
         if not remap:
             return lf
@@ -153,12 +153,25 @@ def _apply_rating_table(
     existing_cols = set(
         lf.collect_schema().names() if hasattr(lf, "collect_schema") else lf.columns
     )
+    # Save original dtypes so we can revert after the join
+    if hasattr(lf, "collect_schema"):
+        _schema = lf.collect_schema()
+        original_dtypes = {f: _schema[f] for f in factors if f in existing_cols}
+    else:
+        _dtypes = dict(zip(lf.columns, lf.dtypes))
+        original_dtypes = {f: _dtypes[f] for f in factors if f in existing_cols}
+
     cast_exprs = [pl.col(f).cast(pl.Utf8).alias(f) for f in factors if f in existing_cols]
     if cast_exprs:
         lf = lf.with_columns(cast_exprs)
 
     # Left join
     lf = lf.join(lookup.lazy(), on=factors, how="left")
+
+    # Revert factor columns to their original dtypes
+    revert_exprs = [pl.col(f).cast(dtype) for f, dtype in original_dtypes.items()]
+    if revert_exprs:
+        lf = lf.with_columns(revert_exprs)
 
     # Rename value → outputColumn, apply default
     # B13: Gracefully handle non-numeric defaultValue (e.g. "N/A", "", inf, nan)
@@ -200,16 +213,18 @@ def _combine_rating_columns(
         return lf.with_columns(pl.col(columns[0]).alias(output_col))
 
     if operation == "add":
-        expr = pl.col(columns[0])
+        # fill_null(0.0) for add: missing factor contributes nothing
+        expr = pl.col(columns[0]).fill_null(0.0)
         for c in columns[1:]:
-            expr = expr + pl.col(c)
+            expr = expr + pl.col(c).fill_null(0.0)
     elif operation == "min":
         expr = pl.min_horizontal(*[pl.col(c) for c in columns])
     elif operation == "max":
         expr = pl.max_horizontal(*[pl.col(c) for c in columns])
     else:  # multiply (default)
-        expr = pl.col(columns[0])
+        # fill_null(1.0) for multiply: missing factor = no effect (neutral element)
+        expr = pl.col(columns[0]).fill_null(1.0)
         for c in columns[1:]:
-            expr = expr * pl.col(c)
+            expr = expr * pl.col(c).fill_null(1.0)
 
     return lf.with_columns(expr.alias(output_col))

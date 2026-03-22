@@ -13,11 +13,19 @@ def compute_metrics(
     y_pred: np.ndarray,
     weight: np.ndarray | None = None,
     metric_names: list[str] | None = None,
+    *,
+    variance_power: float | None = None,
 ) -> dict[str, float]:
     """Compute requested metrics between actuals and predictions.
 
     All metrics support optional sample weights (exposure weighting
     is standard in insurance).
+
+    Parameters
+    ----------
+    variance_power : float | None
+        If provided, passed to ``tweedie_deviance`` so the metric matches
+        the variance power the model was trained with (default 1.5).
     """
     if metric_names is None:
         metric_names = ["gini", "rmse"]
@@ -27,12 +35,17 @@ def compute_metrics(
         fn = _METRIC_REGISTRY.get(name.lower())
         if fn is None:
             raise ValueError(f"Unknown metric: {name}. Available: {list(_METRIC_REGISTRY.keys())}")
-        results[name] = fn(y_true, y_pred, weight)
+        if name.lower() == "tweedie_deviance" and variance_power is not None:
+            results[name] = fn(y_true, y_pred, weight, variance_power=variance_power)
+        else:
+            results[name] = fn(y_true, y_pred, weight)
     return results
 
 
 def _gini(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Normalised Gini coefficient — measures rank ordering of predictions.
 
@@ -87,7 +100,9 @@ def _gini(
 
 
 def _rmse(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Root Mean Squared Error (optionally weighted)."""
     residuals = y_true - y_pred
@@ -97,7 +112,9 @@ def _rmse(
 
 
 def _mae(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Mean Absolute Error (optionally weighted)."""
     residuals = np.abs(y_true - y_pred)
@@ -107,7 +124,9 @@ def _mae(
 
 
 def _mse(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Mean Squared Error (optionally weighted)."""
     residuals = y_true - y_pred
@@ -117,7 +136,9 @@ def _mse(
 
 
 def _r2(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """R-squared / coefficient of determination (optionally weighted)."""
     if weight is not None:
@@ -132,7 +153,9 @@ def _r2(
 
 
 def _auc(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Area Under the ROC Curve (binary classification)."""
     from sklearn.metrics import roc_auc_score
@@ -143,7 +166,9 @@ def _auc(
 
 
 def _logloss(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Log Loss / binary cross-entropy."""
     from sklearn.metrics import log_loss
@@ -154,7 +179,9 @@ def _logloss(
 
 
 def _poisson_deviance(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
 ) -> float:
     """Poisson deviance — appropriate for count/frequency models."""
     y_pred_safe = np.maximum(y_pred, 1e-10)
@@ -165,7 +192,9 @@ def _poisson_deviance(
 
 
 def _tweedie_deviance(
-    y_true: np.ndarray, y_pred: np.ndarray, weight: np.ndarray | None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    weight: np.ndarray | None,
     variance_power: float = 1.5,
 ) -> float:
     """Tweedie deviance — generalises Poisson (p=1) and Gamma (p=2)."""
@@ -183,8 +212,7 @@ def _tweedie_deviance(
         dev = 2.0 * (-log_ratio + diff_ratio)
     else:
         term1 = (
-            np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p))
-            if np.any(y_true_safe > 0) else 0.0
+            np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p)) if np.any(y_true_safe > 0) else 0.0
         )
         term2 = y_true_safe * np.power(y_pred_safe, 1 - p) / (1 - p)
         term3 = np.power(y_pred_safe, 2 - p) / (2 - p)
@@ -229,12 +257,14 @@ def compute_double_lift(
             continue
         actual = float(np.average(y_true_sorted[idx], weights=bw))
         predicted = float(np.average(y_pred_sorted[idx], weights=bw))
-        result.append({
-            "decile": i + 1,
-            "actual": round(actual, 6),
-            "predicted": round(predicted, 6),
-            "count": len(idx),
-        })
+        result.append(
+            {
+                "decile": i + 1,
+                "actual": round(actual, 6),
+                "predicted": round(predicted, 6),
+                "count": len(idx),
+            }
+        )
     return result
 
 
@@ -336,24 +366,28 @@ def _ave_numeric_bins(
             lo, hi = float(np.nanmin(bin_vals)), float(np.nanmax(bin_vals))
             label = f"{lo:.4g}–{hi:.4g}" if lo != hi else f"{lo:.4g}"
 
-            bins.append({
-                "label": label,
-                "exposure": round(float(total_w), 4),
-                "avg_actual": round(float(np.average(y_true[mask], weights=bw)), 6),
-                "avg_predicted": round(float(np.average(y_pred[mask], weights=bw)), 6),
-            })
+            bins.append(
+                {
+                    "label": label,
+                    "exposure": round(float(total_w), 4),
+                    "avg_actual": round(float(np.average(y_true[mask], weights=bw)), 6),
+                    "avg_predicted": round(float(np.average(y_pred[mask], weights=bw)), 6),
+                }
+            )
 
     # NaN bin
     if nan_mask.any():
         bw = weight[nan_mask]
         total_w = bw.sum()
         if total_w > 0:
-            bins.append({
-                "label": "Missing",
-                "exposure": round(float(total_w), 4),
-                "avg_actual": round(float(np.average(y_true[nan_mask], weights=bw)), 6),
-                "avg_predicted": round(float(np.average(y_pred[nan_mask], weights=bw)), 6),
-            })
+            bins.append(
+                {
+                    "label": "Missing",
+                    "exposure": round(float(total_w), 4),
+                    "avg_actual": round(float(np.average(y_true[nan_mask], weights=bw)), 6),
+                    "avg_predicted": round(float(np.average(y_pred[nan_mask], weights=bw)), 6),
+                }
+            )
 
     return bins
 
@@ -370,12 +404,14 @@ def _ave_categorical_bins(
         return []
 
     # Vectorized groupby: no Python row loops
-    tmp = pl.DataFrame({
-        "cat": col.cast(pl.Utf8).fill_null("__MISSING__"),
-        "w": weight,
-        "wa": y_true * weight,
-        "wp": y_pred * weight,
-    })
+    tmp = pl.DataFrame(
+        {
+            "cat": col.cast(pl.Utf8).fill_null("__MISSING__"),
+            "w": weight,
+            "wa": y_true * weight,
+            "wp": y_pred * weight,
+        }
+    )
     grouped = (
         tmp.group_by("cat")
         .agg(
@@ -394,23 +430,29 @@ def _ave_categorical_bins(
         if row["exposure"] == 0:
             continue
         label = "Missing" if row["cat"] == "__MISSING__" else row["cat"]
-        bins.append({
-            "label": label,
-            "exposure": round(row["exposure"], 4),
-            "avg_actual": round(row["sum_actual"] / row["exposure"], 6),
-            "avg_predicted": round(row["sum_predicted"] / row["exposure"], 6),
-        })
+        bins.append(
+            {
+                "label": label,
+                "exposure": round(row["exposure"], 4),
+                "avg_actual": round(row["sum_actual"] / row["exposure"], 6),
+                "avg_predicted": round(row["sum_predicted"] / row["exposure"], 6),
+            }
+        )
 
     # Lump remaining categories into "Other"
     if remainder.height > 0:
         other_exposure = float(remainder["exposure"].sum())
         if other_exposure > 0:
-            bins.append({
-                "label": "Other",
-                "exposure": round(other_exposure, 4),
-                "avg_actual": round(float(remainder["sum_actual"].sum()) / other_exposure, 6),
-                "avg_predicted": round(float(remainder["sum_predicted"].sum()) / other_exposure, 6),
-            })
+            bins.append(
+                {
+                    "label": "Other",
+                    "exposure": round(other_exposure, 4),
+                    "avg_actual": round(float(remainder["sum_actual"].sum()) / other_exposure, 6),
+                    "avg_predicted": round(
+                        float(remainder["sum_predicted"].sum()) / other_exposure, 6
+                    ),
+                }
+            )
 
     return bins
 
@@ -555,8 +597,9 @@ def compute_lorenz_curve(
     """
     n = len(y_true)
     if n == 0:
-        return [{"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}], \
-               [{"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}]
+        return [{"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}], [
+            {"cum_weight_frac": 0.0, "cum_actual_frac": 0.0}
+        ]
 
     w = weight if weight is not None else np.ones(n)
 
@@ -589,9 +632,7 @@ def compute_lorenz_curve(
         if total_len <= n_points:
             indices = np.arange(total_len)
         else:
-            indices = np.unique(
-                np.round(np.linspace(0, total_len - 1, n_points)).astype(int)
-            )
+            indices = np.unique(np.round(np.linspace(0, total_len - 1, n_points)).astype(int))
 
         return [
             {
@@ -682,16 +723,20 @@ def compute_pdp(
                     )
                 preds = algo.predict(model, modified, features)
                 avg_pred = float(np.mean(preds))
-                grid_entries.append({
-                    "value": val if is_cat else round(float(val), 6),
-                    "avg_prediction": round(avg_pred, 6),
-                })
+                grid_entries.append(
+                    {
+                        "value": val if is_cat else round(float(val), 6),
+                        "avg_prediction": round(avg_pred, 6),
+                    }
+                )
 
-            results.append({
-                "feature": feat,
-                "type": feat_type,
-                "grid": grid_entries,
-            })
+            results.append(
+                {
+                    "feature": feat,
+                    "type": feat_type,
+                    "grid": grid_entries,
+                }
+            )
         except Exception:  # noqa: BLE001
             # Defensive: skip features that fail (e.g. unsupported dtype)
             continue

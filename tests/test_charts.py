@@ -44,31 +44,28 @@ def _sample_double_lift() -> list[dict]:
 
 def _sample_loss_data() -> list[dict]:
     return [
-        {"iteration": i, "train_RMSE": 1.0 / (i + 1), "eval_RMSE": 1.1 / (i + 1)}
-        for i in range(50)
+        {"iteration": i, "train_RMSE": 1.0 / (i + 1), "eval_RMSE": 1.1 / (i + 1)} for i in range(50)
     ]
 
 
 def _sample_importance() -> list[dict]:
-    return [
-        {"feature": f"feat_{i}", "importance": 1.0 - i * 0.1}
-        for i in range(5)
-    ]
+    return [{"feature": f"feat_{i}", "importance": 1.0 - i * 0.1} for i in range(5)]
 
 
 def _sample_numeric_bins() -> list[dict]:
     return [
-        {"label": f"{i*10:.0f}\u2013{(i+1)*10:.0f}", "exposure": 100.0,
-         "avg_actual": 0.5 + i * 0.1, "avg_predicted": 0.5 + i * 0.12}
+        {
+            "label": f"{i * 10:.0f}\u2013{(i + 1) * 10:.0f}",
+            "exposure": 100.0,
+            "avg_actual": 0.5 + i * 0.1,
+            "avg_predicted": 0.5 + i * 0.12,
+        }
         for i in range(8)
     ]
 
 
 def _sample_lorenz_curve() -> list[dict]:
-    return [
-        {"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.6}
-        for i in range(11)
-    ]
+    return [{"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.6} for i in range(11)]
 
 
 def _sample_residuals_histogram() -> list[dict]:
@@ -79,17 +76,11 @@ def _sample_residuals_histogram() -> list[dict]:
 
 
 def _sample_scatter_points() -> list[dict]:
-    return [
-        {"actual": i * 0.1, "predicted": i * 0.11, "weight": 1.0}
-        for i in range(20)
-    ]
+    return [{"actual": i * 0.1, "predicted": i * 0.11, "weight": 1.0} for i in range(20)]
 
 
 def _sample_pdp_numeric() -> list[dict]:
-    return [
-        {"value": i * 10, "avg_prediction": 0.5 + i * 0.02}
-        for i in range(10)
-    ]
+    return [{"value": i * 10, "avg_prediction": 0.5 + i * 0.02} for i in range(10)]
 
 
 def _sample_pdp_categorical() -> list[dict]:
@@ -102,26 +93,36 @@ def _sample_pdp_categorical() -> list[dict]:
 def _render_double_lift_data():
     return render_double_lift_svg(_sample_double_lift())
 
+
 def _render_loss_data():
     return render_loss_curve_svg(_sample_loss_data(), best_iteration=20)
+
 
 def _render_importance_data():
     return render_horizontal_bars_svg(_sample_importance(), "feature", "importance", title="Test")
 
+
 def _render_ave_data():
     return render_ave_feature_svg("age", _sample_numeric_bins(), is_categorical=False)
+
 
 def _render_lorenz_data():
     return render_lorenz_curve_svg(_sample_lorenz_curve(), _sample_lorenz_curve())
 
+
 def _render_residuals_data():
-    return render_residuals_svg(_sample_residuals_histogram(), {"mean": 0.1, "std": 0.5, "skew": 0.3})
+    return render_residuals_svg(
+        _sample_residuals_histogram(), {"mean": 0.1, "std": 0.5, "skew": 0.3}
+    )
+
 
 def _render_scatter_data():
     return render_scatter_svg(_sample_scatter_points())
 
+
 def _render_pdp_numeric_data():
     return render_pdp_feature_svg("age", _sample_pdp_numeric(), "numeric")
+
 
 def _render_pdp_cat_data():
     return render_pdp_feature_svg("vehicle", _sample_pdp_categorical(), "categorical")
@@ -154,8 +155,12 @@ class TestChartValidXml:
     [
         pytest.param(lambda: render_double_lift_svg([]), id="double_lift"),
         pytest.param(lambda: render_loss_curve_svg([]), id="loss_curve"),
-        pytest.param(lambda: render_horizontal_bars_svg([], "f", "v", title="Empty"), id="horizontal_bars"),
-        pytest.param(lambda: render_ave_feature_svg("empty", [], is_categorical=False), id="ave_feature"),
+        pytest.param(
+            lambda: render_horizontal_bars_svg([], "f", "v", title="Empty"), id="horizontal_bars"
+        ),
+        pytest.param(
+            lambda: render_ave_feature_svg("empty", [], is_categorical=False), id="ave_feature"
+        ),
         pytest.param(lambda: render_lorenz_curve_svg([], []), id="lorenz_curve"),
         pytest.param(lambda: render_residuals_svg([]), id="residuals"),
         pytest.param(lambda: render_scatter_svg([]), id="scatter"),
@@ -257,14 +262,14 @@ class TestLossCurveSvg:
 class TestHorizontalBarsSvg:
     @pytest.fixture()
     def importance_data(self) -> list[dict]:
-        return [
-            {"feature": f"feat_{i}", "importance": 1.0 - i * 0.1}
-            for i in range(5)
-        ]
+        return [{"feature": f"feat_{i}", "importance": 1.0 - i * 0.1} for i in range(5)]
 
     def test_contains_bars(self, importance_data):
         svg = render_horizontal_bars_svg(
-            importance_data, "feature", "importance", title="Test",
+            importance_data,
+            "feature",
+            "importance",
+            title="Test",
         )
         root = _parse_svg(svg)
         rects = root.findall(".//{http://www.w3.org/2000/svg}rect")
@@ -273,14 +278,20 @@ class TestHorizontalBarsSvg:
 
     def test_correct_color(self, importance_data):
         svg = render_horizontal_bars_svg(
-            importance_data, "feature", "importance",
-            title="Test", color=COLOR_SHAP,
+            importance_data,
+            "feature",
+            "importance",
+            title="Test",
+            color=COLOR_SHAP,
         )
         assert COLOR_SHAP in svg
 
     def test_default_color_is_importance(self, importance_data):
         svg = render_horizontal_bars_svg(
-            importance_data, "feature", "importance", title="Test",
+            importance_data,
+            "feature",
+            "importance",
+            title="Test",
         )
         assert COLOR_IMPORTANCE in svg
 
@@ -289,12 +300,17 @@ class TestHorizontalBarsSvg:
     def test_max_items(self):
         data = [{"feature": f"f{i}", "importance": float(i)} for i in range(30)]
         svg = render_horizontal_bars_svg(
-            data, "feature", "importance", title="Test", max_items=10,
+            data,
+            "feature",
+            "importance",
+            title="Test",
+            max_items=10,
         )
         root = _parse_svg(svg)
-        # Should not contain bars beyond max_items
+        # Top 10 by importance (f29..f20) should be present, low importance (f0) should not
         texts = [t.text for t in root.findall(".//{http://www.w3.org/2000/svg}text")]
-        assert "f29" not in texts
+        assert "f29" in texts  # highest importance
+        assert "f0" not in texts  # lowest importance, should be truncated
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +322,12 @@ class TestAveFeatureSvg:
     @pytest.fixture()
     def numeric_bins(self) -> list[dict]:
         return [
-            {"label": f"{i*10:.0f}–{(i+1)*10:.0f}", "exposure": 100.0,
-             "avg_actual": 0.5 + i * 0.1, "avg_predicted": 0.5 + i * 0.12}
+            {
+                "label": f"{i * 10:.0f}–{(i + 1) * 10:.0f}",
+                "exposure": 100.0,
+                "avg_actual": 0.5 + i * 0.1,
+                "avg_predicted": 0.5 + i * 0.12,
+            }
             for i in range(8)
         ]
 
@@ -358,8 +378,7 @@ class TestLorenzCurveSvg:
     def test_contains_two_curves(self):
         model = _sample_lorenz_curve()
         perfect = [
-            {"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.3}
-            for i in range(11)
+            {"cum_weight_frac": i / 10, "cum_actual_frac": (i / 10) ** 0.3} for i in range(11)
         ]
         svg = render_lorenz_curve_svg(model, perfect)
         root = _parse_svg(svg)
@@ -377,7 +396,7 @@ class TestLorenzCurveSvg:
     def test_correct_colors(self):
         svg = render_lorenz_curve_svg(_sample_lorenz_curve(), _sample_lorenz_curve())
         assert COLOR_ACTUAL in svg  # model curve
-        assert COLOR_EVAL in svg    # perfect curve
+        assert COLOR_EVAL in svg  # perfect curve
 
     def test_model_only(self):
         svg = render_lorenz_curve_svg(_sample_lorenz_curve(), [])

@@ -26,7 +26,8 @@ logger = get_logger(component="rustystats")
 
 
 def _auto_terms(
-    features: list[str], cat_features: list[str],
+    features: list[str],
+    cat_features: list[str],
 ) -> dict[str, dict[str, Any]]:
     """Generate default term specs when none are provided.
 
@@ -86,7 +87,8 @@ def _build_interactions(
 
 
 def _align_coefs_and_names(
-    coefs: np.ndarray, names: list[str],
+    coefs: np.ndarray,
+    names: list[str],
 ) -> tuple[np.ndarray, list[str]]:
     """Align coefficient array and feature names, prepending (Intercept) if needed."""
     if len(coefs) > len(names):
@@ -178,8 +180,10 @@ class GLMAlgorithm(BaseAlgorithm):
             terms = _auto_terms(features, cat_features)
 
         if feature_weights:
-            logger.warning("glm_feature_weights_unsupported",
-                msg="feature_weights is not supported by RustyStats GLM and will be ignored")
+            logger.warning(
+                "glm_feature_weights_unsupported",
+                msg="feature_weights is not supported by RustyStats GLM and will be ignored",
+            )
 
         # Apply monotone constraints from the top-level config
         if monotone_constraints:
@@ -272,10 +276,7 @@ class GLMAlgorithm(BaseAlgorithm):
         coefs, names = _align_coefs_and_names(coefs, names)
 
         pairs = sorted(zip(names, coefs), key=lambda x: x[1], reverse=True)
-        return [
-            {"feature": name, "importance": float(imp)}
-            for name, imp in pairs
-        ]
+        return [{"feature": name, "importance": float(imp)} for name, imp in pairs]
 
     def save(self, model: Any, path: Path) -> None:
         """Save model using RustyStats native binary serialization."""
@@ -340,14 +341,16 @@ class GLMAlgorithm(BaseAlgorithm):
             result = []
             for i, name in enumerate(names):
                 if i < len(coefs):
-                    result.append({
-                        "feature": name,
-                        "coefficient": float(coefs[i]),
-                        "std_error": float(ses[i]) if i < len(ses) else 0.0,
-                        "z_value": float(zvals[i]) if i < len(zvals) else 0.0,
-                        "p_value": float(pvals[i]) if i < len(pvals) else 1.0,
-                        "significance": str(sigs[i]) if i < len(sigs) else "",
-                    })
+                    result.append(
+                        {
+                            "feature": name,
+                            "coefficient": float(coefs[i]),
+                            "std_error": float(ses[i]) if i < len(ses) else 0.0,
+                            "z_value": float(zvals[i]) if i < len(zvals) else 0.0,
+                            "p_value": float(pvals[i]) if i < len(pvals) else 1.0,
+                            "significance": str(sigs[i]) if i < len(sigs) else "",
+                        }
+                    )
             return result
 
     def relativities(self, model: Any) -> list[dict[str, Any]]:
@@ -366,10 +369,7 @@ class GLMAlgorithm(BaseAlgorithm):
         try:
             rel_df = model.relativities()
             raw = rel_df.to_dicts()
-            return [
-                {key_map.get(k, k.lower()): v for k, v in row.items()}
-                for row in raw
-            ]
+            return [{key_map.get(k, k.lower()): v for k, v in row.items()} for row in raw]
         except Exception as exc:
             logger.warning("relativities_primary_failed", error=str(exc))
             # Fallback: compute from coefficients
@@ -495,12 +495,19 @@ class GLMAlgorithm(BaseAlgorithm):
         )
 
         regularization = params.get("regularization")
+        alpha = params.get("alpha", 0)
+        l1_ratio = params.get("l1_ratio", 0.5)
         if regularization:
             # RustyStats handles CV internally for regularization
-            result = rs.glm_dict(**builder_kwargs).fit(
-                regularization=regularization,
-                cv=n_folds,
-            )
+            fit_kwargs: dict[str, Any] = {
+                "regularization": regularization,
+                "cv": n_folds,
+            }
+            if alpha > 0:
+                fit_kwargs["alpha"] = alpha
+            if regularization == "elastic_net":
+                fit_kwargs["l1_ratio"] = l1_ratio
+            result = rs.glm_dict(**builder_kwargs).fit(**fit_kwargs)
 
             raw_cv = getattr(result, "cv_deviance", None)
             cv_deviance = float(raw_cv) if raw_cv is not None else 0.0

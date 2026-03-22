@@ -13,14 +13,14 @@ from typing import Any
 # Color palette
 # ---------------------------------------------------------------------------
 
-COLOR_BARS = "#D1D5DB"       # grey — exposure / count bars
-COLOR_ACTUAL = "#2563EB"     # blue — actual line
+COLOR_BARS = "#D1D5DB"  # grey — exposure / count bars
+COLOR_ACTUAL = "#2563EB"  # blue — actual line
 COLOR_PREDICTED = "#F97316"  # orange — predicted line
-COLOR_TRAIN = "#8B5CF6"      # purple — train loss
-COLOR_EVAL = "#22C55E"       # green — eval loss
+COLOR_TRAIN = "#8B5CF6"  # purple — train loss
+COLOR_EVAL = "#22C55E"  # green — eval loss
 COLOR_BEST_ITER = "#EF4444"  # red — best iteration marker
-COLOR_IMPORTANCE = "#2563EB" # blue — importance bars
-COLOR_SHAP = "#F97316"       # orange — SHAP bars
+COLOR_IMPORTANCE = "#2563EB"  # blue — importance bars
+COLOR_SHAP = "#F97316"  # orange — SHAP bars
 COLOR_AXIS = "#374151"
 COLOR_GRID = "#E5E7EB"
 
@@ -199,8 +199,7 @@ def _render_dual_axis_chart(
             )
         for i in range(n):
             parts.append(
-                f'<circle cx="{x_pos(i):.1f}" cy="{y_line(values[i]):.1f}" '
-                f'r="3" fill="{color}"/>'
+                f'<circle cx="{x_pos(i):.1f}" cy="{y_line(values[i]):.1f}" r="3" fill="{color}"/>'
             )
 
     # X-axis labels
@@ -365,23 +364,19 @@ def render_loss_curve_svg(
     # Train line
     if train_vals:
         points = " ".join(
-            f"{x_pos(iterations[i]):.1f},{y_pos(train_vals[i]):.1f}"
-            for i in range(len(data))
+            f"{x_pos(iterations[i]):.1f},{y_pos(train_vals[i]):.1f}" for i in range(len(data))
         )
         parts.append(
-            f'<polyline points="{points}" fill="none" '
-            f'stroke="{COLOR_TRAIN}" stroke-width="2"/>'
+            f'<polyline points="{points}" fill="none" stroke="{COLOR_TRAIN}" stroke-width="2"/>'
         )
 
     # Eval line
     if eval_vals:
         points = " ".join(
-            f"{x_pos(iterations[i]):.1f},{y_pos(eval_vals[i]):.1f}"
-            for i in range(len(data))
+            f"{x_pos(iterations[i]):.1f},{y_pos(eval_vals[i]):.1f}" for i in range(len(data))
         )
         parts.append(
-            f'<polyline points="{points}" fill="none" '
-            f'stroke="{COLOR_EVAL}" stroke-width="2"/>'
+            f'<polyline points="{points}" fill="none" stroke="{COLOR_EVAL}" stroke-width="2"/>'
         )
 
     # Best iteration line
@@ -446,7 +441,7 @@ def render_horizontal_bars_svg(
     if not data:
         return _placeholder_svg(400, 200, f"No {title.lower() or 'data'}")
 
-    items = data[:max_items]
+    items = sorted(data, key=lambda d: d.get("importance", 0), reverse=True)[:max_items]
     n = len(items)
     bar_height = 20
     gap = 6
@@ -591,23 +586,21 @@ def render_lorenz_curve_svg(
     # Model curve (blue)
     if model_curve:
         pts = " ".join(
-            f'{x_pos(p["cum_weight_frac"]):.1f},{y_pos(p["cum_actual_frac"]):.1f}'
+            f"{x_pos(p['cum_weight_frac']):.1f},{y_pos(p['cum_actual_frac']):.1f}"
             for p in model_curve
         )
         parts.append(
-            f'<polyline points="{pts}" fill="none" '
-            f'stroke="{COLOR_ACTUAL}" stroke-width="2"/>'
+            f'<polyline points="{pts}" fill="none" stroke="{COLOR_ACTUAL}" stroke-width="2"/>'
         )
 
     # Perfect curve (green)
     if perfect_curve:
         pts = " ".join(
-            f'{x_pos(p["cum_weight_frac"]):.1f},{y_pos(p["cum_actual_frac"]):.1f}'
+            f"{x_pos(p['cum_weight_frac']):.1f},{y_pos(p['cum_actual_frac']):.1f}"
             for p in perfect_curve
         )
         parts.append(
-            f'<polyline points="{pts}" fill="none" '
-            f'stroke="{COLOR_EVAL}" stroke-width="2"/>'
+            f'<polyline points="{pts}" fill="none" stroke="{COLOR_EVAL}" stroke-width="2"/>'
         )
 
     # Legend
@@ -717,9 +710,9 @@ def render_residuals_svg(
         sx = margin["left"] + plot_w - 5
         sy = margin["top"] + 10
         lines = [
-            f'mean={stats.get("mean", 0):.4g}',
-            f'std={stats.get("std", 0):.4g}',
-            f'skew={stats.get("skew", 0):.4g}',
+            f"mean={stats.get('mean', 0):.4g}",
+            f"std={stats.get('std', 0):.4g}",
+            f"skew={stats.get('skew', 0):.4g}",
         ]
         for j, line in enumerate(lines):
             parts.append(
@@ -914,9 +907,7 @@ def render_pdp_feature_svg(
             return margin["left"] + plot_w * (v - x_min_v) / (x_max_v - x_min_v)
 
         # Line
-        pts = " ".join(
-            f"{x_pos(num_vals[i]):.1f},{y_pos(preds[i]):.1f}" for i in range(n)
-        )
+        pts = " ".join(f"{x_pos(num_vals[i]):.1f},{y_pos(preds[i]):.1f}" for i in range(n))
         parts.append(
             f'<polyline points="{pts}" fill="none" '
             f'stroke="{COLOR_ACTUAL}" stroke-width="2" stroke-linejoin="round"/>'

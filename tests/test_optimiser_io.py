@@ -58,12 +58,16 @@ def mlflow_mocks(tmp_path):
             mock_download.return_value = str(path)
             return str(path)
 
-        yield type("Mocks", (), {
-            "download": mock_download,
-            "set_uri": mock_set_uri,
-            "backend": mock_backend,
-            "write_artifact": staticmethod(write_artifact),
-        })()
+        yield type(
+            "Mocks",
+            (),
+            {
+                "download": mock_download,
+                "set_uri": mock_set_uri,
+                "backend": mock_backend,
+                "write_artifact": staticmethod(write_artifact),
+            },
+        )()
 
 
 # ===========================================================================
@@ -87,7 +91,7 @@ class TestLoadOptimiserArtifact:
 
         result1 = load_optimiser_artifact(str(f))
         result2 = load_optimiser_artifact(str(f))
-        assert result1 is result2
+        assert result1 == result2
 
     def test_mtime_change_invalidates_cache(self, tmp_path):
         f = tmp_path / "artifact.json"
@@ -143,7 +147,7 @@ class TestLoadMlflowOptimiserArtifactRun:
 
         result1 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
         result2 = load_mlflow_optimiser_artifact(source_type="run", run_id="run_1")
-        assert result1 is result2
+        assert result1 == result2
         # download_artifacts called only once due to caching
         mlflow_mocks.download.assert_called_once()
 

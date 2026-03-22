@@ -365,7 +365,13 @@ def _execute_lazy(
             lf = fn()
         else:
             input_ids = parents_of.get(nid, [])
-            input_lfs = [lazy_outputs[pid] for pid in input_ids if pid in lazy_outputs]
+            missing = [pid for pid in input_ids if pid not in lazy_outputs]
+            if missing:
+                raise ValueError(
+                    f"Node '{nid}' is missing input(s) from: {missing}. "
+                    "Upstream node(s) may have failed or not been registered."
+                )
+            input_lfs = [lazy_outputs[pid] for pid in input_ids]
             if not input_lfs:
                 raise ValueError(f"No input data available for node '{nid}'")
             lf = fn(*input_lfs)
@@ -601,6 +607,16 @@ def _execute_eager_core(
                     result = result.head(row_limit)
             else:
                 input_ids = parents_of.get(nid, [])
+                missing_parents = [pid for pid in input_ids if pid not in eager_outputs]
+                if missing_parents:
+                    raise ValueError(
+                        f"Node '{nid}' is missing input(s) from: {missing_parents}. "
+                        "Upstream node(s) may not have been registered."
+                    )
+                failed_parents = [pid for pid in input_ids if eager_outputs[pid] is None]
+                if failed_parents:
+                    eager_outputs[nid] = None
+                    continue
                 input_lfs = [
                     df.lazy()
                     for pid in input_ids

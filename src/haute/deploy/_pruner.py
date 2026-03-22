@@ -37,13 +37,20 @@ def _live_only_edges(
     switch_live_source: dict[str, str | None] = {}
     node_map = {n.id: n for n in nodes}
     for sid in switch_ids:
-        inputs = node_map[sid].data.config.get("inputs", [])
-        first_input_name = inputs[0] if inputs else None
-        if first_input_name:
+        config = node_map[sid].data.config
+        inputs = config.get("inputs", [])
+        input_scenario_map = config.get("input_scenario_map", {})
+        live_input_name = next(
+            (k for k, v in input_scenario_map.items() if v == "live"),
+            None,
+        )
+        if live_input_name is None:
+            live_input_name = inputs[0] if inputs else None
+        if live_input_name:
             for e in edges:
                 if e.target == sid:
                     src_label = node_map[e.source].data.label
-                    if _sanitize_func_name(src_label) == first_input_name:
+                    if _sanitize_func_name(src_label) == live_input_name:
                         switch_live_source[sid] = e.source
                         break
 
@@ -89,7 +96,7 @@ def prune_for_deploy(
     needed = ancestors(output_node_id, deploy_edges, all_ids)
 
     kept_nodes = [n for n in nodes if n.id in needed]
-    kept_edges = [e for e in edges if e.source in needed and e.target in needed]
+    kept_edges = [e for e in deploy_edges if e.source in needed and e.target in needed]
     removed_ids = sorted(all_ids - needed)
 
     pruned_graph = graph.model_copy(update={"nodes": kept_nodes, "edges": kept_edges})
@@ -134,6 +141,7 @@ def find_deploy_input_nodes(graph: PipelineGraph) -> list[str]:
 def find_source_nodes(graph: PipelineGraph) -> list[str]:
     """Find all source nodes in a graph (dataSource, apiInput, constant)."""
     return [
-        n.id for n in graph.nodes
+        n.id
+        for n in graph.nodes
         if n.data.nodeType in (NodeType.DATA_SOURCE, NodeType.API_INPUT, NodeType.CONSTANT)
     ]

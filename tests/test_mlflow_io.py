@@ -45,10 +45,13 @@ def mock_mlflow_env():
     mock_mlflow_tracking = MagicMock()
     mock_mlflow_tracking.MlflowClient.return_value = mock_client_instance
 
-    modules_patch = patch.dict(sys.modules, {
-        "mlflow": mock_mlflow,
-        "mlflow.tracking": mock_mlflow_tracking,
-    })
+    modules_patch = patch.dict(
+        sys.modules,
+        {
+            "mlflow": mock_mlflow,
+            "mlflow.tracking": mock_mlflow_tracking,
+        },
+    )
     resolve_patch = patch(
         "haute.modelling._mlflow_log.resolve_tracking_backend",
         return_value=("file:///mlruns", "local"),
@@ -69,10 +72,13 @@ class TestLoadRunBasedModel:
         fake_model.get_cat_feature_indices.return_value = []
         _mock_mlflow, _mock_client, modules_patch, resolve_patch = mock_mlflow_env
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
-             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
-             patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._load_catboost_model", return_value=fake_model),
+            patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"),
+            patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"),
+        ):
             result = load_mlflow_model(
                 source_type="run",
                 run_id="abc123",
@@ -122,11 +128,14 @@ class TestLoadRegisteredModel:
         mv = MagicMock(run_id="resolved_run_id")
         mock_client.get_model_version.return_value = mv
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
-             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
-             patch("haute._mlflow_utils.resolve_version", return_value="2"), \
-             patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._load_catboost_model", return_value=fake_model),
+            patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"),
+            patch("haute._mlflow_utils.resolve_version", return_value="2"),
+            patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"),
+        ):
             result = load_mlflow_model(
                 source_type="registered",
                 registered_model="my-model",
@@ -150,8 +159,11 @@ class TestPyfuncAutoDetect:
         fake_pyfunc.metadata.signature.inputs.input_names.return_value = ["f1", "f2"]
         _, _, modules_patch, resolve_patch = mock_mlflow_env
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc),
+        ):
             result = load_mlflow_model(
                 source_type="run",
                 run_id="abc123",
@@ -170,10 +182,13 @@ class TestPyfuncAutoDetect:
         fake_pyfunc.metadata.signature.inputs.input_names.return_value = ["a"]
         _, _, modules_patch, resolve_patch = mock_mlflow_env
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._find_cbm_artifact", side_effect=FileNotFoundError), \
-             patch("haute._mlflow_io._find_model_artifact", return_value=("model", "pyfunc")), \
-             patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._find_cbm_artifact", side_effect=FileNotFoundError),
+            patch("haute._mlflow_io._find_model_artifact", return_value=("model", "pyfunc")),
+            patch("haute._mlflow_io._load_pyfunc_model", return_value=fake_pyfunc),
+        ):
             result = load_mlflow_model(
                 source_type="run",
                 run_id="abc123",
@@ -213,8 +228,11 @@ class TestModelCache:
 
         mock_mlflow, _, modules_patch, resolve_patch = mock_mlflow_env
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"),
+        ):
             result = load_mlflow_model(
                 source_type="run",
                 run_id="abc123",
@@ -236,10 +254,13 @@ class TestModelCache:
         fake_model.get_cat_feature_indices.return_value = []
         _, _, modules_patch, resolve_patch = mock_mlflow_env
 
-        with modules_patch, resolve_patch, \
-             patch("haute._mlflow_io._load_catboost_model", return_value=fake_model), \
-             patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"), \
-             patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"):
+        with (
+            modules_patch,
+            resolve_patch,
+            patch("haute._mlflow_io._load_catboost_model", return_value=fake_model),
+            patch("haute._mlflow_io._resolve_artifact_local", return_value="/tmp/model.cbm"),
+            patch("haute._mlflow_io._find_cbm_artifact", return_value="model.cbm"),
+        ):
             load_mlflow_model(
                 source_type="run",
                 run_id="new_run",
@@ -452,19 +473,26 @@ class TestPreparePredictFrame:
         df = pl.DataFrame({"cat": ["a", None, "b"]})
         result = _prepare_predict_frame(df, ["cat"], frozenset({"cat"}), "catboost")
         import pandas as pd
+
         assert isinstance(result, pd.DataFrame)
         assert result.iloc[1, 0] == "_MISSING_"
 
     def test_mixed_numeric_and_categorical(self):
         """Mixed features: numeric→float32, categorical→sentinel+Categorical."""
-        df = pl.DataFrame({
-            "num": [1.0, None, 3.0],
-            "cat": ["x", None, "y"],
-        })
+        df = pl.DataFrame(
+            {
+                "num": [1.0, None, 3.0],
+                "cat": ["x", None, "y"],
+            }
+        )
         result = _prepare_predict_frame(
-            df, ["num", "cat"], frozenset({"cat"}), "catboost",
+            df,
+            ["num", "cat"],
+            frozenset({"cat"}),
+            "catboost",
         )
         import pandas as pd
+
         assert isinstance(result, pd.DataFrame)
         assert np.isnan(result["num"].iloc[1])
         assert result["cat"].iloc[1] == "_MISSING_"
@@ -487,6 +515,7 @@ class TestPreparePredictFrame:
         df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
         result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "pyfunc")
         import pandas as pd
+
         assert isinstance(result, pd.DataFrame)
 
 
@@ -510,7 +539,9 @@ class TestFindArtifactByExtension:
         client = MagicMock()
         art = MagicMock(path="glm_model.rsglm", is_dir=False)
         client.list_artifacts.return_value = [art]
-        assert _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats") == "glm_model.rsglm"
+        assert (
+            _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats") == "glm_model.rsglm"
+        )
 
     def test_finds_cbm_in_subdirectory(self):
         """Finds .cbm one level deep in a subdirectory."""
@@ -520,7 +551,9 @@ class TestFindArtifactByExtension:
             [dir_art],
             [MagicMock(path="models/trained.cbm", is_dir=False)],
         ]
-        assert _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost") == "models/trained.cbm"
+        assert (
+            _find_artifact_by_extension(client, "run1", ".cbm", "CatBoost") == "models/trained.cbm"
+        )
 
     def test_finds_rsglm_in_subdirectory(self):
         """Finds .rsglm one level deep in a subdirectory."""
@@ -530,7 +563,10 @@ class TestFindArtifactByExtension:
             [dir_art],
             [MagicMock(path="artifacts/glm.rsglm", is_dir=False)],
         ]
-        assert _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats") == "artifacts/glm.rsglm"
+        assert (
+            _find_artifact_by_extension(client, "run1", ".rsglm", "RustyStats")
+            == "artifacts/glm.rsglm"
+        )
 
     def test_missing_cbm_raises_with_label(self):
         """FileNotFoundError includes the extension and label."""
@@ -576,6 +612,7 @@ class TestFindArtifactByExtension:
     def test_delegates_correctly_via_find_rsglm(self):
         """_find_rsglm_artifact delegates to _find_artifact_by_extension."""
         from haute._mlflow_io import _find_rsglm_artifact
+
         client = MagicMock()
         art = MagicMock(path="model.rsglm", is_dir=False)
         client.list_artifacts.return_value = [art]
@@ -594,11 +631,13 @@ class TestAppendClassificationProba:
         """2-D probability array extracts the positive class (column 1)."""
         df = pl.DataFrame({"x": [1, 2, 3]})
         model = MagicMock()
-        model.predict_proba.return_value = np.array([
-            [0.8, 0.2],
-            [0.3, 0.7],
-            [0.5, 0.5],
-        ])
+        model.predict_proba.return_value = np.array(
+            [
+                [0.8, 0.2],
+                [0.3, 0.7],
+                [0.5, 0.5],
+            ]
+        )
         sm = ScoringModel(model, ["x"], frozenset(), "catboost")
         result = _append_classification_proba(df, sm, np.array([[1], [2], [3]]), "pred")
         assert "pred_proba" in result.columns
@@ -664,7 +703,8 @@ class TestLoadRustystatsModel:
         model_file.write_bytes(b"fake_bytes")
 
         mock_model = MagicMock()
-        mock_model.feature_names = ["feat_a", "feat_b"]
+        mock_model.feature_names = ["ns(feat_a, 1/3)", "ns(feat_a, 2/3)", "feat_b"]
+        mock_model.terms_dict = {"feat_a": {"type": "ns"}, "feat_b": {"type": "linear"}}
         mock_rs = MagicMock()
         mock_rs.GLMModel.from_bytes.return_value = mock_model
 
@@ -673,6 +713,7 @@ class TestLoadRustystatsModel:
 
         assert isinstance(sm, ScoringModel)
         assert sm.flavor == "rustystats"
+        # Uses raw input column names from terms_dict, not design matrix names
         assert sm.feature_names == ["feat_a", "feat_b"]
         assert sm.cat_feature_names == frozenset()
         assert sm.raw_model is mock_model
@@ -735,7 +776,8 @@ class TestLoadLocalModel:
         model_file.write_bytes(b"fake_bytes")
 
         mock_model = MagicMock()
-        mock_model.feature_names = ["x", "y"]
+        mock_model.feature_names = ["ns(x, 1/3)", "ns(x, 2/3)", "y"]
+        mock_model.terms_dict = {"x": {"type": "ns"}, "y": {"type": "linear"}}
         mock_rs = MagicMock()
         mock_rs.GLMModel.from_bytes.return_value = mock_model
 
@@ -784,11 +826,11 @@ class TestPreparePredictFrameRustystats:
         result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "rustystats")
         assert isinstance(result, pl.DataFrame)
 
-    def test_returns_exact_input_dataframe(self):
-        """RustyStats should get the exact same DataFrame object (no copy)."""
-        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+    def test_returns_only_feature_columns(self):
+        """RustyStats should get only the feature columns, not extra columns."""
+        df = pl.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0], "target": [10.0, 20.0]})
         result = _prepare_predict_frame(df, ["a", "b"], frozenset(), "rustystats")
-        assert result is df
+        assert set(result.columns) == {"a", "b"}
 
     def test_nulls_not_processed(self):
         """RustyStats handles its own null preprocessing — nulls pass through."""

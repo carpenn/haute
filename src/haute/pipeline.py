@@ -243,7 +243,13 @@ class Pipeline(NodeRegistry):
                 else:
                     input_names = self._get_inputs(n.name)
                     if input_names:
-                        input_dfs = [outputs[name] for name in input_names if name in outputs]
+                        missing = [name for name in input_names if name not in outputs]
+                        if missing:
+                            raise ValueError(
+                                f"Node '{n.name}' is missing input(s) from: {missing}. "
+                                "Upstream node(s) may have failed or not been registered."
+                            )
+                        input_dfs = [outputs[name] for name in input_names]
                         outputs[n.name] = n(*input_dfs)
                     else:
                         # No explicit edges - use last available output (backward compat)
@@ -288,7 +294,13 @@ class Pipeline(NodeRegistry):
                     continue
                 input_names = self._get_inputs(n.name)
                 if input_names:
-                    input_dfs = [outputs[name] for name in input_names if name in outputs]
+                    missing = [name for name in input_names if name not in outputs]
+                    if missing:
+                        raise ValueError(
+                            f"Node '{n.name}' is missing input(s) from: {missing}. "
+                            "Upstream node(s) may have failed or not been registered."
+                        )
+                    input_dfs = [outputs[name] for name in input_names]
                     outputs[n.name] = n(*input_dfs)
                 else:
                     outputs[n.name] = n(df)

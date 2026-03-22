@@ -55,6 +55,7 @@ class TestDeployDispatchDatabricks:
         # haute.deploy.__init__, so we must patch where they are used.
         with (
             patch("haute.deploy.resolve_config", return_value=fake_resolved) as mock_resolve,
+            patch("haute.deploy.validate_deploy", return_value=[]),
             patch("haute.deploy.deploy_to_mlflow", return_value=fake_result) as mock_mlflow,
         ):
             result = deploy(config)
@@ -78,6 +79,7 @@ class TestDeployDispatchContainer:
         # is lazily imported inside the function → patch at source module.
         with (
             patch("haute.deploy.resolve_config", return_value=fake_resolved) as mock_resolve,
+            patch("haute.deploy.validate_deploy", return_value=[]),
             patch(
                 "haute.deploy._container.deploy_to_container",
                 return_value=fake_result,
@@ -102,6 +104,7 @@ class TestDeployDispatchPlatformContainer:
 
         with (
             patch("haute.deploy.resolve_config", return_value=fake_resolved) as mock_resolve,
+            patch("haute.deploy.validate_deploy", return_value=[]),
             patch(
                 "haute.deploy._container.deploy_to_platform_container",
                 return_value=fake_result,
@@ -150,6 +153,7 @@ class TestDeployDispatchReturnValue:
 
         with (
             patch("haute.deploy.resolve_config", return_value=fake_resolved),
+            patch("haute.deploy.validate_deploy", return_value=[]),
             patch("haute.deploy.deploy_to_mlflow", return_value=fake_result),
         ):
             result = deploy(config)

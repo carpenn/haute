@@ -479,8 +479,10 @@ class OptimiserSolveService:
                     checkpoint_dir=checkpoint_dir,
                 )
             finally:
-                if _prev_chunk is not None:
-                    pl.Config.set_streaming_chunk_size(int(_prev_chunk))
+                # Restore previous streaming chunk size (0 resets to Polars default).
+                pl.Config.set_streaming_chunk_size(
+                    int(_prev_chunk) if _prev_chunk is not None else 0
+                )
             return lazy_outputs
         except HTTPException:
             raise

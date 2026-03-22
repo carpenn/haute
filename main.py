@@ -13,7 +13,7 @@ from utility.features import (
     RENAME_MAP,
 )
 
-pipeline = haute.Pipeline("my_pipeline", description="")
+pipeline = haute.Pipeline("my_pipeline", description='')
 
 
 @pipeline.data_source(config="config/data_source/batch_quotes.json")
@@ -46,10 +46,7 @@ def quoted_premiums() -> pl.LazyFrame:
 def quotes() -> pl.LazyFrame:
     """quotes node"""
     from haute._json_flatten import read_json_flat
-
-    return read_json_flat(
-        "data/quotes/quotes_10m.jsonl", config_path="config/quote_input/quotes.json"
-    )
+    return read_json_flat("data/quotes/quotes_10m.jsonl", config_path="config/quote_input/quotes.json")
 
 
 @pipeline.polars
@@ -57,11 +54,11 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
     """Feature engineering for insurance pricing"""
     cols = quotes.collect_schema().names()
     cover_start = to_date("policy_details.cover_start_date")
-
+    
     # Helpers build the dynamic driver + addon expressions
     ad_derived, ad_age_cols, ad_renames, ad_keep = driver_features(cols, cover_start)
     addon_derived, addon_renames, addon_keep = addon_features(cols, ADDON_NAMES)
-
+    
     # Step 1 — Add calculated columns
     df = quotes.with_columns(
         # Proposer
@@ -84,15 +81,15 @@ def feature_processing(quotes: pl.LazyFrame) -> pl.LazyFrame:
         *ad_derived,
         *addon_derived,
     )
-
+    
     # Step 2 — Youngest driver across proposer + any additional drivers
     df = df.with_columns(
         pl.min_horizontal("proposer_age", *ad_age_cols).alias("youngest_driver_age"),
     )
-
+    
     # Step 3 — Rename dot-notation columns to clean names
     df = df.rename({**RENAME_MAP, **ad_renames, **addon_renames})
-
+    
     # Step 4 — Keep only the columns we need
     df = df.select(list(RENAME_MAP.values()) + DERIVED_COLS + ad_keep + addon_keep)
     return df
@@ -122,11 +119,8 @@ def competitor_scoring(policies: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_scoring node"""
     from pathlib import Path
     from haute.graph_utils import score_from_config
-
     base = str(Path(__file__).parent)
-    return score_from_config(
-        policies, config="config/model_scoring/competitor_scoring.json", base_dir=base
-    )
+    return score_from_config(policies, config="config/model_scoring/competitor_scoring.json", base_dir=base)
 
 
 @pipeline.polars
@@ -153,19 +147,7 @@ def join_premiums(join_policy_data: pl.LazyFrame, quoted_premiums: pl.LazyFrame)
     return df
 
 
-@pipeline.polars(
-    selected_columns=[
-        "quote_id",
-        "sale_flag",
-        "competitor_premium",
-        "premium",
-        "difference_to_market",
-        "proposer_age",
-        "cover_type",
-        "margin",
-        "burn_cost",
-    ]
-)
+@pipeline.polars(selected_columns=['quote_id', 'sale_flag', 'competitor_premium', 'premium', 'difference_to_market', 'proposer_age', 'cover_type', 'margin', 'burn_cost'])
 def competitor_features(join_premiums: pl.LazyFrame) -> pl.LazyFrame:
     """competitor_features node"""
     df = join_premiums.with_columns(
@@ -184,7 +166,6 @@ def conversion(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
 def conversion_sink(competitor_features: pl.LazyFrame) -> pl.LazyFrame:
     """Data Sink 9 node"""
     from haute._polars_utils import safe_sink
-
     safe_sink(competitor_features, "output/conversion_data.parquet")
     return competitor_features
 
@@ -202,13 +183,8 @@ def conversion_scoring(competitor_features_scenarios: pl.LazyFrame) -> pl.LazyFr
     """conversion_scoring node"""
     from pathlib import Path
     from haute.graph_utils import score_from_config
-
     base = str(Path(__file__).parent)
-    return score_from_config(
-        competitor_features_scenarios,
-        config="config/model_scoring/conversion_scoring.json",
-        base_dir=base,
-    )
+    return score_from_config(competitor_features_scenarios, config="config/model_scoring/conversion_scoring.json", base_dir=base)
 
 
 @pipeline.polars
@@ -232,6 +208,7 @@ def online_optimiser(optimiser_input: pl.LazyFrame) -> pl.LazyFrame:
 def competitor_features_scenarios(premium: pl.LazyFrame) -> pl.LazyFrame:
     """Instance of competitor_features"""
     return competitor_features(join_premiums=premium)
+
 
 
 # Wire nodes together - edges define data flow

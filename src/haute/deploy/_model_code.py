@@ -10,6 +10,8 @@ import pandas as pd
 from mlflow.models import set_model
 from mlflow.pyfunc import PythonModelContext
 
+from haute._types import PipelineGraph
+
 
 class HauteModel(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined]
     """MLflow PythonModel wrapper for a deployed haute pipeline."""
@@ -18,7 +20,7 @@ class HauteModel(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined]
         """Called once when the model is loaded for serving."""
         manifest_path = Path(context.artifacts["deploy_manifest"])
         self._manifest = json.loads(manifest_path.read_text())
-        self._graph = self._manifest["pruned_graph"]
+        self._graph = PipelineGraph.model_validate(self._manifest["pruned_graph"])
         self._input_node_ids = self._manifest["input_node_ids"]
         self._output_node_id = self._manifest["output_node_id"]
         self._output_fields = self._manifest.get("output_fields")

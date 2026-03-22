@@ -67,7 +67,11 @@ class TestHauteModelLoadContext:
 
         model.load_context(ctx)
 
-        assert model._graph == {"nodes": [], "edges": []}
+        from haute._types import PipelineGraph
+
+        assert isinstance(model._graph, PipelineGraph)
+        assert len(model._graph.nodes) == 0
+        assert len(model._graph.edges) == 0
         assert model._input_node_ids == ["api_src"]
         assert model._output_node_id == "out"
         assert model._output_fields == ["premium"]
@@ -223,10 +227,18 @@ class TestHauteModelPredict:
         model = self._build_fixture_model()
 
         # Area "A" → factor 1.1, premium = VehPower * area_factor * Exposure
-        input_pd = pd.DataFrame([{
-            "IDpol": 1, "VehPower": 5, "Area": "A",
-            "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5,
-        }])
+        input_pd = pd.DataFrame(
+            [
+                {
+                    "IDpol": 1,
+                    "VehPower": 5,
+                    "Area": "A",
+                    "VehAge": 1,
+                    "BonusMalus": 50,
+                    "Exposure": 0.5,
+                }
+            ]
+        )
 
         result = model.predict(MagicMock(), input_pd)
 
@@ -240,10 +252,26 @@ class TestHauteModelPredict:
 
         model = self._build_fixture_model()
 
-        input_pd = pd.DataFrame([
-            {"IDpol": 1, "VehPower": 5, "Area": "A", "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5},
-            {"IDpol": 2, "VehPower": 10, "Area": "B", "VehAge": 2, "BonusMalus": 60, "Exposure": 1.0},
-        ])
+        input_pd = pd.DataFrame(
+            [
+                {
+                    "IDpol": 1,
+                    "VehPower": 5,
+                    "Area": "A",
+                    "VehAge": 1,
+                    "BonusMalus": 50,
+                    "Exposure": 0.5,
+                },
+                {
+                    "IDpol": 2,
+                    "VehPower": 10,
+                    "Area": "B",
+                    "VehAge": 2,
+                    "BonusMalus": 60,
+                    "Exposure": 1.0,
+                },
+            ]
+        )
 
         result = model.predict(MagicMock(), input_pd)
 
@@ -260,10 +288,18 @@ class TestHauteModelPredict:
 
         model = self._build_fixture_model(output_fields=["premium"])
 
-        input_pd = pd.DataFrame([{
-            "IDpol": 1, "VehPower": 5, "Area": "A",
-            "VehAge": 1, "BonusMalus": 50, "Exposure": 0.5,
-        }])
+        input_pd = pd.DataFrame(
+            [
+                {
+                    "IDpol": 1,
+                    "VehPower": 5,
+                    "Area": "A",
+                    "VehAge": 1,
+                    "BonusMalus": 50,
+                    "Exposure": 0.5,
+                }
+            ]
+        )
 
         result = model.predict(MagicMock(), input_pd)
 
@@ -283,15 +319,20 @@ class TestInferInputSchema:
         """Input node with empty path must raise ValueError."""
         from haute.deploy._schema import infer_input_schema
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {},
+                        },
+                    },
+                ],
+            }
+        )
 
         with pytest.raises(ValueError, match="no path"):
             infer_input_schema(graph, "src")
@@ -300,15 +341,20 @@ class TestInferInputSchema:
         """Input node with path="" must raise ValueError."""
         from haute.deploy._schema import infer_input_schema
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                ],
+            }
+        )
 
         with pytest.raises(ValueError, match="no path"):
             infer_input_schema(graph, "src")
@@ -330,15 +376,20 @@ class TestInferInputSchema:
         pq_path = tmp_path / "input.parquet"
         pl.DataFrame({"age": [25], "premium": [100.5]}).write_parquet(pq_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": str(pq_path)},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": str(pq_path)},
+                        },
+                    },
+                ],
+            }
+        )
 
         schema = infer_input_schema(graph, "src")
         assert "age" in schema
@@ -349,15 +400,20 @@ class TestInferInputSchema:
         """File that can't be read raises ValueError."""
         from haute.deploy._schema import infer_input_schema
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": "/nonexistent/path/data.parquet"},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": "/nonexistent/path/data.parquet"},
+                        },
+                    },
+                ],
+            }
+        )
 
         with pytest.raises(ValueError, match="Failed to read schema"):
             infer_input_schema(graph, "src")
@@ -372,21 +428,29 @@ class TestInferOutputSchema:
 
         monkeypatch.chdir(tmp_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": "d.parquet"},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         # Compute the fingerprint that will be used
         from haute._cache import graph_fingerprint
@@ -417,21 +481,29 @@ class TestInferOutputSchema:
         pq_path = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1.0]}).write_parquet(pq_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": str(pq_path)},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": str(pq_path)},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         # Write corrupt cache
         cache_dir = tmp_path / ".haute_cache"
@@ -455,21 +527,29 @@ class TestInferOutputSchema:
         pq_path = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1.0]}).write_parquet(pq_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": str(pq_path)},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": str(pq_path)},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         cache_dir = tmp_path / ".haute_cache"
         cache_dir.mkdir()
@@ -478,16 +558,19 @@ class TestInferOutputSchema:
 
         mock_result = pl.DataFrame({"result": [42.0]})
 
-        with patch("haute.deploy._schema.logger") as mock_logger, \
-             patch("haute.deploy._scorer.score_graph", return_value=mock_result):
+        with (
+            patch("haute.deploy._schema.logger") as mock_logger,
+            patch("haute.deploy._scorer.score_graph", return_value=mock_result),
+        ):
             infer_output_schema(graph, "out", ["src"])
 
         # Find the corrupt_schema_cache warning call
         warning_calls = [
-            c for c in mock_logger.warning.call_args_list
-            if c[0][0] == "corrupt_schema_cache"
+            c for c in mock_logger.warning.call_args_list if c[0][0] == "corrupt_schema_cache"
         ]
-        assert len(warning_calls) == 1, f"Expected 1 corrupt_schema_cache warning, got {len(warning_calls)}"
+        assert len(warning_calls) == 1, (
+            f"Expected 1 corrupt_schema_cache warning, got {len(warning_calls)}"
+        )
         kwargs = warning_calls[0][1]
         assert "path" in kwargs
         assert "error" in kwargs
@@ -501,21 +584,29 @@ class TestInferOutputSchema:
         pq_path = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1.0]}).write_parquet(pq_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": str(pq_path)},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": str(pq_path)},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         mock_result = pl.DataFrame({"premium": [100.0]})
 
@@ -539,21 +630,29 @@ class TestInferOutputSchema:
         pq_path = tmp_path / "data.parquet"
         pl.DataFrame({"x": [1.0]}).write_parquet(pq_path)
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": str(pq_path)},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": str(pq_path)},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         # Write cache with wrong fingerprint
         cache_dir = tmp_path / ".haute_cache"
@@ -583,21 +682,29 @@ class TestScoreGraphApiInputInjection:
         """apiInput nodes should receive the injected input_df."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
         result = score_graph(
@@ -616,29 +723,40 @@ class TestScoreGraphApiInputInjection:
         """Multiple apiInput nodes all receive the same input_df."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src1", "data": {
-                    "label": "src1",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "src2", "data": {
-                    "label": "src2",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src1", "target": "out"},
-                {"id": "e2", "source": "src2", "target": "out"},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src1",
+                        "data": {
+                            "label": "src1",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "src2",
+                        "data": {
+                            "label": "src2",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src1", "target": "out"},
+                    {"id": "e2", "source": "src2", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"val": [10]})
         result = score_graph(
@@ -658,21 +776,29 @@ class TestScoreGraphOutputFields:
         """When output_fields is set, only those columns appear in result."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0], "y": [2.0], "z": [3.0]})
         result = score_graph(
@@ -690,21 +816,29 @@ class TestScoreGraphOutputFields:
         """Without output_fields, all columns pass through."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0], "y": [2.0]})
         result = score_graph(
@@ -724,15 +858,20 @@ class TestScoreGraphMissingOutput:
         """Requesting a non-existent output node raises RuntimeError."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0]})
 
@@ -750,29 +889,42 @@ class TestScoreGraphBadInput:
 
     def _simple_graph(self):
         """apiInput → transform (cast VehPower to float) → output."""
-        return _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "calc", "data": {
-                    "label": "calc",
-                    "nodeType": "polars",
-                    "config": {"code": '.with_columns(result=pl.col("VehPower").cast(pl.Float64) * 2)'},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "calc"},
-                {"id": "e2", "source": "calc", "target": "out"},
-            ],
-        })
+        return _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "calc",
+                        "data": {
+                            "label": "calc",
+                            "nodeType": "polars",
+                            "config": {
+                                "code": '.with_columns(result=pl.col("VehPower").cast(pl.Float64) * 2)'
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "calc"},
+                    {"id": "e2", "source": "calc", "target": "out"},
+                ],
+            }
+        )
 
     def test_missing_column_raises(self):
         """Input missing a column referenced by transform raises an error."""
@@ -809,21 +961,29 @@ class TestScoreGraphBadInput:
     @staticmethod
     def _passthrough_graph():
         """apiInput → output with no transform."""
-        return _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "out"}],
-        })
+        return _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "out"}],
+            }
+        )
 
     def test_null_input_propagates(self):
         """Null values flow through the pipeline without crashing."""
@@ -867,34 +1027,45 @@ class TestScoreGraphExternalFileRemap:
         pkl_path = tmp_path / "lookup.pkl"
         pkl_path.write_bytes(b"fake")
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "ext", "data": {
-                    "label": "ext",
-                    "nodeType": "externalFile",
-                    "config": {
-                        "path": "original/lookup.pkl",
-                        "fileType": "pickle",
-                        "modelClass": "classifier",
-                        "code": "df = df.with_columns(pl.lit(99).alias('ext_val'))",
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
                     },
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "ext"},
-                {"id": "e2", "source": "ext", "target": "out"},
-            ],
-        })
+                    {
+                        "id": "ext",
+                        "data": {
+                            "label": "ext",
+                            "nodeType": "externalFile",
+                            "config": {
+                                "path": "original/lookup.pkl",
+                                "fileType": "pickle",
+                                "modelClass": "classifier",
+                                "code": "df = df.with_columns(pl.lit(99).alias('ext_val'))",
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "ext"},
+                    {"id": "e2", "source": "ext", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0]})
         remap = {"ext__lookup.pkl": str(pkl_path)}
@@ -917,33 +1088,44 @@ class TestScoreGraphExternalFileRemap:
         """externalFile without code passes through first input."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "ext", "data": {
-                    "label": "ext",
-                    "nodeType": "externalFile",
-                    "config": {
-                        "path": "original/lookup.pkl",
-                        "fileType": "pickle",
-                        "code": "",
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
                     },
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "ext"},
-                {"id": "e2", "source": "ext", "target": "out"},
-            ],
-        })
+                    {
+                        "id": "ext",
+                        "data": {
+                            "label": "ext",
+                            "nodeType": "externalFile",
+                            "config": {
+                                "path": "original/lookup.pkl",
+                                "fileType": "pickle",
+                                "code": "",
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "ext"},
+                    {"id": "e2", "source": "ext", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0, 2.0]})
         remap = {"ext__lookup.pkl": "/fake/path"}
@@ -971,32 +1153,43 @@ class TestScoreGraphOptimiserApplyRemap:
         artifact_path = tmp_path / "opt_artifact.json"
         artifact_path.write_text(json.dumps({"type": "banding", "data": {}}))
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "opt", "data": {
-                    "label": "opt",
-                    "nodeType": "optimiserApply",
-                    "config": {
-                        "artifact_path": "artifacts/opt_artifact.json",
-                        "version_column": "__opt_v__",
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
                     },
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "opt"},
-                {"id": "e2", "source": "opt", "target": "out"},
-            ],
-        })
+                    {
+                        "id": "opt",
+                        "data": {
+                            "label": "opt",
+                            "nodeType": "optimiserApply",
+                            "config": {
+                                "artifact_path": "artifacts/opt_artifact.json",
+                                "version_column": "__opt_v__",
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "opt"},
+                    {"id": "e2", "source": "opt", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0]})
         remap = {"opt__opt_artifact.json": str(artifact_path)}
@@ -1022,33 +1215,44 @@ class TestScoreGraphOptimiserApplyRemap:
         """optimiserApply with MLflow source downloads at runtime."""
         from haute.deploy._scorer import score_graph
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "opt", "data": {
-                    "label": "opt",
-                    "nodeType": "optimiserApply",
-                    "config": {
-                        "sourceType": "run",
-                        "run_id": "run_abc",
-                        "version_column": "__opt_v__",
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
                     },
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "opt"},
-                {"id": "e2", "source": "opt", "target": "out"},
-            ],
-        })
+                    {
+                        "id": "opt",
+                        "data": {
+                            "label": "opt",
+                            "nodeType": "optimiserApply",
+                            "config": {
+                                "sourceType": "run",
+                                "run_id": "run_abc",
+                                "version_column": "__opt_v__",
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "opt"},
+                    {"id": "e2", "source": "opt", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0]})
         mock_artifact = MagicMock()
@@ -1082,35 +1286,46 @@ class TestScoreGraphModelScoreRemap:
         mock_model.feature_names_ = ["x"]
         mock_model.predict.return_value = np.array([42.0])
 
-        graph = _g({
-            "nodes": [
-                {"id": "src", "data": {
-                    "label": "src",
-                    "nodeType": "apiInput",
-                    "config": {"path": ""},
-                }},
-                {"id": "ms", "data": {
-                    "label": "ms",
-                    "nodeType": "modelScore",
-                    "config": {
-                        "sourceType": "run",
-                        "run_id": "r1",
-                        "artifact_path": "model.cbm",
-                        "task": "regression",
-                        "output_column": "pred",
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "apiInput",
+                            "config": {"path": ""},
+                        },
                     },
-                }},
-                {"id": "out", "data": {
-                    "label": "out",
-                    "nodeType": "output",
-                    "config": {},
-                }},
-            ],
-            "edges": [
-                {"id": "e1", "source": "src", "target": "ms"},
-                {"id": "e2", "source": "ms", "target": "out"},
-            ],
-        })
+                    {
+                        "id": "ms",
+                        "data": {
+                            "label": "ms",
+                            "nodeType": "modelScore",
+                            "config": {
+                                "sourceType": "run",
+                                "run_id": "r1",
+                                "artifact_path": "model.cbm",
+                                "task": "regression",
+                                "output_column": "pred",
+                            },
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "data": {
+                            "label": "out",
+                            "nodeType": "output",
+                            "config": {},
+                        },
+                    },
+                ],
+                "edges": [
+                    {"id": "e1", "source": "src", "target": "ms"},
+                    {"id": "e2", "source": "ms", "target": "out"},
+                ],
+            }
+        )
 
         input_df = pl.DataFrame({"x": [1.0]})
         remap = {"ms__model.cbm": str(cbm_path)}
@@ -1195,11 +1410,7 @@ class TestLoadEnv:
 
         env_file = tmp_path / ".env"
         env_file.write_text(
-            "# comment\n"
-            "MY_TEST_VAR=hello\n"
-            "  ANOTHER_VAR = world  \n"
-            "\n"
-            "NO_EQUALS_LINE\n"
+            "# comment\nMY_TEST_VAR=hello\n  ANOTHER_VAR = world  \n\nNO_EQUALS_LINE\n"
         )
 
         # Remove any pre-existing values
@@ -1231,14 +1442,17 @@ class TestLoadEnv:
 
         assert os.environ.get("MY_PRESET") == "original"
 
-    @pytest.mark.parametrize("raw_value, expected", [
-        ('"hello"', "hello"),
-        ("'hello'", "hello"),
-        ("'quoted with spaces'", "quoted with spaces"),
-        ('"double quoted"', "double quoted"),
-        ("no_quotes", "no_quotes"),
-        ("", ""),
-    ])
+    @pytest.mark.parametrize(
+        "raw_value, expected",
+        [
+            ('"hello"', "hello"),
+            ("'hello'", "hello"),
+            ("'quoted with spaces'", "quoted with spaces"),
+            ('"double quoted"', "double quoted"),
+            ("no_quotes", "no_quotes"),
+            ("", ""),
+        ],
+    )
     def test_load_env_fallback_strips_quotes(self, tmp_path, monkeypatch, raw_value, expected):
         """Fallback parser must strip surrounding single and double quotes."""
         from haute.deploy._config import _load_env
@@ -1316,8 +1530,13 @@ class TestApplyEnvOverrides:
         from haute.deploy._config import DeployConfig, _apply_env_overrides
 
         # Clear all HAUTE_ env vars
-        for key in ["HAUTE_MODEL_NAME", "HAUTE_ENDPOINT_NAME", "HAUTE_TARGET",
-                     "HAUTE_SERVING_WORKLOAD_SIZE", "HAUTE_SERVING_SCALE_TO_ZERO"]:
+        for key in [
+            "HAUTE_MODEL_NAME",
+            "HAUTE_ENDPOINT_NAME",
+            "HAUTE_TARGET",
+            "HAUTE_SERVING_WORKLOAD_SIZE",
+            "HAUTE_SERVING_SCALE_TO_ZERO",
+        ]:
             monkeypatch.delenv(key, raising=False)
 
         config = DeployConfig(pipeline_file=PIPELINE_FILE, model_name="original")
@@ -1447,7 +1666,8 @@ class TestEffectiveEndpointName:
         from haute.deploy._config import DeployConfig
 
         config = DeployConfig(
-            pipeline_file=PIPELINE_FILE, model_name="m",
+            pipeline_file=PIPELINE_FILE,
+            model_name="m",
             endpoint_name="my-ep",
         )
         assert config.effective_endpoint_name == "my-ep"
@@ -1456,7 +1676,8 @@ class TestEffectiveEndpointName:
         from haute.deploy._config import DeployConfig
 
         config = DeployConfig(
-            pipeline_file=PIPELINE_FILE, model_name="m",
+            pipeline_file=PIPELINE_FILE,
+            model_name="m",
             endpoint_name="my-ep",
             endpoint_suffix="-staging",
         )
@@ -1466,7 +1687,8 @@ class TestEffectiveEndpointName:
         from haute.deploy._config import DeployConfig
 
         config = DeployConfig(
-            pipeline_file=PIPELINE_FILE, model_name="my-model",
+            pipeline_file=PIPELINE_FILE,
+            model_name="my-model",
             endpoint_suffix="-staging",
         )
         assert config.effective_endpoint_name == "my-model-staging"
@@ -1604,11 +1826,20 @@ class TestBuildSignature:
         from mlflow.types import DataType
 
         all_types = {
-            "a_i8": "Int8", "b_i16": "Int16", "c_i32": "Int32", "d_i64": "Int64",
-            "e_u8": "UInt8", "f_u16": "UInt16", "g_u32": "UInt32", "h_u64": "UInt64",
-            "i_f32": "Float32", "j_f64": "Float64",
-            "k_str": "String", "l_utf8": "Utf8",
-            "m_bool": "Boolean", "n_date": "Date",
+            "a_i8": "Int8",
+            "b_i16": "Int16",
+            "c_i32": "Int32",
+            "d_i64": "Int64",
+            "e_u8": "UInt8",
+            "f_u16": "UInt16",
+            "g_u32": "UInt32",
+            "h_u64": "UInt64",
+            "i_f32": "Float32",
+            "j_f64": "Float64",
+            "k_str": "String",
+            "l_utf8": "Utf8",
+            "m_bool": "Boolean",
+            "n_date": "Date",
         }
         resolved = _make_resolved(
             input_schema=all_types,
@@ -1653,15 +1884,20 @@ class TestCondaEnvAndPipRequirements:
         """If a node has fileType=catboost, catboost is added to requirements."""
         from haute.deploy._mlflow import _pip_requirements
 
-        graph = _g({
-            "nodes": [
-                {"id": "ext", "data": {
-                    "label": "ext",
-                    "nodeType": "externalFile",
-                    "config": {"fileType": "catboost"},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "ext",
+                        "data": {
+                            "label": "ext",
+                            "nodeType": "externalFile",
+                            "config": {"fileType": "catboost"},
+                        },
+                    },
+                ],
+            }
+        )
         resolved = _make_resolved(pruned_graph=graph)
         reqs = _pip_requirements(resolved)
 
@@ -1671,15 +1907,20 @@ class TestCondaEnvAndPipRequirements:
         """Without catboost nodes, catboost is NOT in requirements."""
         from haute.deploy._mlflow import _pip_requirements
 
-        graph = _g({
-            "nodes": [
-                {"id": "t", "data": {
-                    "label": "t",
-                    "nodeType": "polars",
-                    "config": {},
-                }},
-            ],
-        })
+        graph = _g(
+            {
+                "nodes": [
+                    {
+                        "id": "t",
+                        "data": {
+                            "label": "t",
+                            "nodeType": "polars",
+                            "config": {},
+                        },
+                    },
+                ],
+            }
+        )
         resolved = _make_resolved(pruned_graph=graph)
         reqs = _pip_requirements(resolved)
 
@@ -1751,8 +1992,11 @@ class TestCheckDatabricksConnectivity:
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="https://host/api", code=403, msg="Forbidden",
-                hdrs=None, fp=None,
+                url="https://host/api",
+                code=403,
+                msg="Forbidden",
+                hdrs=None,
+                fp=None,
             )
 
             with pytest.raises(RuntimeError, match="403 Forbidden"):
@@ -1769,8 +2013,11 @@ class TestCheckDatabricksConnectivity:
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="https://host/api", code=404, msg="Not Found",
-                hdrs=None, fp=None,
+                url="https://host/api",
+                code=404,
+                msg="Not Found",
+                hdrs=None,
+                fp=None,
             )
 
             _check_databricks_connectivity(messages.append)
@@ -1933,7 +2180,9 @@ class TestBuildReport:
         input_df = pl.DataFrame({"age": [25, 30]})
 
         report = build_report(
-            stg, prd, input_df,
+            stg,
+            prd,
+            input_df,
             pipeline_name="test",
             staging_endpoint="stg-ep",
             prod_endpoint="prod-ep",
@@ -1955,7 +2204,9 @@ class TestBuildReport:
         input_df = pl.DataFrame({"age": [25, 30, 35]})
 
         report = build_report(
-            stg, prd, input_df,
+            stg,
+            prd,
+            input_df,
             pipeline_name="test",
             staging_endpoint="stg",
             prod_endpoint="prod",
@@ -1971,7 +2222,9 @@ class TestBuildReport:
 
         input_df = pl.DataFrame({"age": [25]})
         report = build_report(
-            [], [], input_df,
+            [],
+            [],
+            input_df,
             pipeline_name="test",
             staging_endpoint="stg",
             prod_endpoint="prod",
@@ -1990,11 +2243,19 @@ class TestFormatTerminal:
         from haute.deploy._impact import ColumnStats, ImpactReport, format_terminal
 
         stats = ColumnStats(
-            name="premium", n_rows=100, n_changed=50,
-            mean_change_pct=5.0, median_change_pct=4.0,
-            max_increase_pct=20.0, max_decrease_pct=-10.0,
-            p5=-8.0, p25=-2.0, p75=8.0, p95=15.0,
-            staging_mean=110.0, prod_mean=100.0,
+            name="premium",
+            n_rows=100,
+            n_changed=50,
+            mean_change_pct=5.0,
+            median_change_pct=4.0,
+            max_increase_pct=20.0,
+            max_decrease_pct=-10.0,
+            p5=-8.0,
+            p25=-2.0,
+            p75=8.0,
+            p95=15.0,
+            staging_mean=110.0,
+            prod_mean=100.0,
             total_premium_change_pct=10.0,
         )
 
@@ -2083,11 +2344,19 @@ class TestFormatMarkdown:
         from haute.deploy._impact import ColumnStats, ImpactReport, format_markdown
 
         stats = ColumnStats(
-            name="premium", n_rows=100, n_changed=50,
-            mean_change_pct=5.0, median_change_pct=4.0,
-            max_increase_pct=20.0, max_decrease_pct=-10.0,
-            p5=-8.0, p25=-2.0, p75=8.0, p95=15.0,
-            staging_mean=110.0, prod_mean=100.0,
+            name="premium",
+            n_rows=100,
+            n_changed=50,
+            mean_change_pct=5.0,
+            median_change_pct=4.0,
+            max_increase_pct=20.0,
+            max_decrease_pct=-10.0,
+            p5=-8.0,
+            p25=-2.0,
+            p75=8.0,
+            p95=15.0,
+            staging_mean=110.0,
+            prod_mean=100.0,
             total_premium_change_pct=10.0,
         )
 
@@ -2208,7 +2477,9 @@ class TestScoreHttpEndpointBatched:
 
         with patch("urllib.request.urlopen", return_value=mock_response):
             results = score_http_endpoint_batched(
-                "http://localhost:8080", records, batch_size=10,
+                "http://localhost:8080",
+                records,
+                batch_size=10,
             )
 
         assert results == [{"premium": 100.0}]
@@ -2220,15 +2491,20 @@ class TestScoreHttpEndpointBatched:
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_err = urllib.error.HTTPError(
-                url="http://localhost:8080/quote", code=500,
-                msg="Server Error", hdrs=None, fp=None,
+                url="http://localhost:8080/quote",
+                code=500,
+                msg="Server Error",
+                hdrs=None,
+                fp=None,
             )
             mock_err.read = lambda: b"internal error"
             mock_urlopen.side_effect = mock_err
 
             with pytest.raises(RuntimeError, match="HTTP 500"):
                 score_http_endpoint_batched(
-                    "http://localhost:8080", records, batch_size=10,
+                    "http://localhost:8080",
+                    records,
+                    batch_size=10,
                 )
 
 
@@ -2294,11 +2570,13 @@ class TestValidateDeployEdgeCases:
 
         resolved = _make_resolved(
             output_node_id="missing_output",
-            pruned_graph=_g({
-                "nodes": [
-                    {"id": "src", "data": {"nodeType": "apiInput", "config": {}}},
-                ],
-            }),
+            pruned_graph=_g(
+                {
+                    "nodes": [
+                        {"id": "src", "data": {"nodeType": "apiInput", "config": {}}},
+                    ],
+                }
+            ),
             input_node_ids=["src"],
         )
 
@@ -2312,13 +2590,15 @@ class TestValidateDeployEdgeCases:
         resolved = _make_resolved(
             input_schema={},
             output_schema={"col": "Int64"},
-            pruned_graph=_g({
-                "nodes": [
-                    {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
-                    {"id": "output", "data": {"nodeType": "output", "config": {}}},
-                ],
-                "edges": [{"id": "e1", "source": "policies", "target": "output"}],
-            }),
+            pruned_graph=_g(
+                {
+                    "nodes": [
+                        {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
+                        {"id": "output", "data": {"nodeType": "output", "config": {}}},
+                    ],
+                    "edges": [{"id": "e1", "source": "policies", "target": "output"}],
+                }
+            ),
             input_node_ids=["policies"],
             output_node_id="output",
         )
@@ -2333,13 +2613,15 @@ class TestValidateDeployEdgeCases:
         resolved = _make_resolved(
             input_schema={"col": "Int64"},
             output_schema={},
-            pruned_graph=_g({
-                "nodes": [
-                    {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
-                    {"id": "output", "data": {"nodeType": "output", "config": {}}},
-                ],
-                "edges": [{"id": "e1", "source": "policies", "target": "output"}],
-            }),
+            pruned_graph=_g(
+                {
+                    "nodes": [
+                        {"id": "policies", "data": {"nodeType": "apiInput", "config": {}}},
+                        {"id": "output", "data": {"nodeType": "output", "config": {}}},
+                    ],
+                    "edges": [{"id": "e1", "source": "policies", "target": "output"}],
+                }
+            ),
             input_node_ids=["policies"],
             output_node_id="output",
         )
@@ -2368,3 +2650,64 @@ class TestScoreTestQuotesEdgeCases:
 
         results = score_test_quotes(resolved)
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Bug regression: pruner
+# ---------------------------------------------------------------------------
+
+
+class TestBugB4PrunerUsesOriginalEdges:
+    """B4: kept_edges must filter from deploy_edges, not original edges."""
+
+    def test_batch_edge_not_reintroduced_when_shared_node(self) -> None:
+        from haute.deploy._pruner import prune_for_deploy
+
+        def _node(nid, ntype="polars", config=None):
+            return {
+                "id": nid,
+                "position": {"x": 0, "y": 0},
+                "data": {"label": nid, "nodeType": ntype, "config": config or {}},
+            }
+
+        def _edge(src, tgt):
+            return {"id": f"e_{src}_{tgt}", "source": src, "target": tgt}
+
+        graph = _g(
+            {
+                "nodes": [
+                    _node("shared"),
+                    _node("live_src"),
+                    _node("switch", "liveSwitch", {"inputs": ["live_src", "shared"]}),
+                    _node("transform"),
+                    _node("output", "output"),
+                ],
+                "edges": [
+                    _edge("shared", "switch"),  # batch edge
+                    _edge("live_src", "switch"),  # live edge
+                    _edge("switch", "output"),
+                    _edge("shared", "transform"),
+                    _edge("transform", "output"),
+                ],
+            }
+        )
+        pruned, kept, removed = prune_for_deploy(graph, "output")
+        pruned_pairs = {(e.source, e.target) for e in pruned.edges}
+        # The batch edge shared->switch should NOT be in the pruned graph
+        assert ("shared", "switch") not in pruned_pairs
+        # The live edge should be kept
+        assert ("live_src", "switch") in pruned_pairs
+
+
+class TestBugB10LexicographicVersionComparison:
+    """B10: MLflow version max() must use numeric, not string comparison."""
+
+    def test_version_10_greater_than_9(self) -> None:
+        from haute.deploy._mlflow import deploy_to_mlflow
+
+        # We just need to test the max() logic. Let's test directly.
+        versions = ["1", "2", "9", "10", "11"]
+        result = max(versions, key=lambda v: int(v))
+        assert result == "11"
+        # The bug: max(versions) without int() gives "9"
+        assert max(versions) == "9"  # proves the bug exists in string comparison

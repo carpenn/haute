@@ -14,6 +14,7 @@ external objects.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from typing import Any
@@ -51,14 +52,14 @@ def load_optimiser_artifact(path: str) -> dict[str, Any]:
         logger.debug("optimiser_artifact_cache_hit", path=path)
         cached = _artifact_cache.get(key)
         assert cached is not None  # guaranteed by __contains__ check above
-        return cached
+        return copy.deepcopy(cached)
 
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         artifact: dict[str, Any] = json.load(f)
 
     _artifact_cache.put(key, artifact)
     logger.info("optimiser_artifact_loaded", path=path, mode=artifact.get("mode"))
-    return artifact
+    return copy.deepcopy(artifact)
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +109,13 @@ def load_mlflow_optimiser_artifact(
         logger.debug("mlflow_optimiser_cache_hit", key=str(cache_key))
         cached = _mlflow_cache.get(cache_key)
         assert cached is not None  # guaranteed by __contains__ check above
-        return cached
+        return copy.deepcopy(cached)
 
     local_path = mlflow.artifacts.download_artifacts(
         f"runs:/{resolved_run_id}/{_MLFLOW_ARTIFACT_NAME}"
     )
 
-    with open(local_path) as f:
+    with open(local_path, encoding="utf-8") as f:
         artifact: dict[str, Any] = json.load(f)
 
     _mlflow_cache.put(cache_key, artifact)
@@ -124,6 +125,4 @@ def load_mlflow_optimiser_artifact(
         run_id=resolved_run_id,
         mode=artifact.get("mode"),
     )
-    return artifact
-
-
+    return copy.deepcopy(artifact)

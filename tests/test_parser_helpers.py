@@ -124,17 +124,13 @@ class TestGetDecoratorKwargs:
         assert _get_decorator_kwargs(dec) == {}
 
     def test_ignores_positional_args(self):
-        dec = self._parse_decorator(
-            "@pipeline.node(42, x=1)\ndef f(): pass"
-        )
+        dec = self._parse_decorator("@pipeline.node(42, x=1)\ndef f(): pass")
         kwargs = _get_decorator_kwargs(dec)
         assert kwargs == {"x": 1}
 
     def test_star_kwargs_ignored(self):
         """**kwargs (arg=None) are skipped."""
-        dec = self._parse_decorator(
-            "@pipeline.node(**cfg, x=1)\ndef f(): pass"
-        )
+        dec = self._parse_decorator("@pipeline.node(**cfg, x=1)\ndef f(): pass")
         kwargs = _get_decorator_kwargs(dec)
         assert "x" in kwargs
         # **cfg has kw.arg == None, so it's skipped
@@ -165,33 +161,26 @@ class TestIsPipelineNodeDecorator:
     def test_all_decorator_types(self):
         """All type-specific decorators should be recognised."""
         from haute._types import DECORATOR_TO_NODE_TYPE
+
         for method in DECORATOR_TO_NODE_TYPE:
-            assert _is_pipeline_node_decorator(
-                self._dec(f"@pipeline.{method}\ndef f(): pass")
-            ), f"@pipeline.{method} was not recognised"
+            assert _is_pipeline_node_decorator(self._dec(f"@pipeline.{method}\ndef f(): pass")), (
+                f"@pipeline.{method} was not recognised"
+            )
 
     def test_wrong_attr(self):
-        assert not _is_pipeline_node_decorator(
-            self._dec("@pipeline.connect\ndef f(): pass")
-        )
+        assert not _is_pipeline_node_decorator(self._dec("@pipeline.connect\ndef f(): pass"))
 
     def test_old_node_not_matched(self):
         """The old @pipeline.node style is no longer recognised."""
-        assert not _is_pipeline_node_decorator(
-            self._dec("@pipeline.node\ndef f(): pass")
-        )
+        assert not _is_pipeline_node_decorator(self._dec("@pipeline.node\ndef f(): pass"))
 
     def test_other_object_does_not_match(self):
         """The function checks both .attr in DECORATOR_TO_NODE_TYPE AND receiver == 'pipeline'."""
-        assert not _is_pipeline_node_decorator(
-            self._dec("@other.transform\ndef f(): pass")
-        )
+        assert not _is_pipeline_node_decorator(self._dec("@other.transform\ndef f(): pass"))
 
     def test_submodel_does_not_match_pipeline(self):
         """@submodel.polars should NOT match the pipeline checker."""
-        assert not _is_pipeline_node_decorator(
-            self._dec("@submodel.polars\ndef f(): pass")
-        )
+        assert not _is_pipeline_node_decorator(self._dec("@submodel.polars\ndef f(): pass"))
 
     def test_submodel_call_does_not_match_pipeline(self):
         """@submodel.data_source(...) should NOT match the pipeline checker."""
@@ -200,9 +189,7 @@ class TestIsPipelineNodeDecorator:
         )
 
     def test_plain_name_decorator(self):
-        assert not _is_pipeline_node_decorator(
-            self._dec("@some_decorator\ndef f(): pass")
-        )
+        assert not _is_pipeline_node_decorator(self._dec("@some_decorator\ndef f(): pass"))
 
 
 class TestIsSubmodelNodeDecorator:
@@ -222,19 +209,13 @@ class TestIsSubmodelNodeDecorator:
         )
 
     def test_pipeline_transform_is_not_submodel(self):
-        assert not _is_submodel_node_decorator(
-            self._dec("@pipeline.polars\ndef f(): pass")
-        )
+        assert not _is_submodel_node_decorator(self._dec("@pipeline.polars\ndef f(): pass"))
 
     def test_other_object_is_not_submodel(self):
-        assert not _is_submodel_node_decorator(
-            self._dec("@other.transform\ndef f(): pass")
-        )
+        assert not _is_submodel_node_decorator(self._dec("@other.transform\ndef f(): pass"))
 
     def test_submodel_connect_is_not_node(self):
-        assert not _is_submodel_node_decorator(
-            self._dec("@submodel.connect\ndef f(): pass")
-        )
+        assert not _is_submodel_node_decorator(self._dec("@submodel.connect\ndef f(): pass"))
 
 
 # ===========================================================================
@@ -399,17 +380,17 @@ class TestBuildEdges:
         assert len(edges) == 1
         assert edges[0].source == "source" and edges[0].target == "transform"
 
-    def test_explicit_suppresses_implicit_for_same_target(self):
-        """Nodes with explicit connect() should not also get implicit edges."""
+    def test_explicit_and_implicit_edges_coexist(self):
+        """Implicit edges supplement explicit ones for the same target."""
         nodes = [
             self._raw("a", []),
             self._raw("b", []),
             self._raw("c", ["a", "b"]),  # param names match a and b
         ]
         edges = _build_edges(nodes, [("a", "c")])
-        targets_of_c = [(e.source, e.target) for e in edges if e.target == "c"]
-        # Only the explicit edge (a, c), not implicit (b, c)
-        assert targets_of_c == [("a", "c")]
+        targets_of_c = sorted([(e.source, e.target) for e in edges if e.target == "c"])
+        # Explicit (a,c) + implicit (b,c) -- both present
+        assert targets_of_c == [("a", "c"), ("b", "c")]
 
     def test_fallback_linear_chain(self):
         """With no edges and no matching params, nodes form a linear chain."""
@@ -450,8 +431,10 @@ class TestBuildRfNodes:
         raw = [
             {"func_name": "a", "node_type": "dataSource", "description": "desc A", "config": {}},
             {
-                "func_name": "b", "node_type": "polars",
-                "description": "", "config": {"code": "x"},
+                "func_name": "b",
+                "node_type": "polars",
+                "description": "",
+                "config": {"code": "x"},
             },
         ]
         nodes = _build_rf_nodes(raw)
@@ -524,10 +507,7 @@ class TestExtractMeta:
         assert name == "fallback"
 
     def test_multiple_assignments_picks_first(self):
-        source = (
-            'pipeline = haute.Pipeline("first")\n'
-            'pipeline = haute.Pipeline("second")\n'
-        )
+        source = 'pipeline = haute.Pipeline("first")\npipeline = haute.Pipeline("second")\n'
         tree = ast.parse(source)
         name, _ = _extract_pipeline_meta(tree)
         assert name == "first"
@@ -567,14 +547,7 @@ class TestExtractPreambleEdgeCases:
 
     def test_preamble_strips_blank_lines(self):
         source = (
-            "import polars as pl\n"
-            "import haute\n"
-            "\n"
-            "\n"
-            "X = 1\n"
-            "\n"
-            "\n"
-            'pipeline = haute.Pipeline("test")\n'
+            'import polars as pl\nimport haute\n\n\nX = 1\n\n\npipeline = haute.Pipeline("test")\n'
         )
         preamble = _extract_preamble(source)
         assert preamble == "X = 1"
@@ -618,11 +591,7 @@ class TestExtractPreservedBlocks:
         assert "B = 2" in blocks[1]
 
     def test_unmatched_start_ignored(self):
-        source = (
-            "# haute:preserve-start\n"
-            "X = 1\n"
-            "# no end marker\n"
-        )
+        source = "# haute:preserve-start\nX = 1\n# no end marker\n"
         blocks = _extract_preserved_blocks(source)
         assert blocks == []
 
@@ -633,13 +602,7 @@ class TestExtractPreservedBlocks:
         assert _extract_preserved_blocks("") == []
 
     def test_block_with_blank_lines_stripped(self):
-        source = (
-            "# haute:preserve-start\n"
-            "\n"
-            "X = 1\n"
-            "\n"
-            "# haute:preserve-end\n"
-        )
+        source = "# haute:preserve-start\n\nX = 1\n\n# haute:preserve-end\n"
         blocks = _extract_preserved_blocks(source)
         assert blocks[0] == "X = 1"
 
@@ -653,13 +616,19 @@ class TestBuildNodeConfigExtended:
     def test_banding_multi_factor(self):
         config = _build_node_config(
             NodeType.BANDING,
-            {"factors": [
-                {
-                    "banding": "discrete", "column": "age",
-                    "output_column": "age_band", "rules": [], "default": "0",
-                },
-            ]},
-            "", [],
+            {
+                "factors": [
+                    {
+                        "banding": "discrete",
+                        "column": "age",
+                        "output_column": "age_band",
+                        "rules": [],
+                        "default": "0",
+                    },
+                ]
+            },
+            "",
+            [],
         )
         assert len(config["factors"]) == 1
         assert config["factors"][0]["outputColumn"] == "age_band"
@@ -669,11 +638,13 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.BANDING,
             {
-                "banding": "continuous", "column": "x",
+                "banding": "continuous",
+                "column": "x",
                 "output_column": "x_factor",
                 "rules": [{"min": 0, "max": 1, "value": 1.0}],
             },
-            "", [],
+            "",
+            [],
         )
         assert len(config["factors"]) == 1
         assert config["factors"][0]["column"] == "x"
@@ -683,7 +654,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.BANDING,
             {"factors": "not_a_list"},
-            "", [],
+            "",
+            [],
         )
         assert config["factors"] == []
 
@@ -691,7 +663,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.RATING_STEP,
             {"tables": "not_a_list"},
-            "", [],
+            "",
+            [],
         )
         assert config["tables"] == []
 
@@ -699,7 +672,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.RATING_STEP,
             {"tables": [], "operation": "multiply", "combinedColumn": "premium"},
-            "", [],
+            "",
+            [],
         )
         assert config["operation"] == "multiply"
         assert config["combinedColumn"] == "premium"
@@ -708,7 +682,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.RATING_STEP,
             {"tables": [], "op": "add"},
-            "", [],
+            "",
+            [],
         )
         assert config["operation"] == "add"
 
@@ -716,7 +691,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.RATING_STEP,
             {"tables": [{"name": "T", "entries": "not_a_list", "factors": "also_not"}]},
-            "", [],
+            "",
+            [],
         )
         assert config["tables"][0]["entries"] == []
         assert config["tables"][0]["factors"] == []
@@ -725,7 +701,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.CONSTANT,
             {"values": [{"name": "pi", "value": 3.14}]},
-            "", [],
+            "",
+            [],
         )
         assert config["values"] == [{"name": "pi", "value": "3.14"}]
 
@@ -733,7 +710,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.CONSTANT,
             {"values": "bad"},
-            "", [],
+            "",
+            [],
         )
         assert config["values"] == []
 
@@ -741,10 +719,14 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.SCENARIO_EXPANDER,
             {
-                "scenario_expander": True, "quote_id": "qid",
-                "min_value": 0.8, "max_value": 1.2, "steps": 5,
+                "scenario_expander": True,
+                "quote_id": "qid",
+                "min_value": 0.8,
+                "max_value": 1.2,
+                "steps": 5,
             },
-            "", [],
+            "",
+            [],
         )
         assert config["quote_id"] == "qid"
         assert config["min_value"] == 0.8
@@ -753,31 +735,30 @@ class TestBuildNodeConfigExtended:
     def test_scenario_expander_config_extracts_sentinel_code(self):
         body = (
             '    """Expand."""\n'
-            '    df = source\n'
-            '    # -- user code --\n'
-            '    df = (\n'
-            '        df\n'
+            "    df = source\n"
+            "    # -- user code --\n"
+            "    df = (\n"
+            "        df\n"
             '        .filter(pl.col("sv") > 0.9)\n'
-            '    )\n'
-            '    return df'
+            "    )\n"
+            "    return df"
         )
         config = _build_node_config(
             NodeType.SCENARIO_EXPANDER,
             {"scenario_expander": True, "steps": 5},
-            body, ["source"],
+            body,
+            ["source"],
         )
         assert "code" in config
         assert '.filter(pl.col("sv") > 0.9)' in config["code"]
 
     def test_scenario_expander_config_empty_code_without_sentinel(self):
-        body = (
-            '    """Expand."""\n'
-            '    return source'
-        )
+        body = '    """Expand."""\n    return source'
         config = _build_node_config(
             NodeType.SCENARIO_EXPANDER,
             {"scenario_expander": True, "steps": 5},
-            body, ["source"],
+            body,
+            ["source"],
         )
         assert config.get("code", "") == ""
 
@@ -785,7 +766,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.OPTIMISER,
             {"optimiser": True, "mode": "online", "quote_id": "id", "objective": "premium"},
-            "", [],
+            "",
+            [],
         )
         assert config["mode"] == "online"
         assert config["objective"] == "premium"
@@ -794,7 +776,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.OPTIMISER_APPLY,
             {"optimiser_apply": True, "artifact_path": "/path/to/artifact.json"},
-            "", [],
+            "",
+            [],
         )
         assert config["artifact_path"] == "/path/to/artifact.json"
 
@@ -802,7 +785,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.MODELLING,
             {"modelling": True, "target": "loss", "algorithm": "catboost", "task": "regression"},
-            "", [],
+            "",
+            [],
         )
         assert config["target"] == "loss"
         assert config["algorithm"] == "catboost"
@@ -811,7 +795,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.POLARS,
             {"instance_of": "original_node"},
-            "", [],
+            "",
+            [],
         )
         assert config["instanceOf"] == "original_node"
 
@@ -819,7 +804,8 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.DATA_SOURCE,
             {"table": "catalog.schema.tbl", "http_path": "/sql/x", "query": "SELECT *"},
-            "", [],
+            "",
+            [],
         )
         assert config["http_path"] == "/sql/x"
         assert config["query"] == "SELECT *"
@@ -841,17 +827,13 @@ class TestBuildNodeConfigExtended:
         config = _build_node_config(
             NodeType.MODEL_SCORE,
             {"source_type": "run", "run_id": "abc"},
-            "", [],
+            "",
+            [],
         )
         assert config["sourceType"] == "run"
 
     def test_model_score_code_from_sentinel(self):
-        body = (
-            "    result = df.lazy()\n"
-            "    # -- user code --\n"
-            "    x = 1\n"
-            "    return result"
-        )
+        body = "    result = df.lazy()\n    # -- user code --\n    x = 1\n    return result"
         config = _build_node_config(NodeType.MODEL_SCORE, {}, body, [])
         assert "x = 1" in config["code"]
 
@@ -866,7 +848,11 @@ class TestResolveNodeConfig:
         """Without config= key, falls through to _build_node_config."""
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
-                {"path": "data.parquet"}, "", [], 0, None,
+                {"path": "data.parquet"},
+                "",
+                [],
+                0,
+                None,
                 explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -883,7 +869,10 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
-                "", [], 0, tmp_path,
+                "",
+                [],
+                0,
+                tmp_path,
                 explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -907,7 +896,10 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
-                body, [], 0, tmp_path,
+                body,
+                [],
+                0,
+                tmp_path,
                 explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -921,14 +913,14 @@ class TestResolveNodeConfig:
         cfg_file = cfg_dir / "my_source.json"
         cfg_file.write_text(json.dumps(cfg))
 
-        body = (
-            '    """Load data."""\n'
-            '    return pl.scan_parquet("data.parquet")'
-        )
+        body = '    """Load data."""\n    return pl.scan_parquet("data.parquet")'
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, loaded = _resolve_node_config(
                 {"config": "config/data_source/my_source.json"},
-                body, [], 0, tmp_path,
+                body,
+                [],
+                0,
+                tmp_path,
                 explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -939,7 +931,10 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
                 {"config": "config/data_source/missing.json"},
-                "", [], 0, tmp_path,
+                "",
+                [],
+                0,
+                tmp_path,
                 explicit_node_type=NodeType.DATA_SOURCE,
             )
         assert node_type == NodeType.DATA_SOURCE
@@ -959,7 +954,10 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, config = _resolve_node_config(
                 {"config": "config/banding/my_transform.json"},
-                body, ["source"], 1, tmp_path,
+                body,
+                ["source"],
+                1,
+                tmp_path,
                 explicit_node_type=NodeType.BANDING,
             )
         assert node_type == NodeType.BANDING
@@ -1011,7 +1009,10 @@ class TestResolveNodeConfig:
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             node_type, loaded = _resolve_node_config(
                 {"config": mangled_path},
-                "", ["df"], 1, tmp_path,
+                "",
+                ["df"],
+                1,
+                tmp_path,
                 func_name="age_band",
                 explicit_node_type=NodeType.BANDING,
             )
@@ -1081,11 +1082,7 @@ class TestExtractSentinelUserCode:
         assert _extract_sentinel_user_code(body, "df") == ""
 
     def test_sentinel_with_no_code_returns_empty(self):
-        body = (
-            '    df = pl.scan_parquet("data.parquet")\n'
-            "    # -- user code --\n"
-            "    return df"
-        )
+        body = '    df = pl.scan_parquet("data.parquet")\n    # -- user code --\n    return df'
         assert _extract_sentinel_user_code(body, "df") == ""
 
     def test_model_score_compat_return_result(self):
@@ -1122,11 +1119,7 @@ class TestExtractUserCodeEdgeCases:
 
     def test_multiline_return(self):
         body = (
-            '    """doc"""\n'
-            "    return (\n"
-            "        source\n"
-            '        .filter(pl.col("x") > 0)\n'
-            "    )"
+            '    """doc"""\n    return (\n        source\n        .filter(pl.col("x") > 0)\n    )'
         )
         result = _extract_user_code(body, ["source"])
         assert "source" in result
@@ -1225,7 +1218,10 @@ class TestExtractDecoratedNodes:
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert len(nodes) == 2
         assert nodes[0]["func_name"] == "source"
@@ -1245,7 +1241,10 @@ class TestExtractDecoratedNodes:
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_submodel_node_decorator, bodies, None,
+                tree,
+                _is_submodel_node_decorator,
+                bodies,
+                None,
             )
         assert len(nodes) == 1
         assert nodes[0]["func_name"] == "calc"
@@ -1263,23 +1262,23 @@ class TestExtractDecoratedNodes:
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert len(nodes) == 1
         assert nodes[0]["func_name"] == "matched"
 
     def test_ignores_non_function_stmts(self):
-        source = (
-            "x = 1\n"
-            "y = 2\n"
-            "@pipeline.polars\n"
-            "def only_func():\n"
-            "    return 1\n"
-        )
+        source = "x = 1\ny = 2\n@pipeline.polars\ndef only_func():\n    return 1\n"
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert len(nodes) == 1
 
@@ -1287,53 +1286,55 @@ class TestExtractDecoratedNodes:
         tree, bodies = self._parse_source("x = 1\n")
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert nodes == []
 
     def test_extracts_param_names(self):
-        source = (
-            "@pipeline.polars\n"
-            "def transform(a, b, c):\n"
-            "    return a\n"
-        )
+        source = "@pipeline.polars\ndef transform(a, b, c):\n    return a\n"
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert nodes[0]["param_names"] == ["a", "b", "c"]
 
     def test_extracts_docstring(self):
-        source = (
-            "@pipeline.polars\n"
-            "def transform(a):\n"
-            '    """My transform doc."""\n'
-            "    return a\n"
-        )
+        source = '@pipeline.polars\ndef transform(a):\n    """My transform doc."""\n    return a\n'
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             nodes = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
         assert nodes[0]["description"] == "My transform doc."
 
     def test_pipeline_checker_does_not_match_submodel(self):
-        source = (
-            "@submodel.polars\n"
-            "def calc(x):\n"
-            "    return x\n"
-        )
+        source = "@submodel.polars\ndef calc(x):\n    return x\n"
         tree, bodies = self._parse_source(source)
         with patch("haute._parser_helpers.warn_unrecognized_config_keys"):
             # submodel checker matches @submodel.polars
             nodes = _extract_decorated_nodes(
-                tree, _is_submodel_node_decorator, bodies, None,
+                tree,
+                _is_submodel_node_decorator,
+                bodies,
+                None,
             )
             assert len(nodes) == 1
             # pipeline checker must NOT match @submodel.polars —
             # it checks decorator.value.id == "pipeline"
             nodes2 = _extract_decorated_nodes(
-                tree, _is_pipeline_node_decorator, bodies, None,
+                tree,
+                _is_pipeline_node_decorator,
+                bodies,
+                None,
             )
             assert len(nodes2) == 0

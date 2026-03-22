@@ -22,6 +22,7 @@ from haute.deploy._config import (
     resolve_config,
 )
 from haute.deploy._mlflow import DeployResult, deploy_to_mlflow, get_deploy_status
+from haute.deploy._validators import validate_deploy
 
 __all__ = [
     "AwsEcsConfig",
@@ -66,6 +67,10 @@ def deploy(config: DeployConfig) -> DeployResult:
         )
 
     resolved = resolve_config(config)
+
+    errors = validate_deploy(resolved)
+    if errors:
+        raise ValueError(f"Deploy validation failed: {errors}")
 
     if config.target == "databricks":
         return deploy_to_mlflow(resolved)
