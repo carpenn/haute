@@ -131,8 +131,8 @@ function djb2(s: string): string {
 
 export function hashConfig(config: Record<string, unknown>): string {
   // Strip internal keys that don't affect computation
-  const { _nodeId, _columns, _schemaWarnings, ...rest } = config
-  void _nodeId; void _columns; void _schemaWarnings
+  const { _nodeId, _columns, _schemaWarnings, _availableColumns, ...rest } = config
+  void _nodeId; void _columns; void _schemaWarnings; void _availableColumns
   return djb2(JSON.stringify(rest))
 }
 
@@ -277,11 +277,9 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
     set((s) => {
       const job = s.solveJobs[nodeId]
       if (!job) return s
+      const { [nodeId]: _removedJob, ...remainingJobs } = s.solveJobs; void _removedJob
       return {
-        solveJobs: {
-          ...s.solveJobs,
-          [nodeId]: { ...job, progress: null, error },
-        },
+        solveJobs: remainingJobs,
       }
     }),
 
@@ -348,7 +346,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
   completeTrainJob: (nodeId, result) =>
     set((s) => {
       const job = s.trainJobs[nodeId]
-      // Support direct completion (no active job, e.g. sync error/result)
+      if (!job) return s
       const { [nodeId]: _removedJob, ...remainingJobs } = s.trainJobs; void _removedJob
       return {
         trainJobs: remainingJobs,
@@ -367,11 +365,9 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
     set((s) => {
       const job = s.trainJobs[nodeId]
       if (!job) return s
+      const { [nodeId]: _removedJob, ...remainingJobs } = s.trainJobs; void _removedJob
       return {
-        trainJobs: {
-          ...s.trainJobs,
-          [nodeId]: { ...job, progress: null, error },
-        },
+        trainJobs: remainingJobs,
       }
     }),
 
@@ -409,7 +405,9 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
   clearNode: (nodeId) =>
     set((s) => {
       const { [nodeId]: _rp, ...previews } = s.previews; void _rp
-      const { [nodeId]: _rcc, ...columnCache } = s.columnCache; void _rcc
+      const columnCache = Object.fromEntries(
+        Object.entries(s.columnCache).filter(([k]) => k !== nodeId && !k.startsWith(`${nodeId}:`))
+      )
       const { [nodeId]: _rsr, ...solveResults } = s.solveResults; void _rsr
       const { [nodeId]: _rsj, ...solveJobs } = s.solveJobs; void _rsj
       const { [nodeId]: _rtr, ...trainResults } = s.trainResults; void _rtr

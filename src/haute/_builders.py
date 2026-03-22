@@ -226,7 +226,13 @@ def _build_data_source(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, source_with_code, True
 
 
-@_register(NodeType.CONSTANT, columns=_passthrough_columns)
+def _constant_columns(config: dict[str, Any]) -> ColumnContract:
+    raw_values = config.get("values", []) or []
+    produced = {v.get("name", "") for v in raw_values if v.get("name")}
+    return produced or {"constant"}, set()
+
+
+@_register(NodeType.CONSTANT, columns=_constant_columns)
 def _build_constant(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     raw_values = config.get("values", []) or []
@@ -373,7 +379,8 @@ def _rating_step_columns(config: dict[str, Any]) -> ColumnContract:
             produced.add(out)
         referenced.update(t.get("factors") or [])
     combined = config.get("combinedColumn", "")
-    if combined:
+    table_out_cols = [t.get("outputColumn", "") for t in tables if t.get("outputColumn")]
+    if combined and len(table_out_cols) >= 2:
         produced.add(combined)
     return produced, referenced
 
@@ -430,10 +437,15 @@ def _scenario_expander_columns(config: dict[str, Any]) -> ColumnContract:
 def _build_scenario_expander(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     config = ctx.config
     _col_name = (config.get("column_name") or "").strip()
-    _min_val = float(config.get("min_value", _DEFAULT_SCENARIO_MIN))
-    _max_val = float(config.get("max_value", _DEFAULT_SCENARIO_MAX))
-    _steps = int(config.get("steps", _DEFAULT_SCENARIO_STEPS))
-    _step_col = config.get("step_column", "scenario_index")
+    raw_min = config.get("min_value")
+    _min_val = float(raw_min) if raw_min is not None else _DEFAULT_SCENARIO_MIN
+    raw_max = config.get("max_value")
+    _max_val = float(raw_max) if raw_max is not None else _DEFAULT_SCENARIO_MAX
+    raw_steps = config.get("steps")
+    _steps = int(raw_steps) if raw_steps is not None else _DEFAULT_SCENARIO_STEPS
+    if _steps < 1:
+        raise ValueError(f"Scenario expander requires steps >= 1, got {_steps}")
+    _step_col = config.get("step_column") or "scenario_index"
     code = (config.get("code") or "").strip()
     _preamble = dict(ctx.preamble_ns) if ctx.preamble_ns else None
 
@@ -748,6 +760,9 @@ def _apply_online(
     mult_col = artifact.get("scenario_value", "scenario_value")
     objective = artifact.get("objective", "expected_income")
     constraints = artifact.get("constraints") or {}
+
+    # Filter out null/NaN quote IDs before casting (null → "null" string is invalid)
+    lf = lf.filter(pl.col(qid_col).is_not_null())
 
     # Cast columns to the types price-contour expects (same as solve endpoint)
     cast_exprs = [

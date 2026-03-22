@@ -91,7 +91,8 @@ export interface SinkResponse {
 export interface SchemaResult {
   path: string
   columns: ColumnInfo[]
-  row_count: number
+  row_count: number | null
+  row_count_estimated?: boolean
   column_count: number
   preview: Record<string, unknown>[]
 }
@@ -222,12 +223,14 @@ export interface CacheStatusResponse {
   column_count: number
   size_bytes: number
   fetched_at: number
+  columns?: Record<string, string>
 }
 
 export interface FetchProgressResponse {
   active: boolean
   rows?: number
   elapsed?: number
+  batches?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +252,7 @@ export interface JsonCacheStatusResponse {
   column_count: number
   size_bytes: number
   cached_at: number
+  columns?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +269,9 @@ export interface MlflowRun {
   run_name: string
   metrics: Record<string, number>
   artifacts: string[]
+  status?: string
+  start_time?: number | null
+  params?: Record<string, string>
 }
 
 export interface MlflowModel {
@@ -277,6 +284,7 @@ export interface MlflowModelVersion {
   run_id: string
   status: string
   description: string
+  creation_timestamp?: number | null
 }
 
 // ---------------------------------------------------------------------------

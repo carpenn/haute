@@ -64,6 +64,8 @@ def _compute_scenario_value_stats(
 
     col = df["optimal_scenario_value"]
     n = len(col)
+    if n == 0:
+        return {"n": 0}, {}
     stats = {
         "mean": float(col.mean()),
         "std": float(col.std()),

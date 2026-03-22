@@ -42,7 +42,7 @@ export function FeaturesTab({ result }: FeaturesTabProps) {
     )
   }
 
-  const maxVal = Math.max(...items.map(i => Math.abs(i.importance)))
+  const maxVal = items.map(i => Math.abs(i.importance)).reduce((a, b) => Math.max(a, b), -Infinity)
 
   return (
     <div className="space-y-2">

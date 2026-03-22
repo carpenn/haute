@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from haute._logging import get_logger
+from haute._mlflow_utils import search_versions
 from haute.deploy._config import ResolvedDeploy
 from haute.deploy._utils import build_manifest
 
@@ -130,7 +131,7 @@ def deploy_to_mlflow(
     _log(f"Model logged. Fetching registered version for {uc_model_name}...")
     # 7. Get the registered model version
     client = mlflow.tracking.MlflowClient()
-    versions = client.search_model_versions(f"name='{uc_model_name}'")
+    versions = search_versions(client, uc_model_name)
     if versions:
         latest_version = max(versions, key=lambda v: int(v.version)).version
     else:
@@ -186,7 +187,7 @@ def get_deploy_status(
 
     uc_model_name = f"{catalog}.{schema}.{model_name}"
     client = mlflow.tracking.MlflowClient()
-    versions = client.search_model_versions(f"name='{uc_model_name}'")
+    versions = search_versions(client, uc_model_name)
 
     if not versions:
         return {

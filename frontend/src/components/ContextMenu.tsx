@@ -41,7 +41,7 @@ export default function ContextMenu({
       list.push({ label: "Create Instance", icon: Link2, action: () => onCreateInstance(nodeId) })
     }
     if (isSubmodel && onDissolveSubmodel) {
-      const smName = nodeId.replace("submodel__", "")
+      const smName = nodeId.startsWith("submodel__") ? nodeId.slice("submodel__".length) : nodeId
       list.push({ label: "Dissolve Submodel", icon: Ungroup, action: () => onDissolveSubmodel(smName), danger: true })
     }
     list.push({ label: "Delete", icon: Trash2, action: () => onDelete(nodeId), danger: true })

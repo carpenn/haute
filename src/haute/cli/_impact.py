@@ -22,7 +22,7 @@ from haute.cli._helpers import _load_deploy_config, resolve_transport
 @click.option(
     "--batch-size",
     default=500,
-    type=int,
+    type=click.IntRange(min=1),
     help="Rows per endpoint request. Default: 500.",
 )
 def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
@@ -46,7 +46,7 @@ def impact(endpoint_suffix: str | None, sample: int, batch_size: int) -> None:
     config = _load_deploy_config(require_toml=True)
 
     # Determine endpoint names
-    staging_suffix = endpoint_suffix or config.ci.staging_endpoint_suffix
+    staging_suffix = endpoint_suffix or config.ci.staging_endpoint_suffix or "_staging"
     base_name = config.endpoint_name or config.model_name
     staging_name = base_name + staging_suffix
     prod_name = base_name

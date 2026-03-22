@@ -50,7 +50,7 @@ const useSettingsStore = create<SettingsState>()((set, get) => ({
   // Collapsible sections
   collapsedSections: {},
   toggleSection: (key) => set((s) => ({
-    collapsedSections: { ...s.collapsedSections, [key]: !s.collapsedSections[key] },
+    collapsedSections: { ...s.collapsedSections, [key]: s.collapsedSections[key] === undefined ? false : !s.collapsedSections[key] },
   })),
   isSectionOpen: (key, defaultOpen = false) => {
     const val = get().collapsedSections[key]

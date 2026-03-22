@@ -28,7 +28,7 @@ export function FeatureBrowser({ features, selected, onSelect, width = 180 }: Fe
     return features.filter(f => f.feature.toLowerCase().includes(q))
   }, [features, search])
 
-  const maxImportance = features.length > 0 ? Math.max(...features.map(f => Math.abs(f.importance))) : 1
+  const maxImportance = features.length > 0 ? features.map(f => Math.abs(f.importance)).reduce((a, b) => Math.max(a, b), -Infinity) : 1
 
   return (
     <div className="flex flex-col shrink-0" style={{ width, borderRight: "1px solid var(--border)" }}>

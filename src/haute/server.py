@@ -210,15 +210,19 @@ async def _file_watcher() -> None:
         """Parse and broadcast after debounce window expires."""
         await asyncio.sleep(_DEBOUNCE_SECONDS)
 
+        # Snapshot and clear BEFORE processing to avoid losing changes
+        # that arrive during the async broadcast awaits below.
+        to_process = set(pending_changes)
+        pending_changes.clear()
+
         if is_self_write():
-            pending_changes.clear()
             return
 
         # Collect changed files from pending set
         changed_files: list[Path] = []
         module_stems: list[str] = []
         config_changed = False
-        for change_type, changed_path in pending_changes:
+        for change_type, changed_path in to_process:
             p = Path(changed_path)
             if change_type not in (Change.modified, Change.added):
                 continue
@@ -237,7 +241,6 @@ async def _file_watcher() -> None:
             else:
                 changed_files.append(p)
 
-        pending_changes.clear()
         invalidate_pipeline_index()
 
         # For changed modules, only re-parse pipelines that import them

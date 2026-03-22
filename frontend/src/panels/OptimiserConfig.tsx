@@ -9,7 +9,7 @@ import { NODE_TYPES } from "../utils/nodeTypes"
 import useNodeResultsStore, { hashConfig } from "../stores/useNodeResultsStore"
 import useSettingsStore from "../stores/useSettingsStore"
 import { formatElapsed } from "../utils/formatValue"
-import { configField } from "../utils/configField"
+import { configField, safeParseFloat, safeParseInt } from "../utils/configField"
 import { withAlpha } from "../utils/color"
 import { extractBandingLevelsForNode } from "../utils/banding"
 import { buildGraph } from "../utils/buildGraph"
@@ -92,9 +92,9 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
   const maxIter = configField(config, "max_iter", 50)
   const tolerance = configField(config, "tolerance", 1e-6)
   const chunkSize = configField(config, "chunk_size", 500_000)
-  const recordHistory = configField(config, "record_history", true)
+  const recordHistory = configField(config, "record_history", false)
   const maxCdIterations = configField(config, "max_cd_iterations", 10)
-  const cdTolerance = configField(config, "cd_tolerance", 1e-4)
+  const cdTolerance = configField(config, "cd_tolerance", 1e-3)
   const frontierMin = configField(config, "frontier_min", 0.80)
   const frontierMax = configField(config, "frontier_max", 1.10)
   const frontierSteps = configField(config, "frontier_steps", 15)
@@ -380,7 +380,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   type="number"
                   step={0.01}
                   value={constraintValue}
-                  onChange={(e) => handleConstraintValueChange(name, constraintType, parseFloat(e.target.value) || 0)}
+                  onChange={(e) => handleConstraintValueChange(name, constraintType, safeParseFloat(e.target.value, 0))}
                   className="w-16 px-1.5 py-1 rounded text-[11px] font-mono text-right"
                   style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                 />
@@ -415,7 +415,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 type="number"
                 step={0.01}
                 value={frontierMin}
-                onChange={(e) => onUpdate("frontier_min", parseFloat(e.target.value) || 0.80)}
+                onChange={(e) => onUpdate("frontier_min", safeParseFloat(e.target.value, 0.80))}
                 className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
@@ -426,7 +426,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 type="number"
                 step={0.01}
                 value={frontierMax}
-                onChange={(e) => onUpdate("frontier_max", parseFloat(e.target.value) || 1.10)}
+                onChange={(e) => onUpdate("frontier_max", safeParseFloat(e.target.value, 1.10))}
                 className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
@@ -438,7 +438,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                 min={2}
                 step={1}
                 value={frontierSteps}
-                onChange={(e) => onUpdate("frontier_steps", parseInt(e.target.value) || 15)}
+                onChange={(e) => onUpdate("frontier_steps", safeParseInt(e.target.value, 15))}
                 className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
@@ -456,7 +456,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
             <input
               type="number" min={1} step={1}
               value={maxIter}
-              onChange={(e) => onUpdate("max_iter", parseInt(e.target.value) || 50)}
+              onChange={(e) => onUpdate("max_iter", safeParseInt(e.target.value, 50))}
               className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
               style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
@@ -466,7 +466,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
             <input
               type="number" step={0.000001}
               value={tolerance}
-              onChange={(e) => onUpdate("tolerance", parseFloat(e.target.value) || 1e-6)}
+              onChange={(e) => onUpdate("tolerance", safeParseFloat(e.target.value, 1e-6))}
               className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
               style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
@@ -491,7 +491,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
               <input
                 type="number" min={1000} step={10000}
                 value={chunkSize}
-                onChange={(e) => onUpdate("chunk_size", parseInt(e.target.value) || 500_000)}
+                onChange={(e) => onUpdate("chunk_size", safeParseInt(e.target.value, 500_000))}
                 className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                 style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
               />
@@ -517,7 +517,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   <input
                     type="number" min={1} step={1}
                     value={maxCdIterations}
-                    onChange={(e) => onUpdate("max_cd_iterations", parseInt(e.target.value) || 10)}
+                    onChange={(e) => onUpdate("max_cd_iterations", safeParseInt(e.target.value, 10))}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                     style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />
@@ -527,7 +527,7 @@ export default function OptimiserConfig({ config, onUpdate, allNodes, edges, sub
                   <input
                     type="number" step={0.0001}
                     value={cdTolerance}
-                    onChange={(e) => onUpdate("cd_tolerance", parseFloat(e.target.value) || 1e-4)}
+                    onChange={(e) => onUpdate("cd_tolerance", safeParseFloat(e.target.value, 1e-3))}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                     style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />

@@ -80,6 +80,7 @@ def list_databricks_warehouses() -> WarehouseListResponse:
                 size=wh.cluster_size or "",
             )
             for wh in w.warehouses.list()
+            if wh.id and wh.name
         ]
         return WarehouseListResponse(warehouses=warehouses)
     except HTTPException:

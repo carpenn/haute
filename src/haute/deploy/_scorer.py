@@ -11,7 +11,7 @@ node types for live scoring:
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import polars as pl
 
@@ -41,7 +41,9 @@ def _remap_artifact(
     Returns the remapped local path if found, otherwise ``None``.
     """
     raw_path = config.get(key_field, "")
-    artifact_key = f"{node_id}__{PurePosixPath(raw_path).name}"
+    # Use Path (platform-aware) to match the bundler's Path(abs_path).name.
+    # PurePosixPath would fail on Windows backslash paths.
+    artifact_key = f"{node_id}__{Path(raw_path).name}" if raw_path else f"{node_id}__"
     return remap.get(artifact_key)
 
 

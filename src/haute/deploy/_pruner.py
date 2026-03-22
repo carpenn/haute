@@ -45,14 +45,24 @@ def _live_only_edges(
             None,
         )
         if live_input_name is None:
-            live_input_name = inputs[0] if inputs else None
-        if live_input_name:
+            # Fallback: use the first edge targeting this switch (edge-list
+            # order), matching the runtime switch_fn fallback in _builders.py.
+            for e in edges:
+                if e.target == sid:
+                    switch_live_source[sid] = e.source
+                    break
+        else:
             for e in edges:
                 if e.target == sid:
                     src_label = node_map[e.source].data.label
                     if _sanitize_func_name(src_label) == live_input_name:
                         switch_live_source[sid] = e.source
                         break
+            if sid not in switch_live_source:
+                raise ValueError(
+                    f"LiveSwitch node '{sid}': input_scenario_map live input "
+                    f"'{live_input_name}' does not match any connected node"
+                )
 
     filtered: list[GraphEdge] = []
     for e in edges:
@@ -112,12 +122,14 @@ def find_output_node(graph: PipelineGraph) -> str:
     Raises:
         ValueError: If zero or multiple output nodes are found.
     """
+    seen: set[str] = set()
     candidates: list[str] = []
     for n in graph.nodes:
-        if n.data.nodeType == NodeType.OUTPUT:
+        if n.id in seen:
+            continue
+        if n.data.nodeType == NodeType.OUTPUT or n.data.config.get("output"):
             candidates.append(n.id)
-        elif n.data.config.get("output"):
-            candidates.append(n.id)
+            seen.add(n.id)
 
     if len(candidates) == 0:
         raise ValueError("No output node found. Mark a node with @pipeline.output().")

@@ -26,6 +26,27 @@ _scenario_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 _SCORE_BATCH_SIZE = 500_000
 
+# Module-level temp file cleanup — avoids accumulating atexit handlers
+_temp_files_to_clean: set[str] = set()
+_atexit_registered = False
+
+
+def _register_temp_cleanup(path: str) -> None:
+    global _atexit_registered
+    _temp_files_to_clean.add(path)
+    if not _atexit_registered:
+        import atexit
+
+        def _cleanup_all() -> None:
+            for p in _temp_files_to_clean:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+        atexit.register(_cleanup_all)
+        _atexit_registered = True
+
 
 def _run_score_pipeline(
     scoring_model: Any,
@@ -115,11 +136,7 @@ def _score_batched_standalone(
         task,
     )
 
-    def _cleanup(p: str = scored_path) -> None:
-        if os.path.exists(p):
-            os.unlink(p)
-
-    atexit.register(_cleanup)
+    _register_temp_cleanup(scored_path)
     os.unlink(input_path)
     return pl.scan_parquet(scored_path)
 
@@ -216,6 +233,7 @@ class ModelScorer:
             output_col=self.output_col,
             code=self.code,
             source_names=self.source_names,
+            extra_dfs=dfs[1:],
             source=self.source,
             row_limit=self.row_limit,
         )
@@ -254,11 +272,7 @@ class ModelScorer:
             self.task,
         )
 
-        def _cleanup(p: str = scored_path) -> None:
-            if os.path.exists(p):
-                os.unlink(p)
-
-        atexit.register(_cleanup)
+        _register_temp_cleanup(scored_path)
         os.unlink(input_path)
         return pl.scan_parquet(scored_path)
 
@@ -407,9 +421,14 @@ def _batch_score_to_parquet(
         if writer is not None:
             writer.close()
         else:
-            # Zero-row input: write an empty parquet with the correct schema
-            empty = pl.DataFrame({c: pl.Series([], dtype=pl.Utf8) for c in features}).with_columns(
-                pl.Series(output_col, [], dtype=pl.Utf8)
-            )
+            # Zero-row input: write an empty parquet preserving correct dtypes
+            input_schema = pl.read_parquet_schema(input_path)
+            empty = pl.DataFrame(
+                {c: pl.Series([], dtype=input_schema.get(c, pl.Float64)) for c in features}
+            ).with_columns(pl.Series(output_col, [], dtype=pl.Float64))
+            if want_proba:
+                empty = empty.with_columns(
+                    pl.Series(f"{output_col}_proba", [], dtype=pl.Float64)
+                )
             pq.write_table(empty.to_arrow(), out_path)
     return out_path

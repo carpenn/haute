@@ -54,8 +54,8 @@ export function LossTab({ result, width = 700, height = 280 }: LossTabProps) {
     if (entry[trainKey] != null) allVals.push(entry[trainKey])
     if (evalKey && entry[evalKey] != null) allVals.push(entry[evalKey])
   }
-  const yMin = Math.min(...allVals)
-  const yMax = Math.max(...allVals)
+  const yMin = allVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const yMax = allVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const yRange = yMax - yMin || 1
   // Add 5% padding
   const yPadded = yRange * 0.05

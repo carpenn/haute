@@ -140,20 +140,21 @@ def safe_sink(
     """
     path = Path(path)
     compression: Literal["lz4", "zstd"] = "lz4" if fast_checkpoint else "zstd"
-    try:
-        if fmt == "csv":
-            lf.sink_csv(path)
-        else:
-            lf.sink_parquet(path, compression=compression)
-    except (
-        pl.exceptions.ComputeError,
-        pl.exceptions.InvalidOperationError,
-        pl.exceptions.SchemaError,
-    ):
-        logger.info("sink_streaming_fallback", path=str(path), fmt=fmt)
-        df = lf.collect(engine="streaming")
-        if fmt == "csv":
-            df.write_csv(path)
-        else:
-            df.write_parquet(path, compression=compression)
-        del df
+    with atomic_write(path) as tmp:
+        try:
+            if fmt == "csv":
+                lf.sink_csv(tmp)
+            else:
+                lf.sink_parquet(tmp, compression=compression)
+        except (
+            pl.exceptions.ComputeError,
+            pl.exceptions.InvalidOperationError,
+            pl.exceptions.SchemaError,
+        ):
+            logger.info("sink_streaming_fallback", path=str(path), fmt=fmt)
+            df = lf.collect(engine="streaming")
+            if fmt == "csv":
+                df.write_csv(tmp)
+            else:
+                df.write_parquet(tmp, compression=compression)
+            del df

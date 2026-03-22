@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { FileText, Database, Check } from "lucide-react"
 import { FileBrowser, CodeEditor } from "./_shared"
 import type { OnUpdateConfig } from "./_shared"
@@ -23,6 +23,9 @@ export default function DataSourceEditor({
   const currentPath = configField<string | undefined>(config, "path", undefined)
   const hasFile = sourceType === "flat_file" && !!currentPath
   const [fileExpanded, setFileExpanded] = useState(false)
+  const configQuery = configField(config, "query", "") || "SELECT *"
+  const [query, setQuery] = useState(configQuery)
+  useEffect(() => { setQuery(configQuery) }, [configQuery])
 
   return (
     <>
@@ -93,8 +96,8 @@ export default function DataSourceEditor({
               </label>
               <textarea
                 placeholder={"SELECT *\nFROM catalog.schema.table\nWHERE status = 'active'"}
-                defaultValue={configField(config, "query", "") || "SELECT *"}
-                onChange={(e) => onUpdate("query", e.target.value || undefined)}
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); onUpdate("query", e.target.value || undefined) }}
                 rows={3}
                 className="mt-1 w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2 resize-y"
                 style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}

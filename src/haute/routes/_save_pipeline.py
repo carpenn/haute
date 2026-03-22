@@ -54,13 +54,15 @@ class SavePipelineService:
         self._validate_singletons(graph)
         py_path = self._resolve_source_file(body.source_file)
 
-        mark_self_write()
-
         self._write_code(body, graph, py_path)
         self._infer_flatten_schemas(graph)
         self._write_config_files(graph)
         self._remove_stale_config_files(graph)
         self._write_sidecar(py_path, graph, body.sources, body.active_source)
+
+        # Mark self-write AFTER all files are written so the cooldown
+        # window covers the file-watcher events for all written files.
+        mark_self_write()
 
         return SavePipelineResponse(
             file=str(py_path.relative_to(self._root)),
@@ -161,6 +163,7 @@ class SavePipelineService:
         """Write per-node config JSON sidecar files."""
         from haute._config_io import collect_node_configs
 
+        self._prev_config_files = getattr(self, "_last_config_files", None)
         self._last_config_files = collect_node_configs(graph)
         for rel_path, json_content in self._last_config_files.items():
             out_path = (self._root / rel_path).resolve()
@@ -170,28 +173,32 @@ class SavePipelineService:
             out_path.write_text(json_content)
 
     def _remove_stale_config_files(self, graph: PipelineGraph) -> None:
-        """Delete config JSON files that no longer correspond to a node."""
-        from haute._config_io import NODE_TYPE_TO_FOLDER
+        """Delete config JSON files that THIS pipeline previously owned but no longer needs.
 
-        config_files = getattr(self, "_last_config_files", {})
-        config_dir = self._root / "config"
-        if not config_dir.is_dir():
+        Only removes files in the diff (prev - current) to avoid destroying
+        other pipelines' configs in multi-pipeline projects.
+        """
+        prev = getattr(self, "_prev_config_files", None)
+        if prev is None:
+            return  # First save — nothing to clean up
+
+        current = getattr(self, "_last_config_files", {})
+        stale = set(prev) - set(current)
+        if not stale:
             return
 
-        for folder in NODE_TYPE_TO_FOLDER.values():
-            folder_path = config_dir / folder
-            if not folder_path.is_dir():
+        for rel in stale:
+            stale_path = (self._root / rel).resolve()
+            if not stale_path.is_relative_to(self._root):
                 continue
-            for json_file in folder_path.glob("*.json"):
-                rel = json_file.relative_to(self._root).as_posix()
-                if rel not in config_files:
-                    json_file.unlink()
-                    logger.info("stale_config_removed", path=rel)
-            # Remove empty folder
-            if not any(folder_path.iterdir()):
-                folder_path.rmdir()
+            if stale_path.is_file():
+                stale_path.unlink()
+                logger.info("stale_config_removed", path=rel)
+            folder = stale_path.parent
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
 
-        # Remove empty config dir
+        config_dir = self._root / "config"
         if config_dir.is_dir() and not any(config_dir.iterdir()):
             config_dir.rmdir()
 

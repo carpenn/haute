@@ -153,6 +153,7 @@ _BLOCKED_ATTRS = frozenset({
     "__builtins__",
     "__loader__",
     "__spec__",
+    "__closure__",
 })
 
 # Non-dunder attribute names that enable frame/traceback inspection escapes.
@@ -264,6 +265,9 @@ class _ASTValidator(ast.NodeVisitor):
         raise UnsafeCodeError(
             "async function definitions are blocked in pipeline code"
         )
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        raise UnsafeCodeError("Lambda expressions are not allowed")
 
     def visit_Global(self, node: ast.Global) -> None:
         raise UnsafeCodeError("global statements are blocked in pipeline code")

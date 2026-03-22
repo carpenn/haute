@@ -8,6 +8,7 @@ open the file in a browser and decide whether a model goes live.
 from __future__ import annotations
 
 import html
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -105,7 +106,7 @@ def generate_model_card(
 
     # --- Primary metrics (from diagnostics set) ---
     if metrics:
-        metric_rows = [[k, f"{v:.4f}"] for k, v in metrics.items()]
+        metric_rows = [[k, f"{v:.4f}" if math.isfinite(v) else "N/A"] for k, v in metrics.items()]
         header = f"Metrics ({diag.diagnostics_set.title()} set)"
         sections.append(f"<h2>{html.escape(header)}</h2>")
         sections.append(
@@ -114,7 +115,7 @@ def generate_model_card(
 
     # --- Holdout metrics (when holdout exists but isn't the diagnostics set) ---
     if diag.holdout_metrics and diag.diagnostics_set != "holdout":
-        ho_rows = [[k, f"{v:.4f}"] for k, v in diag.holdout_metrics.items()]
+        ho_rows = [[k, f"{v:.4f}" if math.isfinite(v) else "N/A"] for k, v in diag.holdout_metrics.items()]
         sections.append("<h2>Holdout Metrics</h2>")
         sections.append(
             _html_table(["Metric", "Value"], ho_rows, ["left", "right"])
@@ -126,7 +127,7 @@ def generate_model_card(
         stds = diag.cv_results.get("std_metrics", {})
         n_folds = diag.cv_results.get("n_folds", "—")
         cv_rows = [
-            [k, f"{means[k]:.4f}", f"{stds.get(k, 0):.4f}"]
+            [k, f"{means[k]:.4f}" if math.isfinite(means[k]) else "N/A", f"{stds.get(k, 0):.4f}" if math.isfinite(stds.get(k, 0)) else "N/A"]
             for k in means
         ]
         sections.append(f"<h2>Cross-Validation ({n_folds} folds)</h2>")

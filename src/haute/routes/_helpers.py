@@ -25,6 +25,7 @@ def validate_safe_path(base: Path, user_provided: str | Path) -> Path:
     Returns the resolved ``Path``.  Raises ``HTTPException(403)`` if the
     resolved path escapes the project root.
     """
+    base = base.resolve()
     target = (base / user_provided).resolve()
     if not target.is_relative_to(base):
         raise HTTPException(

@@ -6,6 +6,7 @@ Supports CatBoost (native ``.cbm``) and any MLflow pyfunc model.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -367,6 +368,8 @@ def clear_model_cache(run_id: str | None = None) -> int:
 
     removed = 0
     if run_id:
+        if os.sep in run_id or "/" in run_id or ".." in run_id:
+            raise ValueError(f"Invalid run_id: {run_id!r}")
         target = cache_root / run_id
         if target.exists():
             removed = sum(1 for _ in target.glob("*") if _.is_file())
@@ -432,10 +435,9 @@ def load_mlflow_model(
     # components are fully determined without any network call.
     if source_type == "run" and run_id and artifact_path:
         fast_key = (source_type, run_id, artifact_path, task)
-        if fast_key in _model_cache:
+        cached = _model_cache.get(fast_key)
+        if cached is not None:
             logger.info("mlflow_model_cache_hit", key=str(fast_key))
-            cached = _model_cache.get(fast_key)
-            assert cached is not None
             return cached
 
     resolved_run_id, resolved_version, mlflow_mod, client = resolve_mlflow_source(
@@ -462,10 +464,9 @@ def load_mlflow_model(
 
     cache_key = (source_type, resolved_run_id, resolved_version or resolved_artifact, task)
 
-    if cache_key in _model_cache:
+    cached = _model_cache.get(cache_key)
+    if cached is not None:
         logger.info("mlflow_model_cache_hit", key=str(cache_key))
-        cached = _model_cache.get(cache_key)
-        assert cached is not None  # guaranteed by __contains__ check above
         return cached
 
     # Load model based on detected flavor.

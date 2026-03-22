@@ -85,21 +85,23 @@ export default function useTracing({
     return map
   }, [nodes])
 
-  // Map external parent node IDs → port node IDs
+  // Map external parent node IDs → port node IDs (separate in/out to avoid collision)
   const parentToPortId = useMemo(() => {
-    const map = new Map<string, string>()
+    const inMap = new Map<string, string>()
+    const outMap = new Map<string, string>()
     for (const n of nodes) {
       if (n.id.startsWith("port_in__")) {
-        map.set(n.id.replace("port_in__", ""), n.id)
+        inMap.set(n.id.replace("port_in__", ""), n.id)
       } else if (n.id.startsWith("port_out__")) {
-        map.set(n.id.replace("port_out__", ""), n.id)
+        outMap.set(n.id.replace("port_out__", ""), n.id)
       }
     }
-    return map
+    return { inMap, outMap }
   }, [nodes])
 
   const resolveTraceId = useCallback(
-    (id: string) => childToSubmodelId.get(id) || parentToPortId.get(id) || id,
+    (id: string) =>
+      childToSubmodelId.get(id) || parentToPortId.inMap.get(id) || parentToPortId.outMap.get(id) || id,
     [childToSubmodelId, parentToPortId],
   )
 

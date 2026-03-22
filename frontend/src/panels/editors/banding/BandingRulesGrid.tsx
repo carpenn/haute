@@ -32,6 +32,13 @@ export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFa
 
   // Ensure rules have stable _id keys (assign on first render, persist via onUpdateFactor)
   const didAssignIds = useRef(false)
+  const prevRulesRef = useRef(rawRules)
+  useEffect(() => {
+    if (prevRulesRef.current !== rawRules) {
+      didAssignIds.current = false
+      prevRulesRef.current = rawRules
+    }
+  }, [rawRules])
   const rules = ensureRuleIds(rawRules)
   useEffect(() => {
     if (rules !== rawRules && !didAssignIds.current) {

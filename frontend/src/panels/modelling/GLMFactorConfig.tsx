@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react"
 import type { OnUpdateConfig } from "../editors"
-import { configField } from "../../utils/configField"
+import { configField, safeParseFloat } from "../../utils/configField"
 
 type Column = { name: string; dtype: string }
 
@@ -298,7 +298,7 @@ export function GLMFactorConfig({
                       <input
                         type="number"
                         value={spec.prior_weight ?? 1.0}
-                        onChange={(e) => updateTermField(col.name, "prior_weight", parseFloat(e.target.value) || 1.0)}
+                        onChange={(e) => updateTermField(col.name, "prior_weight", safeParseFloat(e.target.value, 1.0))}
                         className="w-10 px-1 py-0.5 rounded text-[10px] font-mono text-center"
                         style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                         step={0.5}

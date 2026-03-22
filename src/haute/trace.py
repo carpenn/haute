@@ -344,7 +344,10 @@ def execute_trace(
             if input_ids:
                 input_row = {}
                 for pid in input_ids:
-                    input_row.update(cached_rows[pid])
+                    for k, v in cached_rows[pid].items():
+                        # Namespace-prefix on collision to avoid overwriting
+                        key = f"{pid}.{k}" if k in input_row else k
+                        input_row[key] = v
             else:
                 input_row = {}
 

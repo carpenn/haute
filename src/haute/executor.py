@@ -17,6 +17,7 @@ import re
 import shutil
 import tempfile
 import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,12 @@ class PreambleError(HauteError):
 # change between invocations) skip the expensive module eviction +
 # re-import cycle.  The cache is invalidated when the preamble text
 # changes (hash mismatch).
-_preamble_cache: dict[str, dict[str, Any]] = {}
+_PREAMBLE_CACHE_MAX = 64
+_preamble_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+_DANGEROUS_MODULES = frozenset({"os", "sys", "subprocess", "shutil", "signal", "ctypes", "importlib"})
+
+_polars_config_lock = threading.Lock()
 
 
 def _compile_preamble(
@@ -173,8 +179,14 @@ def _compile_preamble(
 
             raise PreambleError(msg, source_line=source_line) from exc
 
-    result = {k: v for k, v in ns.items() if k not in base_keys}
+    result = {
+        k: v for k, v in ns.items()
+        if k not in base_keys
+        and not (hasattr(v, "__name__") and getattr(v, "__name__", "") in _DANGEROUS_MODULES)
+    }
     _preamble_cache[cache_key] = result
+    if len(_preamble_cache) > _PREAMBLE_CACHE_MAX:
+        _preamble_cache.popitem(last=False)
     return result
 
 

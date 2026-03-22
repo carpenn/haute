@@ -39,9 +39,6 @@ def create_submodel_graph(
     sm_file = f"modules/{sm_name}.py"
     selected_ids = set(node_ids)
 
-    if len(selected_ids) < 2:
-        raise ValueError("A submodel must contain at least 2 nodes.")
-
     nodes = graph.nodes
     edges = graph.edges
 
@@ -49,6 +46,10 @@ def create_submodel_graph(
     child_nodes = [n for n in nodes if n.id in selected_ids]
     parent_nodes = [n for n in nodes if n.id not in selected_ids]
     child_node_ids = {n.id for n in child_nodes}
+
+    # Validate after filtering against actual graph nodes (not raw input)
+    if len(child_node_ids) < 2:
+        raise ValueError("A submodel must contain at least 2 nodes.")
 
     # Classify edges
     internal_edges = [

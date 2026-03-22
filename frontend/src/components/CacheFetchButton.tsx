@@ -86,7 +86,11 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
     const id = setInterval(() => {
       getProgress(resourceKey)
         .then((data) => {
-          if (data.active) setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0, phase: data.phase || "" })
+          if (data.active) {
+            setProgress({ rows: data.rows || 0, elapsed: data.elapsed || 0, phase: data.phase || "" })
+          } else {
+            setBuilding(false)
+          }
         })
         .catch((e) => { console.warn("progress poll failed", e) })
     }, 1000)
@@ -122,6 +126,7 @@ export function CacheFetchButton<TStatus extends BaseCacheStatus>({
   }
 
   const doDelete = () => {
+    if (!resourceKey) return
     deleteCacheFn(resourceKey)
       .then((data) => setCache(data))
       .catch((e: Error) => setError(e instanceof ApiError ? e.detail || e.message : e.message))

@@ -5,7 +5,7 @@
  * completed. Seven tabs: Summary, Loss, Lift, Residuals, Features, AvE, PDP.
  */
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ChevronDown, ChevronUp, BrainCircuit } from "lucide-react"
 import { useDragResize } from "../hooks/useDragResize"
 import type { TrainResult, TrainProgress } from "../stores/useNodeResultsStore"
@@ -63,6 +63,8 @@ export function ModellingPreview({
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 360, minHeight: 180, maxHeight: 700 })
   const [tab, setTab] = useState<TabKey>("summary")
 
+  useEffect(() => setTab("summary"), [result])
+
   // Source training progress from store
   const trainProgress: TrainProgress | null = useNodeResultsStore((s) => s.trainJobs[nodeId]?.progress ?? null)
 
@@ -87,7 +89,7 @@ export function ModellingPreview({
   })
 
   // Status summary for collapsed bar
-  const metricsSummary = Object.entries(result.metrics).slice(0, 2).map(([k, v]) => `${k}: ${v.toFixed(4)}`).join(" | ")
+  const metricsSummary = Object.entries(result.metrics).slice(0, 2).map(([k, v]) => `${k}: ${typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : String(v)}`).join(" | ")
 
   // ── Collapsed ──
   if (collapsed) {

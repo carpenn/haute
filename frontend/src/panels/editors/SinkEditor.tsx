@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { HardDriveDownload } from "lucide-react"
 import type { SimpleNode, SimpleEdge, OnUpdateConfig } from "./_shared"
 import { executeSink } from "../../api/client"
@@ -31,6 +31,9 @@ export default function SinkEditor({
   const format = configField(config, "format", "parquet")
   const [writing, setWriting] = useState(false)
   const [writeResult, setWriteResult] = useState<{ status: string; message: string } | null>(null)
+  const configPath = configField(config, "path", "")
+  const [localPath, setLocalPath] = useState(configPath)
+  useEffect(() => { setLocalPath(configPath) }, [configPath])
 
   const hasPath = Boolean(config.path)
 
@@ -74,8 +77,8 @@ export default function SinkEditor({
         <input
           type="text"
           placeholder=""
-          defaultValue={configField(config, "path", "")}
-          onChange={(e) => onUpdate("path", e.target.value)}
+          value={localPath}
+          onChange={(e) => { setLocalPath(e.target.value); onUpdate("path", e.target.value) }}
           className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
           style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
           onFocus={(e) => { e.currentTarget.style.borderColor = withAlpha(accentColor, 0.3); e.currentTarget.style.boxShadow = `0 0 0 2px ${withAlpha(accentColor, 0.1)}` }}

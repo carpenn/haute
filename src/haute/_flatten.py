@@ -8,12 +8,14 @@ from haute._types import GraphEdge, GraphNode, PipelineGraph
 logger = get_logger(component="flatten")
 
 
-def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
-    """Dissolve all submodel nodes into a flat graph for execution.
+def flatten_graph(
+    graph: PipelineGraph,
+    target_name: str | None = None,
+) -> PipelineGraph:
+    """Dissolve submodel nodes into a flat graph for execution.
 
-    Replaces each ``submodel`` node with its child nodes (stored in the
-    ``submodels`` metadata) and rewires boundary edges so they point to
-    the actual internal nodes.
+    When *target_name* is provided, only that specific submodel is
+    flattened.  When ``None`` (default), all submodels are dissolved.
 
     If the graph has no submodels, it is returned unchanged.
     """
@@ -21,15 +23,23 @@ def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
     if not submodels:
         return graph
 
+    names_to_flatten = (
+        {target_name} & set(submodels) if target_name is not None else set(submodels)
+    )
+    if not names_to_flatten:
+        return graph
+
     nodes: list[GraphNode] = list(graph.nodes)
     edges: list[GraphEdge] = list(graph.edges)
 
-    # Remove submodel placeholder nodes
-    submodel_node_ids = {f"submodel__{name}" for name in submodels}
+    # Remove submodel placeholder nodes (only the targeted ones)
+    submodel_node_ids = {f"submodel__{name}" for name in names_to_flatten}
     nodes = [n for n in nodes if n.id not in submodel_node_ids]
 
-    # Inline child nodes and internal edges from each submodel
+    # Inline child nodes and internal edges from each targeted submodel
     for _sm_name, sm_meta in submodels.items():
+        if _sm_name not in names_to_flatten:
+            continue
         sm_graph = sm_meta.get("graph", {})
         for nd in sm_graph.get("nodes", []):
             nodes.append(GraphNode.model_validate(nd) if isinstance(nd, dict) else nd)
@@ -88,4 +98,7 @@ def flatten_graph(graph: PipelineGraph) -> PipelineGraph:
         node_count=len(nodes),
         edge_count=len(deduped),
     )
-    return graph.model_copy(update={"nodes": nodes, "edges": deduped, "submodels": None})
+    remaining_submodels = {
+        k: v for k, v in submodels.items() if k not in names_to_flatten
+    } or None
+    return graph.model_copy(update={"nodes": nodes, "edges": deduped, "submodels": remaining_submodels})

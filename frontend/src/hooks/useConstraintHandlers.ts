@@ -35,7 +35,7 @@ export function useConstraintHandlers(
   }, [constraints, onUpdate])
 
   const handleConstraintValueChange = useCallback((name: string, type: string, value: number) => {
-    onUpdate("constraints", { ...constraints, [name]: { [type]: value } })
+    onUpdate("constraints", { ...constraints, [name]: { ...constraints[name], [type]: value } })
   }, [constraints, onUpdate])
 
   return {

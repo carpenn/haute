@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { OnUpdateConfig } from "../editors"
-import { configField } from "../../utils/configField"
+import { configField, safeParseInt } from "../../utils/configField"
 import { toggleButtonStyle } from "./styles"
 
 type Column = { name: string; dtype: string }
@@ -83,7 +83,7 @@ export function SplitAndMetricsConfig({
                   <input
                     type="number"
                     value={(split.seed as number) ?? 42}
-                    onChange={(e) => onSplitUpdate("seed", parseInt(e.target.value) || 42)}
+                    onChange={(e) => onSplitUpdate("seed", safeParseInt(e.target.value, 42))}
                     className="w-full mt-0.5 px-2 py-1 rounded text-xs font-mono"
                     style={{ background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
                   />

@@ -129,7 +129,7 @@ async def dissolve_submodel(body: DissolveSubmodelRequest) -> DissolveSubmodelRe
     sm_file = sm_meta.get("file", "")
 
     # Remove the submodel from the graph metadata and flatten
-    flat = flatten_graph(graph)
+    flat = flatten_graph(graph, target_name=sm_name)
 
     # Write the updated main file
     from haute.codegen import graph_to_code

@@ -310,8 +310,16 @@ def fetch_and_cache(
             writer.close()
             writer = None
         else:
-            # Zero rows returned -- write an empty parquet so the cache file exists
-            pq.write_table(pa.table({}), str(tmp_path))
+            # Zero rows returned -- write an empty parquet preserving schema
+            if cursor.description:
+                schema = pa.schema([(desc[0], pa.string()) for desc in cursor.description])
+                empty_table = pa.table(
+                    {f.name: pa.array([], type=f.type) for f in schema},
+                    schema=schema,
+                )
+            else:
+                empty_table = pa.table({})
+            pq.write_table(empty_table, str(tmp_path))
         tmp_path.replace(out_path)
     except BaseException:
         if writer is not None:

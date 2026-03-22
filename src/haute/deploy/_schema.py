@@ -86,6 +86,8 @@ def infer_output_schema(
     from haute.deploy._scorer import score_graph
 
     # Build a 1-row sample from the first input node's data
+    if not input_node_ids:
+        raise ValueError("No API input nodes found in the graph")
     node = _find_node(graph, input_node_ids[0])
     config = node.data.config
     path = config.get("path", "")

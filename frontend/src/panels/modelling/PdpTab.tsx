@@ -6,7 +6,7 @@
  *   - Numeric features: line chart of avg_prediction vs feature value
  *   - Categorical features: bar chart (one bar per category)
  */
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import type { TrainResult } from "../../stores/useNodeResultsStore"
 import { FeatureBrowser, type FeatureItem } from "./FeatureBrowser"
 
@@ -42,6 +42,10 @@ export function PdpTab({ result }: PdpTabProps) {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(
     featureItems.length > 0 ? featureItems[0].feature : null,
   )
+
+  useEffect(() => {
+    if (featureItems.length > 0) setSelectedFeature(featureItems[0].feature)
+  }, [featureItems])
 
   const handleSelect = useCallback((feature: string) => {
     setSelectedFeature(feature)
@@ -122,11 +126,11 @@ function PdpLineChart({ grid }: { grid: PdpGridPoint[] }) {
   const xVals = grid.map(p => Number(p.value))
   const yVals = grid.map(p => p.avg_prediction)
 
-  const xMin = Math.min(...xVals)
-  const xMax = Math.max(...xVals)
+  const xMin = xVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const xMax = xVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const xRange = xMax - xMin || 1
-  const yMin = Math.min(...yVals)
-  const yMax = Math.max(...yVals)
+  const yMin = yVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const yMax = yVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const yPad = (yMax - yMin) * 0.1 || 0.001
   const yLo = yMin - yPad
   const yHi = yMax + yPad
@@ -212,8 +216,8 @@ function PdpBarChart({ grid }: { grid: PdpGridPoint[] }) {
   const chartH = height - marginTop - marginBottom
 
   const yVals = grid.map(p => p.avg_prediction)
-  const yMin = Math.min(0, Math.min(...yVals))
-  const yMax = Math.max(...yVals) * 1.1
+  const yMin = Math.min(0, yVals.reduce((a, b) => Math.min(a, b), Infinity))
+  const yMax = yVals.reduce((a, b) => Math.max(a, b), -Infinity) * 1.1
   const ySpan = yMax - yMin || 1
 
   const barGroupW = chartW / grid.length

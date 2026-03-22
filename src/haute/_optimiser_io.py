@@ -48,10 +48,9 @@ def load_optimiser_artifact(path: str) -> dict[str, Any]:
 
     key = (path, mtime)
 
-    if key in _artifact_cache:
+    cached = _artifact_cache.get(key)
+    if cached is not None:
         logger.debug("optimiser_artifact_cache_hit", path=path)
-        cached = _artifact_cache.get(key)
-        assert cached is not None  # guaranteed by __contains__ check above
         return copy.deepcopy(cached)
 
     with open(path, encoding="utf-8") as f:
@@ -105,10 +104,9 @@ def load_mlflow_optimiser_artifact(
     )
 
     cache_key = (source_type, resolved_run_id, resolved_version)
-    if cache_key in _mlflow_cache:
+    cached = _mlflow_cache.get(cache_key)
+    if cached is not None:
         logger.debug("mlflow_optimiser_cache_hit", key=str(cache_key))
-        cached = _mlflow_cache.get(cache_key)
-        assert cached is not None  # guaranteed by __contains__ check above
         return copy.deepcopy(cached)
 
     local_path = mlflow.artifacts.download_artifacts(

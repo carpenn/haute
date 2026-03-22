@@ -409,6 +409,8 @@ class TrainingJob:
             data_path = clean_path
             owns_tmp = True
             _mem_checkpoint(f"dropped {null_count:,} null-target rows")
+            # Re-read row count from cleaned file so split mask matches
+            pq_meta = read_parquet_metadata(Path(data_path))
 
         # Derive features from schema
         features, cat_features = self._derive_features(schema_df)

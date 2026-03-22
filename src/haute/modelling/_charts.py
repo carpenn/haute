@@ -42,6 +42,8 @@ def _truncate_label(label: str, max_len: int = 25) -> str:
 
 def _nice_ticks(min_val: float, max_val: float, n_ticks: int = 5) -> list[float]:
     """Generate clean tick values for an axis range."""
+    if not math.isfinite(min_val) or not math.isfinite(max_val):
+        return []
     if min_val == max_val:
         return [min_val]
     span = max_val - min_val
@@ -441,7 +443,7 @@ def render_horizontal_bars_svg(
     if not data:
         return _placeholder_svg(400, 200, f"No {title.lower() or 'data'}")
 
-    items = sorted(data, key=lambda d: d.get("importance", 0), reverse=True)[:max_items]
+    items = sorted(data, key=lambda d: d.get(value_key, 0), reverse=True)[:max_items]
     n = len(items)
     bar_height = 20
     gap = 6

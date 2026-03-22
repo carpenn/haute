@@ -69,16 +69,17 @@ export default function useEdgeHandlers({
       if (params.source === params.target) return
       const { edges: currentEdges, nodes: currentNodes } = graphRef.current
       const exists = currentEdges.some(
-        (e) => e.source === params.source && e.target === params.target
+        (e) =>
+          e.source === params.source &&
+          e.target === params.target &&
+          e.sourceHandle === (params.sourceHandle ?? null) &&
+          e.targetHandle === (params.targetHandle ?? null)
       )
       if (exists) return
       if (wouldExceedMaxInputs(params.target!, currentNodes, currentEdges)) return
 
-      const targetNode = currentNodes.find((n) => n.id === params.target)
-      if (targetNode && nodeData(targetNode).nodeType === NODE_TYPES.SUBMODEL && params.targetHandle) {
-        setEdges((eds) => addEdge({ ...params, targetHandle: null }, eds))
-        return
-      }
+      // For submodel nodes, keep the targetHandle so drill-in can route
+      // edges to the correct internal port node.
 
       setEdges((eds) => addEdge(params, eds))
     },

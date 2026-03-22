@@ -36,7 +36,7 @@ _last_fetch_time: float = 0.0
 
 # Characters that have no business in a branch name or SHA — used by
 # ``_validate_ref_name`` to block argument injection.
-_BAD_REF_CHARS = re.compile(r"[\x00-\x1f\x7f~^:?*\[\\]")
+_BAD_REF_CHARS = re.compile(r'[\x00-\x1f\x7f~^:?*\[\]\\]')
 
 
 # ---------------------------------------------------------------------------

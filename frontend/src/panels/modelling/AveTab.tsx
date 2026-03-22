@@ -7,7 +7,7 @@
  *   - Lines = avg_actual (green) + avg_predicted (purple)
  *   - X-axis = bin labels
  */
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import type { TrainResult } from "../../stores/useNodeResultsStore"
 import { FeatureBrowser, type FeatureItem } from "./FeatureBrowser"
 
@@ -45,6 +45,10 @@ export function AveTab({ result }: AveTabProps) {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(
     featureItems.length > 0 ? featureItems[0].feature : null,
   )
+
+  useEffect(() => {
+    if (featureItems.length > 0) setSelectedFeature(featureItems[0].feature)
+  }, [featureItems])
 
   const handleSelect = useCallback((feature: string) => {
     setSelectedFeature(feature)
@@ -104,14 +108,14 @@ function AveChart({ data }: { data: AveFeature }) {
 
   // Scales
   const allAvgVals = bins.flatMap(b => [b.avg_actual, b.avg_predicted])
-  const yMin = Math.min(...allAvgVals)
-  const yMax = Math.max(...allAvgVals)
+  const yMin = allAvgVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const yMax = allAvgVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const yPad = (yMax - yMin) * 0.1 || 0.001
   const yLo = yMin - yPad
   const yHi = yMax + yPad
   const ySpan = yHi - yLo
 
-  const maxExposure = Math.max(...bins.map(b => b.exposure))
+  const maxExposure = bins.map(b => b.exposure).reduce((a, b) => Math.max(a, b), -Infinity)
 
   const barGroupW = chartW / bins.length
   const barW = barGroupW * 0.6

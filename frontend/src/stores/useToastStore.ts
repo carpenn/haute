@@ -22,7 +22,7 @@ const useToastStore = create<ToastState>()((set, get) => ({
     const id = String(get()._toastCounter + 1)
     set((s) => ({
       _toastCounter: s._toastCounter + 1,
-      toasts: [...s.toasts, { id, type, text }],
+      toasts: [...s.toasts.slice(-9), { id, type, text }],
     }))
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),

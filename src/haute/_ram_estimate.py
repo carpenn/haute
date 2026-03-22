@@ -167,13 +167,6 @@ def estimate_gpu_vram_bytes(
 
 # Bytes per column for the analytical estimate.  Training features are
 # cast to Float32 (4 bytes) in _build_pool, but the Polars DataFrame
-# before that uses Float64 (8 bytes) for numerics.  String columns are
-# cast to Categorical (~4 bytes index + dictionary overhead).  Using 8
-# gives a conservative upper bound that matches the Polars in-memory
-# representation before _build_pool runs.
-_BYTES_PER_COL = 8
-
-
 def _parquet_metadata(path: str) -> tuple[int, int]:
     """Return (row_count, column_count) from parquet footer metadata."""
     meta = read_parquet_metadata(Path(path))

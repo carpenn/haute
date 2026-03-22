@@ -167,7 +167,7 @@ export default function BandingEditor({
           ) : (
             <input
               key={`col-${safeIdx}`}
-              type="text" placeholder="driver_age" defaultValue={factor.column}
+              type="text" placeholder="driver_age" value={factor.column || ""}
               onChange={(e) => updateFactor(safeIdx, { column: e.target.value })}
               className="w-full px-2 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
               style={INPUT_STYLE} />
@@ -177,7 +177,7 @@ export default function BandingEditor({
           <label className="text-[11px] font-bold uppercase tracking-[0.08em] block mb-1" style={{ color: 'var(--text-muted)' }}>Output Column</label>
           <input
             key={`out-${safeIdx}`}
-            type="text" placeholder="age_band" defaultValue={factor.outputColumn}
+            type="text" placeholder="age_band" value={factor.outputColumn || ""}
             onChange={(e) => updateFactor(safeIdx, { outputColumn: e.target.value })}
             className="w-full px-2 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
             style={INPUT_STYLE} />
@@ -217,8 +217,8 @@ export default function BandingEditor({
         </label>
         <input
           key={`def-${safeIdx}`}
-          type="text" placeholder="null" defaultValue={factor.default || ""}
-          onChange={(e) => updateFactor(safeIdx, { default: e.target.value || null })}
+          type="text" placeholder="null" defaultValue={factor.default ?? ""}
+          onChange={(e) => updateFactor(safeIdx, { default: e.target.value !== "" ? e.target.value : null })}
           className="w-full px-2 py-1.5 text-xs font-mono rounded-lg focus:outline-none focus:ring-2"
           style={INPUT_STYLE} />
       </div>

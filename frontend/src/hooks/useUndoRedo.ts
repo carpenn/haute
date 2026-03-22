@@ -41,9 +41,16 @@ export default function useUndoRedo(initialNodes: Node[] = [], initialEdges: Edg
   const [canRedo, setCanRedo] = useState(false)
 
   const pushSnapshot = useCallback(() => {
+    // Shallow-clone each node/edge so in-place mutations (e.g. React Flow
+    // updating `position` during drag) don't corrupt historical snapshots.
+    // This is O(n) in node count and only runs on structural changes, not
+    // on every drag pixel — drags are batched via the isDragging guard.
     past.current = [
       ...past.current.slice(-(MAX_HISTORY - 1)),
-      { nodes: nodesRef.current, edges: edgesRef.current },
+      {
+        nodes: nodesRef.current.map((n) => ({ ...n, data: { ...n.data } })),
+        edges: edgesRef.current.map((e) => ({ ...e })),
+      },
     ]
     future.current = []
     setCanUndo(true)

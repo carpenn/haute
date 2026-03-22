@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Check, ChevronDown, Loader2 } from "lucide-react"
 import {
   getWarehouses,
@@ -155,6 +155,13 @@ export function CatalogTablePicker({
   const [catalog, setCatalog] = useState(parts[0] || "")
   const [dbSchema, setDbSchema] = useState(parts[1] || "")
   const [tableName, setTableName] = useState(parts[2] || "")
+
+  useEffect(() => {
+    const parts = table ? table.split(".") : []
+    setCatalog(parts[0] || "")
+    setDbSchema(parts[1] || "")
+    setTableName(parts[2] || "")
+  }, [table])
 
   const [catalogs, setCatalogs] = useState<CatalogItem[]>([])
   const [schemas, setSchemas] = useState<SchemaItem[]>([])

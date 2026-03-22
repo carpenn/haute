@@ -225,6 +225,25 @@ def _dedent(code: str) -> str:
     return "\n".join(line[m:] if len(line) >= m else line for line in code_lines)
 
 
+def _unwrap_chain_assignment(code: str) -> str | None:
+    """Unwrap ``df = (\\n...\\n)`` and strip the leading source variable name.
+
+    Returns the extracted chain code, or ``None`` if the pattern doesn't match.
+    """
+    if not (code.startswith("df = (") or code.startswith("df=(")):
+        return None
+    inner = code.split("(", 1)[1]
+    if inner.rstrip().endswith(")"):
+        inner = inner.rstrip()[:-1]
+    extracted = _dedent(inner).strip()
+    # Strip leading source variable name to prevent accumulation on
+    # save/reload roundtrips (e.g. "source_name\n.filter()")
+    lines = extracted.splitlines()
+    if len(lines) > 1 and lines[1].lstrip().startswith(".") and lines[0].strip().isidentifier():
+        extracted = "\n".join(lines[1:])
+    return extracted
+
+
 def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     """Extract the meaningful user code from a function body.
 
@@ -252,11 +271,9 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     code = "\n".join(code_lines).strip()
 
     # Pattern 1: codegen chain style "df = (\n...\n)" — unwrap to inner
-    if code.startswith("df = (") or code.startswith("df=("):
-        inner = code.split("(", 1)[1]
-        if inner.rstrip().endswith(")"):
-            inner = inner.rstrip()[:-1]
-        return _dedent(inner).strip()
+    chain = _unwrap_chain_assignment(code)
+    if chain is not None:
+        return chain
 
     # Pattern 2: hand-written "return <expr>" — strip "return " prefix
     stripped_lines = []
@@ -355,11 +372,9 @@ def _extract_source_user_code(body_source: str) -> str:
     code = "\n".join(code_lines).strip()
 
     # Unwrap codegen chain style: df = (\n...\n)
-    if code.startswith("df = (") or code.startswith("df=("):
-        inner = code.split("(", 1)[1]
-        if inner.rstrip().endswith(")"):
-            inner = inner.rstrip()[:-1]
-        return _dedent(inner).strip()
+    chain = _unwrap_chain_assignment(code)
+    if chain is not None:
+        return chain
 
     return code
 

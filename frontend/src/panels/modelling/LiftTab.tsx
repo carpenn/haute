@@ -94,8 +94,8 @@ function DoubleLiftChart({
   const chartH = height - marginTop - marginBottom
 
   const allVals = data.flatMap(d => [d.actual, d.predicted])
-  const yMax = Math.max(...allVals) * 1.1
-  const yMin = Math.min(0, Math.min(...allVals) * 1.1)
+  const yMax = allVals.reduce((a, b) => Math.max(a, b), -Infinity) * 1.1
+  const yMin = Math.min(0, allVals.reduce((a, b) => Math.min(a, b), Infinity) * 1.1)
   const ySpan = yMax - yMin || 1
 
   const nDeciles = data.length
@@ -255,7 +255,7 @@ function LorenzChart({
   const yScale = (v: number) => marginTop + chartH - v * chartH
 
   // Compute Gini coefficient (2 * area between diagonal and curve)
-  const gini = computeGini(curve)
+  const gini = computeGini(curve, perfectCurve)
 
   // Build SVG paths
   const modelPath = curve
@@ -355,20 +355,27 @@ function LorenzChart({
   )
 }
 
-/** Compute Gini coefficient using trapezoidal rule. */
-function computeGini(curve: { cum_weight_frac: number; cum_actual_frac: number }[]): number {
+/** Compute normalized Gini coefficient using trapezoidal rule. */
+function computeGini(
+  curve: { cum_weight_frac: number; cum_actual_frac: number }[],
+  perfectCurve?: { cum_weight_frac: number; cum_actual_frac: number }[],
+): number {
   if (curve.length < 2) return 0
 
-  // Area under model curve using trapezoidal rule
-  let areaModel = 0
-  for (let i = 1; i < curve.length; i++) {
-    const dx = curve[i].cum_weight_frac - curve[i - 1].cum_weight_frac
-    const avgY = (curve[i].cum_actual_frac + curve[i - 1].cum_actual_frac) / 2
-    areaModel += dx * avgY
+  const trapArea = (pts: { cum_weight_frac: number; cum_actual_frac: number }[]) => {
+    let area = 0
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].cum_weight_frac - pts[i - 1].cum_weight_frac
+      const avgY = (pts[i].cum_actual_frac + pts[i - 1].cum_actual_frac) / 2
+      area += dx * avgY
+    }
+    return area
   }
 
-  // Area under diagonal = 0.5
-  // Gini = (area_model - 0.5) / (max_possible_area - 0.5)
-  // For simplicity: Gini = 2 * areaModel - 1 (normalized Gini)
-  return 2 * areaModel - 1
+  const rawGini = 2 * trapArea(curve) - 1
+  if (perfectCurve && perfectCurve.length >= 2) {
+    const perfectGini = 2 * trapArea(perfectCurve) - 1
+    return perfectGini !== 0 ? rawGini / perfectGini : 0
+  }
+  return rawGini
 }

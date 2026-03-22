@@ -217,6 +217,7 @@ import polars as pl
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from haute._types import PipelineGraph
 from haute.deploy._scorer import score_graph
 
 # ── Load manifest at startup ────────────────────────────────────────
@@ -224,7 +225,7 @@ from haute.deploy._scorer import score_graph
 _MANIFEST_PATH = Path(__file__).parent / "deploy_manifest.json"
 _manifest = json.loads(_MANIFEST_PATH.read_text())
 
-_pruned_graph = _manifest["pruned_graph"]
+_pruned_graph = PipelineGraph.model_validate(_manifest["pruned_graph"])
 _input_node_ids = _manifest["input_node_ids"]
 _output_node_id = _manifest["output_node_id"]
 _artifact_paths = _manifest["artifacts"]

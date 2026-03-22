@@ -59,7 +59,7 @@ export default function useSubmodelNavigation({
         setEdgesRaw(normalizeEdges(newGraph.edges ?? []))
         submodelsRef.current = newGraph.submodels ?? {}
         addToast("success", `Submodel "${name}" created`)
-        setDirty(false)
+        setDirty(true)
         setTimeout(() => fitView({ padding: 0.8 }), 100)
       }
     } catch (err: unknown) {
@@ -200,9 +200,9 @@ export default function useSubmodelNavigation({
       if (flat) {
         setNodesRaw(flat.nodes ?? [])
         setEdgesRaw(normalizeEdges(flat.edges ?? []))
-        submodelsRef.current = {}
+        submodelsRef.current = data.graph?.submodels ?? submodelsRef.current
         addToast("success", `Submodel "${smName}" dissolved`)
-        setDirty(false)
+        setDirty(true)
         setTimeout(() => fitView({ padding: 0.8 }), 100)
       }
     } catch (err: unknown) {

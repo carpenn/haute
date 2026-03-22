@@ -211,8 +211,11 @@ def _tweedie_deviance(
         diff_ratio = (y_true_safe - y_pred_safe) / y_pred_safe
         dev = 2.0 * (-log_ratio + diff_ratio)
     else:
-        term1 = (
-            np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p)) if np.any(y_true_safe > 0) else 0.0
+        # Element-wise: term1 is 0 when y_true == 0 (avoids inf from 0^negative)
+        term1 = np.where(
+            y_true_safe > 0,
+            np.power(y_true_safe, 2 - p) / ((1 - p) * (2 - p)),
+            0.0,
         )
         term2 = y_true_safe * np.power(y_pred_safe, 1 - p) / (1 - p)
         term3 = np.power(y_pred_safe, 2 - p) / (2 - p)

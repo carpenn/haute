@@ -273,11 +273,14 @@ def _build_pool(
     from haute._mlflow_io import _prepare_predict_frame
 
     cat_set = set(cat_features or [])
-    cat_indices = [i for i, f in enumerate(features) if f in cat_set]
 
     # Select only features present in the DataFrame (may differ when the
     # caller pre-selects columns).
     cols_to_select = [f for f in features if f in df.columns]
+
+    # Compute cat_indices from cols_to_select (not features) so indices
+    # match the actual columns in x_data after filtering.
+    cat_indices = [i for i, f in enumerate(cols_to_select) if f in cat_set]
     selected = df.select(cols_to_select) if cols_to_select != df.columns else df
 
     x_data = _prepare_predict_frame(

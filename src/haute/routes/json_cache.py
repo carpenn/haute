@@ -34,6 +34,9 @@ async def build_json_cache(body: JsonCacheBuildRequest) -> JsonCacheBuildRespons
         from haute._json_flatten import JsonCacheCancelledError
         from haute._json_flatten import build_json_cache as _build
 
+        if body.config_path:
+            validate_safe_path(Path.cwd(), body.config_path)
+
         result = await asyncio.wait_for(
             asyncio.to_thread(
                 _build,

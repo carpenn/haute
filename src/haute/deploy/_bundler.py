@@ -89,6 +89,8 @@ def collect_artifacts(
             local_path = _download_model_artifact(
                 run_id, artifact_path, pipeline_dir,
             )
+            # Patch config so the scorer can build a matching artifact key
+            config["artifact_path"] = local_path.name
             artifact_name = _artifact_name(nid, local_path)
             artifacts[artifact_name] = local_path
 

@@ -292,7 +292,7 @@ class DeployConfig:
 
     def override(self, **cli_kwargs: Any) -> DeployConfig:
         """Return a copy with non-None CLI flags applied over TOML values."""
-        c = copy.copy(self)
+        c = copy.deepcopy(self)
         for key, val in cli_kwargs.items():
             if val is not None and hasattr(c, key):
                 setattr(c, key, val)

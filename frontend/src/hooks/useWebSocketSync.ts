@@ -28,6 +28,7 @@ export default function useWebSocketSync({
   const { addToast } = useToastStore()
   const [status, setStatus] = useState<WsStatus>("reconnecting")
   const retriesRef = useRef(0)
+  const missedUpdateRef = useRef(false)
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
@@ -54,7 +55,10 @@ export default function useWebSocketSync({
             // Skip file-watcher updates when the user has unsaved edits.
             // Their next save will write the .py file, and the subsequent
             // broadcast (after save) will be accepted since dirty is false.
-            if (useUIStore.getState().dirty) return
+            if (useUIStore.getState().dirty) {
+              missedUpdateRef.current = true
+              return
+            }
 
             const g = msg.graph
             const newNodes = g.nodes || []

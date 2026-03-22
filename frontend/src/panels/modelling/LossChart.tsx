@@ -28,8 +28,8 @@ export function LossChart({ lossHistory, bestIteration }: LossChartProps) {
     if (trainKey && entry[trainKey] != null) allVals.push(entry[trainKey])
     if (evalKey && entry[evalKey] != null) allVals.push(entry[evalKey])
   }
-  const yMin = Math.min(...allVals)
-  const yMax = Math.max(...allVals)
+  const yMin = allVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const yMax = allVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const yRange = yMax - yMin || 1
 
   const xScale = (i: number) => px + (i / (lossHistory.length - 1)) * chartW

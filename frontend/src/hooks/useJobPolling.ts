@@ -17,6 +17,7 @@ const BASE_INTERVAL_MS = 500
 const MAX_INTERVAL_MS = 5_000
 const MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000 // 24 hours
 const CONSECUTIVE_FAILURES_FOR_TOAST = 5
+const POLL_TIMEOUT_MS = 30_000
 
 // ── Per-job polling state tracked alongside the timeout handle ──
 
@@ -118,7 +119,12 @@ function reconcilePollers<TJob, TStatus>(
 
       state.timeoutId = setTimeout(async () => {
         try {
-          const status = await pollFn(jobIdFn(job))
+          const status = await Promise.race([
+            pollFn(jobIdFn(job)),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("Poll request timed out")), POLL_TIMEOUT_MS),
+            ),
+          ])
 
           // Reset backoff on successful network call
           state.consecutiveErrors = 0

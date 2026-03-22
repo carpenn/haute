@@ -226,65 +226,69 @@ class TrainService:
                 }
             )
 
-        preamble_ns = self._compile_preamble(body.graph)
-        ram_warning, row_limit, total_source_rows, probe_columns = self._estimate_ram(
-            body.graph,
-            body.node_id,
-            preamble_ns,
-            job_id,
-            source=body.source,
-        )
-        user_limit = config.get("row_limit")
-        row_limit = _clamp_row_limit(row_limit, user_limit)
+        try:
+            preamble_ns = self._compile_preamble(body.graph)
+            ram_warning, row_limit, total_source_rows, probe_columns = self._estimate_ram(
+                body.graph,
+                body.node_id,
+                preamble_ns,
+                job_id,
+                source=body.source,
+            )
+            user_limit = config.get("row_limit")
+            row_limit = _clamp_row_limit(row_limit, user_limit)
 
-        # If the user's row_limit is the binding constraint, the RAM
-        # downsample warning is irrelevant — suppress it.
-        if (
-            ram_warning
-            and user_limit
-            and isinstance(user_limit, (int, float))
-            and int(user_limit) > 0
-            and (row_limit is not None and row_limit == int(user_limit))
-        ):
-            ram_warning = None
-            self._store.update_job(job_id, warning=None)
+            # If the user's row_limit is the binding constraint, the RAM
+            # downsample warning is irrelevant — suppress it.
+            if (
+                ram_warning
+                and user_limit
+                and isinstance(user_limit, (int, float))
+                and int(user_limit) > 0
+                and (row_limit is not None and row_limit == int(user_limit))
+            ):
+                ram_warning = None
+                self._store.update_job(job_id, warning=None)
 
-        train_params = {**config.get("params", {})}
-        for k in _GLM_CONFIG_KEYS:
-            if k in config and k not in train_params:
-                train_params[k] = config[k]
+            train_params = {**config.get("params", {})}
+            for k in _GLM_CONFIG_KEYS:
+                if k in config and k not in train_params:
+                    train_params[k] = config[k]
 
-        split_cfg = config.get("split", {})
-        ram_warning = self._check_gpu_fallback(
-            train_params,
-            row_limit,
-            total_source_rows,
-            probe_columns,
-            ram_warning,
-            job_id,
-            validation_size=float(
-                split_cfg.get("validation_size", split_cfg.get("test_size", 0.2))
-            ),
-            holdout_size=float(split_cfg.get("holdout_size", 0.0)),
-        )
+            split_cfg = config.get("split", {})
+            ram_warning = self._check_gpu_fallback(
+                train_params,
+                row_limit,
+                total_source_rows,
+                probe_columns,
+                ram_warning,
+                job_id,
+                validation_size=float(
+                    split_cfg.get("validation_size", split_cfg.get("test_size", 0.2))
+                ),
+                holdout_size=float(split_cfg.get("holdout_size", 0.0)),
+            )
 
-        # Build the list of columns that must survive projection
-        # (target, weight, offset — even if they're in the exclude list).
-        excluded = config.get("exclude", [])
-        keep_cols: list[str] = [config["target"]]
-        if config.get("weight"):
-            keep_cols.append(config["weight"])
-        if config.get("offset"):
-            keep_cols.append(config["offset"])
+            # Build the list of columns that must survive projection
+            # (target, weight, offset — even if they're in the exclude list).
+            excluded = config.get("exclude", [])
+            keep_cols: list[str] = [config["target"]]
+            if config.get("weight"):
+                keep_cols.append(config["weight"])
+            if config.get("offset"):
+                keep_cols.append(config["offset"])
 
-        tmp_parquet = self._execute_and_sink(
-            body,
-            preamble_ns,
-            row_limit,
-            job_id,
-            exclude=excluded or None,
-            keep_columns=keep_cols,
-        )
+            tmp_parquet = self._execute_and_sink(
+                body,
+                preamble_ns,
+                row_limit,
+                job_id,
+                exclude=excluded or None,
+                keep_columns=keep_cols,
+            )
+        except Exception as exc:
+            self._store.update_job(job_id, status="error", error=str(exc))
+            raise
 
         self._launch_background(
             job_id,
@@ -587,7 +591,7 @@ class TrainService:
             model_name=config.get("model_name") or None,
             output_dir=config.get("output_dir", "models"),
             loss_function=config.get("loss_function") or None,
-            variance_power=config.get("variance_power"),
+            variance_power=config.get("variance_power") if config.get("variance_power") is not None else config.get("var_power"),
             offset=config.get("offset") or None,
             monotone_constraints=config.get("monotone_constraints") or None,
             feature_weights=config.get("feature_weights") or None,

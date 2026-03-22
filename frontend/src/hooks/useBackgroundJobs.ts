@@ -32,7 +32,10 @@ export default function useBackgroundJobs() {
     [],
   )
   const solveOnComplete = useCallback(
-    (nodeId: string, status: SolveProgress) => completeSolveJob(nodeId, status.result!),
+    (nodeId: string, status: SolveProgress) => {
+      if (!status.result) return
+      completeSolveJob(nodeId, status.result)
+    },
     [completeSolveJob],
   )
 
@@ -65,7 +68,10 @@ export default function useBackgroundJobs() {
     [],
   )
   const trainOnComplete = useCallback(
-    (nodeId: string, status: TrainProgress) => completeTrainJob(nodeId, status.result!),
+    (nodeId: string, status: TrainProgress) => {
+      if (!status.result) return
+      completeTrainJob(nodeId, status.result)
+    },
     [completeTrainJob],
   )
 

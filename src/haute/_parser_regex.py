@@ -54,6 +54,11 @@ _RE_DECORATOR_BOOL_KWARG = re.compile(
     r"(\w+)\s*=\s*(True|False)",
 )
 
+_RE_DECORATOR_NUM_KWARG = re.compile(
+    r"(\w+)\s*=\s*(-?[\d.]+(?:e[+-]?\d+)?)\b",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -137,6 +142,10 @@ def _parse_decorator_kwargs_regex(decorator_text: str) -> dict[str, Any]:
         for key, val in _RE_DECORATOR_BOOL_KWARG.findall(inner):
             if key not in result:
                 result[key] = val == "True"
+        # Also capture numeric kwargs (e.g. steps=10, default=1.05)
+        for key, val in _RE_DECORATOR_NUM_KWARG.findall(inner):
+            if key not in result:
+                result[key] = float(val) if "." in val or "e" in val.lower() else int(val)
         return result
     return {}
 

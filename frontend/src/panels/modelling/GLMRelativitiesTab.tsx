@@ -42,7 +42,7 @@ export function GLMRelativitiesTab({ result }: GLMRelativitiesTabProps) {
   }
 
   // Scale: find max deviation from 1.0
-  const maxDev = Math.max(...rows.map(r => Math.abs(r.relativity - 1)), 0.1)
+  const maxDev = Math.max(rows.map(r => Math.abs(r.relativity - 1)).reduce((a, b) => Math.max(a, b), -Infinity), 0.1)
   const hasCi = rows.some(r => r.ci_lower != null && r.ci_upper != null)
 
   return (

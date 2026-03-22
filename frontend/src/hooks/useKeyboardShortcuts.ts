@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import type { Node, Edge } from "@xyflow/react"
 import useToastStore from "../stores/useToastStore"
 import useUIStore from "../stores/useUIStore"
+import useNodeResultsStore from "../stores/useNodeResultsStore"
 
 interface KeyboardShortcutsParams {
   handleSave: () => void
@@ -161,6 +162,10 @@ export default function useKeyboardShortcuts({
           setEdges(currentEdges.filter((ed) => !selectedNodeIds.has(ed.source) && !selectedNodeIds.has(ed.target)))
           setSelectedNode(null)
           setPreviewData(null)
+          // Clean up store state for deleted nodes
+          for (const nid of selectedNodeIds) {
+            useNodeResultsStore.getState().clearNode(nid)
+          }
         } else {
           setEdges(currentEdges.filter((ed) => !selectedEdgeIds.has(ed.id)))
         }

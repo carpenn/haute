@@ -114,7 +114,7 @@ export default function Toolbar({
               autoFocus
               value={newSourceName}
               onChange={(e) => setNewSourceName(e.target.value)}
-              onBlur={() => { setAddingSource(false); setNewSourceName("") }}
+              onBlur={() => requestAnimationFrame(() => { setAddingSource(false); setNewSourceName("") })}
               placeholder="name"
               className="w-20 px-1.5 py-1 text-[11px] font-mono rounded focus:outline-none"
               style={{ background: 'var(--chrome-hover)', border: '1px solid var(--accent)', color: 'var(--text-primary)' }}

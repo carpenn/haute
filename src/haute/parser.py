@@ -148,6 +148,8 @@ def parse_pipeline_source(
 
         for rel_path in submodel_paths:
             sm_filepath = (_base_dir / rel_path).resolve()
+            if not sm_filepath.is_relative_to(_base_dir.resolve()):
+                raise ValueError(f"Submodel path {rel_path!r} escapes project directory")
             if not sm_filepath.is_file():
                 continue
             sm_graph = parse_submodel_file(sm_filepath, _base_dir=_base_dir)

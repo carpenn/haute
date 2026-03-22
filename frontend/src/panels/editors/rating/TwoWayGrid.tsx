@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import type { RatingTable } from "./ratingTableUtils"
-import { relativityColor, relativityTextColor, tableStats } from "./ratingTableUtils"
+import { relativityColor, relativityTextColor, tableStats, resolveDefault } from "./ratingTableUtils"
+import { ControlledNumberCell } from "./ControlledNumberCell"
 import { StatsFooter } from "./StatsFooter"
 
 export function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverrides }: {
@@ -15,6 +16,7 @@ export function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverri
   const colFactor = usedFactors[1]
   const entries = useMemo(() => table.entries || [], [table.entries])
   const stats = useMemo(() => tableStats(entries), [entries])
+  const safeDefault = resolveDefault(table.defaultValue)
 
   if (!rowFactor || !colFactor) return null
 
@@ -25,13 +27,13 @@ export function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverri
   for (const e of entries) {
     const matchSlice = Object.entries(sliceKey).every(([k, v]) => String(e[k]) === v)
     if (!matchSlice) continue
-    const key = `${e[rowFactor]}|${e[colFactor]}`
+    const key = `${e[rowFactor]}\x1F${e[colFactor]}`
     lookup.set(key, typeof e.value === "number" ? e.value : parseFloat(String(e.value ?? "1")))
   }
 
   const updateCell = (row: string, col: string, val: string) => {
-    const num = val === "" ? 0 : parseFloat(val)
-    const numVal = isNaN(num) ? 0 : num
+    const parsed = parseFloat(val)
+    const numVal = val === "" ? safeDefault : (Number.isNaN(parsed) ? safeDefault : parsed)
     const matchRow = (e: Record<string, string | number>) =>
       String(e[rowFactor]) === row && String(e[colFactor]) === col &&
       Object.entries(sliceKey).every(([k, v]) => String(e[k]) === v)
@@ -81,12 +83,12 @@ export function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverri
                     background: ri % 2 === 0 ? 'var(--bg-input)' : 'var(--bg-surface)',
                   }}>{row}</td>
                 {colLabels.map(col => {
-                  const val = lookup.get(`${row}|${col}`) ?? 1
+                  const val = lookup.get(`${row}\x1F${col}`) ?? safeDefault
                   return (
                     <td key={col} className="px-0.5 py-0.5" style={{ borderBottom: '1px solid var(--border)' }}>
-                      <input type="number" step="0.01"
-                        defaultValue={val}
-                        onBlur={(e) => updateCell(row, col, e.target.value)}
+                      <ControlledNumberCell
+                        val={val}
+                        onCommit={(v) => updateCell(row, col, v)}
                         className="w-full px-1 py-1 rounded text-[11px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
                         style={{
                           background: relativityColor(val),
@@ -107,3 +109,4 @@ export function TwoWayGrid({ table, bandingLevels, onUpdateEntries, factorOverri
     </div>
   )
 }
+

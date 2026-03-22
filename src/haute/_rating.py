@@ -108,6 +108,8 @@ def _normalise_banding_factors(config: dict[str, Any]) -> list[dict[str, Any]]:
 # Rating tables
 # ---------------------------------------------------------------------------
 
+_LOOKUP_VAL = "__haute_lookup_val__"
+
 
 def _apply_rating_table(
     lf: _Frame,
@@ -133,6 +135,15 @@ def _apply_rating_table(
         return lf
     lookup = lookup.with_columns(pl.col("value").cast(pl.Float64))
 
+    # Reject NaN/Inf in rating table entries — they corrupt pricing silently
+    _bad_count = lookup.filter(
+        pl.col("value").is_nan() | pl.col("value").is_infinite()
+    ).height
+    if _bad_count:
+        raise ValueError(
+            f"Rating table for '{output_col}' contains {_bad_count} NaN or Inf entries"
+        )
+
     # B15: Select only factor columns + "value" to avoid polluting the main
     # frame with extra keys that may be present in the entries dicts.
     # Guard: if any factor column is missing from entries, config is invalid.
@@ -143,6 +154,10 @@ def _apply_rating_table(
 
     # B14: Deduplicate on factor columns so a left join cannot fan out rows.
     lookup = lookup.unique(subset=factors, keep="last")
+
+    # Rename "value" to an internal name to avoid collision with any
+    # pre-existing "value" column in the input frame (Bug #1/#2).
+    lookup = lookup.rename({"value": _LOOKUP_VAL})
 
     # Cast factor columns in lookup to Utf8 so the join matches string bands
     for f in factors:
@@ -185,14 +200,13 @@ def _apply_rating_table(
         default_val = None
     if default_val is not None:
         lf = lf.with_columns(
-            pl.col("value").fill_null(default_val).alias(output_col),
+            pl.col(_LOOKUP_VAL).fill_null(default_val).alias(output_col),
         )
     else:
-        lf = lf.with_columns(pl.col("value").alias(output_col))
+        lf = lf.with_columns(pl.col(_LOOKUP_VAL).alias(output_col))
 
-    # Drop the temporary "value" column if it differs from outputColumn
-    if output_col != "value":
-        lf = lf.drop("value")
+    # Drop the internal lookup column (always; it can never collide now)
+    lf = lf.drop(_LOOKUP_VAL)
 
     return lf
 
@@ -214,17 +228,19 @@ def _combine_rating_columns(
 
     if operation == "add":
         # fill_null(0.0) for add: missing factor contributes nothing
-        expr = pl.col(columns[0]).fill_null(0.0)
+        # fill_nan(0.0) also catches NaN from bad lookup entries
+        expr = pl.col(columns[0]).fill_null(0.0).fill_nan(0.0)
         for c in columns[1:]:
-            expr = expr + pl.col(c).fill_null(0.0)
+            expr = expr + pl.col(c).fill_null(0.0).fill_nan(0.0)
     elif operation == "min":
         expr = pl.min_horizontal(*[pl.col(c) for c in columns])
     elif operation == "max":
         expr = pl.max_horizontal(*[pl.col(c) for c in columns])
     else:  # multiply (default)
         # fill_null(1.0) for multiply: missing factor = no effect (neutral element)
-        expr = pl.col(columns[0]).fill_null(1.0)
+        # fill_nan(1.0) also catches NaN from bad lookup entries
+        expr = pl.col(columns[0]).fill_null(1.0).fill_nan(1.0)
         for c in columns[1:]:
-            expr = expr * pl.col(c).fill_null(1.0)
+            expr = expr * pl.col(c).fill_null(1.0).fill_nan(1.0)
 
     return lf.with_columns(expr.alias(output_col))

@@ -252,11 +252,7 @@ class Pipeline(NodeRegistry):
                         input_dfs = [outputs[name] for name in input_names]
                         outputs[n.name] = n(*input_dfs)
                     else:
-                        # No explicit edges - use last available output (backward compat)
-                        last_df = list(outputs.values())[-1] if outputs else None
-                        if last_df is None:
-                            raise ValueError(f"Node '{n.name}' has no input")
-                        outputs[n.name] = n(last_df)
+                        raise ValueError(f"Node '{n.name}' has no inbound edges. Use pipeline.connect() to wire it up.")
 
             # Return the output of the last node in topo order
             return outputs[order[-1].name]
@@ -303,8 +299,7 @@ class Pipeline(NodeRegistry):
                     input_dfs = [outputs[name] for name in input_names]
                     outputs[n.name] = n(*input_dfs)
                 else:
-                    outputs[n.name] = n(df)
-                    df = outputs[n.name]
+                    raise ValueError(f"Node '{n.name}' has no inbound edges. Use pipeline.connect() to wire it up.")
 
             return outputs[order[-1].name]
         finally:

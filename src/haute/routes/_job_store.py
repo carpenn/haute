@@ -37,6 +37,7 @@ class JobStore:
         stale = [
             jid for jid, j in self._jobs.items()
             if j.get("created_at", 0) < cutoff
+            and j.get("status") not in ("running",)
         ]
         for jid in stale:
             del self._jobs[jid]
@@ -71,7 +72,13 @@ class JobStore:
         """
         self._jobs[job_id].update(fields)
 
-    def atomic_update(self, job_id: str, fields: dict[str, Any]) -> None:
+    def atomic_update(
+        self,
+        job_id: str,
+        fields: dict[str, Any],
+        *,
+        expected_status: str | None = None,
+    ) -> dict[str, Any]:
         """Replace the job dict with a merged copy — thread-safe.
 
         Instead of mutating the existing dict (which can race with
@@ -80,10 +87,17 @@ class JobStore:
         ``dict.__setitem__`` is atomic, so a reader will always see
         either the old dict or the new one — never a half-updated state.
 
+        When *expected_status* is provided, the update is skipped if the
+        current status does not match (prevents timeout from overwriting
+        a completed job).
+
         Raises ``KeyError`` if *job_id* does not exist.
         """
         old = self._jobs[job_id]
+        if expected_status is not None and old.get("status") != expected_status:
+            return old
         self._jobs[job_id] = {**old, **fields}
+        return self._jobs[job_id]
 
     def require_job(self, job_id: str) -> dict[str, Any]:
         """Return the job dict for *job_id*, or raise HTTP 404 if not found.

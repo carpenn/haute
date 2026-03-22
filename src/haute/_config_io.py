@@ -138,7 +138,7 @@ def save_node_config(
     rel_path = config_path_for_node(node_type, node_name)
     abs_path = base_dir / rel_path
     abs_path.parent.mkdir(parents=True, exist_ok=True)
-    filtered = {k: v for k, v in config.items() if k not in _CODE_KEYS}
+    filtered = {k: v for k, v in config.items() if k not in _CODE_KEYS and not k.startswith("_")}
     abs_path.write_text(json.dumps(filtered, indent=2, ensure_ascii=False) + "\n")
     logger.info("config_saved", path=str(rel_path), node_type=node_type.value)
     return rel_path
@@ -220,6 +220,6 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
             continue
         func_name = _sanitize_func_name(node.data.label)
         rel_path = config_path_for_node(nt, func_name).as_posix()
-        filtered = {k: v for k, v in node.data.config.items() if k not in _CODE_KEYS}
+        filtered = {k: v for k, v in node.data.config.items() if k not in _CODE_KEYS and not k.startswith("_")}
         configs[rel_path] = json.dumps(filtered, indent=2, ensure_ascii=False) + "\n"
     return configs

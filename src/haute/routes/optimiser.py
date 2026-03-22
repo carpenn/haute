@@ -67,13 +67,14 @@ async def solve_status(job_id: str) -> OptimiserStatusResponse:
         start = job.get("start_time")
         timeout = job.get("timeout", _DEFAULT_TIMEOUT)
         if start and (time.monotonic() - start) > timeout:
-            # P7: Atomic update to avoid races with background solver thread
+            # P7: Atomic update — only if still running (avoids overwriting a
+            # completed result with a timeout error).
             _store.atomic_update(job_id, {
                 "status": "error",
                 "message": f"Solve timed out after {timeout}s. "
                 "Increase timeout or simplify the problem.",
                 "elapsed_seconds": time.monotonic() - start,
-            })
+            }, expected_status="running")
             job = _store.require_job(job_id)
 
     frontier_resp = None

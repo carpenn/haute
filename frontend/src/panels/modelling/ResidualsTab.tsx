@@ -75,9 +75,9 @@ function ResidualsHistogram({
   const chartW = width - marginLeft - marginRight
   const chartH = height - marginTop - marginBottom
 
-  const maxCount = Math.max(...data.map(d => d.weighted_count))
-  const xMin = Math.min(...data.map(d => d.bin_center))
-  const xMax = Math.max(...data.map(d => d.bin_center))
+  const maxCount = data.map(d => d.weighted_count).reduce((a, b) => Math.max(a, b), -Infinity)
+  const xMin = data.map(d => d.bin_center).reduce((a, b) => Math.min(a, b), Infinity)
+  const xMax = data.map(d => d.bin_center).reduce((a, b) => Math.max(a, b), -Infinity)
   const xRange = xMax - xMin || 1
   const barW = (chartW / data.length) * 0.85
 
@@ -196,8 +196,8 @@ function ActualVsPredictedScatter({
   }, [data])
 
   const allVals = points.flatMap(p => [p.actual, p.predicted])
-  const vMin = Math.min(...allVals)
-  const vMax = Math.max(...allVals)
+  const vMin = allVals.reduce((a, b) => Math.min(a, b), Infinity)
+  const vMax = allVals.reduce((a, b) => Math.max(a, b), -Infinity)
   const vRange = vMax - vMin || 1
   const padding = vRange * 0.05
   const lo = vMin - padding

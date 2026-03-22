@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from haute._config_io import config_path_for_node, has_config_folder
@@ -81,6 +82,7 @@ def _sanitize_description(desc: str) -> str:
     - **Trailing backslash** would escape the closing quote.  An extra
       backslash is appended to make the count even.
     """
+    desc = desc.replace("{", "{{").replace("}", "}}")
     desc = desc.replace('"""', "'''")
 
     # ── Trailing double-quotes ────────────────────────────────────────
@@ -468,7 +470,13 @@ def _gen_constant(node: GraphNode, source_names: list[str]) -> str:
         # Try numeric coercion for the code literal
         try:
             num = float(val)
-            data_pairs.append(f"{_safe_str(name)}: [{num!r}]")
+            if math.isnan(num):
+                data_pairs.append(f"{_safe_str(name)}: [float('nan')]")
+            elif math.isinf(num):
+                sign = "" if num > 0 else "-"
+                data_pairs.append(f"{_safe_str(name)}: [float('{sign}inf')]")
+            else:
+                data_pairs.append(f"{_safe_str(name)}: [{num!r}]")
         except (ValueError, TypeError):
             data_pairs.append(f"{_safe_str(name)}: [{_safe_str(val)}]")
     data_dict = "{" + ", ".join(data_pairs) + "}" if data_pairs else '{"constant": [0]}'
@@ -558,7 +566,7 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
         rules = f.get("rules", []) or []
         default = f.get("default")
         rules_kw = f", rules={rules!r}" if rules else ""
-        default_kw = f", default={repr(default)}" if default else ""
+        default_kw = f", default={repr(default)}" if default is not None else ""
         first = _first_source(source_names)
         return _BANDING_SINGLE.format(
             func_name=func_name,
@@ -581,7 +589,7 @@ def _gen_banding(node: GraphNode, source_names: list[str]) -> str:
                 "output_column": f.get("outputColumn", ""),
                 "rules": f.get("rules", []),
             }
-            if f.get("default"):
+            if f.get("default") is not None:
                 ef["default"] = f["default"]
             emit_factors.append(ef)
         first = _first_source(source_names)
