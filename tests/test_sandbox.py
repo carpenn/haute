@@ -925,9 +925,10 @@ class TestNonBlockedDunders:
         # list.__init__ reinitializes the list
         assert local["x"] == [4, 5]
 
-    def test_closure_not_blocked(self):
-        """__closure__ is not in _BLOCKED_ATTRS — can leak closure vars."""
-        validate_user_code("fn.__closure__")
+    def test_closure_is_blocked(self):
+        """__closure__ is in _BLOCKED_ATTRS — prevents leaking closure vars."""
+        with pytest.raises(UnsafeCodeError, match="__closure__"):
+            validate_user_code("fn.__closure__")
 
     def test_qualname_not_blocked(self):
         """__qualname__ is not in _BLOCKED_ATTRS."""

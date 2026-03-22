@@ -44,12 +44,17 @@ def _live_only_edges(
             None,
         )
         if live_input_name is None:
-            # Fallback: use the first edge targeting this switch (edge-list
-            # order), matching the runtime switch_fn fallback in _builders.py.
-            for e in edges:
-                if e.target == sid:
-                    switch_live_source[sid] = e.source
-                    break
+            # Fallback: use inputs[0] from config as the live input name,
+            # then match it against edges by label.
+            inputs = config.get("inputs", [])
+            live_input_name = inputs[0] if inputs else None
+            if live_input_name:
+                for e in edges:
+                    if e.target == sid:
+                        src_label = node_map[e.source].data.label
+                        if _sanitize_func_name(src_label) == live_input_name:
+                            switch_live_source[sid] = e.source
+                            break
         else:
             for e in edges:
                 if e.target == sid:

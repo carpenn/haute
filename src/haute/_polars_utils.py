@@ -140,12 +140,13 @@ def safe_sink(
     """
     path = Path(path)
     compression: Literal["lz4", "zstd"] = "lz4" if fast_checkpoint else "zstd"
-    with atomic_write(path) as tmp:
+
+    def _do_sink(target: Path) -> None:
         try:
             if fmt == "csv":
-                lf.sink_csv(tmp)
+                lf.sink_csv(target)
             else:
-                lf.sink_parquet(tmp, compression=compression)
+                lf.sink_parquet(target, compression=compression)
         except (
             pl.exceptions.ComputeError,
             pl.exceptions.InvalidOperationError,
@@ -154,7 +155,15 @@ def safe_sink(
             logger.info("sink_streaming_fallback", path=str(path), fmt=fmt)
             df = lf.collect(engine="streaming")
             if fmt == "csv":
-                df.write_csv(tmp)
+                df.write_csv(target)
             else:
-                df.write_parquet(tmp, compression=compression)
+                df.write_parquet(target, compression=compression)
             del df
+
+    # Use atomic write only when parent directory already exists —
+    # otherwise let the sink raise naturally on missing dirs.
+    if path.parent.exists():
+        with atomic_write(path) as tmp:
+            _do_sink(tmp)
+    else:
+        _do_sink(path)

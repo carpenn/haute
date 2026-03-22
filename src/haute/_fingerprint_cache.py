@@ -87,7 +87,7 @@ class FingerprintCache:
             if entry is None:
                 return None
             first_slot = self._slots[0]
-            if first_slot not in entry or entry[first_slot] is None:
+            if not entry.get(first_slot):
                 return None
             # Promote to MRU
             self._entries.move_to_end(fingerprint)

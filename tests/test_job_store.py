@@ -742,67 +742,62 @@ class TestUpdateJobRaceCondition:
 
 
 class TestLongRunningJobEviction:
-    """Demonstrate that _evict_stale can remove a still-running job.
+    """Running jobs must NOT be evicted by _evict_stale.
 
-    Production failure: A training job running for >24 hours gets evicted
-    when another ``create_job`` or ``get_job`` call triggers
-    ``_evict_stale``.  The background thread's next ``update_job`` call
-    then raises ``KeyError`` because the job dict is gone.
+    Previously, _evict_stale only checked created_at and would evict
+    running jobs after TTL, causing the background thread to crash with
+    KeyError.  The fix skips jobs with status="running".
     """
 
-    def test_running_job_evicted_after_ttl_causes_keyerror(self) -> None:
-        """A running job older than TTL is evicted; update_job then fails."""
+    def test_running_job_survives_eviction(self) -> None:
+        """A running job older than TTL is NOT evicted."""
         store = JobStore(ttl_seconds=10)
 
-        # Simulate a job created 25 hours ago (still "running")
         job_id = store.create_job({
             "status": "running",
             "progress": 0.5,
             "created_at": time.time() - 25 * 3600,
         })
 
-        # Before eviction, the job exists
         assert store.jobs.get(job_id) is not None
 
-        # Trigger eviction by creating another job (or calling get_job)
+        # Trigger eviction by creating another job
         store.create_job({"status": "new"})
 
-        # The long-running job has been evicted
+        # Running job survives eviction
+        assert store.get_job(job_id) is not None
+        # Background thread can still update it
+        store.update_job(job_id, progress=0.6, message="Still training...")
+        assert store.get_job(job_id)["progress"] == 0.6
+
+    def test_completed_job_evicted_after_ttl(self) -> None:
+        """A completed job older than TTL IS evicted normally."""
+        store = JobStore(ttl_seconds=1)
+        job_id = store.create_job({
+            "status": "completed",
+            "created_at": time.time() - 100,
+        })
+        store.create_job({"status": "trigger"})
         assert store.get_job(job_id) is None
 
-        # The background thread would try to update progress — KeyError
-        with pytest.raises(KeyError):
-            store.update_job(job_id, progress=0.6, message="Still training...")
-
-    def test_running_job_evicted_during_background_thread(self) -> None:
-        """Simulate the full race: background thread writes, main thread
-        triggers eviction, background thread's next write fails.
-
-        Catches: silent job loss — the user sees the job vanish while
-        training is still in progress.
-        """
+    def test_running_job_safe_during_concurrent_access(self) -> None:
+        """Running job survives even when concurrent eviction triggers."""
         store = JobStore(ttl_seconds=2)
 
         job_id = store.create_job({
             "status": "running",
             "progress": 0.0,
-            "created_at": time.time() - 5,  # already stale
+            "created_at": time.time() - 5,
         })
 
-        errors: list[Exception] = []
         barrier = threading.Barrier(2)
 
         def background_worker() -> None:
             barrier.wait()
-            try:
-                # Simulate a progress update from the training thread
-                store.update_job(job_id, progress=0.75, message="Training epoch 3")
-            except KeyError as exc:
-                errors.append(exc)
+            store.update_job(job_id, progress=0.75, message="Training epoch 3")
 
         def main_thread_poller() -> None:
             barrier.wait()
-            # This triggers eviction
             store.get_job("some_other_id")
 
         bg = threading.Thread(target=background_worker)
@@ -812,25 +807,8 @@ class TestLongRunningJobEviction:
         main.join(timeout=5)
         bg.join(timeout=5)
 
-        # The job should have been evicted
-        assert store.get_job(job_id) is None
-        # The background thread may or may not have hit the KeyError
-        # depending on scheduling.  But we've demonstrated the scenario
-        # is possible.  Verify the structural issue:
-        with pytest.raises(KeyError):
-            store.update_job(job_id, progress=0.8)
-
-    def test_atomic_update_also_fails_on_evicted_job(self) -> None:
-        """atomic_update has the same eviction vulnerability."""
-        store = JobStore(ttl_seconds=1)
-        job_id = store.create_job({
-            "status": "running",
-            "created_at": time.time() - 100,
-        })
-        # Trigger eviction
-        store.create_job({"status": "trigger"})
-        with pytest.raises(KeyError):
-            store.atomic_update(job_id, {"progress": 0.9})
+        # Running job survives — no KeyError
+        assert store.get_job(job_id) is not None
 
 
 # ---------------------------------------------------------------------------

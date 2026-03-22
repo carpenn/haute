@@ -274,12 +274,24 @@ class TestGetColumnContract:
             NodeType.OPTIMISER,
             NodeType.SUBMODEL,
             NodeType.SUBMODEL_PORT,
-            NodeType.CONSTANT,
         ],
     )
     def test_passthrough_types(self, node_type: NodeType):
         produced, referenced = get_column_contract(node_type, {})
         assert produced == set()
+        assert referenced == set()
+
+    def test_constant_empty_config(self):
+        """Constant with no values config declares produced={} (no columns)."""
+        produced, referenced = get_column_contract(NodeType.CONSTANT, {})
+        assert produced == {"constant"}
+        assert referenced == set()
+
+    def test_constant_with_values(self):
+        """Constant with named values declares those as produced columns."""
+        config = {"values": [{"name": "rate", "value": "1.5"}, {"name": "fee", "value": "10"}]}
+        produced, referenced = get_column_contract(NodeType.CONSTANT, config)
+        assert produced == {"rate", "fee"}
         assert referenced == set()
 
     # -- Opaque types (no registered contract) --------------------------

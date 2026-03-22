@@ -179,10 +179,31 @@ class SavePipelineService:
         other pipelines' configs in multi-pipeline projects.
         """
         prev = getattr(self, "_prev_config_files", None)
-        if prev is None:
-            return  # First save — nothing to clean up
-
         current = getattr(self, "_last_config_files", {})
+
+        if prev is None:
+            # First save — fall back to full-scan cleanup so pre-existing
+            # stale files from manual edits or other tools are removed.
+            from haute._config_io import NODE_TYPE_TO_FOLDER
+
+            config_dir = self._root / "config"
+            if not config_dir.is_dir():
+                return
+            for folder in NODE_TYPE_TO_FOLDER.values():
+                folder_path = config_dir / folder
+                if not folder_path.is_dir():
+                    continue
+                for json_file in folder_path.glob("*.json"):
+                    rel = json_file.relative_to(self._root).as_posix()
+                    if rel not in current:
+                        json_file.unlink()
+                        logger.info("stale_config_removed", path=rel)
+                if not any(folder_path.iterdir()):
+                    folder_path.rmdir()
+            if config_dir.is_dir() and not any(config_dir.iterdir()):
+                config_dir.rmdir()
+            return
+
         stale = set(prev) - set(current)
         if not stale:
             return

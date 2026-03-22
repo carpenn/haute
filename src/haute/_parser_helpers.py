@@ -225,8 +225,16 @@ def _dedent(code: str) -> str:
     return "\n".join(line[m:] if len(line) >= m else line for line in code_lines)
 
 
-def _unwrap_chain_assignment(code: str) -> str | None:
+def _unwrap_chain_assignment(
+    code: str,
+    param_names: list[str] | None = None,
+) -> str | None:
     """Unwrap ``df = (\\n...\\n)`` and strip the leading source variable name.
+
+    When a leading identifier matches a known *param_name* it is kept
+    (it's part of the user's code, e.g. ``source.filter(...)``).  Only
+    codegen-injected variable names (not in param_names) are stripped to
+    prevent accumulation on save/reload roundtrips.
 
     Returns the extracted chain code, or ``None`` if the pattern doesn't match.
     """
@@ -239,7 +247,12 @@ def _unwrap_chain_assignment(code: str) -> str | None:
     # Strip leading source variable name to prevent accumulation on
     # save/reload roundtrips (e.g. "source_name\n.filter()")
     lines = extracted.splitlines()
-    if len(lines) > 1 and lines[1].lstrip().startswith(".") and lines[0].strip().isidentifier():
+    if (
+        len(lines) > 1
+        and lines[1].lstrip().startswith(".")
+        and lines[0].strip().isidentifier()
+        and lines[0].strip() not in (param_names or [])
+    ):
         extracted = "\n".join(lines[1:])
     return extracted
 
@@ -271,7 +284,7 @@ def _extract_user_code(body_source: str, param_names: list[str]) -> str:
     code = "\n".join(code_lines).strip()
 
     # Pattern 1: codegen chain style "df = (\n...\n)" — unwrap to inner
-    chain = _unwrap_chain_assignment(code)
+    chain = _unwrap_chain_assignment(code, param_names=param_names)
     if chain is not None:
         return chain
 

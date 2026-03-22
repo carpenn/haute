@@ -1144,8 +1144,8 @@ class TestExtremeFloatValues:
         result = _apply_banding(lf, "x", "band", "continuous", rules).collect()
         assert result["band"].to_list() == ["huge", "neg_huge", "tiny"]
 
-    def test_inf_in_rating_table_entry(self) -> None:
-        """A rating table entry with Inf value — it becomes a Float64 Inf in output."""
+    def test_inf_in_rating_table_entry_rejected(self) -> None:
+        """A rating table entry with Inf value is rejected — prevents silent pricing corruption."""
         lf = pl.DataFrame({"k": ["a", "b"]}).lazy()
         table: dict[str, Any] = {
             "factors": ["k"],
@@ -1155,10 +1155,8 @@ class TestExtremeFloatValues:
                 {"k": "b", "value": 1.0},
             ],
         }
-        result = _apply_rating_table(lf, table).collect()
-        vals = result["out"].to_list()
-        assert vals[0] == float("inf")
-        assert vals[1] == 1.0
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            _apply_rating_table(lf, table)
 
     def test_combine_with_null_uses_identity(self) -> None:
         """Null factor is treated as the multiplicative identity (1.0).

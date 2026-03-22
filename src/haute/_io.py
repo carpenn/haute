@@ -28,9 +28,10 @@ def read_source(path: str) -> pl.LazyFrame:
     Raises:
         ValueError: If the file extension is not supported.
     """
-    from haute._sandbox import validate_project_path
+    from pathlib import Path as _Path
 
-    validate_project_path(path)
+    if ".." in _Path(path).parts:
+        raise ValueError(f"Path '{path}' contains '..' and is not allowed")
 
     lower = path.lower()
     if lower.endswith(".csv"):

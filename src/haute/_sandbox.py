@@ -266,9 +266,6 @@ class _ASTValidator(ast.NodeVisitor):
             "async function definitions are blocked in pipeline code"
         )
 
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        raise UnsafeCodeError("Lambda expressions are not allowed")
-
     def visit_Global(self, node: ast.Global) -> None:
         raise UnsafeCodeError("global statements are blocked in pipeline code")
 

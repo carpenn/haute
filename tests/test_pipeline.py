@@ -167,8 +167,8 @@ class TestPipeline:
         with pytest.raises(CycleError, match="Cycle detected"):
             p._topo_order()
 
-    def test_run_no_edges_uses_last_output(self):
-        """Without explicit edges, run() feeds last output as input."""
+    def test_run_no_edges_raises(self):
+        """Without explicit edges, run() raises rather than silently chaining."""
         p = Pipeline("implicit")
 
         @p.data_source
@@ -179,13 +179,12 @@ class TestPipeline:
         def transform(df: pl.DataFrame) -> pl.DataFrame:
             return df.with_columns(y=pl.col("x") * 3)
 
-        # No connect() calls - relies on fallback
-        result = p.run()
-        assert "y" in result.columns
-        assert result["y"].to_list() == [3, 6]
+        # No connect() calls — must raise, not silently use wrong data
+        with pytest.raises(ValueError, match="no inbound edges"):
+            p.run()
 
-    def test_score_no_edges(self):
-        """score() without edges should chain nodes sequentially."""
+    def test_score_no_edges_raises(self):
+        """score() without edges raises rather than silently chaining."""
         p = Pipeline("score_implicit")
 
         @p.data_source
@@ -197,8 +196,8 @@ class TestPipeline:
             return df.with_columns(y=pl.col("x") + 100)
 
         custom = pl.DataFrame({"x": [5]})
-        result = p.score(custom)
-        assert result["y"].to_list() == [105]
+        with pytest.raises(ValueError, match="no inbound edges"):
+            p.score(custom)
 
     def test_to_graph_with_explicit_edges(self):
         p = self._simple_pipeline()
