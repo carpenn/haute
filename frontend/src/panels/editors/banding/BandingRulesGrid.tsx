@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react"
+import { useRef, useEffect, useMemo } from "react"
 import { Trash } from "lucide-react"
 import type { BandingFactor, ContinuousRule, CategoricalRule } from "../../../types/banding"
 
@@ -28,7 +28,7 @@ function ruleKey(rule: ContinuousRule | CategoricalRule, index: number): string 
 }
 
 export function BandingRulesGrid({ factor, onUpdateFactor }: { factor: BandingFactor; onUpdateFactor: (patch: Partial<BandingFactor>) => void }) {
-  const rawRules = factor.rules || []
+  const rawRules = useMemo(() => factor.rules || [], [factor.rules])
 
   // Ensure rules have stable _id keys (assign on first render, persist via onUpdateFactor)
   const didAssignIds = useRef(false)

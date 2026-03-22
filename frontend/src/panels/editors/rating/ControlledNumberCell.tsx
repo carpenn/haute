@@ -6,6 +6,7 @@ export function ControlledNumberCell({ val, onCommit, ...rest }: {
   onCommit: (v: string) => void
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "onBlur">) {
   const [local, setLocal] = useState(String(val))
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- sync controlled value from prop
   useEffect(() => setLocal(String(val)), [val])
   return (
     <input type="number" step="0.01"

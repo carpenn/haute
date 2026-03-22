@@ -156,12 +156,14 @@ export function CatalogTablePicker({
   const [dbSchema, setDbSchema] = useState(parts[1] || "")
   const [tableName, setTableName] = useState(parts[2] || "")
 
+  /* eslint-disable react-hooks/set-state-in-effect -- sync local state from prop */
   useEffect(() => {
-    const parts = table ? table.split(".") : []
-    setCatalog(parts[0] || "")
-    setDbSchema(parts[1] || "")
-    setTableName(parts[2] || "")
+    const p = table ? table.split(".") : []
+    setCatalog(p[0] || "")
+    setDbSchema(p[1] || "")
+    setTableName(p[2] || "")
   }, [table])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const [catalogs, setCatalogs] = useState<CatalogItem[]>([])
   const [schemas, setSchemas] = useState<SchemaItem[]>([])

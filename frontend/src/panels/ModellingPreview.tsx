@@ -62,7 +62,7 @@ export function ModellingPreview({
   const [collapsed, setCollapsed] = useState(false)
   const { height, containerRef, onDragStart } = useDragResize({ initialHeight: 360, minHeight: 180, maxHeight: 700 })
   const [tab, setTab] = useState<TabKey>("summary")
-
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reset tab on new training result
   useEffect(() => setTab("summary"), [result])
 
   // Source training progress from store

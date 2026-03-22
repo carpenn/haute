@@ -43,9 +43,11 @@ export function PdpTab({ result }: PdpTabProps) {
     featureItems.length > 0 ? featureItems[0].feature : null,
   )
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset selection on new data */
   useEffect(() => {
     if (featureItems.length > 0) setSelectedFeature(featureItems[0].feature)
   }, [featureItems])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSelect = useCallback((feature: string) => {
     setSelectedFeature(feature)

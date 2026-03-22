@@ -273,6 +273,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       }
     }),
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   failSolveJob: (nodeId, _error) =>
     set((s) => {
       const job = s.solveJobs[nodeId]
@@ -361,6 +362,7 @@ const useNodeResultsStore = create<NodeResultsState>()((set, get) => ({
       }
     }),
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   failTrainJob: (nodeId, _error) =>
     set((s) => {
       const job = s.trainJobs[nodeId]
