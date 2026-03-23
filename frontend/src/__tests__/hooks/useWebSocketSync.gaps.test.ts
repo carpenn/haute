@@ -104,6 +104,7 @@ function makeHookParams() {
     setEdgesRaw: vi.fn(),
     setPreamble: vi.fn(),
     preambleRef: { current: "" },
+    graphRefreshingRef: { current: 0 },
     nodeIdCounter: { current: 0 },
     fitView: vi.fn(),
   }

@@ -50,6 +50,7 @@ type UseEdgeHandlersParams = {
   fetchPreview: (node: Node) => void
   clearTrace: () => void
   screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number }
+  graphRefreshingRef: MutableRefObject<number>
 }
 
 export default function useEdgeHandlers({
@@ -63,6 +64,7 @@ export default function useEdgeHandlers({
   fetchPreview,
   clearTrace,
   screenToFlowPosition,
+  graphRefreshingRef,
 }: UseEdgeHandlersParams) {
   const onConnect: OnConnect = useCallback(
     (params) => {
@@ -88,6 +90,9 @@ export default function useEdgeHandlers({
 
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
     if (selectedNodes.length !== 1) {
+      // During a WebSocket graph refresh React Flow fires a spurious
+      // deselection — ignore it so the open panel doesn't dim.
+      if (graphRefreshingRef.current) return
       // Canvas click or multi-select: deselect but keep panel showing last node
       setSelectedNode(null)
       clearTrace()

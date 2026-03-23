@@ -9,6 +9,7 @@ Route handlers live in ``haute.routes.*`` — see:
 """
 
 import asyncio
+import hashlib
 import time
 import traceback
 import uuid
@@ -23,7 +24,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from haute._cache import graph_fingerprint
 from haute._logging import configure_logging, get_logger
 from haute.routes._helpers import (
     broadcast,
@@ -264,12 +264,17 @@ async def _file_watcher() -> None:
 
             logger.info("file_changed", file=p.name)
             try:
-                graph = parse_pipeline_to_graph(p)
-                fp = graph_fingerprint(graph)
+                # Hash raw bytes so ANY edit triggers a broadcast.  The parser
+                # normalises code (strips whitespace, docstrings, return
+                # statements) which hides real edits from a graph-only
+                # fingerprint.  Checking before parse skips the expensive
+                # AST walk when the file is byte-identical.
+                fp = hashlib.md5(p.read_bytes()).hexdigest()
                 fp_key = str(p.resolve())
                 if _last_broadcast_fp.get(fp_key) == fp:
                     logger.info("graph_unchanged", file=p.name)
                     continue
+                graph = parse_pipeline_to_graph(p)
                 _last_broadcast_fp[fp_key] = fp
                 await broadcast(
                     {

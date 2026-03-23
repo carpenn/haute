@@ -157,6 +157,7 @@ function FlowEditor() {
   const preambleRef = useRef("")
   const pipelineNameRef = useRef("main")
   const sourceFileRef = useRef("")
+  const graphRefreshingRef = useRef(0)
   const nodeIdCounter = useRef(0)
 
   // Keep graphRef in sync so callbacks never see stale state.
@@ -174,10 +175,12 @@ function FlowEditor() {
     }
   }, [nodes, edges, bumpGraphVersion])
 
-  // Track dirty state via reference equality (avoids JSON.stringify overhead)
+  // Track dirty state via reference equality (avoids JSON.stringify overhead).
+  // Skip when a WebSocket graph refresh caused the change — the file on disk
+  // is the source of truth in that case, so the GUI is not "dirty".
   const prevStateRef = useRef<{ nodes: Node[]; edges: Edge[]; preamble: string } | null>(null)
   useEffect(() => {
-    if (lastSavedRef.current) {
+    if (lastSavedRef.current && !graphRefreshingRef.current) {
       const prev = prevStateRef.current
       if (prev && (prev.nodes !== nodes || prev.edges !== edges || prev.preamble !== preamble)) {
         setDirty(true)
@@ -191,7 +194,7 @@ function FlowEditor() {
   // ---------------------------------------------------------------------------
 
   const wsStatus = useWebSocketSync({
-    setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
+    setNodesRaw, setEdgesRaw, setPreamble, preambleRef, graphRefreshingRef,
     nodeIdCounter, fitView,
   })
 
@@ -270,6 +273,7 @@ function FlowEditor() {
     graphRef, nodeIdCounter, lastSelectedNodeRef,
     setNodes, setEdges, setSelectedNode, setContextMenu,
     fetchPreview, clearTrace, screenToFlowPosition,
+    graphRefreshingRef,
   })
 
   // ---------------------------------------------------------------------------

@@ -111,6 +111,7 @@ function makeHookParams() {
     setEdgesRaw: vi.fn(),
     setPreamble: vi.fn(),
     preambleRef: { current: "" },
+    graphRefreshingRef: { current: 0 },
     nodeIdCounter: { current: 0 },
     fitView: vi.fn(),
   }
@@ -130,6 +131,7 @@ describe("useWebSocketSync", () => {
     // Reset mock state
     vi.mocked(useToastStore.getState().addToast).mockClear()
     vi.mocked(useUIStore.getState().setSyncBanner).mockClear()
+    vi.mocked(useUIStore.getState().setDirty).mockClear()
     useUIStore.getState().dirty = false
   })
 
@@ -246,6 +248,8 @@ describe("useWebSocketSync", () => {
       )
       // Sync banner cleared
       expect(useUIStore.getState().setSyncBanner).toHaveBeenCalledWith(null)
+      // Ensures subsequent file-watcher updates are not blocked
+      expect(useUIStore.getState().setDirty).toHaveBeenCalledWith(false)
     })
 
     it("uses layout when nodes have no positions", async () => {
@@ -276,7 +280,7 @@ describe("useWebSocketSync", () => {
       expect(getLayoutedElements).toHaveBeenCalled()
     })
 
-    it("skips graph update when dirty flag is true", async () => {
+    it("accepts graph update even when dirty flag is true", async () => {
       const params = makeHookParams()
       renderHook(() => useWebSocketSync(params))
 
@@ -301,8 +305,44 @@ describe("useWebSocketSync", () => {
         }))
       })
 
-      // Should NOT have updated nodes (dirty skip)
-      expect(params.setNodesRaw).not.toHaveBeenCalled()
+      // File-watcher updates are always accepted — the file on disk is
+      // the source of truth when the user edits in their IDE.
+      expect(params.setNodesRaw).toHaveBeenCalled()
+    })
+
+    it("sets graphRefreshingRef around node replacement and clears after 150ms", async () => {
+      const params = makeHookParams()
+      renderHook(() => useWebSocketSync(params))
+
+      act(() => {
+        latestWS().onopen?.(new Event("open"))
+      })
+
+      const graphMsg = {
+        type: "graph_update",
+        graph: {
+          nodes: [
+            { id: "transform_1", position: { x: 100, y: 200 }, data: { label: "test" } },
+          ],
+          edges: [],
+        },
+      }
+
+      await act(async () => {
+        latestWS().onmessage?.(new MessageEvent("message", {
+          data: JSON.stringify(graphMsg),
+        }))
+      })
+
+      // Guard active — onSelectionChange will skip spurious deselections
+      expect(params.graphRefreshingRef.current).toBeGreaterThan(0)
+
+      // Guard released — normal selection behaviour resumes
+      act(() => {
+        vi.advanceTimersByTime(150)
+      })
+
+      expect(params.graphRefreshingRef.current).toBe(0)
     })
 
     it("handles parse_error messages by setting sync banner", async () => {

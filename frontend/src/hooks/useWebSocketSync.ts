@@ -12,23 +12,27 @@ interface WebSocketSyncParams {
   setEdgesRaw: (edges: Edge[]) => void
   setPreamble: (p: string) => void
   preambleRef: React.MutableRefObject<string>
+  graphRefreshingRef: React.MutableRefObject<number>
   nodeIdCounter: React.MutableRefObject<number>
   fitView: (options?: { padding?: number }) => void
 }
 
 const MAX_RETRIES = 50
+
+// After replacing nodes, React Flow fires onSelectionChange before the new
+// nodes are committed.  This guard window lets that spurious event pass.
+const SELECTION_CHANGE_GUARD_MS = 150
 const INITIAL_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
 
 export default function useWebSocketSync({
-  setNodesRaw, setEdgesRaw, setPreamble, preambleRef,
+  setNodesRaw, setEdgesRaw, setPreamble, preambleRef, graphRefreshingRef,
   nodeIdCounter, fitView,
 }: WebSocketSyncParams): WsStatus {
   const { setSyncBanner } = useUIStore()
   const { addToast } = useToastStore()
   const [status, setStatus] = useState<WsStatus>("reconnecting")
   const retriesRef = useRef(0)
-  const missedUpdateRef = useRef(false)
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
@@ -52,13 +56,6 @@ export default function useWebSocketSync({
           const msg = JSON.parse(event.data)
 
           if (msg.type === "graph_update" && msg.graph) {
-            // Skip file-watcher updates when the user has unsaved edits.
-            // Their next save will write the .py file, and the subsequent
-            // broadcast (after save) will be accepted since dirty is false.
-            if (useUIStore.getState().dirty) {
-              missedUpdateRef.current = true
-              return
-            }
 
             const g = msg.graph
             const newNodes = g.nodes || []
@@ -68,6 +65,9 @@ export default function useWebSocketSync({
               (n: Node) => n.position && (n.position.x !== 0 || n.position.y !== 0)
             )
 
+            // Guard: prevent React Flow's onSelectionChange from clearing
+            // the open panel while we replace nodes.
+            graphRefreshingRef.current += 1
             if (hasPositions) {
               setNodesRaw(newNodes)
             } else {
@@ -75,12 +75,15 @@ export default function useWebSocketSync({
               setNodesRaw(layouted)
             }
             setEdgesRaw(newEdges)
+            setTimeout(() => { graphRefreshingRef.current -= 1 }, SELECTION_CHANGE_GUARD_MS)
             if (g.preamble !== undefined) {
               setPreamble(g.preamble || "")
               preambleRef.current = g.preamble || ""
             }
             nodeIdCounter.current = computeNextNodeId(newNodes)
             setSyncBanner(null)
+            // The GUI is now in sync with the file on disk — not dirty.
+            useUIStore.getState().setDirty(false)
             addToast("info", "Pipeline updated from file")
             setTimeout(() => fitView({ padding: 0.8 }), 100)
           }

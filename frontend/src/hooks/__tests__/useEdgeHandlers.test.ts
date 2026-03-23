@@ -24,6 +24,7 @@ function makeParams() {
     fetchPreview: vi.fn(),
     clearTrace: vi.fn(),
     screenToFlowPosition: vi.fn((pos: { x: number; y: number }) => pos),
+    graphRefreshingRef: { current: 0 },
   }
 }
 
@@ -183,6 +184,17 @@ describe("useEdgeHandlers", () => {
     })
     expect(params.setSelectedNode).toHaveBeenCalledWith(null)
     expect(params.clearTrace).toHaveBeenCalled()
+  })
+
+  it("onSelectionChange skips deselection when graphRefreshingRef is true", () => {
+    const params = makeParams()
+    params.graphRefreshingRef.current = 1
+    const { result } = renderHook(() => useEdgeHandlers(params))
+    act(() => {
+      result.current.onSelectionChange({ nodes: [], edges: [] })
+    })
+    expect(params.setSelectedNode).not.toHaveBeenCalled()
+    expect(params.clearTrace).not.toHaveBeenCalled()
   })
 
   it("onNodeClick opens panel and fetches preview", () => {
