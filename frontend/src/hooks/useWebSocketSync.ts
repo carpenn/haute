@@ -122,7 +122,7 @@ export default function useWebSocketSync({
       if (reconnectTimer) clearTimeout(reconnectTimer)
       ws?.close()
     }
-  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, nodeIdCounter, fitView, setSyncBanner, addToast])
+  }, [setNodesRaw, setEdgesRaw, setPreamble, preambleRef, nodeIdCounter, fitView, setSyncBanner, addToast, graphRefreshingRef])
 
   return status
 }

@@ -98,7 +98,7 @@ export default function useEdgeHandlers({
       clearTrace()
       // Don't clear previewData or lastSelectedNodeRef -- panel stays visible
     }
-  }, [setSelectedNode, clearTrace])
+  }, [setSelectedNode, clearTrace, graphRefreshingRef])
 
   /** Opens panel on a full click (mousedown+mouseup) — skipped for drags. */
   const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {

@@ -273,7 +273,14 @@ Long-running operations (model training, optimisation solving) use a consistent 
 
 New route modules that add background jobs must follow this same structure. See `routes/modelling.py` and `routes/optimiser.py` as reference implementations.
 
-## 26. Formatted Lookup Tables
+## 26. Fix It If You See It
+
+- Any linting error, CI failure, or test failure must be fixed in the same commit that touches the affected area, regardless of when the issue was introduced.
+- Do not leave pre-existing broken windows for the next person. If `ruff`, `mypy`, `eslint`, `tsc`, or `pytest` fails on code you are working near, fix it.
+- This applies to all checks in the preflight script: Python lint, Python types, TypeScript types, ESLint, and tests.
+- If a fix is non-trivial and unrelated to your change, it may be split into a separate commit, but it must still ship in the same PR.
+
+## 27. Formatted Lookup Tables
 
 When a file contains an aligned lookup table (e.g. `NODE_TYPE_META` in `nodeTypes.ts`), new entries must match the column alignment of existing entries. Misaligned entries make diffs noisy and the table harder to scan.
 
@@ -521,6 +528,7 @@ Engineering Standards
 - [ ] No circular imports; import direction flows downward
 - [ ] Logging uses structlog, not `print`; correct levels; structured context
 - [ ] Background jobs follow the standard pattern (§25): job store, TTL eviction, thread dispatch, status polling
+- [ ] Pre-existing lint/type/test failures in touched areas are fixed (§26)
 - [ ] New entries in aligned lookup tables match existing column alignment
 
 LLM Code Review
