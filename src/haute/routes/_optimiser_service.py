@@ -452,7 +452,12 @@ class OptimiserSolveService:
         try:
             import polars as pl
 
-            from haute.executor import _build_node_fn, _compile_preamble, _resolve_batch_scenario
+            from haute.executor import (
+                _build_node_fn,
+                _compile_preamble,
+                _pipeline_dir,
+                _resolve_batch_scenario,
+            )
             from haute.graph_utils import _execute_lazy
 
             # Resolve scenario: optimiser runs on batch data, not live.
@@ -462,6 +467,7 @@ class OptimiserSolveService:
                 _compile_preamble(
                     body.graph.preamble or "",
                     force_refresh=False,
+                    pipeline_dir=_pipeline_dir(body.graph),
                 )
                 or None
             )

@@ -130,9 +130,10 @@ async def save_pipeline(body: SavePipelineRequest) -> SavePipelineResponse:
     When the graph contains submodels, multiple files are written via
     ``graph_to_code_multi``.
     """
+    from haute.routes._helpers import pipeline_dir
     from haute.routes._save_pipeline import SavePipelineService
 
-    svc = SavePipelineService(project_root=Path.cwd())
+    svc = SavePipelineService(project_root=Path.cwd(), pipeline_root=pipeline_dir())
     return svc.save(body)
 
 

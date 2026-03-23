@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 def _isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test in a temporary directory so utility/ is fresh."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("haute.routes.utility.pipeline_dir", lambda: tmp_path)
 
 
 # ---------------------------------------------------------------------------

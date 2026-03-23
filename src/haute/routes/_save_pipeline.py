@@ -34,10 +34,14 @@ class SavePipelineService:
     project_root:
         Absolute path to the project working directory (``Path.cwd()``
         at startup).  All file I/O is sandboxed under this directory.
+    pipeline_root:
+        Directory that contains the pipeline file and its ``config/``
+        subfolder.  Defaults to *project_root* when not given.
     """
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, pipeline_root: Path | None = None) -> None:
         self._root = project_root
+        self._pipeline_root = pipeline_root or project_root
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -166,8 +170,8 @@ class SavePipelineService:
         self._prev_config_files = getattr(self, "_last_config_files", None)
         self._last_config_files = collect_node_configs(graph)
         for rel_path, json_content in self._last_config_files.items():
-            out_path = (self._root / rel_path).resolve()
-            if not out_path.is_relative_to(self._root):
+            out_path = (self._pipeline_root / rel_path).resolve()
+            if not out_path.is_relative_to(self._pipeline_root):
                 continue
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(json_content)
@@ -186,7 +190,7 @@ class SavePipelineService:
             # stale files from manual edits or other tools are removed.
             from haute._config_io import NODE_TYPE_TO_FOLDER
 
-            config_dir = self._root / "config"
+            config_dir = self._pipeline_root / "config"
             if not config_dir.is_dir():
                 return
             for folder in NODE_TYPE_TO_FOLDER.values():
@@ -194,7 +198,7 @@ class SavePipelineService:
                 if not folder_path.is_dir():
                     continue
                 for json_file in folder_path.glob("*.json"):
-                    rel = json_file.relative_to(self._root).as_posix()
+                    rel = json_file.relative_to(self._pipeline_root).as_posix()
                     if rel not in current:
                         json_file.unlink()
                         logger.info("stale_config_removed", path=rel)
@@ -209,8 +213,8 @@ class SavePipelineService:
             return
 
         for rel in stale:
-            stale_path = (self._root / rel).resolve()
-            if not stale_path.is_relative_to(self._root):
+            stale_path = (self._pipeline_root / rel).resolve()
+            if not stale_path.is_relative_to(self._pipeline_root):
                 continue
             if stale_path.is_file():
                 stale_path.unlink()
@@ -219,7 +223,7 @@ class SavePipelineService:
             if folder.is_dir() and not any(folder.iterdir()):
                 folder.rmdir()
 
-        config_dir = self._root / "config"
+        config_dir = self._pipeline_root / "config"
         if config_dir.is_dir() and not any(config_dir.iterdir()):
             config_dir.rmdir()
 

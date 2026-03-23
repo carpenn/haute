@@ -163,6 +163,7 @@ class DeployConfig:
 
     pipeline_file: Path
     model_name: str
+    project_dir: Path | None = None
     target: str = "databricks"
     endpoint_name: str | None = None
     endpoint_suffix: str | None = None
@@ -275,6 +276,7 @@ class DeployConfig:
         config = cls(
             pipeline_file=pipeline_file,
             model_name=model_name,
+            project_dir=path.parent,
             target=target,
             endpoint_name=endpoint_name,
             output_fields=output_fields,
@@ -389,8 +391,12 @@ def resolve_config(config: DeployConfig) -> ResolvedDeploy:
     from haute.parser import parse_pipeline_file
 
     # Load .env for Databricks credentials
-    # Pipeline is in project root by default; handle both root and subdir cases
-    project_root = config.pipeline_file.resolve().parent
+    # .env lives at the project root (haute.toml directory), not the pipeline subdir
+    project_root = (
+        config.project_dir.resolve()
+        if config.project_dir is not None
+        else config.pipeline_file.resolve().parent
+    )
     _load_env(project_root)
 
     # Parse the pipeline

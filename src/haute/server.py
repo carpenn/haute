@@ -10,6 +10,7 @@ Route handlers live in ``haute.routes.*`` — see:
 
 import asyncio
 import hashlib
+import mimetypes
 import time
 import traceback
 import uuid
@@ -31,6 +32,7 @@ from haute.routes._helpers import (
     invalidate_pipeline_index,
     is_self_write,
     parse_pipeline_to_graph,
+    pipeline_dir,
     pipelines_importing_module,
     ws_clients,
 )
@@ -44,6 +46,11 @@ from haute.routes.optimiser import router as optimiser_router
 from haute.routes.pipeline import router as pipeline_router
 from haute.routes.submodel import router as submodel_router
 from haute.routes.utility import router as utility_router
+
+# Windows registry often maps .js to text/plain, causing browsers to reject
+# the JS bundle.  Patch before StaticFiles or FileResponse uses mimetypes.
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 STATIC_DIR = Path(__file__).parent / "static"
 logger = get_logger(component="server")
@@ -193,11 +200,14 @@ async def _file_watcher() -> None:
         return
 
     cwd = Path.cwd()
+    pipe_dir = pipeline_dir()
     watch_dirs = [cwd]
+    if pipe_dir != cwd:
+        watch_dirs.append(pipe_dir)
     modules_dir = cwd / "modules"
     if modules_dir.is_dir():
         watch_dirs.append(modules_dir)
-    config_dir = cwd / "config"
+    config_dir = pipe_dir / "config"
     if config_dir.is_dir():
         watch_dirs.append(config_dir)
 
@@ -233,7 +243,7 @@ async def _file_watcher() -> None:
             if p.suffix != ".py" or p.name.startswith("__"):
                 continue
             # Skip utility/ directory — utility scripts don't affect graph structure
-            utility_dir = cwd / "utility"
+            utility_dir = pipe_dir / "utility"
             if utility_dir.is_dir() and p.is_relative_to(utility_dir):
                 continue
             if p.parent == modules_dir:
@@ -319,5 +329,6 @@ if STATIC_DIR.exists():
         """Serve the React SPA - all non-API routes return index.html."""
         file_path = (STATIC_DIR / full_path).resolve()
         if file_path.is_relative_to(STATIC_DIR) and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(STATIC_DIR / "index.html")
+            media_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+            return FileResponse(file_path, media_type=media_type)
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")

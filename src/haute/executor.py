@@ -63,6 +63,21 @@ _MAX_PREVIEW_ROWS = 10_000  # safety cap for execute_graph JSON payload
 _preamble_lock = threading.Lock()
 
 
+def _pipeline_dir(graph: PipelineGraph) -> Path | None:
+    """Derive the pipeline file's parent directory from ``graph.source_file``.
+
+    Returns *None* when the graph has no source file metadata (e.g.
+    dynamically constructed graphs in tests).
+    """
+    sf = graph.source_file
+    if not sf:
+        return None
+    p = Path(sf)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    return p.resolve().parent
+
+
 class PreambleError(HauteError):
     """Raised when the preamble (imports / utility code) fails to compile."""
 
@@ -90,6 +105,7 @@ def _compile_preamble(
     preamble: str,
     *,
     force_refresh: bool = True,
+    pipeline_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Compile user-defined preamble code into a namespace dict.
 
@@ -127,12 +143,19 @@ def _compile_preamble(
     validate_user_code(preamble, allow_imports=True)
     # Ensure project root is importable so `from utility.xxx import …` works
     # even when the server process was spawned by uvicorn reload.
+    # We add *both* cwd and the pipeline's parent directory because the
+    # utility/ folder may live next to the pipeline file (e.g. inside a
+    # rating/ subfolder) rather than at the project root.
     import os  # noqa: E401
     import sys
 
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
+    if pipeline_dir is not None:
+        pdir = str(Path(pipeline_dir).resolve())
+        if pdir not in sys.path:
+            sys.path.insert(0, pdir)
     # Evict cached utility modules so edits in the GUI are picked up
     # on every run instead of serving stale bytecode from sys.modules.
     # The lock prevents a concurrent request from seeing partially-evicted
@@ -530,7 +553,10 @@ def _eager_execute(
     """
     preamble_error: str | None = None
     try:
-        preamble_ns = _compile_preamble(graph.preamble or "")
+        preamble_ns = _compile_preamble(
+            graph.preamble or "",
+            pipeline_dir=_pipeline_dir(graph),
+        )
     except PreambleError as exc:
         # Don't abort — let non-preamble nodes (data sources, model scoring,
         # etc.) execute normally.  The error will surface on transform /
@@ -657,7 +683,11 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") 
     try:
         # Sink path: use cached preamble (no GUI edits expected during
         # batch runs).  Saves 50-500 ms of utility module re-import.
-        preamble_ns = _compile_preamble(graph.preamble or "", force_refresh=False)
+        preamble_ns = _compile_preamble(
+            graph.preamble or "",
+            force_refresh=False,
+            pipeline_dir=_pipeline_dir(graph),
+        )
 
         def _run_lazy() -> pl.LazyFrame:
             lazy_outputs, _order, _parents, _names = _execute_lazy(
@@ -675,7 +705,13 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") 
 
         lf = _run_lazy()
 
+        # Resolve relative sink paths against the pipeline's directory so
+        # outputs land next to the pipeline file, not in the server's CWD.
         out = Path(path)
+        if not out.is_absolute():
+            pdir = _pipeline_dir(graph)
+            if pdir is not None:
+                out = pdir / out
         out.parent.mkdir(parents=True, exist_ok=True)
 
         # Log the lazy plan so we can diagnose streaming failures.

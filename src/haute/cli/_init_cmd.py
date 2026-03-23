@@ -134,14 +134,28 @@ def init(target: str, ci: str) -> None:
     (project_dir / "data").mkdir(exist_ok=True)
     (project_dir / "prompts").mkdir(exist_ok=True)
 
-    # -- utility/ - project-level utility functions -----------------------------
-    utility_dir = project_dir / "utility"
+    # -- Remove root main.py left over from `uv init` -------------------------
+    root_main = project_dir / "main.py"
+    if root_main.exists():
+        root_main.unlink()
+
+    # -- rating/ - user pipeline files -----------------------------------------
+    rating_dir = project_dir / "rating"
+    rating_dir.mkdir(exist_ok=True)
+    (rating_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    # -- rating/utility/ - project-level utility functions ----------------------
+    utility_dir = rating_dir / "utility"
     utility_dir.mkdir(exist_ok=True)
     (utility_dir / "__init__.py").write_text(starter_utility_init(), encoding="utf-8")
     (utility_dir / "features.py").write_text(starter_utility_features(), encoding="utf-8")
 
-    # -- main.py - starter pipeline --------------------------------------------
-    (project_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
+    # -- rating/main.py - starter pipeline -------------------------------------
+    (rating_dir / "main.py").write_text(starter_pipeline(name), encoding="utf-8")
+
+    # -- rating/ placeholder directories (used once the pipeline grows) --------
+    for sub in ("config", "models", "outputs"):
+        (rating_dir / sub).mkdir(exist_ok=True)
 
     # -- haute.toml - project + deploy + safety + CI config --------------------
     (project_dir / "haute.toml").write_text(
@@ -232,8 +246,8 @@ def init(target: str, ci: str) -> None:
     click.echo("  pyproject.toml        - haute added as dependency")
     click.echo("  haute.toml            - project, deploy, safety & CI config")
     click.echo(f"  .env.example         - {target} credentials template")
-    click.echo("  main.py              - starter pipeline")
-    click.echo("  utility/             - project-level utility functions")
+    click.echo("  rating/main.py       - starter pipeline")
+    click.echo("  rating/utility/      - project-level utility functions")
     click.echo("  data/                - put your data files here")
     click.echo("  prompts/             - reusable AI prompts for pipeline tasks")
     click.echo("  tests/               - starter test + example quote payloads")

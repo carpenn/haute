@@ -75,15 +75,18 @@ class TestInit:
         assert (tmp_path / "haute.toml").exists()
         assert (tmp_path / ".env.example").exists()
         assert (tmp_path / ".gitignore").exists()
-        assert (tmp_path / "main.py").exists()
+        assert (tmp_path / "rating" / "main.py").exists()
+        assert (tmp_path / "rating" / "config").is_dir()
+        assert (tmp_path / "rating" / "models").is_dir()
+        assert (tmp_path / "rating" / "outputs").is_dir()
         assert (tmp_path / "pyproject.toml").exists()
 
-        # haute.toml should reference main.py
+        # haute.toml should reference rating/main.py
         toml_content = (tmp_path / "haute.toml").read_text()
-        assert 'pipeline = "main.py"' in toml_content
+        assert 'pipeline = "rating/main.py"' in toml_content
 
         # Starter pipeline should be valid Python
-        py_content = (tmp_path / "main.py").read_text()
+        py_content = (tmp_path / "rating" / "main.py").read_text()
         compile(py_content, "<test>", "exec")
 
         # pyproject.toml should have haute as a dependency
@@ -154,8 +157,11 @@ class TestInit:
         assert '"mypy' in pyproject_content
         assert '"pytest' in pyproject_content
 
-        # main.py should be overwritten with the starter pipeline
-        py_content = (tmp_path / "main.py").read_text()
+        # Root main.py from uv init should be removed
+        assert not (tmp_path / "main.py").exists()
+
+        # Starter pipeline should be created in rating/
+        py_content = (tmp_path / "rating" / "main.py").read_text()
         assert "haute.Pipeline" in py_content
 
     def test_skips_haute_dep_if_already_present(self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json as _json
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -33,6 +34,43 @@ def validate_safe_path(base: Path, user_provided: str | Path) -> Path:
             detail="Cannot access paths outside the project root",
         )
     return target
+
+
+# ---------------------------------------------------------------------------
+# Pipeline directory resolution
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def pipeline_dir() -> Path:
+    """Return the directory containing the active pipeline file as an absolute Path.
+
+    Resolution order:
+
+    1. ``[project].pipeline`` from ``haute.toml`` in cwd — return its parent dir.
+    2. Fall back to ``Path.cwd()``.
+
+    The result is cached for the lifetime of the process (the pipeline location
+    won't change during a session).
+    """
+    toml_path = Path.cwd() / "haute.toml"
+    if not toml_path.exists():
+        logger.error("haute_toml_missing", cwd=str(Path.cwd()),
+                      hint="Run 'haute init' to create a project")
+        return Path.cwd().resolve()
+    try:
+        import tomllib
+
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+        configured: str | None = data.get("project", {}).get("pipeline")
+        if configured:
+            return (Path.cwd() / configured).resolve().parent
+        logger.warning("haute_toml_missing_pipeline", path=str(toml_path),
+                        hint="Add [project].pipeline to haute.toml")
+    except Exception:
+        logger.error("haute_toml_read_failed", path=str(toml_path), exc_info=True)
+    return Path.cwd().resolve()
 
 
 # ---------------------------------------------------------------------------

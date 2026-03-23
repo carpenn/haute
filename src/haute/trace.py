@@ -27,7 +27,7 @@ from typing import Any
 
 from haute._fingerprint_cache import FingerprintCache
 from haute._logging import get_logger
-from haute.executor import _build_node_fn, _compile_preamble, _preview_cache
+from haute.executor import _build_node_fn, _compile_preamble, _pipeline_dir, _preview_cache
 from haute.graph_utils import (
     NodeType,
     PipelineGraph,
@@ -289,7 +289,10 @@ def execute_trace(
 
         if not reused_preview:
             # Cache miss — execute eagerly via shared core (raises on error)
-            preamble_ns = _compile_preamble(graph.preamble or "")
+            preamble_ns = _compile_preamble(
+                graph.preamble or "",
+                pipeline_dir=_pipeline_dir(graph),
+            )
             result = _execute_eager_core(
                 graph,
                 _build_node_fn,

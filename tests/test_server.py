@@ -1092,6 +1092,7 @@ class TestFileWatcherJsonConfig:
             patch("watchfiles.awatch", _fake_awatch),
             patch("haute.server.broadcast", _capture_broadcast),
             patch("haute.server.is_self_write", return_value=False),
+            patch("haute.server.pipeline_dir", return_value=pipeline_dir),
         ):
             from haute.server import _file_watcher
 
@@ -1138,6 +1139,7 @@ class TestFileWatcherJsonConfig:
             patch("watchfiles.awatch", _fake_awatch),
             patch("haute.server.broadcast", _capture_broadcast),
             patch("haute.server.is_self_write", return_value=False),
+            patch("haute.server.pipeline_dir", return_value=tmp_path),
         ):
             from haute.server import _file_watcher
 

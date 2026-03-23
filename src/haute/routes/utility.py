@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from haute._logging import get_logger
-from haute.routes._helpers import validate_safe_path
+from haute.routes._helpers import pipeline_dir, validate_safe_path
 from haute.schemas import (
     UtilityCreateRequest,
     UtilityFileItem,
@@ -33,7 +33,7 @@ _VALID_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 def _utility_dir() -> Path:
     """Return the ``utility/`` directory under the project root."""
-    return Path.cwd() / "utility"
+    return pipeline_dir() / "utility"
 
 
 def _validate_module_name(name: str) -> None:

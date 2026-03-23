@@ -344,9 +344,12 @@ class TrainService:
 
     @staticmethod
     def _compile_preamble(graph: PipelineGraph) -> dict[str, Any] | None:
-        from haute.executor import _compile_preamble
+        from haute.executor import _compile_preamble, _pipeline_dir
 
-        return _compile_preamble(graph.preamble or "") or None
+        return _compile_preamble(
+            graph.preamble or "",
+            pipeline_dir=_pipeline_dir(graph),
+        ) or None
 
     def _estimate_ram(
         self,

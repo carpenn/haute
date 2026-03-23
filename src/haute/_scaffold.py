@@ -210,7 +210,7 @@ def haute_toml(name: str, target: str, ci: str) -> str:
         f"""\
 [project]
 name = "{name}"
-pipeline = "main.py"
+pipeline = "rating/main.py"
 
 [deploy]
 target = "{target}"
@@ -403,7 +403,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "*.py"
+      - "rating/**"
       - "haute.toml"
       - "data/**"
       - "models/**"
@@ -691,7 +691,7 @@ trigger:
     include: [main]
   paths:
     include:
-      - "*.py"
+      - rating/
       - haute.toml
       - data/
       - models/
@@ -963,7 +963,7 @@ from pathlib import Path
 
 def test_pipeline_parses():
     """Pipeline file is valid Python and contains a haute Pipeline."""
-    pipeline_path = Path(__file__).resolve().parent.parent / "main.py"
+    pipeline_path = Path(__file__).resolve().parent.parent / "rating" / "main.py"
     source = pipeline_path.read_text()
     compile(source, str(pipeline_path), "exec")
     assert "haute.Pipeline" in source
