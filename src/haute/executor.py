@@ -94,9 +94,17 @@ class PreambleError(HauteError):
 _PREAMBLE_CACHE_MAX = 64
 _preamble_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
-_DANGEROUS_MODULES = frozenset({
-    "os", "sys", "subprocess", "shutil", "signal", "ctypes", "importlib",
-})
+_DANGEROUS_MODULES = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "signal",
+        "ctypes",
+        "importlib",
+    }
+)
 
 _polars_config_lock = threading.Lock()
 
@@ -205,7 +213,8 @@ def _compile_preamble(
             raise PreambleError(msg, source_line=source_line) from exc
 
     result = {
-        k: v for k, v in ns.items()
+        k: v
+        for k, v in ns.items()
         if k not in base_keys
         and not (hasattr(v, "__name__") and getattr(v, "__name__", "") in _DANGEROUS_MODULES)
     }
@@ -742,7 +751,8 @@ def execute_sink(graph: PipelineGraph, sink_node_id: str, source: str = "live") 
         )
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        # Restore previous streaming chunk size (0 resets to Polars default).
-        pl.Config.set_streaming_chunk_size(
-            int(_prev_chunk_size) if _prev_chunk_size is not None else 0
-        )
+        # Restore previous streaming chunk size if one was explicitly set.
+        # When _prev_chunk_size is None (Polars auto-default), skip the
+        # restore — Polars does not accept 0 and has no "unset" API.
+        if _prev_chunk_size is not None:
+            pl.Config.set_streaming_chunk_size(int(_prev_chunk_size))

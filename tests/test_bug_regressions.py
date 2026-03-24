@@ -349,24 +349,22 @@ class TestBugB11InstanceSelectedColumns:
 
 
 class TestBugB13B14ChunkSizeRestore:
-    def test_chunk_size_restored_when_originally_unset(self) -> None:
-        """Polars streaming chunk size must be restored even when originally None."""
+    def test_chunk_size_restore_does_not_pass_zero(self) -> None:
+        """Polars streaming chunk size restore must not call set_streaming_chunk_size(0).
+
+        Polars rejects 0 with ``ValueError: number of rows per chunk must be >= 1``.
+        When the previous chunk size was None (Polars auto-default), the restore
+        must be skipped — there is no API to "unset" the streaming chunk size.
+        """
         import inspect
         from haute import executor
 
         source = inspect.getsource(executor.execute_sink)
-        # The fix should always restore - no standalone if guard that skips restore
-        # A ternary like `int(x) if x is not None else 0` is fine (always restores)
-        lines = [l.strip() for l in source.splitlines()]
-        # The buggy pattern was a standalone if that skips the restore entirely:
-        #   if _prev_chunk_size is not None:
-        #       pl.Config.set_streaming_chunk_size(...)
-        # This should NOT exist (the restore should be unconditional)
-        has_standalone_guard = any(
-            l == "if _prev_chunk_size is not None:" for l in lines
-        )
-        assert not has_standalone_guard, \
-            "Chunk size restore should be unconditional, not guarded by standalone if"
+        # The old buggy pattern passed 0 when _prev_chunk_size was None:
+        #   set_streaming_chunk_size(int(x) if x is not None else 0)
+        # This raises ValueError. The fix guards the restore with an if check.
+        assert "else 0" not in source, \
+            "Chunk size restore must not fall back to 0 — Polars rejects it"
 
 
 # ---------------------------------------------------------------------------

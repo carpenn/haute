@@ -19,7 +19,7 @@ pipeline = haute.Pipeline("my_pipeline", description='')
 @pipeline.data_source(config="config/data_source/batch_quotes.json")
 def batch_quotes() -> pl.LazyFrame:
     """batch_quotes node"""
-    df = pl.scan_parquet("output/nb_batch.parquet")
+    df = pl.scan_parquet("data\\competitor_premiums\\nb_batch.parquet")
     df = df.limit(100000)
     return df
 

@@ -1,0 +1,13 @@
+{
+  "sourceType": "run",
+  "registered_model": "",
+  "version": "latest",
+  "task": "regression",
+  "output_column": "conversion_prediction",
+  "experiment_id": "4403259996564708",
+  "experiment_name": "/Shared/haute/conversion",
+  "run_id": "3f289c91098546e6a74d9124dfbc687a",
+  "run_name": "conversion",
+  "artifact_path": "conversion.rsglm",
+  "selected_columns": []
+}

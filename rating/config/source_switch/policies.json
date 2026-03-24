@@ -1,0 +1,6 @@
+{
+  "input_scenario_map": {
+    "feature_processing": "live",
+    "batch_quotes": "nb_batch"
+  }
+}

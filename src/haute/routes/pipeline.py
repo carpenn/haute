@@ -40,6 +40,27 @@ _PREVIEW_TIMEOUT = 120.0  # node preview execution
 _SINK_TIMEOUT = 300.0  # sink (write-to-disk) execution
 
 
+def _ensure_source_file(graph: PipelineGraph) -> None:
+    """Fill in ``graph.source_file`` from ``haute.toml`` when the frontend
+    doesn't provide it.  Without this, the executor can't determine the
+    pipeline directory and preamble imports (e.g. ``from utility.features``)
+    fail because the pipeline's parent dir isn't on ``sys.path``."""
+    if graph.source_file:
+        return
+    toml_path = Path.cwd() / "haute.toml"
+    if not toml_path.exists():
+        return
+    try:
+        import tomllib
+
+        with open(toml_path, "rb") as f:
+            configured = tomllib.load(f).get("project", {}).get("pipeline")
+        if configured:
+            graph.source_file = configured
+    except (OSError, tomllib.TOMLDecodeError, KeyError) as exc:
+        logger.warning("source_file_fallback_failed", error=str(exc))
+
+
 @router.get("/pipelines", response_model=list[PipelineSummary])
 async def list_pipelines() -> list[PipelineSummary]:
     """List all discovered pipelines."""
@@ -144,6 +165,7 @@ async def trace_row(body: TraceRequest) -> TraceResponse:
     from haute.trace import execute_trace, trace_result_to_dict
 
     graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
     if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
@@ -191,6 +213,7 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
     )
 
     graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
     if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
@@ -292,6 +315,7 @@ async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     from haute.graph_utils import flatten_graph
 
     graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
     if not graph.nodes:
         raise HTTPException(status_code=400, detail="Empty graph")
 
