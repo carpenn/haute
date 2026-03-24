@@ -10,8 +10,8 @@ import pytest
 from haute._config_io import (
     FOLDER_TO_NODE_TYPE,
     NODE_TYPE_TO_FOLDER,
-    _CODE_KEYS,
     collect_node_configs,
+    config_load_errors,
     config_path_for_node,
     has_config_folder,
     load_node_config,
@@ -19,8 +19,7 @@ from haute._config_io import (
     save_node_config,
 )
 from haute._types import NodeType
-from tests.conftest import make_edge, make_graph, make_node
-
+from tests.conftest import make_graph
 
 # ---------------------------------------------------------------------------
 # Mapping consistency
@@ -139,46 +138,83 @@ class TestRemoveConfigFile:
 
 class TestCollectNodeConfigs:
     def test_datasource_and_transform(self):
-        graph = make_graph({
-            "nodes": [
-                {"id": "src", "data": {"label": "src", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "t", "data": {"label": "clean", "nodeType": "polars", "config": {"code": ".filter()"}}},
-            ],
-            "edges": [{"id": "e1", "source": "src", "target": "t"}],
-        })
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "src",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                    {
+                        "id": "t",
+                        "data": {
+                            "label": "clean",
+                            "nodeType": "polars",
+                            "config": {"code": ".filter()"},
+                        },
+                    },
+                ],
+                "edges": [{"id": "e1", "source": "src", "target": "t"}],
+            }
+        )
         configs = collect_node_configs(graph)
         assert "config/data_source/src.json" in configs
         # Transform should NOT have a config file
         assert not any("transform" in k for k in configs)
 
     def test_code_key_excluded(self):
-        graph = make_graph({
-            "nodes": [
-                {"id": "ext", "data": {
-                    "label": "ext",
-                    "nodeType": "externalFile",
-                    "config": {"path": "m.pkl", "fileType": "pickle", "code": "df = obj(df)"},
-                }},
-            ],
-            "edges": [],
-        })
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "ext",
+                        "data": {
+                            "label": "ext",
+                            "nodeType": "externalFile",
+                            "config": {
+                                "path": "m.pkl",
+                                "fileType": "pickle",
+                                "code": "df = obj(df)",
+                            },
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
         configs = collect_node_configs(graph)
         content = json.loads(configs["config/load_file/ext.json"])
         assert "code" not in content
         assert content["path"] == "m.pkl"
 
     def test_instance_nodes_skipped(self):
-        graph = make_graph({
-            "nodes": [
-                {"id": "orig", "data": {"label": "orig", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-                {"id": "inst", "data": {
-                    "label": "inst",
-                    "nodeType": "dataSource",
-                    "config": {"path": "d.parquet", "instanceOf": "orig"},
-                }},
-            ],
-            "edges": [],
-        })
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "orig",
+                        "data": {
+                            "label": "orig",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                    {
+                        "id": "inst",
+                        "data": {
+                            "label": "inst",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet", "instanceOf": "orig"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
         configs = collect_node_configs(graph)
         assert "config/data_source/orig.json" in configs
         assert "config/data_source/inst.json" not in configs
@@ -186,17 +222,38 @@ class TestCollectNodeConfigs:
     def test_all_node_types_produce_config(self):
         """Every non-transform, non-submodel node type should generate a config file."""
         nodes = [
-            {"id": "a", "data": {"label": "a", "nodeType": "apiInput", "config": {"path": "d.json"}}},
-            {"id": "b", "data": {"label": "b", "nodeType": "dataSource", "config": {"path": "d.parquet"}}},
-            {"id": "c", "data": {"label": "c", "nodeType": "liveSwitch", "config": {"mode": "live"}}},
-            {"id": "d", "data": {"label": "d", "nodeType": "modelScore", "config": {"task": "regression"}}},
+            {
+                "id": "a",
+                "data": {"label": "a", "nodeType": "apiInput", "config": {"path": "d.json"}},
+            },
+            {
+                "id": "b",
+                "data": {"label": "b", "nodeType": "dataSource", "config": {"path": "d.parquet"}},
+            },
+            {
+                "id": "c",
+                "data": {"label": "c", "nodeType": "liveSwitch", "config": {"mode": "live"}},
+            },
+            {
+                "id": "d",
+                "data": {"label": "d", "nodeType": "modelScore", "config": {"task": "regression"}},
+            },
             {"id": "e", "data": {"label": "e", "nodeType": "banding", "config": {"factors": []}}},
             {"id": "f", "data": {"label": "f", "nodeType": "ratingStep", "config": {"tables": []}}},
             {"id": "g", "data": {"label": "g", "nodeType": "output", "config": {"fields": []}}},
-            {"id": "h", "data": {"label": "h", "nodeType": "dataSink", "config": {"path": "o.parquet"}}},
-            {"id": "i", "data": {"label": "i", "nodeType": "externalFile", "config": {"path": "m.pkl"}}},
+            {
+                "id": "h",
+                "data": {"label": "h", "nodeType": "dataSink", "config": {"path": "o.parquet"}},
+            },
+            {
+                "id": "i",
+                "data": {"label": "i", "nodeType": "externalFile", "config": {"path": "m.pkl"}},
+            },
             {"id": "j", "data": {"label": "j", "nodeType": "modelling", "config": {"target": "y"}}},
-            {"id": "k", "data": {"label": "k", "nodeType": "optimiser", "config": {"mode": "online"}}},
+            {
+                "id": "k",
+                "data": {"label": "k", "nodeType": "optimiser", "config": {"mode": "online"}},
+            },
             {"id": "l", "data": {"label": "l", "nodeType": "optimiserApply", "config": {}}},
             {"id": "m", "data": {"label": "m", "nodeType": "scenarioExpander", "config": {}}},
             {"id": "n", "data": {"label": "n", "nodeType": "constant", "config": {"values": []}}},
@@ -207,14 +264,210 @@ class TestCollectNodeConfigs:
 
     def test_config_paths_always_use_forward_slashes(self):
         """Config path keys must use forward slashes (not OS-dependent backslashes)."""
-        graph = make_graph({
-            "nodes": [
-                {"id": "b", "data": {"label": "age_band", "nodeType": "banding", "config": {"factors": []}}},
-                {"id": "r", "data": {"label": "area_rate", "nodeType": "ratingStep", "config": {"tables": []}}},
-            ],
-            "edges": [],
-        })
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "b",
+                        "data": {
+                            "label": "age_band",
+                            "nodeType": "banding",
+                            "config": {"factors": []},
+                        },
+                    },
+                    {
+                        "id": "r",
+                        "data": {
+                            "label": "area_rate",
+                            "nodeType": "ratingStep",
+                            "config": {"tables": []},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
         configs = collect_node_configs(graph)
         for path in configs:
             assert "\\" not in path, f"Config path contains backslash: {path}"
             assert path.startswith("config/"), f"Config path should start with config/: {path}"
+
+
+# ---------------------------------------------------------------------------
+# _load_error protection — prevents config loss on save
+# ---------------------------------------------------------------------------
+
+
+class TestLoadErrorProtection:
+    """Verify that nodes with _load_error are excluded from save output,
+    preserving the original config file on disk."""
+
+    def test_load_error_node_skipped_in_collect(self):
+        """A node with _load_error should not appear in collect_node_configs."""
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "ok",
+                        "data": {
+                            "label": "ok",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                    {
+                        "id": "bad",
+                        "data": {
+                            "label": "bad",
+                            "nodeType": "dataSource",
+                            "config": {"_load_error": "file not found"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+        configs = collect_node_configs(graph)
+        assert "config/data_source/ok.json" in configs
+        assert "config/data_source/bad.json" not in configs
+
+    def test_load_error_node_appears_in_config_load_errors(self):
+        """config_load_errors should return paths for nodes with _load_error."""
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "ok",
+                        "data": {
+                            "label": "ok",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                    {
+                        "id": "bad",
+                        "data": {
+                            "label": "bad",
+                            "nodeType": "dataSource",
+                            "config": {"_load_error": "missing"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+        errors = config_load_errors(graph)
+        assert "config/data_source/bad.json" in errors
+        assert "config/data_source/ok.json" not in errors
+
+    def test_load_error_not_written_to_json(self, tmp_path):
+        """Even if _load_error somehow gets to save_node_config, it must be filtered out."""
+        from haute._config_io import save_node_config
+
+        config = {"path": "d.parquet", "_load_error": "test error"}
+        rel_path = save_node_config(NodeType.DATA_SOURCE, "test", config, tmp_path)
+        content = json.loads((tmp_path / rel_path).read_text())
+        assert "_load_error" not in content
+        assert content["path"] == "d.parquet"
+
+    def test_healthy_node_has_no_load_error(self):
+        """A successfully loaded config should not have _load_error."""
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "ok",
+                        "data": {
+                            "label": "ok",
+                            "nodeType": "dataSource",
+                            "config": {"path": "d.parquet"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+        errors = config_load_errors(graph)
+        assert len(errors) == 0
+
+    def test_user_edit_clears_load_error(self):
+        """When user edits a config (frontend sends clean dict), _load_error is gone
+        and the node is no longer skipped by collect_node_configs."""
+        # Simulate: node initially had _load_error
+        graph_before = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "n",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "dataSource",
+                            "config": {"_load_error": "missing"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+        assert "config/data_source/src.json" not in collect_node_configs(graph_before)
+
+        # Simulate: user edits the node (frontend sends clean config without _load_error)
+        graph_after = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "n",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "dataSource",
+                            "config": {"path": "new.parquet"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+        configs = collect_node_configs(graph_after)
+        assert "config/data_source/src.json" in configs
+        content = json.loads(configs["config/data_source/src.json"])
+        assert content["path"] == "new.parquet"
+
+    def test_save_preserves_original_file(self, tmp_path):
+        """End-to-end: saving a graph with _load_error should not overwrite
+        the original config file on disk."""
+        from haute._config_io import save_node_config
+
+        # Write the original config to disk
+        save_node_config(
+            NodeType.DATA_SOURCE,
+            "src",
+            {"path": "data/real.parquet", "sourceType": "flat_file"},
+            tmp_path,
+        )
+        original_path = tmp_path / "config" / "data_source" / "src.json"
+        assert original_path.exists()
+        original_content = original_path.read_text()
+
+        # Build a graph where that node has _load_error
+        graph = make_graph(
+            {
+                "nodes": [
+                    {
+                        "id": "s",
+                        "data": {
+                            "label": "src",
+                            "nodeType": "dataSource",
+                            "config": {"_load_error": "test"},
+                        },
+                    },
+                ],
+                "edges": [],
+            }
+        )
+
+        # collect_node_configs skips the error node
+        configs = collect_node_configs(graph)
+        assert "config/data_source/src.json" not in configs
+
+        # The original file is still on disk, untouched
+        assert original_path.read_text() == original_content

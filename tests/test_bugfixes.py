@@ -619,3 +619,68 @@ class TestPolarsConfigSafety:
         val = pl.Config.state().get("POLARS_STREAMING_CHUNK_SIZE")
         assert val is not None
         assert int(val) == 99_999
+
+
+# ---------------------------------------------------------------------------
+# Parser warning for config load errors
+# ---------------------------------------------------------------------------
+
+
+class TestParserConfigLoadWarning:
+    """Verify the parser surfaces config load errors via graph.warning."""
+
+    def test_warning_set_when_config_missing(self, tmp_path, monkeypatch):
+        """Parsing a pipeline with a missing config file should set graph.warning."""
+        monkeypatch.chdir(tmp_path)
+        pipeline_dir = tmp_path / "rating"
+        pipeline_dir.mkdir()
+        (pipeline_dir / "main.py").write_text(
+            "import haute\nimport polars as pl\n\n"
+            'pipeline = haute.Pipeline("test")\n\n'
+            '@pipeline.data_source(config="config/data_source/missing.json")\n'
+            "def missing() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("")\n'
+        )
+        # No config file created — it's missing
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "main.py")
+        assert graph.warning is not None
+        assert "missing" in graph.warning
+
+    def test_no_warning_when_config_exists(self, tmp_path, monkeypatch):
+        """Parsing a pipeline with a valid config file should not set graph.warning."""
+        monkeypatch.chdir(tmp_path)
+        pipeline_dir = tmp_path / "rating"
+        pipeline_dir.mkdir()
+        config_dir = pipeline_dir / "config" / "data_source"
+        config_dir.mkdir(parents=True)
+        (config_dir / "src.json").write_text('{"path": "d.parquet"}')
+        (pipeline_dir / "main.py").write_text(
+            "import haute\nimport polars as pl\n\n"
+            'pipeline = haute.Pipeline("test")\n\n'
+            '@pipeline.data_source(config="config/data_source/src.json")\n'
+            "def src() -> pl.LazyFrame:\n"
+            '    return pl.scan_parquet("d.parquet")\n'
+        )
+
+        from haute.parser import parse_pipeline_file
+
+        graph = parse_pipeline_file(pipeline_dir / "main.py")
+        assert graph.warning is None
+
+    def test_format_load_error_warning_empty(self):
+        """No labels should produce None."""
+        from haute.parser import _format_load_error_warning
+
+        assert _format_load_error_warning([]) is None
+
+    def test_format_load_error_warning_truncates(self):
+        """More than 3 labels should be truncated."""
+        from haute.parser import _format_load_error_warning
+
+        result = _format_load_error_warning(["a", "b", "c", "d", "e"])
+        assert result is not None
+        assert "a, b, c" in result
+        assert "and 2 more" in result

@@ -965,7 +965,7 @@ def _resolve_node_config(
         base = base_dir or Path.cwd()
         try:
             loaded = load_node_config(config_ref, base_dir=base)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
             logger.warning("config_path_fallback", original_path=config_ref, func_name=func_name)
             # On Windows the config path may be mangled by backslash
             # escape interpretation (e.g. \b→backspace, \r→CR).  Recover
@@ -975,6 +975,11 @@ def _resolve_node_config(
                 recovered = find_config_by_func_name(func_name, base)
                 if recovered is not None:
                     loaded, _recovered_type = recovered
+            if not loaded:
+                # Mark the node so the save pathway preserves the
+                # original config file on disk instead of overwriting
+                # it with an empty dict.
+                loaded["_load_error"] = f"{config_ref}: {exc}"
         config = dict(loaded)
         # Code lives in the .py function body, not in the JSON file
         if node_type == NodeType.MODEL_SCORE:

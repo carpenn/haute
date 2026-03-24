@@ -80,17 +80,14 @@ def config_path_for_node(
     # Sanitize node_name to prevent path traversal
     if ".." in node_name or "/" in node_name or "\\" in node_name:
         raise ValueError(
-            f"Invalid node name {node_name!r}: must not contain "
-            f"path separators or '..'"
+            f"Invalid node name {node_name!r}: must not contain path separators or '..'"
         )
     rel = Path("config") / folder / f"{node_name}.json"
     if base_dir:
         abs_path = (base_dir / rel).resolve()
         config_root = (base_dir / "config").resolve()
         if not abs_path.is_relative_to(config_root):
-            raise ValueError(
-                f"Config path for {node_name!r} escapes config directory"
-            )
+            raise ValueError(f"Config path for {node_name!r} escapes config directory")
         return abs_path
     return rel
 
@@ -118,9 +115,7 @@ def load_node_config(
     if base_dir:
         root = base_dir.resolve()
         if not resolved.is_relative_to(root):
-            raise ValueError(
-                f"Config path {config_path!r} resolves outside project root"
-            )
+            raise ValueError(f"Config path {config_path!r} resolves outside project root")
     return dict(json.loads(resolved.read_text()))
 
 
@@ -210,6 +205,8 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
 
     Nodes without a config folder (transforms, submodels) are skipped.
     Instance nodes are skipped (they reference an original).
+    Nodes whose config failed to load (``_load_error`` marker) are skipped
+    so the original file on disk is preserved.
     """
     configs: dict[str, str] = {}
     for node in graph.nodes:
@@ -218,11 +215,36 @@ def collect_node_configs(graph: PipelineGraph) -> dict[str, str]:
             continue
         if node.data.config.get("instanceOf"):
             continue
+        if node.data.config.get("_load_error"):
+            continue
         func_name = _sanitize_func_name(node.data.label)
         rel_path = config_path_for_node(nt, func_name).as_posix()
         filtered = {
-            k: v for k, v in node.data.config.items()
+            k: v
+            for k, v in node.data.config.items()
             if k not in _CODE_KEYS and not k.startswith("_")
         }
         configs[rel_path] = json.dumps(filtered, indent=2, ensure_ascii=False) + "\n"
     return configs
+
+
+def config_load_errors(graph: PipelineGraph) -> dict[str, str]:
+    """Return relative config paths for nodes whose config failed to load.
+
+    Used by the save service to protect these files from stale-file cleanup.
+    """
+    errors: dict[str, str] = {}
+    for node in graph.nodes:
+        nt = node.data.nodeType
+        if not has_config_folder(nt):
+            continue
+        err = node.data.config.get("_load_error")
+        if not err:
+            continue
+        func_name = _sanitize_func_name(node.data.label)
+        try:
+            rel_path = config_path_for_node(nt, func_name).as_posix()
+        except ValueError:
+            continue
+        errors[rel_path] = str(err)
+    return errors

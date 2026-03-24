@@ -85,6 +85,7 @@ export default function useWebSocketSync({
             // The GUI is now in sync with the file on disk — not dirty.
             useUIStore.getState().setDirty(false)
             addToast("info", "Pipeline updated from file")
+            if (g.warning) addToast("warning", g.warning)
             setTimeout(() => fitView({ padding: 0.8 }), 100)
           }
 

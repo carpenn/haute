@@ -73,9 +73,7 @@ def _valid_keys_for(node_type: NodeType) -> frozenset[str] | None:
 
 # Pre-compute so the per-call cost is a single dict lookup.
 VALID_KEYS: dict[NodeType, frozenset[str]] = {
-    nt: keys
-    for nt in NodeType
-    if (keys := _valid_keys_for(nt)) is not None
+    nt: keys for nt in NodeType if (keys := _valid_keys_for(nt)) is not None
 }
 
 
@@ -105,7 +103,7 @@ def warn_unrecognized_config_keys(
     if valid is None:
         return []
 
-    bad = sorted(k for k in config if k not in valid)
+    bad = sorted(k for k in config if k not in valid and not k.startswith("_"))
     if bad:
         label = node_label or nt.value
         logger.warning(

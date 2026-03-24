@@ -165,10 +165,11 @@ class SavePipelineService:
 
     def _write_config_files(self, graph: PipelineGraph) -> None:
         """Write per-node config JSON sidecar files."""
-        from haute._config_io import collect_node_configs
+        from haute._config_io import collect_node_configs, config_load_errors
 
         self._prev_config_files = getattr(self, "_last_config_files", None)
         self._last_config_files = collect_node_configs(graph)
+        self._protected_config_files: set[str] = set(config_load_errors(graph))
         for rel_path, json_content in self._last_config_files.items():
             out_path = (self._pipeline_root / rel_path).resolve()
             if not out_path.is_relative_to(self._pipeline_root):
@@ -185,6 +186,8 @@ class SavePipelineService:
         prev = getattr(self, "_prev_config_files", None)
         current = getattr(self, "_last_config_files", {})
 
+        protected = getattr(self, "_protected_config_files", set())
+
         if prev is None:
             # First save — fall back to full-scan cleanup so pre-existing
             # stale files from manual edits or other tools are removed.
@@ -199,7 +202,7 @@ class SavePipelineService:
                     continue
                 for json_file in folder_path.glob("*.json"):
                     rel = json_file.relative_to(self._pipeline_root).as_posix()
-                    if rel not in current:
+                    if rel not in current and rel not in protected:
                         json_file.unlink()
                         logger.info("stale_config_removed", path=rel)
                 if not any(folder_path.iterdir()):
@@ -208,7 +211,7 @@ class SavePipelineService:
                 config_dir.rmdir()
             return
 
-        stale = set(prev) - set(current)
+        stale = set(prev) - set(current) - protected
         if not stale:
             return
 

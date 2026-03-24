@@ -40,6 +40,23 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _format_load_error_warning(labels: list[str]) -> str | None:
+    """Build a user-facing warning when config files failed to load."""
+    if not labels:
+        return None
+    names = ", ".join(labels[:3])
+    suffix = f" and {len(labels) - 3} more" if len(labels) > 3 else ""
+    return (
+        f"Config files could not be loaded for: {names}{suffix}. "
+        "These configs will not be overwritten on save."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -113,7 +130,10 @@ def parse_pipeline_source(
     # Find @pipeline.<type> decorated functions
     func_bodies = _extract_function_bodies(source, tree=tree)
     raw_nodes = _extract_decorated_nodes(
-        tree, _is_pipeline_node_decorator, func_bodies, _base_dir,
+        tree,
+        _is_pipeline_node_decorator,
+        func_bodies,
+        _base_dir,
     )
 
     if not raw_nodes:
@@ -130,6 +150,9 @@ def parse_pipeline_source(
     preamble = _extract_preamble(source)
     preserved_blocks = _extract_preserved_blocks(source)
 
+    # Surface config load errors as a graph-level warning for the GUI.
+    load_error_labels = [n.data.label for n in rf_nodes if n.data.config.get("_load_error")]
+
     graph = PipelineGraph(
         nodes=rf_nodes,
         edges=edges,
@@ -138,6 +161,7 @@ def parse_pipeline_source(
         preamble=preamble,
         preserved_blocks=preserved_blocks,
         source_file=source_file,
+        warning=_format_load_error_warning(load_error_labels),
     )
 
     # --- Submodel handling ---------------------------------------------------

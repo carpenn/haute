@@ -29,14 +29,17 @@ class TestBugB9RustystatsUnfilteredPredict:
         """_prepare_predict_frame should select only feature columns for rustystats."""
         from haute._mlflow_io import _prepare_predict_frame
 
-        df = pl.DataFrame({
-            "feat_a": [1.0, 2.0],
-            "feat_b": [3.0, 4.0],
-            "target": [10.0, 20.0],
-            "weight": [1.0, 1.0],
-        })
+        df = pl.DataFrame(
+            {
+                "feat_a": [1.0, 2.0],
+                "feat_b": [3.0, 4.0],
+                "target": [10.0, 20.0],
+                "weight": [1.0, 1.0],
+            }
+        )
         result = _prepare_predict_frame(
-            df, features=["feat_a", "feat_b"],
+            df,
+            features=["feat_a", "feat_b"],
             cat_feature_names=frozenset(),
             flavor="rustystats",
         )
@@ -56,7 +59,9 @@ class TestBugB12ZeroRowBatchScoring:
 
         # Create empty input parquet with schema
         input_path = str(tmp_path / "empty_input.parquet")
-        pl.DataFrame({"a": pl.Series([], dtype=pl.Float64), "b": pl.Series([], dtype=pl.Float64)}).write_parquet(input_path)
+        pl.DataFrame(
+            {"a": pl.Series([], dtype=pl.Float64), "b": pl.Series([], dtype=pl.Float64)}
+        ).write_parquet(input_path)
 
         mock_model = MagicMock()
         mock_model.feature_names = ["a", "b"]
@@ -66,7 +71,11 @@ class TestBugB12ZeroRowBatchScoring:
         scoring_model.feature_names = ["a", "b"]
 
         out_path = _batch_score_to_parquet(
-            scoring_model, input_path, ["a", "b"], "pred", "regression",
+            scoring_model,
+            input_path,
+            ["a", "b"],
+            "pred",
+            "regression",
         )
         # Should produce a valid parquet file, not crash
         result = pl.read_parquet(out_path)
@@ -141,10 +150,16 @@ class TestBugB17WsClientsSetIteration:
 
         # The fix is: for ws in list(ws_clients): instead of for ws in ws_clients:
         import inspect
+
         source = inspect.getsource(broadcast)
         # After fix, should iterate over list(ws_clients) or similar snapshot
-        assert "list(ws_clients)" in source or "set(ws_clients)" in source or "ws_clients.copy()" in source, \
+        assert (
+            "list(ws_clients)" in source
+            or "set(ws_clients)" in source
+            or "ws_clients.copy()" in source
+        ), (
             "broadcast() should iterate a snapshot of ws_clients to prevent RuntimeError during concurrent mutation"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +172,12 @@ class TestBugB18CacheTOCTOU:
         """Cache lookup should use a single get() call, not __contains__ then get."""
         import inspect
         from haute._io import load_external_object
+
         source = inspect.getsource(load_external_object)
         # After fix, should NOT have the pattern: if key in _object_cache
-        assert "if key in _object_cache" not in source, \
+        assert "if key in _object_cache" not in source, (
             "Should use single cache.get() call instead of __contains__ + get TOCTOU pattern"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +204,9 @@ class TestBugB19MutableCachedDicts:
 
         # Load again - should get original value, not mutated
         result2 = load_optimiser_artifact(str(path))
-        assert result2["lambdas"]["a"] == 1.0, \
+        assert result2["lambdas"]["a"] == 1.0, (
             "Cached dict was mutated by caller - should return a copy"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +229,9 @@ class TestBugB20FeatureImportanceSorting:
             {"feature": "f_feature", "importance": 0.05},
             {"feature": "g_feature", "importance": 0.02},
         ]
-        svg = render_horizontal_bars_svg(data, name_key="feature", value_key="importance", max_items=3)
+        svg = render_horizontal_bars_svg(
+            data, name_key="feature", value_key="importance", max_items=3
+        )
         # The top 3 by importance are c_feature(0.50), d_feature(0.30), e_feature(0.10)
         assert "c_feature" in svg
         assert "d_feature" in svg
@@ -229,24 +249,37 @@ class TestBugB22MissingUtf8Encoding:
         """All JSON file reads in _io.py should use encoding='utf-8'."""
         import inspect
         import haute._io as io_mod
+
         source = inspect.getsource(io_mod)
         # Count open() calls - they should all have encoding
         import re
-        opens = re.findall(r'open\([^)]+\)', source)
+
+        opens = re.findall(r"open\([^)]+\)", source)
         for call in opens:
-            if "encoding" not in call and "'wb'" not in call and '"wb"' not in call and "'rb'" not in call and '"rb"' not in call:
+            if (
+                "encoding" not in call
+                and "'wb'" not in call
+                and '"wb"' not in call
+                and "'rb'" not in call
+                and '"rb"' not in call
+            ):
                 # open() without encoding and not binary mode
-                if "json" in source[source.index(call)-100:source.index(call)].lower() or "read" in call:
+                if (
+                    "json" in source[source.index(call) - 100 : source.index(call)].lower()
+                    or "read" in call
+                ):
                     pytest.fail(f"open() call without encoding='utf-8': {call}")
 
     def test_optimiser_io_uses_utf8_encoding(self) -> None:
         """All JSON file reads in _optimiser_io.py should use encoding='utf-8'."""
         import inspect
         import haute._optimiser_io as opt_io
+
         source = inspect.getsource(opt_io)
         # Check that open() calls for reading have encoding
         import re
-        opens = re.findall(r'with open\([^)]+\) as', source)
+
+        opens = re.findall(r"with open\([^)]+\) as", source)
         for call in opens:
             if "encoding" not in call and "'rb'" not in call and '"rb"' not in call:
                 pytest.fail(f"open() call without encoding='utf-8': {call}")
@@ -269,27 +302,36 @@ class TestBugB5PrunerLiveBranchSelection:
         from haute._types import PipelineGraph
 
         def _node(nid, ntype="polars", config=None):
-            return {"id": nid, "position": {"x": 0, "y": 0},
-                    "data": {"label": nid, "nodeType": ntype, "config": config or {}}}
+            return {
+                "id": nid,
+                "position": {"x": 0, "y": 0},
+                "data": {"label": nid, "nodeType": ntype, "config": config or {}},
+            }
 
         def _edge(src, tgt):
             return {"id": f"e_{src}_{tgt}", "source": src, "target": tgt}
 
         # live source is the SECOND input, not the first
-        graph = PipelineGraph.model_validate({
-            "nodes": [
-                _node("batch_src"),
-                _node("live_src"),
-                _node("sw", "liveSwitch", {
-                    "inputs": ["batch_src", "live_src"],
-                    "input_scenario_map": {"live_src": "live", "batch_src": "batch"},
-                }),
-            ],
-            "edges": [
-                _edge("batch_src", "sw"),
-                _edge("live_src", "sw"),
-            ],
-        })
+        graph = PipelineGraph.model_validate(
+            {
+                "nodes": [
+                    _node("batch_src"),
+                    _node("live_src"),
+                    _node(
+                        "sw",
+                        "liveSwitch",
+                        {
+                            "inputs": ["batch_src", "live_src"],
+                            "input_scenario_map": {"live_src": "live", "batch_src": "batch"},
+                        },
+                    ),
+                ],
+                "edges": [
+                    _edge("batch_src", "sw"),
+                    _edge("live_src", "sw"),
+                ],
+            }
+        )
         result = _live_only_edges(graph.nodes, graph.edges)
         result_pairs = {(e.source, e.target) for e in result}
         # Should keep the live edge (live_src->sw), not batch (batch_src->sw)
@@ -327,16 +369,21 @@ class TestBugB11InstanceSelectedColumns:
         from haute._types import PipelineGraph
 
         def _node(nid, ntype="polars", config=None):
-            return {"id": nid, "position": {"x": 0, "y": 0},
-                    "data": {"label": nid, "nodeType": ntype, "config": config or {}}}
+            return {
+                "id": nid,
+                "position": {"x": 0, "y": 0},
+                "data": {"label": nid, "nodeType": ntype, "config": config or {}},
+            }
 
-        graph = PipelineGraph.model_validate({
-            "nodes": [
-                _node("original", "polars", {"selected_columns": ["a", "b"], "code": ""}),
-                _node("instance", "polars", {"instanceOf": "original"}),
-            ],
-            "edges": [],
-        })
+        graph = PipelineGraph.model_validate(
+            {
+                "nodes": [
+                    _node("original", "polars", {"selected_columns": ["a", "b"], "code": ""}),
+                    _node("instance", "polars", {"instanceOf": "original"}),
+                ],
+                "edges": [],
+            }
+        )
         node_map = {n.id: n for n in graph.nodes}
         resolved = resolve_instance_node(node_map["instance"], node_map)
         # The resolved config should include selected_columns from the original
@@ -363,8 +410,9 @@ class TestBugB13B14ChunkSizeRestore:
         # The old buggy pattern passed 0 when _prev_chunk_size was None:
         #   set_streaming_chunk_size(int(x) if x is not None else 0)
         # This raises ValueError. The fix guards the restore with an if check.
-        assert "else 0" not in source, \
+        assert "else 0" not in source, (
             "Chunk size restore must not fall back to 0 — Polars rejects it"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -378,11 +426,13 @@ class TestBugB15EmptyDatabricksFetchV2:
         # Verify the code handles the writer=None case by writing empty parquet
         import inspect
         from haute._databricks_io import fetch_and_cache
+
         source = inspect.getsource(fetch_and_cache)
         # After fix, when writer is None, an empty parquet should be written
         # The fix should handle the case where no rows were returned
-        assert "writer is None" in source or "not writer" in source or "empty" in source.lower(), \
+        assert "writer is None" in source or "not writer" in source or "empty" in source.lower(), (
             "fetch_and_cache should handle zero-row tables (writer is None)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -395,9 +445,11 @@ class TestBugB16ValidateDeployCall:
         """The programmatic deploy() function should call validate_deploy."""
         import inspect
         from haute.deploy import deploy
+
         source = inspect.getsource(deploy)
-        assert "validate_deploy" in source, \
+        assert "validate_deploy" in source, (
             "deploy() should call validate_deploy() before deploying"
+        )
 
 
 class TestBugB8GlmCvRegularization:
@@ -405,7 +457,7 @@ class TestBugB8GlmCvRegularization:
         """cross_validate should forward alpha from params to the fit call."""
         import inspect
         from haute.modelling._rustystats import GLMAlgorithm
+
         source = inspect.getsource(GLMAlgorithm.cross_validate)
         # The fix should extract alpha from params and pass it
-        assert "alpha" in source, \
-            "cross_validate should extract and forward the alpha parameter"
+        assert "alpha" in source, "cross_validate should extract and forward the alpha parameter"

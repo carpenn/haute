@@ -162,6 +162,7 @@ export default function usePipelineAPI({
         }
         nodeIdCounterRef.current = computeNextNodeId(pipelineNodes)
         lastSavedRef.current = JSON.stringify({ nodes: pipelineNodes, edges: pipelineEdges, preamble: data.preamble || "" })
+        if (data.warning) addToast("warning", data.warning)
         setLoading(false)
       })
       .catch((err) => {
