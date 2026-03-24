@@ -231,3 +231,5 @@ CLAUDE.md
 
 # Claude Code workspace
 .claude/
+
+*.parquet
