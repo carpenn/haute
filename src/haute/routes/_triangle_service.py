@@ -2,6 +2,19 @@
 
 Converts a flat (origin, development, value) DataFrame into a structured
 actuarial loss-development triangle using the ``chainladder`` package.
+
+``chainladder`` is an **optional** dependency — install it to enable the
+Triangle Viewer node::
+
+    pip install chainladder
+
+It is listed under the ``[actuarial]`` extras group::
+
+    pip install haute[actuarial]
+
+It is intentionally *not* a core dependency because its transitive chain
+(``numba`` → ``llvmlite``) requires a matching LLVM toolchain and does not
+yet support all active Python versions (e.g. Python 3.14).
 """
 
 from __future__ import annotations

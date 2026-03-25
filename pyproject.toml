@@ -42,7 +42,6 @@ dependencies = [
     "orjson>=3.9.0",
     "price-contour==0.2.7",
     "rustystats>=0.6.1",
-    "chainladder>=0.8.0",
     "pandas>=2.0.0",
 ]
 
@@ -56,6 +55,9 @@ databricks = [
     "mlflow>=2.15.0",
     "databricks-sdk>=0.30.0",
     "databricks-sql-connector>=3.0.0",
+]
+actuarial = [
+    "chainladder>=0.8.0",
 ]
 
 [dependency-groups]
