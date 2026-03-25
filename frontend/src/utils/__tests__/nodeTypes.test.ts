@@ -20,8 +20,8 @@ describe("NODE_TYPES", () => {
     expect(NODE_TYPES.SUBMODEL_PORT).toBe("submodelPort")
   })
 
-  it("has exactly 17 node types", () => {
-    expect(Object.keys(NODE_TYPES)).toHaveLength(17)
+  it("has exactly 18 node types", () => {
+    expect(Object.keys(NODE_TYPES)).toHaveLength(18)
   })
 })
 
@@ -101,8 +101,8 @@ describe("SINK_ONLY_TYPES", () => {
     expect(SINK_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(false)
   })
 
-  it("has exactly 4 entries", () => {
-    expect(SINK_ONLY_TYPES.size).toBe(4)
+  it("has exactly 5 entries", () => {
+    expect(SINK_ONLY_TYPES.size).toBe(5)
   })
 })
 

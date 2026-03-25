@@ -20,6 +20,7 @@ import {
   OptimiserApplyEditor,
   ConstantEditor,
   SubmodelEditor,
+  TriangleViewerEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
 import ColumnsTab from "./editors/ColumnsTab"
@@ -51,6 +52,7 @@ const NO_COLUMNS_TAB = new Set<string>([
   NODE_TYPES.OUTPUT,
   NODE_TYPES.SUBMODEL,
   NODE_TYPES.MODELLING,
+  NODE_TYPES.TRIANGLE_VIEWER,
 ])
 
 // ─── Instance sub-panel (kept inline — it references multiple node-level concerns) ──
@@ -385,6 +387,18 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
 
       case NODE_TYPES.SUBMODEL:
         return <SubmodelEditor config={config} accentColor={accentColor} />
+
+      case NODE_TYPES.TRIANGLE_VIEWER:
+        return (
+          <TriangleViewerEditor
+            config={config}
+            onUpdate={handleConfigUpdate}
+            inputSources={inputSources}
+            onDeleteInput={onDeleteEdge}
+            upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
+            accentColor={accentColor}
+          />
+        )
 
       default:
         // Fallback: show raw config

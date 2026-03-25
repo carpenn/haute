@@ -52,6 +52,7 @@ class TestNodeType:
         "CONSTANT": "constant",
         "SUBMODEL": "submodel",
         "SUBMODEL_PORT": "submodelPort",
+        "TRIANGLE_VIEWER": "triangleViewer",
     }
 
     def test_no_unexpected_members(self):

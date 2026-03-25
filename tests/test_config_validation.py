@@ -51,6 +51,7 @@ class TestValidKeysRegistry:
             NodeType.OPTIMISER_APPLY,
             NodeType.CONSTANT,
             NodeType.SUBMODEL,
+            NodeType.TRIANGLE_VIEWER,
         }
         assert expected == set(VALID_KEYS.keys()), (
             f"Missing: {expected - set(VALID_KEYS.keys())}, "

@@ -20,6 +20,7 @@ import DataPreview from "./panels/DataPreview"
 import OptimiserPreview from "./panels/OptimiserPreview"
 import OptimiserDataPreview from "./panels/OptimiserDataPreview"
 import { ModellingPreview } from "./panels/ModellingPreview"
+import TrianglePivotPreview from "./panels/TrianglePivotPreview"
 
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
@@ -72,6 +73,7 @@ const nodeTypes = {
   [NODE_TYPES.OPTIMISER_APPLY]: PipelineNode,
   [NODE_TYPES.SCENARIO_EXPANDER]: PipelineNode,
   [NODE_TYPES.CONSTANT]: PipelineNode,
+  [NODE_TYPES.TRIANGLE_VIEWER]: PipelineNode,
   [NODE_TYPES.SUBMODEL]: SubmodelNode,
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
@@ -420,6 +422,14 @@ function FlowEditor() {
               ) {
                 return (
                   <OptimiserDataPreview
+                    data={previewData}
+                    config={nodeData(activeNode).config ?? {}}
+                  />
+                )
+              }
+              if (activeNode && nodeData(activeNode).nodeType === NODE_TYPES.TRIANGLE_VIEWER) {
+                return (
+                  <TrianglePivotPreview
                     data={previewData}
                     config={nodeData(activeNode).config ?? {}}
                   />

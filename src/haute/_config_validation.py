@@ -28,6 +28,7 @@ from haute._types import (
     ScenarioExpanderConfig,
     SubmodelConfig,
     TransformConfig,
+    TriangleViewerConfig,
 )
 
 logger = get_logger(component="config_validation")
@@ -55,6 +56,7 @@ _TYPED_DICT_BY_NODE_TYPE: dict[NodeType, type] = {
     NodeType.OPTIMISER_APPLY: OptimiserApplyConfig,
     NodeType.CONSTANT: ConstantConfig,
     NodeType.SUBMODEL: SubmodelConfig,
+    NodeType.TRIANGLE_VIEWER: TriangleViewerConfig,
 }
 
 # Keys that any node type may carry (set by the parser / executor, not by config authors).
