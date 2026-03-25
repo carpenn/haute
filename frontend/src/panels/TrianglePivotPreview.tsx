@@ -453,7 +453,7 @@ function PivotTable({
               const val = cells.get(origin)?.get(dev) ?? null
               return (
                 <td key={dev} style={TD}>
-                  {val != null ? val.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""}
+                  {val != null ? val.toLocaleString(undefined, { maximumFractionDigits: 4 }) : ""}
                 </td>
               )
             })}
@@ -497,6 +497,14 @@ function TriangleLineChart({
   const yMin = allVals.length ? Math.min(0, ...allVals) : 0
   const yMax = allVals.length ? Math.max(...allVals) : 1
   const yRange = yMax - yMin || 1
+
+  // Dynamic Y-axis number format based on value magnitude
+  const yTickFmt = useMemo(() => {
+    const absMax = Math.max(Math.abs(yMin), Math.abs(yMax))
+    if (absMax >= 1000) return (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    if (absMax >= 1) return (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    return (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 4 })
+  }, [yMin, yMax])
 
   const xStep = developments.length > 1 ? plotW / (developments.length - 1) : 0
 
@@ -555,7 +563,7 @@ function TriangleLineChart({
                   fill="var(--text-muted)"
                   fontSize={9}
                 >
-                  {v.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {yTickFmt(v)}
                 </text>
               </g>
             )

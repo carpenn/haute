@@ -104,7 +104,7 @@ def process_triangle(
         )
         # Fall back: apply each axis independently where possible
         try:
-            tri = tri.grain(f"O{origin_g}D{origin_g}")
+            tri = tri.grain(f"O{origin_g}D{dev_g}")
         except Exception:  # noqa: BLE001
             pass  # Keep original grain
 
