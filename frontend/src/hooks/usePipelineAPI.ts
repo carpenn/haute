@@ -11,6 +11,7 @@ import useSettingsStore from "../stores/useSettingsStore"
 import useUIStore from "../stores/useUIStore"
 import useNodeResultsStore from "../stores/useNodeResultsStore"
 import { validateConfigRefs, formatConfigRefWarnings } from "../utils/validateConfigRefs"
+import { NODE_TYPES } from "../utils/nodeTypes"
 
 interface PipelineAPIParams {
   selectedNode: Node | null
@@ -193,7 +194,14 @@ export default function usePipelineAPI({
 
     const graph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
 
-    previewNode(graph, node.id, rowLimitRef.current, activeSourceRef.current, { signal: controller.signal })
+    // Triangle_Viewer aggregates over the full dataset server-side, so we must
+    // bypass the user's row limit.  Passing 0 signals "no limit" to the backend.
+    const effectiveRowLimit =
+      (node.data as Record<string, unknown>).nodeType === NODE_TYPES.TRIANGLE_VIEWER
+        ? 0
+        : rowLimitRef.current
+
+    previewNode(graph, node.id, effectiveRowLimit, activeSourceRef.current, { signal: controller.signal })
       .then((result) => {
         const preview = resultToPreview(node.id, label, result)
         setPreviewData(preview)

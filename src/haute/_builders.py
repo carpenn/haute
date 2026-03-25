@@ -681,14 +681,59 @@ def _build_submodel_port(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
 
 @_register(NodeType.TRIANGLE_VIEWER, columns=_passthrough_columns)
 def _build_triangle_viewer(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
-    """Pass the upstream frame through unchanged.
+    """Aggregate the upstream frame into a triangle pivot summary.
 
-    The Triangle_Viewer is a pure front-end visualisation node: the pivot
-    aggregation (Origin × Development cross-tab) is computed client-side
-    from the preview rows.  The builder simply forwards the upstream
-    ``LazyFrame`` so that the preview endpoint can return its data.
+    Groups by (originField, developmentField) and sums the valueField so
+    that the preview endpoint returns the **complete aggregate** regardless
+    of how many raw input rows exist.  This means the pivot table in the
+    front-end always reflects the full dataset, not just the preview sample.
+
+    Falls back to passthrough when the three field mappings are not yet
+    configured so that partially-configured nodes still display raw data.
     """
-    return ctx.func_name, _passthrough_fn, False
+    origin_field = ctx.config.get("originField", "")
+    dev_field = ctx.config.get("developmentField", "")
+    value_field = ctx.config.get("valueField", "")
+
+    all_mapped = bool(origin_field and dev_field and value_field)
+
+    _origin = str(origin_field)
+    _dev = str(dev_field)
+    _value = str(value_field)
+
+    def triangle_fn(*dfs: _Frame) -> _Frame:
+        if not dfs:
+            return pl.LazyFrame()
+        df = dfs[0]
+        if not all_mapped:
+            return df
+
+        # Gracefully handle missing columns — warn and fall back to passthrough.
+        available = set(df.collect_schema().names())
+        missing = {_origin, _dev, _value} - available
+        if missing:
+            logger.warning(
+                "triangle_viewer_missing_columns",
+                missing=sorted(missing),
+                available=sorted(available),
+            )
+            return df
+
+        # Group by origin/development, sum the value column (cast to Float64
+        # so that integer and string-encoded numbers are handled uniformly).
+        return (
+            df.group_by([_origin, _dev])
+            .agg(
+                pl.col(_value)
+                .cast(pl.Float64, strict=False)
+                .fill_null(0.0)
+                .sum()
+                .alias(_value)
+            )
+            .sort([_origin, _dev])
+        )
+
+    return ctx.func_name, triangle_fn, False
 
 
 # ---------------------------------------------------------------------------
