@@ -17,10 +17,11 @@ export type PivotResult = {
 
 /**
  * Sort an array of string keys:
- * – numeric ascending when every key is parseable as a finite number;
+ * – numeric ascending when every key is non-empty and parseable as a finite number;
  * – lexicographic ascending otherwise.
  */
 function sortKeys(keys: string[]): string[] {
+  // k.trim() !== "" guard prevents treating empty string (Number("") === 0) as numeric
   const allNumeric = keys.every((k) => k.trim() !== "" && isFinite(Number(k)))
   if (allNumeric) {
     return [...keys].sort((a, b) => Number(a) - Number(b))

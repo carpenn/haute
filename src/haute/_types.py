@@ -496,12 +496,15 @@ class TriangleViewerConfig(TypedDict, total=False):
     """Config for triangleViewer nodes.
 
     Field mappings from the upstream DataSource columns to the three required
-    triangle dimensions.
+    triangle dimensions:
+    - originField: Row dimension (Origin Period)
+    - developmentField: Column dimension (Development Period)
+    - valueField: Cell value — summed per (origin, development) pair
     """
 
-    originField: str       # Row dimension — Origin Period
-    developmentField: str  # Column dimension — Development Period
-    valueField: str        # Cell value — summed per (origin, development) pair
+    originField: str
+    developmentField: str
+    valueField: str
 
 
 class NodeData(BaseModel):
