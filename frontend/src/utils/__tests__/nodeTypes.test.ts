@@ -16,12 +16,13 @@ describe("NODE_TYPES", () => {
     expect(NODE_TYPES.MODELLING).toBe("modelling")
     expect(NODE_TYPES.SCENARIO_EXPANDER).toBe("scenarioExpander")
     expect(NODE_TYPES.CONSTANT).toBe("constant")
+    expect(NODE_TYPES.EXPLORATORY_ANALYSIS).toBe("exploratoryAnalysis")
     expect(NODE_TYPES.SUBMODEL).toBe("submodel")
     expect(NODE_TYPES.SUBMODEL_PORT).toBe("submodelPort")
   })
 
-  it("has exactly 18 node types", () => {
-    expect(Object.keys(NODE_TYPES)).toHaveLength(18)
+  it("has exactly 19 node types", () => {
+    expect(Object.keys(NODE_TYPES)).toHaveLength(19)
   })
 })
 
@@ -101,8 +102,8 @@ describe("SINK_ONLY_TYPES", () => {
     expect(SINK_ONLY_TYPES.has(NODE_TYPES.API_INPUT)).toBe(false)
   })
 
-  it("has exactly 5 entries", () => {
-    expect(SINK_ONLY_TYPES.size).toBe(5)
+  it("has exactly 6 entries", () => {
+    expect(SINK_ONLY_TYPES.size).toBe(6)
   })
 })
 

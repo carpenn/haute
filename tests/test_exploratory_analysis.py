@@ -11,7 +11,14 @@ from fastapi.testclient import TestClient
 
 from haute._builders import _build_node_fn
 from haute._config_validation import warn_unrecognized_config_keys
-from haute._types import ExploratoryAnalysisConfig, GraphEdge, GraphNode, NodeData, NodeType, PipelineGraph
+from haute._types import (
+    ExploratoryAnalysisConfig,
+    GraphEdge,
+    GraphNode,
+    NodeData,
+    NodeType,
+    PipelineGraph,
+)
 
 
 def _make_exploratory_node(
@@ -106,7 +113,9 @@ def exploratory_project(tmp_path: Path) -> tuple[Path, str]:
             "feature_band": ["A", "A", "?", "B", "UNKNOWN", "C"],
             "target_value": [100.0, 120.0, 130.0, 140.0, 150.0, 3000.0],
         }
-    ).with_columns(pl.col("accident_date").str.strptime(pl.Date, strict=False)).write_parquet(data_path)
+    ).with_columns(
+        pl.col("accident_date").str.strptime(pl.Date, strict=False)
+    ).write_parquet(data_path)
     return tmp_path, data_path.as_posix()
 
 
@@ -144,7 +153,10 @@ def _build_graph(data_path: str) -> PipelineGraph:
             },
         ),
     )
-    return PipelineGraph(nodes=[source, eda], edges=[GraphEdge(id="e1", source="source", target="eda")])
+    return PipelineGraph(
+        nodes=[source, eda],
+        edges=[GraphEdge(id="e1", source="source", target="eda")],
+    )
 
 
 class TestExploratoryAnalysisRoutes:
@@ -167,7 +179,7 @@ class TestExploratoryAnalysisRoutes:
         assert any(row["field"] == "target_value" for row in data["descriptive_statistics"])
         assert any(row["field"] == "target_value" for row in data["outliers_inliers"])
         assert any(row["field"] == "feature_band" for row in data["disguised_missings"])
-        assert "auto" in data["correlations"]["types"]
+        assert "pearson" in data["correlations"]["types"]
         assert data["one_way_options"][0]["field"] == "accident_date"
         assert data["chart"]["points"]
 

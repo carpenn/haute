@@ -345,7 +345,10 @@ async def triangle_node(body: TriangleRequest) -> TriangleResponse:
     if not (origin_field and dev_field and value_field):
         return TriangleResponse(
             status="error",
-            error="Triangle fields not fully configured — map Origin, Development, and Value in the config panel.",
+            error=(
+                "Triangle fields not fully configured — map Origin, Development, "
+                "and Value in the config panel."
+            ),
         )
 
     try:
@@ -431,7 +434,10 @@ async def exploratory_analysis_node(
     if not target_node:
         raise HTTPException(status_code=404, detail=f"Node '{body.node_id}' not found")
     if target_node.data.nodeType != NodeType.EXPLORATORY_ANALYSIS:
-        raise HTTPException(status_code=400, detail="Target node is not an exploratory-analysis node")
+        raise HTTPException(
+            status_code=400,
+            detail="Target node is not an exploratory-analysis node",
+        )
 
     try:
         results = await asyncio.wait_for(
@@ -500,7 +506,10 @@ async def exploratory_analysis_one_way_chart(
     if not target_node:
         raise HTTPException(status_code=404, detail=f"Node '{body.node_id}' not found")
     if target_node.data.nodeType != NodeType.EXPLORATORY_ANALYSIS:
-        raise HTTPException(status_code=400, detail="Target node is not an exploratory-analysis node")
+        raise HTTPException(
+            status_code=400,
+            detail="Target node is not an exploratory-analysis node",
+        )
 
     try:
         results = await asyncio.wait_for(

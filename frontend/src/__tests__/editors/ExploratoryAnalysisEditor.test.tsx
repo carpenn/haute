@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import ExploratoryAnalysisEditor from "../../panels/editors/ExploratoryAnalysisEditor"
+
+afterEach(cleanup)
 
 describe("ExploratoryAnalysisEditor", () => {
   it("renders one row per upstream column", () => {

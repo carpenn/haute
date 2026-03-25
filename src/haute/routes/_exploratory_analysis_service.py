@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 import polars as pl
-from ydata_profiling import ProfileReport
+from ydata_profiling import ProfileReport  # type: ignore[import-untyped]
 
 ROLE_VALUES: tuple[str, ...] = (
     "policy_key",
@@ -250,7 +250,10 @@ def build_one_way_chart_payload(
     if normalized_roles[x_field] not in ONE_WAY_ROLE_VALUES:
         return {"x_field": x_field, "error": "Selected field cannot be used on the x-axis."}
 
-    target_field = next((field for field, role in normalized_roles.items() if role == "target"), None)
+    target_field = next(
+        (field for field, role in normalized_roles.items() if role == "target"),
+        None,
+    )
     if not target_field:
         return {"x_field": x_field, "error": "Assign a target field to render the line series."}
 
@@ -258,14 +261,21 @@ def build_one_way_chart_payload(
     if x_field not in pdf.columns:
         return {"x_field": x_field, "error": f"Field '{x_field}' is not available in the dataset."}
     if target_field not in pdf.columns:
-        return {"x_field": x_field, "error": f"Target field '{target_field}' is not available in the dataset."}
+        return {
+            "x_field": x_field,
+            "error": f"Target field '{target_field}' is not available in the dataset.",
+        }
 
     buckets, bucket_order, was_binned = _bucket_series(pdf[x_field], dtype_map.get(x_field, ""))
     chart_df = pd.DataFrame({"bucket": buckets})
     chart_df["line"] = pd.to_numeric(pdf[target_field], errors="coerce").fillna(0.0)
 
     claim_key_field = next(
-        (field for field, role in normalized_roles.items() if role == "claim_key" and field in pdf.columns),
+        (
+            field
+            for field, role in normalized_roles.items()
+            if role == "claim_key" and field in pdf.columns
+        ),
         None,
     )
     if claim_key_field:
@@ -288,7 +298,9 @@ def build_one_way_chart_payload(
         bar_label = "Rows"
 
     order_lookup = {label: idx for idx, label in enumerate(bucket_order)}
-    grouped["bucket_order"] = grouped["bucket"].map(lambda value: order_lookup.get(str(value), len(order_lookup)))
+    grouped["bucket_order"] = grouped["bucket"].map(
+        lambda value: order_lookup.get(str(value), len(order_lookup))
+    )
     grouped = grouped.sort_values("bucket_order")
 
     points = [
@@ -405,7 +417,9 @@ def _build_distribution(meta: dict[str, Any], value_counts: Any) -> dict[str, An
 def _build_correlation_matrix(correlations: dict[str, Any]) -> dict[str, Any]:
     if not correlations:
         return {"fields": [], "types": [], "cells": []}
-    fields = sorted({str(field) for matrix in correlations.values() for field in matrix.index.tolist()})
+    fields = sorted(
+        {str(field) for matrix in correlations.values() for field in matrix.index.tolist()}
+    )
     correlation_types = [name for name in MULTI_CORRELATIONS if name in correlations]
     cells: list[list[dict[str, Any]]] = []
     for row_field in fields:
@@ -489,7 +503,7 @@ def _outlier_mask(series: pd.Series, dtype: str) -> pd.Series:
         return numeric.lt(lower) | numeric.gt(upper)
     if dtype in TEMPORAL_DTYPES:
         dt = pd.to_datetime(series, errors="coerce")
-        numeric = dt.view("int64").astype("float64")
+        numeric = dt.astype("int64", copy=False).astype("float64")
         clean = pd.Series(numeric).replace({pd.NA: None}).dropna()
         if clean.empty:
             return pd.Series([False] * len(series))
