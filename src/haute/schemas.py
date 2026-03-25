@@ -176,8 +176,31 @@ class SinkResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# /api/files
+# /api/pipeline/triangle
 # ---------------------------------------------------------------------------
+
+
+class TriangleRequest(BaseModel):
+    graph: Graph
+    node_id: str
+    source: str = "live"
+    origin_grain: str = "Y"
+    dev_grain: str = "Y"
+    triangle_type: str = "incremental"
+
+
+class TriangleResponse(BaseModel):
+    status: str
+    origins: list[str] = Field(default_factory=list)
+    developments: list[str] = Field(default_factory=list)
+    values: list[list[float | None]] = Field(default_factory=list)
+    triangle_type: str = "incremental"
+    origin_grain: str = "Y"
+    dev_grain: str = "Y"
+    error: str | None = None
+
+
+
 
 
 class FileItem(BaseModel):

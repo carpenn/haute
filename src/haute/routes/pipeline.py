@@ -28,6 +28,8 @@ from haute.schemas import (
     SinkResponse,
     TraceRequest,
     TraceResponse,
+    TriangleRequest,
+    TriangleResponse,
 )
 
 logger = get_logger(component="server.pipeline")
@@ -305,7 +307,104 @@ async def preview_node(body: PreviewNodeRequest) -> PreviewNodeResponse:
         raise HTTPException(status_code=500, detail=_INTERNAL_ERROR_DETAIL)
 
 
-@router.post("/pipeline/sink", response_model=SinkResponse)
+@router.post("/pipeline/triangle", response_model=TriangleResponse)
+async def triangle_node(body: TriangleRequest) -> TriangleResponse:
+    """Run pipeline up to a Triangle Viewer node and return chainladder-processed data.
+
+    Accepts grain controls (``origin_grain``, ``dev_grain``) and a
+    ``triangle_type`` toggle (``"incremental"`` / ``"cumulative"``).
+    Uses the ``chainladder`` package to aggregate, re-grain, and convert
+    the actuarial loss-development triangle.
+    """
+    from haute.executor import execute_graph
+    from haute.graph_utils import flatten_graph
+    from haute.routes._triangle_service import process_triangle
+
+    graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
+    if not graph.nodes:
+        raise HTTPException(status_code=400, detail="Empty graph")
+
+    node_map = graph.node_map
+    target_node = node_map.get(body.node_id)
+    if not target_node:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Node '{body.node_id}' not found",
+        )
+
+    config = target_node.data.config
+    origin_field = str(config.get("originField", ""))
+    dev_field = str(config.get("developmentField", ""))
+    value_field = str(config.get("valueField", ""))
+
+    if not (origin_field and dev_field and value_field):
+        return TriangleResponse(
+            status="error",
+            error="Triangle fields not fully configured — map Origin, Development, and Value in the config panel.",
+        )
+
+    try:
+        # Execute the full pipeline up to (and including) the triangle viewer
+        # node using row_limit=0 so all rows are returned, not just a sample.
+        results = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_graph,
+                graph,
+                target_node_id=body.node_id,
+                row_limit=0,
+                source=body.source,
+            ),
+            timeout=_PREVIEW_TIMEOUT,
+        )
+
+        node_result = results.get(body.node_id)
+        if not node_result:
+            return TriangleResponse(
+                status="error",
+                error=f"Node '{body.node_id}' produced no result",
+            )
+        if node_result.status == "error":
+            return TriangleResponse(
+                status="error",
+                error=node_result.error or "Node execution failed",
+            )
+
+        triangle_data = process_triangle(
+            preview_rows=node_result.preview,
+            origin_field=origin_field,
+            dev_field=dev_field,
+            value_field=value_field,
+            origin_grain=body.origin_grain,
+            dev_grain=body.dev_grain,
+            triangle_type=body.triangle_type,
+        )
+
+        return TriangleResponse(
+            status="ok",
+            origins=triangle_data["origins"],
+            developments=triangle_data["developments"],
+            values=triangle_data["values"],
+            triangle_type=body.triangle_type,
+            origin_grain=body.origin_grain,
+            dev_grain=body.dev_grain,
+        )
+    except TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Triangle execution timed out ({_PREVIEW_TIMEOUT:.0f}s limit)",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("triangle_failed", error=str(e))
+        return TriangleResponse(
+            status="error",
+            error=str(e),
+        )
+
+
+
 async def execute_sink_node(body: SinkRequest) -> SinkResponse:
     """Execute the pipeline up to a sink node and write output to disk.
 

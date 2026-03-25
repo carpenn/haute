@@ -2,10 +2,38 @@ import { InputSourcesBar, INPUT_STYLE } from "./_shared"
 import type { InputSource, OnUpdateConfig } from "./_shared"
 import { configField } from "../../utils/configField"
 
-const FIELDS: Array<{ key: string; label: string; description: string }> = [
-  { key: "originField", label: "Origin Period", description: "row dimension" },
-  { key: "developmentField", label: "Development Period", description: "column dimension" },
-  { key: "valueField", label: "Value", description: "summed in each cell" },
+// Date-like Polars dtypes (origin / development period columns must be date fields)
+const DATE_DTYPES = new Set(["Date", "Datetime", "Duration"])
+
+// Non-string numeric Polars dtypes (value field must be numeric)
+const STRING_DTYPES = new Set(["Utf8", "String", "Categorical", "Enum", "Boolean"])
+
+type FieldSpec = {
+  key: string
+  label: string
+  description: string
+  filterFn: (dtype: string) => boolean
+}
+
+const FIELDS: FieldSpec[] = [
+  {
+    key: "originField",
+    label: "Origin Period",
+    description: "row dimension — date field",
+    filterFn: (dtype) => DATE_DTYPES.has(dtype),
+  },
+  {
+    key: "developmentField",
+    label: "Development Period",
+    description: "column dimension — date field",
+    filterFn: (dtype) => DATE_DTYPES.has(dtype),
+  },
+  {
+    key: "valueField",
+    label: "Value",
+    description: "summed in each cell — numeric field",
+    filterFn: (dtype) => !STRING_DTYPES.has(dtype),
+  },
 ]
 
 export default function TriangleViewerEditor({
@@ -56,8 +84,9 @@ export default function TriangleViewerEditor({
         </div>
       )}
 
-      {FIELDS.map(({ key, label, description }) => {
+      {FIELDS.map(({ key, label, description, filterFn }) => {
         const value = configField(config, key, "")
+        const filteredColumns = upstreamColumns.filter((c) => filterFn(c.dtype))
         return (
           <div key={key}>
             <label
@@ -79,11 +108,16 @@ export default function TriangleViewerEditor({
                 aria-label={label}
               >
                 <option value="">— select column —</option>
-                {upstreamColumns.map((c) => (
+                {filteredColumns.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
                   </option>
                 ))}
+                {filteredColumns.length === 0 && (
+                  <option value="" disabled>
+                    No matching columns
+                  </option>
+                )}
               </select>
             ) : (
               <input
@@ -115,3 +149,4 @@ export default function TriangleViewerEditor({
     </div>
   )
 }
+

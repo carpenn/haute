@@ -51,6 +51,7 @@ import useNodeResultsStore from "./stores/useNodeResultsStore"
 
 import { NODE_TYPES } from "./utils/nodeTypes"
 import { nodeData } from "./types/node"
+import { resolveGraphFromRefs } from "./utils/buildGraph"
 import { PanelLeftOpen } from "lucide-react"
 
 // ---------------------------------------------------------------------------
@@ -428,10 +429,13 @@ function FlowEditor() {
                 )
               }
               if (activeNode && nodeData(activeNode).nodeType === NODE_TYPES.TRIANGLE_VIEWER) {
+                const triGraph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
                 return (
                   <TrianglePivotPreview
                     data={previewData}
                     config={nodeData(activeNode).config ?? {}}
+                    graph={triGraph}
+                    nodeId={activeNode.id}
                   />
                 )
               }
