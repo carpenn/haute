@@ -43,6 +43,8 @@ NODE_TYPE_TO_FOLDER: dict[NodeType, str] = {
     NodeType.OPTIMISER_APPLY: "apply_optimisation",
     NodeType.SCENARIO_EXPANDER: "expander",
     NodeType.CONSTANT: "constant",
+    NodeType.TRIANGLE_VIEWER: "triangle_viewer",
+    NodeType.EDA_VIEWER: "eda_viewer",
 }
 
 FOLDER_TO_NODE_TYPE: dict[str, NodeType] = {v: k for k, v in NODE_TYPE_TO_FOLDER.items()}

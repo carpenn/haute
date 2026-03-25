@@ -53,6 +53,7 @@ class TestNodeType:
         "SUBMODEL": "submodel",
         "SUBMODEL_PORT": "submodelPort",
         "TRIANGLE_VIEWER": "triangleViewer",
+        "EDA_VIEWER": "edaViewer",
     }
 
     def test_no_unexpected_members(self):
