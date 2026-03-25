@@ -39,8 +39,8 @@ type TriangleType = "incremental" | "cumulative"
 interface TrianglePivotPreviewProps {
   data: PreviewData | null
   config: Record<string, unknown>
-  graph: GraphPayload
   nodeId: string
+  getGraph: () => GraphPayload
 }
 
 // ── Component ─────────────────────────────────────────────────────────────
@@ -48,8 +48,8 @@ interface TrianglePivotPreviewProps {
 export default function TrianglePivotPreview({
   data,
   config,
-  graph,
   nodeId,
+  getGraph,
 }: TrianglePivotPreviewProps) {
   const originField = String(config.originField ?? "")
   const developmentField = String(config.developmentField ?? "")
@@ -81,7 +81,7 @@ export default function TrianglePivotPreview({
     setTriLoading(true)
     setTriError(null)
 
-    fetchTriangle(graph, nodeId, originGrain, devGrain, triangleType, "live", {
+    fetchTriangle(getGraph(), nodeId, originGrain, devGrain, triangleType, "live", {
       signal: ctrl.signal,
       timeout: 120_000,
     })
@@ -101,12 +101,15 @@ export default function TrianglePivotPreview({
       .finally(() => {
         if (!ctrl.signal.aborted) setTriLoading(false)
       })
-  }, [allMapped, nodeId, graph, originGrain, devGrain, triangleType, data?.status])
+  }, [allMapped, nodeId, getGraph, originGrain, devGrain, triangleType, data?.status])
 
   // Re-fetch whenever controls or underlying preview data changes
   useEffect(() => {
-    loadTriangle()
-    return () => { abortRef.current?.abort() }
+    const timer = window.setTimeout(loadTriangle, 0)
+    return () => {
+      window.clearTimeout(timer)
+      abortRef.current?.abort()
+    }
   }, [loadTriangle])
 
   // ── Drag-resize ──────────────────────────────────────────────────────────
@@ -689,4 +692,3 @@ const TD_HEADER: React.CSSProperties = {
   position: "sticky",
   left: 0,
 }
-

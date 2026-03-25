@@ -165,6 +165,10 @@ class NodeRegistry:
         """Decorator alias for constant nodes."""
         return self._register_node(fn, **config)
 
+    def exploratory_analysis(self, fn: Callable | None = None, **config: Any) -> Callable:
+        """Decorator alias for exploratory-analysis nodes."""
+        return self._register_node(fn, **config)
+
     def instance(self, fn: Callable | None = None, **config: Any) -> Callable:
         """Decorator alias for instance nodes."""
         return self._register_node(fn, **config)

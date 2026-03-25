@@ -44,6 +44,7 @@ dependencies = [
     "rustystats>=0.6.1",
     "chainladder>=0.8.0",
     "pandas>=2.0.0",
+    "ydata-profiling>=4.18.1",
 ]
 
 [project.urls]

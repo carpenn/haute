@@ -200,6 +200,39 @@ class TriangleResponse(BaseModel):
     error: str | None = None
 
 
+class ExploratoryAnalysisRequest(BaseModel):
+    graph: Graph
+    node_id: str
+    source: str = "live"
+
+
+class ExploratoryOneWayChartRequest(BaseModel):
+    graph: Graph
+    node_id: str
+    x_field: str
+    source: str = "live"
+
+
+class ExploratoryOneWayChartResponse(BaseModel):
+    status: str
+    chart: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class ExploratoryAnalysisResponse(BaseModel):
+    status: str
+    row_count: int = 0
+    field_roles: dict[str, str] = Field(default_factory=dict)
+    descriptive_statistics: list[dict[str, Any]] = Field(default_factory=list)
+    outliers_inliers: list[dict[str, Any]] = Field(default_factory=list)
+    disguised_missings: list[dict[str, Any]] = Field(default_factory=list)
+    correlations: dict[str, Any] = Field(default_factory=dict)
+    one_way_options: list[dict[str, str]] = Field(default_factory=list)
+    default_x_field: str | None = None
+    chart: dict[str, Any] | None = None
+    error: str | None = None
+
+
 
 
 

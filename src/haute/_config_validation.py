@@ -17,6 +17,7 @@ from haute._types import (
     DataSinkConfig,
     DataSourceConfig,
     ExternalFileConfig,
+    ExploratoryAnalysisConfig,
     LiveSwitchConfig,
     ModellingConfig,
     ModelScoreConfig,
@@ -57,6 +58,7 @@ _TYPED_DICT_BY_NODE_TYPE: dict[NodeType, type] = {
     NodeType.CONSTANT: ConstantConfig,
     NodeType.SUBMODEL: SubmodelConfig,
     NodeType.TRIANGLE_VIEWER: TriangleViewerConfig,
+    NodeType.EXPLORATORY_ANALYSIS: ExploratoryAnalysisConfig,
 }
 
 # Keys that any node type may carry (set by the parser / executor, not by config authors).

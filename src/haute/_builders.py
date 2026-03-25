@@ -736,6 +736,12 @@ def _build_triangle_viewer(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, triangle_fn, False
 
 
+@_register(NodeType.EXPLORATORY_ANALYSIS, columns=_passthrough_columns)
+def _build_exploratory_analysis(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    """Pass through the upstream frame for exploratory analysis viewer nodes."""
+    return ctx.func_name, _passthrough_fn, False
+
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import OptimiserPreview from "./panels/OptimiserPreview"
 import OptimiserDataPreview from "./panels/OptimiserDataPreview"
 import { ModellingPreview } from "./panels/ModellingPreview"
 import TrianglePivotPreview from "./panels/TrianglePivotPreview"
+import ExploratoryAnalysisPreview from "./panels/ExploratoryAnalysisPreview"
 
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
@@ -75,6 +76,7 @@ const nodeTypes = {
   [NODE_TYPES.SCENARIO_EXPANDER]: PipelineNode,
   [NODE_TYPES.CONSTANT]: PipelineNode,
   [NODE_TYPES.TRIANGLE_VIEWER]: PipelineNode,
+  [NODE_TYPES.EXPLORATORY_ANALYSIS]: PipelineNode,
   [NODE_TYPES.SUBMODEL]: SubmodelNode,
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }
@@ -162,6 +164,10 @@ function FlowEditor() {
   const sourceFileRef = useRef("")
   const graphRefreshingRef = useRef(0)
   const nodeIdCounter = useRef(0)
+  const getPreviewGraph = useCallback(
+    () => resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef),
+    [],
+  )
 
   // Keep graphRef in sync so callbacks never see stale state.
   // Only bump graphVersion for structural changes (add/remove/data), not position-only drags.
@@ -429,13 +435,22 @@ function FlowEditor() {
                 )
               }
               if (activeNode && nodeData(activeNode).nodeType === NODE_TYPES.TRIANGLE_VIEWER) {
-                const triGraph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
                 return (
                   <TrianglePivotPreview
                     data={previewData}
                     config={nodeData(activeNode).config ?? {}}
-                    graph={triGraph}
                     nodeId={activeNode.id}
+                    getGraph={getPreviewGraph}
+                  />
+                )
+              }
+              if (activeNode && nodeData(activeNode).nodeType === NODE_TYPES.EXPLORATORY_ANALYSIS) {
+                return (
+                  <ExploratoryAnalysisPreview
+                    data={previewData}
+                    config={nodeData(activeNode).config ?? {}}
+                    nodeId={activeNode.id}
+                    getGraph={getPreviewGraph}
                   />
                 )
               }

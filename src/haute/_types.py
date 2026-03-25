@@ -48,6 +48,7 @@ class NodeType(StrEnum):
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
     TRIANGLE_VIEWER = "triangleViewer"
+    EXPLORATORY_ANALYSIS = "exploratoryAnalysis"
 
 
 DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
@@ -67,6 +68,7 @@ DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
     "optimiser_apply": NodeType.OPTIMISER_APPLY,
     "constant": NodeType.CONSTANT,
     "triangle_viewer": NodeType.TRIANGLE_VIEWER,
+    "exploratory_analysis": NodeType.EXPLORATORY_ANALYSIS,
     "instance": NodeType.POLARS,  # instances default to polars; real type resolved at runtime
 }
 
@@ -471,6 +473,8 @@ SCENARIO_EXPANDER_CONFIG_KEYS: tuple[str, ...] = (
     "step_column",
 )
 
+EXPLORATORY_ANALYSIS_CONFIG_KEYS: tuple[str, ...] = ("fieldRoles",)
+
 
 class ConstantConfig(TypedDict, total=False):
     """Config for constant nodes.
@@ -505,6 +509,12 @@ class TriangleViewerConfig(TypedDict, total=False):
     originField: str
     developmentField: str
     valueField: str
+
+
+class ExploratoryAnalysisConfig(TypedDict, total=False):
+    """Config for exploratoryAnalysis nodes."""
+
+    fieldRoles: dict[str, str]
 
 
 class NodeData(BaseModel):

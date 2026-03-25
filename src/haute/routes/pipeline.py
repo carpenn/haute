@@ -17,6 +17,10 @@ from haute.routes._helpers import (
     raise_pipeline_not_found,
 )
 from haute.schemas import (
+    ExploratoryAnalysisRequest,
+    ExploratoryAnalysisResponse,
+    ExploratoryOneWayChartRequest,
+    ExploratoryOneWayChartResponse,
     NodeMemoryInfo,
     NodeTimingInfo,
     PipelineSummary,
@@ -402,6 +406,141 @@ async def triangle_node(body: TriangleRequest) -> TriangleResponse:
             status="error",
             error=str(e),
         )
+
+
+@router.post("/pipeline/exploratory-analysis", response_model=ExploratoryAnalysisResponse)
+async def exploratory_analysis_node(
+    body: ExploratoryAnalysisRequest,
+) -> ExploratoryAnalysisResponse:
+    """Run pipeline up to an exploratory-analysis node and profile all rows."""
+    from haute._types import NodeType
+    from haute.executor import execute_graph
+    from haute.graph_utils import flatten_graph
+    from haute.routes._exploratory_analysis_service import (
+        build_exploratory_analysis_payload,
+        normalize_field_roles,
+    )
+
+    graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
+    if not graph.nodes:
+        raise HTTPException(status_code=400, detail="Empty graph")
+
+    node_map = graph.node_map
+    target_node = node_map.get(body.node_id)
+    if not target_node:
+        raise HTTPException(status_code=404, detail=f"Node '{body.node_id}' not found")
+    if target_node.data.nodeType != NodeType.EXPLORATORY_ANALYSIS:
+        raise HTTPException(status_code=400, detail="Target node is not an exploratory-analysis node")
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_graph,
+                graph,
+                target_node_id=body.node_id,
+                row_limit=0,
+                source=body.source,
+            ),
+            timeout=_PREVIEW_TIMEOUT,
+        )
+        node_result = results.get(body.node_id)
+        if not node_result:
+            return ExploratoryAnalysisResponse(
+                status="error",
+                error=f"Node '{body.node_id}' produced no result",
+            )
+        if node_result.status == "error":
+            return ExploratoryAnalysisResponse(
+                status="error",
+                error=node_result.error or "Node execution failed",
+            )
+
+        payload = build_exploratory_analysis_payload(
+            node_result.preview,
+            [col.model_dump() for col in node_result.columns],
+            normalize_field_roles(target_node.data.config.get("fieldRoles")),
+        )
+        return ExploratoryAnalysisResponse(**payload)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Exploratory analysis timed out ({_PREVIEW_TIMEOUT:.0f}s limit)",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("exploratory_analysis_failed", error=str(e))
+        return ExploratoryAnalysisResponse(status="error", error=str(e))
+
+
+@router.post(
+    "/pipeline/exploratory-analysis/one-way",
+    response_model=ExploratoryOneWayChartResponse,
+)
+async def exploratory_analysis_one_way_chart(
+    body: ExploratoryOneWayChartRequest,
+) -> ExploratoryOneWayChartResponse:
+    """Recompute the exploratory-analysis one-way chart for a different x-axis field."""
+    from haute._types import NodeType
+    from haute.executor import execute_graph
+    from haute.graph_utils import flatten_graph
+    from haute.routes._exploratory_analysis_service import (
+        build_one_way_chart_payload,
+        normalize_field_roles,
+    )
+
+    graph = flatten_graph(body.graph)
+    _ensure_source_file(graph)
+    if not graph.nodes:
+        raise HTTPException(status_code=400, detail="Empty graph")
+
+    node_map = graph.node_map
+    target_node = node_map.get(body.node_id)
+    if not target_node:
+        raise HTTPException(status_code=404, detail=f"Node '{body.node_id}' not found")
+    if target_node.data.nodeType != NodeType.EXPLORATORY_ANALYSIS:
+        raise HTTPException(status_code=400, detail="Target node is not an exploratory-analysis node")
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.to_thread(
+                execute_graph,
+                graph,
+                target_node_id=body.node_id,
+                row_limit=0,
+                source=body.source,
+            ),
+            timeout=_PREVIEW_TIMEOUT,
+        )
+        node_result = results.get(body.node_id)
+        if not node_result:
+            return ExploratoryOneWayChartResponse(
+                status="error",
+                error=f"Node '{body.node_id}' produced no result",
+            )
+        if node_result.status == "error":
+            return ExploratoryOneWayChartResponse(
+                status="error",
+                error=node_result.error or "Node execution failed",
+            )
+        chart = build_one_way_chart_payload(
+            node_result.preview,
+            [col.model_dump() for col in node_result.columns],
+            normalize_field_roles(target_node.data.config.get("fieldRoles")),
+            body.x_field,
+        )
+        return ExploratoryOneWayChartResponse(status="ok", chart=chart)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Exploratory chart timed out ({_PREVIEW_TIMEOUT:.0f}s limit)",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("exploratory_analysis_chart_failed", error=str(e))
+        return ExploratoryOneWayChartResponse(status="error", error=str(e))
 
 
 

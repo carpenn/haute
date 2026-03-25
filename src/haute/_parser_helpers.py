@@ -706,6 +706,8 @@ def _build_node_config(
             {"name": v.get("name", ""), "value": str(v.get("value", ""))}
             for v in (raw_values if isinstance(raw_values, list) else [])
         ]
+    elif node_type == NodeType.EXPLORATORY_ANALYSIS:
+        config["fieldRoles"] = decorator_kwargs.get("fieldRoles", {})
     elif node_type == NodeType.DATA_SINK:
         config["path"] = decorator_kwargs.get("path", decorator_kwargs.get("sink", ""))
         config["format"] = decorator_kwargs.get("format", "parquet")

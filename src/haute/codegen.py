@@ -8,6 +8,7 @@ from collections.abc import Callable
 from haute._config_io import config_path_for_node, has_config_folder
 from haute._logging import get_logger
 from haute._types import (
+    EXPLORATORY_ANALYSIS_CONFIG_KEYS,
     MODELLING_CONFIG_KEYS,
     NODE_TYPE_TO_DECORATOR,
     OPTIMISER_APPLY_CONFIG_KEYS,
@@ -276,6 +277,13 @@ def {func_name}({params}) -> pl.LazyFrame:
 
 _MODELLING = '''\
 @pipeline.modelling({dec_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first}
+'''
+
+_EXPLORATORY_ANALYSIS = '''\
+@pipeline.exploratory_analysis({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
@@ -705,6 +713,10 @@ _CODEGEN_BUILDERS[NodeType.OPTIMISER_APPLY] = _make_passthrough_builder(
 _CODEGEN_BUILDERS[NodeType.MODELLING] = _make_passthrough_builder(
     _MODELLING,
     MODELLING_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.EXPLORATORY_ANALYSIS] = _make_passthrough_builder(
+    _EXPLORATORY_ANALYSIS,
+    EXPLORATORY_ANALYSIS_CONFIG_KEYS,
 )
 
 

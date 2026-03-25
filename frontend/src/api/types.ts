@@ -87,6 +87,100 @@ export interface SinkResponse {
   format?: string
 }
 
+export interface ExploratoryDistribution {
+  kind: string
+  values: number[]
+}
+
+export interface ExploratoryDescriptiveRow {
+  field: string
+  role: string
+  dtype: string
+  profile_type?: string | null
+  non_missing_count: number
+  missing_count: number
+  missing_proportion: number
+  distinct_count: number
+  distinct_proportion: number
+  mean?: string | number | null
+  std?: string | number | null
+  min?: string | number | null
+  p5?: string | number | null
+  p25?: string | number | null
+  median?: string | number | null
+  p75?: string | number | null
+  p95?: string | number | null
+  max?: string | number | null
+  top_values: string[]
+  distribution?: ExploratoryDistribution | null
+}
+
+export interface ExploratoryOutlierRow {
+  field: string
+  role: string
+  dtype: string
+  outlier: string[]
+  outlier_proportion: number
+  inlier: string[]
+  inlier_proportion: number
+}
+
+export interface ExploratoryMissingRow {
+  field: string
+  role: string
+  dtype: string
+  missing_values: string[]
+  missing_proportion: number
+}
+
+export interface ExploratoryCorrelationMatrix {
+  fields: string[]
+  types: string[]
+  cells: Array<Array<Record<string, number | null>>>
+}
+
+export interface ExploratoryOneWayOption {
+  field: string
+  role: string
+  dtype: string
+}
+
+export interface ExploratoryOneWayPoint {
+  x: string
+  bar_value: number
+  line_value: number
+}
+
+export interface ExploratoryOneWayChart {
+  x_field: string
+  x_label?: string
+  bar_label?: string
+  line_label?: string
+  binned?: boolean
+  points?: ExploratoryOneWayPoint[]
+  error?: string | null
+}
+
+export interface ExploratoryAnalysisResponse {
+  status: string
+  row_count: number
+  field_roles: Record<string, string>
+  descriptive_statistics: ExploratoryDescriptiveRow[]
+  outliers_inliers: ExploratoryOutlierRow[]
+  disguised_missings: ExploratoryMissingRow[]
+  correlations: ExploratoryCorrelationMatrix
+  one_way_options: ExploratoryOneWayOption[]
+  default_x_field?: string | null
+  chart?: ExploratoryOneWayChart | null
+  error?: string | null
+}
+
+export interface ExploratoryOneWayChartResponse {
+  status: string
+  chart?: ExploratoryOneWayChart | null
+  error?: string | null
+}
+
 /** Schema info returned by /api/schema and /api/schema/databricks. */
 export interface SchemaResult {
   path: string
@@ -362,4 +456,3 @@ export interface TriangleResponse {
   dev_grain: string
   error?: string | null
 }
-

@@ -13,6 +13,7 @@ export { default as OptimiserApplyEditor } from "./OptimiserApplyEditor"
 export { default as ConstantEditor } from "./ConstantEditor"
 export { default as SubmodelEditor } from "./SubmodelEditor"
 export { default as TriangleViewerEditor } from "./TriangleViewerEditor"
+export { default as ExploratoryAnalysisEditor } from "./ExploratoryAnalysisEditor"
 
 // Re-export shared types so NodePanel can use them
 export type { SimpleNode, SimpleEdge, InputSource, SchemaInfo, OnUpdateConfig } from "./_shared"

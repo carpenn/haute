@@ -46,6 +46,8 @@ import type {
   GitBranchInfo,
   GitHistoryEntry,
   TriangleResponse,
+  ExploratoryAnalysisResponse,
+  ExploratoryOneWayChartResponse,
 } from "./types"
 
 // Re-export types so existing consumers importing from client.ts still work
@@ -159,6 +161,40 @@ export function fetchTriangle(
     origin_grain: originGrain,
     dev_grain: devGrain,
     triangle_type: triangleType,
+  }, {
+    timeout: 120_000,
+    ...options,
+  })
+}
+
+export function fetchExploratoryAnalysis(
+  graph: GraphPayload,
+  nodeId: string,
+  source?: string,
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<ExploratoryAnalysisResponse> {
+  return post("/api/pipeline/exploratory-analysis", {
+    graph,
+    node_id: nodeId,
+    source: source ?? "live",
+  }, {
+    timeout: 120_000,
+    ...options,
+  })
+}
+
+export function fetchExploratoryOneWayChart(
+  graph: GraphPayload,
+  nodeId: string,
+  xField: string,
+  source?: string,
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<ExploratoryOneWayChartResponse> {
+  return post("/api/pipeline/exploratory-analysis/one-way", {
+    graph,
+    node_id: nodeId,
+    x_field: xField,
+    source: source ?? "live",
   }, {
     timeout: 120_000,
     ...options,

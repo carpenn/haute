@@ -21,6 +21,7 @@ import {
   ConstantEditor,
   SubmodelEditor,
   TriangleViewerEditor,
+  ExploratoryAnalysisEditor,
 } from "./editors"
 import type { InputSource, SimpleNode, SimpleEdge } from "./editors"
 import ColumnsTab from "./editors/ColumnsTab"
@@ -53,6 +54,7 @@ const NO_COLUMNS_TAB = new Set<string>([
   NODE_TYPES.SUBMODEL,
   NODE_TYPES.MODELLING,
   NODE_TYPES.TRIANGLE_VIEWER,
+  NODE_TYPES.EXPLORATORY_ANALYSIS,
 ])
 
 // ─── Instance sub-panel (kept inline — it references multiple node-level concerns) ──
@@ -391,6 +393,18 @@ export default function NodePanel({ node, edges, allNodes, submodels, preamble, 
       case NODE_TYPES.TRIANGLE_VIEWER:
         return (
           <TriangleViewerEditor
+            config={config}
+            onUpdate={handleConfigUpdate}
+            inputSources={inputSources}
+            onDeleteInput={onDeleteEdge}
+            upstreamColumns={collectUpstreamColumns(node.id, edges, nodeMap)}
+            accentColor={accentColor}
+          />
+        )
+
+      case NODE_TYPES.EXPLORATORY_ANALYSIS:
+        return (
+          <ExploratoryAnalysisEditor
             config={config}
             onUpdate={handleConfigUpdate}
             inputSources={inputSources}

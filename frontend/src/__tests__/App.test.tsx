@@ -147,6 +147,10 @@ vi.mock("../panels/OptimiserPreview", () => ({
   default: () => <div data-testid="optimiser-preview" />,
 }))
 
+vi.mock("../panels/ExploratoryAnalysisPreview", () => ({
+  default: () => <div data-testid="exploratory-analysis-preview" />,
+}))
+
 vi.mock("../panels/TracePanel", () => ({
   default: () => <div data-testid="trace-panel" />,
 }))
