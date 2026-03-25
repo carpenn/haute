@@ -105,9 +105,9 @@ export default function TrianglePivotPreview({
 
   // Re-fetch whenever controls or underlying preview data changes
   useEffect(() => {
-    const timer = window.setTimeout(loadTriangle, 0)
+    const frame = window.requestAnimationFrame(() => { loadTriangle() })
     return () => {
-      window.clearTimeout(timer)
+      window.cancelAnimationFrame(frame)
       abortRef.current?.abort()
     }
   }, [loadTriangle])

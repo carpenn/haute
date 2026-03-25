@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from math import isnan
 from typing import Any
 
 import pandas as pd
@@ -574,7 +573,7 @@ def _to_json_value(value: Any) -> Any:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and (pd.isna(value) or not pd.notna(value) or isnan(value)):
+        if isinstance(value, float) and pd.isna(value):
             return None
         return value
     if hasattr(value, "item"):

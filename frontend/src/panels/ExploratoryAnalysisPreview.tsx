@@ -209,9 +209,9 @@ export default function ExploratoryAnalysisPreview({
   }, [getGraph, nodeId])
 
   useEffect(() => {
-    const timer = window.setTimeout(loadAnalysis, 0)
+    const frame = window.requestAnimationFrame(() => { loadAnalysis() })
     return () => {
-      window.clearTimeout(timer)
+      window.cancelAnimationFrame(frame)
       analysisAbort.current?.abort()
     }
   }, [loadAnalysis, configHash])
