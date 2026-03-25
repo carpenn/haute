@@ -6,6 +6,15 @@ from a collected Polars DataFrame.
 
 Correlations are computed via ``ydata-profiling`` when available, with a
 pure-Polars/pandas fallback when the package is not installed.
+
+``ydata-profiling`` is an **unofficial** optional — install it manually
+for richer correlation outputs::
+
+    pip install ydata-profiling
+
+It is intentionally *not* listed in ``pyproject.toml`` extras because its
+transitive dependency chain (``numba`` → ``llvmlite``) requires a matching
+LLVM toolchain and does not yet support all active Python versions.
 """
 
 from __future__ import annotations
