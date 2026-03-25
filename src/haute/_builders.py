@@ -679,6 +679,18 @@ def _build_submodel_port(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, _passthrough_fn, False
 
 
+@_register(NodeType.TRIANGLE_VIEWER, columns=_passthrough_columns)
+def _build_triangle_viewer(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    """Pass the upstream frame through unchanged.
+
+    The Triangle_Viewer is a pure front-end visualisation node: the pivot
+    aggregation (Origin × Development cross-tab) is computed client-side
+    from the preview rows.  The builder simply forwards the upstream
+    ``LazyFrame`` so that the preview endpoint can return its data.
+    """
+    return ctx.func_name, _passthrough_fn, False
+
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------

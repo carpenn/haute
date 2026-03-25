@@ -1,4 +1,4 @@
-import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3, Hash } from "lucide-react"
+import { Database, Brain, TableProperties, CircleDot, HardDriveDownload, FileArchive, Package, ArrowRight, Radio, ToggleLeft, SlidersHorizontal, FlaskConical, Target, Crosshair, Rows3, Hash, Grid3X3 } from "lucide-react"
 import PolarsIcon from "../components/PolarsIcon"
 
 export const NODE_TYPES = {
@@ -17,6 +17,7 @@ export const NODE_TYPES = {
   OPTIMISER_APPLY: "optimiserApply",
   SCENARIO_EXPANDER: "scenarioExpander",
   CONSTANT: "constant",
+  TRIANGLE_VIEWER: "triangleViewer",
   SUBMODEL: "submodel",
   SUBMODEL_PORT: "submodelPort",
 } as const
@@ -66,6 +67,8 @@ export const NODE_TYPE_META: Record<NodeTypeValue, {
   // Optimisation group (gold) — price optimisation
   [NODE_TYPES.OPTIMISER]:          { icon: Target,             color: "#D4B82A", label: "OPTIMISATION",   name: "Optimisation",         description: "Price optimisation via Lagrangian solver",                     defaultConfig: { mode: "online", objective: "", constraints: {}, quote_id: "quote_id", scenario_index: "scenario_index", scenario_value: "scenario_value", max_iter: 50, tolerance: 1e-6 } },
   [NODE_TYPES.OPTIMISER_APPLY]:    { icon: Crosshair,          color: "#D4B82A", label: "APPLY OPT",     name: "Apply Optimisation",   description: "Apply saved optimisation results (lambdas or factor tables)",  defaultConfig: { sourceType: "file", artifact_path: "", version_column: "__optimiser_version__" } },
+  // Visualisation (teal) — in-pipeline analytics views
+  [NODE_TYPES.TRIANGLE_VIEWER]:    { icon: Grid3X3,            color: "#0891B2", label: "TRIANGLE",       name: "Triangle Viewer",      description: "Pivot table: Origin × Development cross-tab with summed values", defaultConfig: { originField: "", developmentField: "", valueField: "" }, maxInputs: 1 },
   // Structure (slate) — composition & utility
   [NODE_TYPES.SUBMODEL]:           { icon: Package,            color: "#7B8DA0", label: "SUBMODEL",       name: "Submodel",             description: "Reusable sub-pipeline",                                       defaultConfig: {} },
   [NODE_TYPES.SUBMODEL_PORT]:      { icon: ArrowRight,         color: "#94a3b8", label: "PORT",           name: "Port",                 description: "Submodel input/output port",                                  defaultConfig: {} },
@@ -82,7 +85,7 @@ export const SOURCE_ONLY_TYPES = new Set<string>([
 
 /** Nodes that only consume data — no output handle. */
 export const SINK_ONLY_TYPES = new Set<string>([
-  NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK, NODE_TYPES.MODELLING, NODE_TYPES.OPTIMISER,
+  NODE_TYPES.OUTPUT, NODE_TYPES.DATA_SINK, NODE_TYPES.MODELLING, NODE_TYPES.OPTIMISER, NODE_TYPES.TRIANGLE_VIEWER,
 ])
 
 /** Node types shown in the palette, in display order. Submodel/port are excluded (created via dialog). */
@@ -92,6 +95,7 @@ export const PALETTE_TYPES: NodeTypeValue[] = [
   NODE_TYPES.POLARS, NODE_TYPES.SCENARIO_EXPANDER, NODE_TYPES.BANDING, NODE_TYPES.RATING_STEP,
   NODE_TYPES.MODELLING, NODE_TYPES.MODEL_SCORE,
   NODE_TYPES.OPTIMISER, NODE_TYPES.OPTIMISER_APPLY,
+  NODE_TYPES.TRIANGLE_VIEWER,
 ]
 
 /** Derived lookups — backward compatible, prefer NODE_TYPE_META for new code. */

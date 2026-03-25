@@ -47,6 +47,7 @@ class NodeType(StrEnum):
     CONSTANT = "constant"
     SUBMODEL = "submodel"
     SUBMODEL_PORT = "submodelPort"
+    TRIANGLE_VIEWER = "triangleViewer"
 
 
 DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
@@ -65,6 +66,7 @@ DECORATOR_TO_NODE_TYPE: dict[str, NodeType] = {
     "scenario_expander": NodeType.SCENARIO_EXPANDER,
     "optimiser_apply": NodeType.OPTIMISER_APPLY,
     "constant": NodeType.CONSTANT,
+    "triangle_viewer": NodeType.TRIANGLE_VIEWER,
     "instance": NodeType.POLARS,  # instances default to polars; real type resolved at runtime
 }
 
@@ -488,6 +490,18 @@ class SubmodelConfig(TypedDict, total=False):
     childNodeIds: list[str]
     inputPorts: list[str]
     outputPorts: list[str]
+
+
+class TriangleViewerConfig(TypedDict, total=False):
+    """Config for triangleViewer nodes.
+
+    Field mappings from the upstream DataSource columns to the three required
+    triangle dimensions.
+    """
+
+    originField: str       # Row dimension — Origin Period
+    developmentField: str  # Column dimension — Development Period
+    valueField: str        # Cell value — summed per (origin, development) pair
 
 
 class NodeData(BaseModel):
