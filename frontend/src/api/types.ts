@@ -346,3 +346,20 @@ export interface GitHistoryEntry {
   timestamp: string
   files_changed: string[]
 }
+
+// ---------------------------------------------------------------------------
+// /api/pipeline/triangle
+// ---------------------------------------------------------------------------
+
+export interface TriangleResponse {
+  status: string
+  origins: string[]
+  developments: string[]
+  /** 2-D array: values[origin_index][dev_index], null = no data */
+  values: (number | null)[][]
+  triangle_type: string
+  origin_grain: string
+  dev_grain: string
+  error?: string | null
+}
+

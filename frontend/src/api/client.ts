@@ -45,6 +45,7 @@ import type {
   GitStatus,
   GitBranchInfo,
   GitHistoryEntry,
+  TriangleResponse,
 } from "./types"
 
 // Re-export types so existing consumers importing from client.ts still work
@@ -136,6 +137,28 @@ export function previewNode(
 ): Promise<NodeResult & { node_id: string }> {
   return post("/api/pipeline/preview", {
     graph, node_id: nodeId, row_limit: rowLimit, source: source ?? "live",
+  }, {
+    timeout: 120_000,
+    ...options,
+  })
+}
+
+export function fetchTriangle(
+  graph: GraphPayload,
+  nodeId: string,
+  originGrain: string,
+  devGrain: string,
+  triangleType: string,
+  source?: string,
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<TriangleResponse> {
+  return post("/api/pipeline/triangle", {
+    graph,
+    node_id: nodeId,
+    source: source ?? "live",
+    origin_grain: originGrain,
+    dev_grain: devGrain,
+    triangle_type: triangleType,
   }, {
     timeout: 120_000,
     ...options,
