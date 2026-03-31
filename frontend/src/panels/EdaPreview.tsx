@@ -393,7 +393,6 @@ function OneWaySvgChart({ data }: { data: EdaOneWayResponse }) {
   const [dims, setDims] = useState({ w: MIN_CHART_W, h: MIN_CHART_H })
   const { x_labels, claim_counts, target_sums } = data
   const n = x_labels.length
-  if (n === 0) return null
 
   useEffect(() => {
     const element = containerRef.current
@@ -420,6 +419,7 @@ function OneWaySvgChart({ data }: { data: EdaOneWayResponse }) {
   const chartH = dims.h
   const innerW = chartW - PAD.left - PAD.right
   const innerH = chartH - PAD.top - PAD.bottom
+  if (n === 0) return null
 
   const maxBar = Math.max(...claim_counts, 1)
   const maxLine = Math.max(...target_sums, 1)
