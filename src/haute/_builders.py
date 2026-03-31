@@ -736,6 +736,24 @@ def _build_triangle_viewer(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
     return ctx.func_name, triangle_fn, False
 
 
+@_register(NodeType.EDA_VIEWER, columns=_passthrough_columns)
+def _build_eda_viewer(ctx: NodeBuildContext) -> tuple[str, Callable, bool]:
+    """Pass through the upstream frame unchanged.
+
+    The EDA Viewer node does no transformation — it is purely a viewer.
+    Analysis is performed by the ``/api/pipeline/eda`` endpoint which
+    executes the graph up to this node and passes the collected data to
+    ``routes._eda_service``.
+    """
+
+    def eda_fn(*dfs: _Frame) -> _Frame:
+        if not dfs:
+            return pl.LazyFrame()
+        return dfs[0]
+
+    return ctx.func_name, eda_fn, False
+
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------

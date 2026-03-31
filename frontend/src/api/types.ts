@@ -363,3 +363,72 @@ export interface TriangleResponse {
   error?: string | null
 }
 
+
+// ---------------------------------------------------------------------------
+// /api/pipeline/eda  and  /api/pipeline/eda/one_way
+// ---------------------------------------------------------------------------
+
+export interface EdaDescriptiveRow {
+  field: string
+  role: string
+  dtype: string
+  count: number
+  missing_count: number
+  missing_prop: number
+  mean?: number | null
+  std?: number | null
+  min?: number | string | null
+  q25?: number | null
+  median?: number | null
+  q75?: number | null
+  max?: number | string | null
+  skewness?: number | null
+  n_unique?: number | null
+  top_value?: string | null
+  sparkline?: string | null
+}
+
+export interface EdaOutlierRow {
+  field: string
+  role: string
+  dtype: string
+  outlier_values: (number | string | null)[]
+  outlier_count: number
+  outlier_prop: number
+  inlier_count: number
+  inlier_prop: number
+}
+
+export interface EdaDisguisedMissingRow {
+  field: string
+  role: string
+  dtype: string
+  missing_values: (number | string | null)[]
+  missing_count: number
+  missing_prop: number
+}
+
+export interface EdaCorrelations {
+  fields: string[]
+  pearson: (number | null)[][]
+  spearman: (number | null)[][]
+  cramer: (number | null)[][]
+}
+
+export interface EdaResponse {
+  status: string
+  error?: string | null
+  descriptive: EdaDescriptiveRow[]
+  outliers: EdaOutlierRow[]
+  disguised_missings: EdaDisguisedMissingRow[]
+  correlations: EdaCorrelations
+}
+
+export interface EdaOneWayResponse {
+  status: string
+  error?: string | null
+  x_field: string
+  x_labels: string[]
+  claim_counts: number[]
+  target_sums: number[]
+}

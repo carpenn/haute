@@ -46,6 +46,8 @@ import type {
   GitBranchInfo,
   GitHistoryEntry,
   TriangleResponse,
+  EdaResponse,
+  EdaOneWayResponse,
 } from "./types"
 
 // Re-export types so existing consumers importing from client.ts still work
@@ -625,6 +627,44 @@ export function gitDeleteBranch(
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ branch }),
+    ...options,
+  })
+}
+
+export function fetchEda(
+  graph: GraphPayload,
+  nodeId: string,
+  fieldRoles: Record<string, string>,
+  source?: string,
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<EdaResponse> {
+  return post("/api/pipeline/eda", {
+    graph,
+    node_id: nodeId,
+    source: source ?? "live",
+    field_roles: fieldRoles,
+  }, {
+    timeout: 180_000,
+    ...options,
+  })
+}
+
+export function fetchEdaOneWay(
+  graph: GraphPayload,
+  nodeId: string,
+  fieldRoles: Record<string, string>,
+  xField: string,
+  source?: string,
+  options?: { signal?: AbortSignal; timeout?: number },
+): Promise<EdaOneWayResponse> {
+  return post("/api/pipeline/eda/one_way", {
+    graph,
+    node_id: nodeId,
+    source: source ?? "live",
+    field_roles: fieldRoles,
+    x_field: xField,
+  }, {
+    timeout: 180_000,
     ...options,
   })
 }

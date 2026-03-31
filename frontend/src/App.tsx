@@ -21,6 +21,7 @@ import OptimiserPreview from "./panels/OptimiserPreview"
 import OptimiserDataPreview from "./panels/OptimiserDataPreview"
 import { ModellingPreview } from "./panels/ModellingPreview"
 import TrianglePivotPreview from "./panels/TrianglePivotPreview"
+import EdaPreview from "./panels/EdaPreview"
 
 import TracePanel from "./panels/TracePanel"
 import ToastContainer from "./components/Toast"
@@ -435,6 +436,17 @@ function FlowEditor() {
                     data={previewData}
                     config={nodeData(activeNode).config ?? {}}
                     graph={triGraph}
+                    nodeId={activeNode.id}
+                  />
+                )
+              }
+              if (activeNode && nodeData(activeNode).nodeType === NODE_TYPES.EDA_VIEWER) {
+                const edaGraph = resolveGraphFromRefs(graphRef, parentGraphRef, submodelsRef, preambleRef)
+                return (
+                  <EdaPreview
+                    data={previewData}
+                    config={nodeData(activeNode).config ?? {}}
+                    graph={edaGraph}
                     nodeId={activeNode.id}
                   />
                 )

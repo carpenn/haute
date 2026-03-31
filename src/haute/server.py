@@ -39,6 +39,7 @@ from haute.routes._helpers import (
 from haute.routes.databricks import router as databricks_router
 from haute.routes.files import router as files_router
 from haute.routes.git import router as git_router
+from haute.routes.eda import router as eda_router
 from haute.routes.json_cache import router as json_cache_router
 from haute.routes.mlflow import router as mlflow_router
 from haute.routes.modelling import router as modelling_router
@@ -154,6 +155,7 @@ app.include_router(optimiser_router)
 app.include_router(mlflow_router)
 app.include_router(utility_router)
 app.include_router(git_router)
+app.include_router(eda_router)
 
 
 # ---------------------------------------------------------------------------

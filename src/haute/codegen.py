@@ -8,11 +8,13 @@ from collections.abc import Callable
 from haute._config_io import config_path_for_node, has_config_folder
 from haute._logging import get_logger
 from haute._types import (
+    EDA_VIEWER_CONFIG_KEYS,
     MODELLING_CONFIG_KEYS,
     NODE_TYPE_TO_DECORATOR,
     OPTIMISER_APPLY_CONFIG_KEYS,
     OPTIMISER_CONFIG_KEYS,
     SCENARIO_EXPANDER_CONFIG_KEYS,
+    TRIANGLE_VIEWER_CONFIG_KEYS,
 )
 from haute.graph_utils import (
     GraphEdge,
@@ -276,6 +278,20 @@ def {func_name}({params}) -> pl.LazyFrame:
 
 _MODELLING = '''\
 @pipeline.modelling({dec_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first}
+'''
+
+_TRIANGLE_VIEWER = '''\
+@pipeline.triangle_viewer({dec_kwargs})
+def {func_name}({params}) -> pl.LazyFrame:
+    """{description}"""
+    return {first}
+'''
+
+_EDA_VIEWER = '''\
+@pipeline.eda_viewer({dec_kwargs})
 def {func_name}({params}) -> pl.LazyFrame:
     """{description}"""
     return {first}
@@ -705,6 +721,14 @@ _CODEGEN_BUILDERS[NodeType.OPTIMISER_APPLY] = _make_passthrough_builder(
 _CODEGEN_BUILDERS[NodeType.MODELLING] = _make_passthrough_builder(
     _MODELLING,
     MODELLING_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.TRIANGLE_VIEWER] = _make_passthrough_builder(
+    _TRIANGLE_VIEWER,
+    TRIANGLE_VIEWER_CONFIG_KEYS,
+)
+_CODEGEN_BUILDERS[NodeType.EDA_VIEWER] = _make_passthrough_builder(
+    _EDA_VIEWER,
+    EDA_VIEWER_CONFIG_KEYS,
 )
 
 

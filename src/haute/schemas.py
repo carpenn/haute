@@ -200,6 +200,102 @@ class TriangleResponse(BaseModel):
     error: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# /api/pipeline/eda  and  /api/pipeline/eda/one_way
+# ---------------------------------------------------------------------------
+
+
+class EdaDescriptiveRow(BaseModel):
+    """One row per field in the descriptive statistics table."""
+
+    field: str
+    role: str
+    dtype: str
+    count: int = 0
+    missing_count: int = 0
+    missing_prop: float = 0.0
+    # Numeric-specific (float) or date-specific (str)
+    mean: float | None = None
+    std: float | None = None
+    min: float | str | None = None
+    q25: float | None = None
+    median: float | None = None
+    q75: float | None = None
+    max: float | str | None = None
+    skewness: float | None = None
+    # General
+    n_unique: int | None = None
+    top_value: str | None = None
+    # SVG sparkline data (base64-encoded inline SVG)
+    sparkline: str | None = None
+
+
+class EdaOutlierRow(BaseModel):
+    """One row per field in the outliers/inliers table."""
+
+    field: str
+    role: str
+    dtype: str
+    outlier_values: list[Any] = Field(default_factory=list)
+    outlier_count: int = 0
+    outlier_prop: float = 0.0
+    inlier_count: int = 0
+    inlier_prop: float = 0.0
+
+
+class EdaDisguisedMissingRow(BaseModel):
+    """One row per field in the disguised missings table."""
+
+    field: str
+    role: str
+    dtype: str
+    missing_values: list[Any] = Field(default_factory=list)
+    missing_count: int = 0
+    missing_prop: float = 0.0
+
+
+class EdaCorrelations(BaseModel):
+    """Correlation matrix data (one or more matrices)."""
+
+    fields: list[str] = Field(default_factory=list)
+    pearson: list[list[float | None]] = Field(default_factory=list)
+    spearman: list[list[float | None]] = Field(default_factory=list)
+    cramer: list[list[float | None]] = Field(default_factory=list)
+
+
+class EdaRequest(BaseModel):
+    graph: Graph
+    node_id: str
+    source: str = "live"
+    field_roles: dict[str, str] = Field(default_factory=dict)
+
+
+class EdaResponse(BaseModel):
+    status: str
+    error: str | None = None
+    descriptive: list[EdaDescriptiveRow] = Field(default_factory=list)
+    outliers: list[EdaOutlierRow] = Field(default_factory=list)
+    disguised_missings: list[EdaDisguisedMissingRow] = Field(default_factory=list)
+    correlations: EdaCorrelations = Field(default_factory=EdaCorrelations)
+
+
+class EdaOneWayRequest(BaseModel):
+    graph: Graph
+    node_id: str
+    source: str = "live"
+    field_roles: dict[str, str] = Field(default_factory=dict)
+    x_field: str = ""
+
+
+class EdaOneWayResponse(BaseModel):
+    status: str
+    error: str | None = None
+    x_field: str = ""
+    x_labels: list[str] = Field(default_factory=list)
+    claim_counts: list[int] = Field(default_factory=list)
+    target_sums: list[float] = Field(default_factory=list)
+
+
 
 
 
