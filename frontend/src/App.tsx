@@ -76,6 +76,7 @@ const nodeTypes = {
   [NODE_TYPES.SCENARIO_EXPANDER]: PipelineNode,
   [NODE_TYPES.CONSTANT]: PipelineNode,
   [NODE_TYPES.TRIANGLE_VIEWER]: PipelineNode,
+  [NODE_TYPES.EDA_VIEWER]: PipelineNode,
   [NODE_TYPES.SUBMODEL]: SubmodelNode,
   [NODE_TYPES.SUBMODEL_PORT]: SubmodelPortNode,
 }

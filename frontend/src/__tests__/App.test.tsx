@@ -8,16 +8,21 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
+let lastReactFlowProps: Record<string, unknown> | null = null
+
 // ---------------------------------------------------------------------------
 // Mock ReactFlow entirely
 // ---------------------------------------------------------------------------
 
 vi.mock("@xyflow/react", () => ({
-  ReactFlow: ({ children, ...props }: Record<string, unknown>) => (
-    <div data-testid="react-flow" {...(props.onPaneClick ? { onClick: props.onPaneClick as React.MouseEventHandler } : {})}>
-      {children as React.ReactNode}
-    </div>
-  ),
+  ReactFlow: ({ children, ...props }: Record<string, unknown>) => {
+    lastReactFlowProps = props
+    return (
+      <div data-testid="react-flow" {...(props.onPaneClick ? { onClick: props.onPaneClick as React.MouseEventHandler } : {})}>
+        {children as React.ReactNode}
+      </div>
+    )
+  },
   ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Background: () => null,
   useReactFlow: () => ({
@@ -237,6 +242,7 @@ vi.mock("../api/client", () => ({
 import App from "../App"
 import useUIStore from "../stores/useUIStore"
 import useSettingsStore from "../stores/useSettingsStore"
+import { NODE_TYPES } from "../utils/nodeTypes"
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -246,6 +252,7 @@ afterEach(cleanup)
 
 beforeEach(() => {
   mockLoading = false
+  lastReactFlowProps = null
 
   // Reset UI store to known defaults
   useUIStore.setState({
@@ -296,6 +303,12 @@ describe("App", () => {
   it("shows ReactFlow canvas when not loading", () => {
     render(<App />)
     expect(screen.getByTestId("react-flow")).toBeInTheDocument()
+  })
+
+  it("registers the EDA node with the shared PipelineNode renderer", () => {
+    render(<App />)
+    const registeredNodeTypes = lastReactFlowProps?.nodeTypes as Record<string, unknown>
+    expect(registeredNodeTypes[NODE_TYPES.EDA_VIEWER]).toBeTruthy()
   })
 
   it("shows BreadcrumbBar", () => {

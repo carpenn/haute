@@ -11,7 +11,7 @@
  * All data is fetched from POST /api/pipeline/eda and POST /api/pipeline/eda/one_way.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { SearchCheck, ChevronDown, ChevronUp, RefreshCw } from "lucide-react"
 import type { PreviewData } from "./DataPreview"
 import type { GraphPayload, EdaResponse, EdaOneWayResponse } from "../api/types"
@@ -337,8 +337,14 @@ function OneWayTab({
   }, [graph, nodeId, fieldRoles])
 
   useEffect(() => {
-    if (xField) loadChart(xField)
-    return () => { abortRef.current?.abort() }
+    if (!xField) {
+      return () => { abortRef.current?.abort() }
+    }
+    const timeoutId = window.setTimeout(() => loadChart(xField), 0)
+    return () => {
+      window.clearTimeout(timeoutId)
+      abortRef.current?.abort()
+    }
   }, [xField, loadChart])
 
   if (xOptions.length === 0) {
@@ -346,7 +352,7 @@ function OneWayTab({
   }
 
   return (
-    <div className="p-3 space-y-3">
+    <div className="box-border flex h-full min-h-0 flex-col gap-3 p-3">
       {/* X-axis selector */}
       <div className="flex items-center gap-2">
         <label className="text-[11px]" style={{ color: "var(--text-muted)" }}>X axis:</label>
@@ -364,7 +370,9 @@ function OneWayTab({
       {error && <ErrorBox msg={error} />}
 
       {chartData && chartData.x_labels.length > 0 && (
-        <OneWaySvgChart data={chartData} />
+        <div className="min-h-[280px] flex-1">
+          <OneWaySvgChart data={chartData} />
+        </div>
       )}
 
       {!loading && !error && chartData && chartData.x_labels.length === 0 && (
@@ -376,17 +384,42 @@ function OneWayTab({
 
 // ── SVG Bar-Line chart ─────────────────────────────────────────────────────
 
-const CHART_W = 580
-const CHART_H = 220
-const PAD = { top: 16, right: 40, bottom: 64, left: 60 }
+const MIN_CHART_W = 480
+const MIN_CHART_H = 280
+const PAD = { top: 20, right: 64, bottom: 72, left: 60 }
 
 function OneWaySvgChart({ data }: { data: EdaOneWayResponse }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [dims, setDims] = useState({ w: MIN_CHART_W, h: MIN_CHART_H })
   const { x_labels, claim_counts, target_sums } = data
   const n = x_labels.length
   if (n === 0) return null
 
-  const innerW = CHART_W - PAD.left - PAD.right
-  const innerH = CHART_H - PAD.top - PAD.bottom
+  useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+
+    const updateDims = (width: number, height: number) => {
+      setDims({
+        w: Math.max(Math.round(width), MIN_CHART_W),
+        h: Math.max(Math.round(height), MIN_CHART_H),
+      })
+    }
+
+    updateDims(element.clientWidth, element.clientHeight)
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return
+      updateDims(entry.contentRect.width, entry.contentRect.height)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  const chartW = dims.w
+  const chartH = dims.h
+  const innerW = chartW - PAD.left - PAD.right
+  const innerH = chartH - PAD.top - PAD.bottom
 
   const maxBar = Math.max(...claim_counts, 1)
   const maxLine = Math.max(...target_sums, 1)
@@ -410,8 +443,9 @@ function OneWaySvgChart({ data }: { data: EdaOneWayResponse }) {
     return `${cx},${cy}`
   }).join(" ")
 
-  // X-axis ticks: show at most 15 labels
-  const tickStep = Math.max(1, Math.ceil(n / 15))
+  // X-axis ticks: show more labels when the pane is wider
+  const maxTickCount = Math.max(4, Math.floor(innerW / 64))
+  const tickStep = Math.max(1, Math.ceil(n / maxTickCount))
   const xTicks = x_labels
     .map((lbl, i) => ({ lbl, x: PAD.left + i * barW + barW / 2, i }))
     .filter(({ i }) => i % tickStep === 0)
@@ -429,81 +463,83 @@ function OneWaySvgChart({ data }: { data: EdaOneWayResponse }) {
   })) : []
 
   return (
-    <svg
-      width={CHART_W}
-      height={CHART_H}
-      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-      style={{ maxWidth: "100%", overflow: "visible" }}
-      aria-label="One-way chart"
-    >
-      {/* Grid lines */}
-      {yLeftTicks.map((t, i) => (
-        <line key={i} x1={PAD.left} y1={t.y} x2={PAD.left + innerW} y2={t.y} stroke="var(--border)" strokeWidth={0.5} />
-      ))}
+    <div ref={containerRef} className="h-full w-full rounded-lg" style={{ border: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+      <svg
+        width={chartW}
+        height={chartH}
+        viewBox={`0 0 ${chartW} ${chartH}`}
+        style={{ display: "block", width: "100%", height: "100%", overflow: "visible" }}
+        aria-label="One-way chart"
+      >
+        {/* Grid lines */}
+        {yLeftTicks.map((t, i) => (
+          <line key={i} x1={PAD.left} y1={t.y} x2={PAD.left + innerW} y2={t.y} stroke="var(--border)" strokeWidth={0.5} />
+        ))}
 
-      {/* Bars */}
-      {bars}
+        {/* Bars */}
+        {bars}
 
-      {/* Line */}
-      {hasTarget && (
-        <>
-          <polyline
-            points={linePoints}
-            fill="none"
-            stroke="#fb923c"
-            strokeWidth={2}
-            strokeLinejoin="round"
-          />
-          {target_sums.map((v, i) => (
-            <circle key={i} cx={PAD.left + i * barW + barW / 2} cy={PAD.top + innerH - (v / maxLine) * innerH} r={3} fill="#fb923c" />
-          ))}
-        </>
-      )}
-
-      {/* X axis */}
-      <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
-      {xTicks.map(({ lbl, x }) => (
-        <text key={x} x={x} y={PAD.top + innerH + 14} textAnchor="end" fontSize={9} fill="var(--text-muted)" transform={`rotate(-45,${x},${PAD.top + innerH + 14})`}>{lbl}</text>
-      ))}
-
-      {/* Y left axis (bar) */}
-      <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
-      {yLeftTicks.map((t, i) => (
-        <text key={i} x={PAD.left - 5} y={t.y + 4} textAnchor="end" fontSize={9} fill="var(--text-muted)">{t.v.toLocaleString()}</text>
-      ))}
-      <text x={16} y={PAD.top + innerH / 2} textAnchor="middle" fontSize={9} fill="#38bdf8" transform={`rotate(-90,16,${PAD.top + innerH / 2})`}>Count</text>
-
-      {/* Y right axis (line) */}
-      {hasTarget && (
-        <>
-          <line x1={PAD.left + innerW} y1={PAD.top} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
-          {yRightTicks.map((t, i) => (
-            <text key={i} x={PAD.left + innerW + 5} y={t.y + 4} textAnchor="start" fontSize={9} fill="var(--text-muted)">{t.v}</text>
-          ))}
-          <text x={CHART_W - 10} y={PAD.top + innerH / 2} textAnchor="middle" fontSize={9} fill="#fb923c" transform={`rotate(90,${CHART_W - 10},${PAD.top + innerH / 2})`}>Target sum</text>
-        </>
-      )}
-
-      {/* Legend */}
-      <g transform={`translate(${PAD.left + 8},${PAD.top + 4})`}>
-        <rect x={0} y={0} width={10} height={10} fill="#38bdf8" opacity={0.7} rx={1} />
-        <text x={14} y={9} fontSize={9} fill="var(--text-muted)">Claim / row count</text>
+        {/* Line */}
         {hasTarget && (
           <>
-            <line x1={0} y1={20} x2={10} y2={20} stroke="#fb923c" strokeWidth={2} />
-            <circle cx={5} cy={20} r={2.5} fill="#fb923c" />
-            <text x={14} y={24} fontSize={9} fill="var(--text-muted)">Target sum</text>
+            <polyline
+              points={linePoints}
+              fill="none"
+              stroke="#fb923c"
+              strokeWidth={2}
+              strokeLinejoin="round"
+            />
+            {target_sums.map((v, i) => (
+              <circle key={i} cx={PAD.left + i * barW + barW / 2} cy={PAD.top + innerH - (v / maxLine) * innerH} r={3} fill="#fb923c" />
+            ))}
           </>
         )}
-      </g>
-    </svg>
+
+        {/* X axis */}
+        <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+        {xTicks.map(({ lbl, x }) => (
+          <text key={x} x={x} y={PAD.top + innerH + 14} textAnchor="end" fontSize={9} fill="var(--text-muted)" transform={`rotate(-45,${x},${PAD.top + innerH + 14})`}>{lbl}</text>
+        ))}
+
+        {/* Y left axis (bar) */}
+        <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+        {yLeftTicks.map((t, i) => (
+          <text key={i} x={PAD.left - 5} y={t.y + 4} textAnchor="end" fontSize={9} fill="var(--text-muted)">{t.v.toLocaleString()}</text>
+        ))}
+        <text x={16} y={PAD.top + innerH / 2} textAnchor="middle" fontSize={9} fill="#38bdf8" transform={`rotate(-90,16,${PAD.top + innerH / 2})`}>Count</text>
+
+        {/* Y right axis (line) */}
+        {hasTarget && (
+          <>
+            <line x1={PAD.left + innerW} y1={PAD.top} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="var(--border)" strokeWidth={1} />
+            {yRightTicks.map((t, i) => (
+              <text key={i} x={PAD.left + innerW + 5} y={t.y + 4} textAnchor="start" fontSize={9} fill="var(--text-muted)">{t.v}</text>
+            ))}
+            <text x={chartW - 10} y={PAD.top + innerH / 2} textAnchor="middle" fontSize={9} fill="#fb923c" transform={`rotate(90,${chartW - 10},${PAD.top + innerH / 2})`}>Target sum</text>
+          </>
+        )}
+
+        {/* Legend */}
+        <g transform={`translate(${PAD.left + 8},${PAD.top + 4})`}>
+          <rect x={0} y={0} width={10} height={10} fill="#38bdf8" opacity={0.7} rx={1} />
+          <text x={14} y={9} fontSize={9} fill="var(--text-muted)">Claim / row count</text>
+          {hasTarget && (
+            <>
+              <line x1={0} y1={20} x2={10} y2={20} stroke="#fb923c" strokeWidth={2} />
+              <circle cx={5} cy={20} r={2.5} fill="#fb923c" />
+              <text x={14} y={24} fontSize={9} fill="var(--text-muted)">Target sum</text>
+            </>
+          )}
+        </g>
+      </svg>
+    </div>
   )
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function EdaPreview({ data, config, graph, nodeId }: EdaPreviewProps) {
-  const fieldRoles = (config.fieldRoles ?? {}) as Record<string, string>
+  const fieldRoles = useMemo(() => (config.fieldRoles ?? {}) as Record<string, string>, [config.fieldRoles])
   const hasRoles = Object.keys(fieldRoles).length > 0
 
   const [collapsed, setCollapsed] = useState(false)
@@ -541,8 +577,11 @@ export default function EdaPreview({ data, config, graph, nodeId }: EdaPreviewPr
   }, [hasRoles, nodeId, graph, fieldRoles, data?.status])
 
   useEffect(() => {
-    loadEda()
-    return () => { abortRef.current?.abort() }
+    const timeoutId = window.setTimeout(loadEda, 0)
+    return () => {
+      window.clearTimeout(timeoutId)
+      abortRef.current?.abort()
+    }
   }, [loadEda])
 
   // ── Header bar ──────────────────────────────────────────────────────────
@@ -651,7 +690,7 @@ export default function EdaPreview({ data, config, graph, nodeId }: EdaPreviewPr
         </div>
 
         {/* Tab content */}
-        <div style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: activeTab === "One-way Charts" ? "hidden" : "auto", display: "flex", flexDirection: "column" }}>
           {loading && <LoadingSpinner />}
           {!loading && error && <ErrorBox msg={error} />}
           {!loading && !error && edaData && (
