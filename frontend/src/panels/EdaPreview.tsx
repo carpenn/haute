@@ -337,12 +337,10 @@ function OneWayTab({
   }, [graph, nodeId, fieldRoles])
 
   useEffect(() => {
-    if (!xField) {
-      return () => { abortRef.current?.abort() }
-    }
-    const timeoutId = window.setTimeout(() => loadChart(xField), 0)
+    if (!xField) return
+    const frameId = window.requestAnimationFrame(() => loadChart(xField))
     return () => {
-      window.clearTimeout(timeoutId)
+      window.cancelAnimationFrame(frameId)
       abortRef.current?.abort()
     }
   }, [xField, loadChart])
@@ -577,9 +575,9 @@ export default function EdaPreview({ data, config, graph, nodeId }: EdaPreviewPr
   }, [hasRoles, nodeId, graph, fieldRoles, data?.status])
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(loadEda, 0)
+    const frameId = window.requestAnimationFrame(loadEda)
     return () => {
-      window.clearTimeout(timeoutId)
+      window.cancelAnimationFrame(frameId)
       abortRef.current?.abort()
     }
   }, [loadEda])
