@@ -30,7 +30,13 @@ def _run_pipeline_and_collect(graph, node_id: str, source: str):  # type: ignore
 
     from haute.executor import execute_graph
 
-    results = execute_graph(graph, target_node_id=node_id, row_limit=0, source=source)
+    results = execute_graph(
+        graph,
+        target_node_id=node_id,
+        row_limit=0,
+        max_preview_rows=None,
+        source=source,
+    )
     node_result = results.get(node_id)
     if not node_result:
         raise ValueError(f"Node '{node_id}' produced no result")

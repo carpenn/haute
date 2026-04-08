@@ -2446,6 +2446,28 @@ class TestMaxPreviewRowsTruncation:
 
         _preview_cache.invalidate()
 
+    def test_max_preview_rows_none_returns_full_preview(self, tmp_path):
+        """Internal callers can disable preview truncation when needed."""
+        from haute.executor import _preview_cache
+
+        _preview_cache.invalidate()
+
+        p = tmp_path / "full.parquet"
+        pl.DataFrame({"x": list(range(25))}).write_parquet(p)
+
+        graph = _g(
+            {
+                "nodes": [_source_node("src", str(p))],
+                "edges": [],
+            }
+        )
+
+        results = execute_graph(graph, max_preview_rows=None)
+        assert results["src"].row_count == 25
+        assert len(results["src"].preview) == 25
+
+        _preview_cache.invalidate()
+
 
 # ---------------------------------------------------------------------------
 # GAP 6: Empty DataFrame (0 rows) through full pipeline

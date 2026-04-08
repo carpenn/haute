@@ -342,7 +342,7 @@ def execute_graph(
     graph: PipelineGraph,
     target_node_id: str | None = None,
     row_limit: int | None = None,
-    max_preview_rows: int = _MAX_PREVIEW_ROWS,
+    max_preview_rows: int | None = _MAX_PREVIEW_ROWS,
     source: str = "live",
 ) -> dict[str, NodeResult]:
     """Execute a graph and return per-node results.
@@ -356,6 +356,8 @@ def execute_graph(
         row_limit: If set, apply .head(row_limit) to source nodes so only
                    that many rows flow through the pipeline.
         max_preview_rows: Max rows to include in the JSON preview payload.
+                          Pass ``None`` to disable preview truncation for
+                          backend-only callers that need the full dataset.
 
     Returns:
         Dict mapping node_id → {
@@ -520,7 +522,11 @@ def execute_graph(
             column_count=len(df.columns),
             columns=columns,
             available_columns=avail_col_infos,
-            preview=df.head(max_preview_rows).to_dicts(),
+            preview=(
+                df.to_dicts()
+                if max_preview_rows is None
+                else df.head(max_preview_rows).to_dicts()
+            ),
             timing_ms=timings.get(nid, 0),
             memory_bytes=memory_bytes.get(nid, 0),
             schema_warnings=schema_warnings.get(nid, []),

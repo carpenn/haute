@@ -353,6 +353,7 @@ async def triangle_node(body: TriangleRequest) -> TriangleResponse:
                 graph,
                 target_node_id=body.node_id,
                 row_limit=0,
+                max_preview_rows=None,
                 source=body.source,
             ),
             timeout=_PREVIEW_TIMEOUT,
